@@ -34,7 +34,8 @@ impl Engine {
     /// # Errors
     /// Refuses invalid fields, dependent field removal, stale bases or definitions.
     pub async fn plan_schema(&self, spec: &SchemaSpec) -> Result<RunPlan> {
-        self.plan_request(&OperationRequest::Schema(spec.clone()))
+        let memory = self.request_memory(spec)?;
+        self.plan_request(OperationRequest::Schema(spec.clone()), memory)
             .await
     }
 
@@ -43,7 +44,8 @@ impl Engine {
     /// # Errors
     /// Refuses unsupported edits, stale cutover boundaries or unavailable retained data.
     pub async fn evolve_schema(&self, spec: &SchemaSpec) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Schema(spec.clone()), None)
+        let memory = self.request_memory(spec)?;
+        self.run_internal(OperationRequest::Schema(spec.clone()), memory, None)
             .await
     }
 
@@ -53,7 +55,8 @@ impl Engine {
     /// Returns the injected failure or ordinary schema-operation errors.
     #[cfg(feature = "test-util")]
     pub async fn schema_until(&self, spec: &SchemaSpec, phase: &str) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Schema(spec.clone()), Some(phase))
+        let memory = self.request_memory(&(spec, phase))?;
+        self.run_internal(OperationRequest::Schema(spec.clone()), memory, Some(phase))
             .await
     }
 
@@ -123,7 +126,7 @@ impl Engine {
     ) -> Result<PhaseResult> {
         #[cfg(feature = "test-util")]
         work_started("admission");
-        let base = self.release(&spec.dataset, &spec.base).await?;
+        let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         if operation.base_manifest.as_ref() != Some(&base.manifest) {
             return Err(invalid());
         }
@@ -153,7 +156,7 @@ impl Engine {
         directory: &Path,
         operation: &Operation,
     ) -> Result<write::Prepared> {
-        let base = self.release(&spec.dataset, &spec.base).await?;
+        let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         if operation.base_manifest.as_ref() != Some(&base.manifest) {
             return Err(invalid());
         }

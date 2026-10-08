@@ -371,11 +371,14 @@ async fn main() -> anyhow::Result<()> {
                         "hosted access is unqualified; bind to loopback"
                     );
                     let listener = tokio::net::TcpListener::bind(bind).await?;
-                    axum::serve(listener, docspec::http::router(engine))
+                    let result = axum::serve(listener, docspec::http::router(engine.clone()))
                         .with_graceful_shutdown(async {
                             let _ = tokio::signal::ctrl_c().await;
                         })
-                        .await?;
+                        .await;
+                    // Disconnected clients may leave owned service tasks finishing.
+                    engine.shutdown().await?;
+                    result?;
                 }
                 _ => unreachable!("independent-reader commands handled before opening workspace"),
             }

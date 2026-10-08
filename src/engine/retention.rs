@@ -109,6 +109,22 @@ impl Engine {
         operation: &OperationId,
         reason: &str,
     ) -> Result<Abandonment> {
+        let memory = self.request_memory(&(dataset, operation, reason))?;
+        let dataset = dataset.clone();
+        let operation = operation.clone();
+        let reason = reason.to_owned();
+        self.admit_work(memory, move |engine| async move {
+            engine.abandon_admitted(&dataset, &operation, &reason).await
+        })
+        .await
+    }
+
+    async fn abandon_admitted(
+        &self,
+        dataset: &Id,
+        operation: &OperationId,
+        reason: &str,
+    ) -> Result<Abandonment> {
         if reason.trim().is_empty() {
             return Err(Error::refusal(
                 "missing_reason",

@@ -47,7 +47,7 @@ impl Engine {
             return Err(full_refresh());
         }
         let base = self
-            .release(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
+            .release_admitted(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
             .await?;
         check_manifest(&base, operation)?;
         let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
@@ -393,7 +393,7 @@ impl Engine {
         operation: &Operation,
     ) -> Result<write::Prepared> {
         let base = self
-            .release(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
+            .release_admitted(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
             .await?;
         check_manifest(&base, operation)?;
         let before = &base

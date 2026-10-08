@@ -180,12 +180,21 @@ impl Engine {
     /// # Errors
     /// Refuses unknown bases, conflicting retry identities, or invalid definitions.
     pub async fn plan_backfill(&self, spec: &BackfillSpec) -> Result<BackfillPlan> {
+        let memory = self.request_memory(spec)?;
+        let spec = spec.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.plan_backfill_admitted(&spec).await
+        })
+        .await
+    }
+
+    async fn plan_backfill_admitted(&self, spec: &BackfillSpec) -> Result<BackfillPlan> {
         validate(spec)?;
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
         self.check_not_abandoned(&view, &spec.operation).await?;
-        let base = self.release(&spec.dataset, &spec.base).await?;
+        let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         let native = storage::open_pin(&base.dataset.groups["source"]).await?;
         let expressions = Expressions::compile(
             &self.context(),
@@ -313,6 +322,20 @@ impl Engine {
     }
 
     async fn backfill_internal(
+        &self,
+        spec: &BackfillSpec,
+        stop: Option<&str>,
+    ) -> Result<ReleasePin> {
+        let memory = self.request_memory(&(spec, stop))?;
+        let spec = spec.clone();
+        let stop = stop.map(str::to_owned);
+        self.admit_work(memory, move |engine| async move {
+            engine.backfill_admitted(&spec, stop.as_deref()).await
+        })
+        .await
+    }
+
+    async fn backfill_admitted(
         &self,
         spec: &BackfillSpec,
         stop: Option<&str>,

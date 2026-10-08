@@ -17,6 +17,18 @@ impl Engine {
     /// Refuses unknown root formats/dependencies, conflicting identities, missing
     /// metadata, incomplete catalog enumeration, or exhausted metadata capacity.
     pub async fn inspect_retention(&self, objects: &[ObjectRef]) -> Result<RetentionInspection> {
+        let memory = self.request_memory(&objects)?;
+        let objects = objects.to_vec();
+        self.admit_work(memory, move |engine| async move {
+            engine.inspect_retention_admitted(&objects).await
+        })
+        .await
+    }
+
+    async fn inspect_retention_admitted(
+        &self,
+        objects: &[ObjectRef],
+    ) -> Result<RetentionInspection> {
         if !self.inner.owned_catalog {
             return Err(Error::refusal(
                 "retention_catalog_unqualified",

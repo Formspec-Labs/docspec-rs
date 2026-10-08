@@ -1,0 +1,21 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.48s
+     Running tests/rebuild_completion.rs (target/debug/deps/rebuild_completion-e2c166ebcfc744bd)
+
+running 5 tests
+test lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.56s
+
+     Running tests/worker_initialization.rs (target/debug/deps/worker_initialization-919a3b3d41f29938)
+
+running 2 tests
+test forced_shutdown_before_initialization_poll_quarantines_host_until_process_exit ... ok
+test canceled_open_finishes_owned_initialization_before_releasing_host ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

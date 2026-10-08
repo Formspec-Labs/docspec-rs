@@ -32,6 +32,7 @@ const HANDOFF_DEADLINE: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 struct Pause {
     data: bool,
+    lost_response: bool,
     committed: oneshot::Sender<Table>,
     release: oneshot::Receiver<()>,
 }
@@ -49,6 +50,14 @@ impl PausedCatalog {
     }
 
     fn arm_kind(&self, data: bool) -> (oneshot::Receiver<Table>, oneshot::Sender<()>) {
+        self.arm_response(data, false)
+    }
+
+    fn arm_response(
+        &self,
+        data: bool,
+        lost_response: bool,
+    ) -> (oneshot::Receiver<Table>, oneshot::Sender<()>) {
         let (committed, observed) = oneshot::channel();
         let (release, resumed) = oneshot::channel();
         let mut next = self.next.lock().unwrap();
@@ -58,6 +67,7 @@ impl PausedCatalog {
         );
         *next = Some(Pause {
             data,
+            lost_response,
             committed,
             release: resumed,
         });
@@ -104,6 +114,13 @@ impl Catalog for PausedCatalog {
                     )
                     .with_retryable(false)
                 })?;
+            if pause.lost_response {
+                return Err(iceberg::Error::new(
+                    iceberg::ErrorKind::Unexpected,
+                    "injected lost acknowledgment after the native commit",
+                )
+                .with_retryable(false));
+            }
         }
         Ok(committed)
     }
@@ -500,4 +517,80 @@ async fn newer_admission_preserves_finished_source_before_acknowledgment_and_reb
     verify_release(&result, limits()).await.unwrap();
     let after = engine.inspect(&rebased.dataset).await.unwrap();
     assert_eq!(after[&phase_key], retained[&phase_key]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown() {
+    for lost_response in [false, true] {
+        let root = TempDir::new().unwrap();
+        let (engine, base, _) = fixture(root.path(), false).await;
+        drop(engine);
+        let workspace = root.path().join("workspace");
+        let catalog = Arc::new(PausedCatalog {
+            inner: storage::local_catalog(&workspace).await.unwrap(),
+            next: Mutex::new(None),
+        });
+        let engine = Engine::with_catalog(&workspace, catalog.clone(), limits())
+            .await
+            .unwrap();
+        let source = input(
+            &root.path().join("replacement.parquet"),
+            &[(Some(4), Some("after disconnect".into()))],
+        );
+        let request = RunSpec {
+            dataset: base.dataset.dataset.clone(),
+            operation: id("disconnected"),
+            base: Some(base.id.clone()),
+            relationship: None,
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: base.dataset.definition.clone(),
+        };
+        // Success pauses the data commit before the nested historical release
+        // lookup. Error pauses an actual lifecycle commit before its lost response.
+        let (committed, release) = catalog.arm_response(!lost_response, lost_response);
+        let caller = {
+            let engine = engine.clone();
+            let request = request.clone();
+            tokio::spawn(async move { engine.run(&request).await })
+        };
+        tokio::time::timeout(HANDOFF_DEADLINE, committed)
+            .await
+            .unwrap()
+            .unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            Engine::open(&workspace, limits()).await.unwrap_err().code(),
+            "workspace_busy"
+        );
+        let mut drain = Box::pin(engine.shutdown());
+        assert!(futures::poll!(&mut drain).is_pending());
+        assert_eq!(
+            engine.inspect(&request.dataset).await.unwrap_err().code(),
+            "host_closing"
+        );
+        release
+            .send(())
+            .expect("the native operation must survive caller cancellation");
+        tokio::time::timeout(HANDOFF_DEADLINE, drain)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(engine);
+        let engine = Engine::open(&workspace, limits()).await.unwrap();
+        let plan = engine.plan(&request).await.unwrap();
+        assert_eq!(plan.completed, !lost_response);
+        let before = engine.inspect(&request.dataset).await.unwrap();
+        let operation = before[&format!("operation/{}", request.operation)].clone();
+        let result = engine.run(&request).await.unwrap();
+        assert_eq!(result.id, request.operation);
+        assert_eq!(
+            engine.inspect(&request.dataset).await.unwrap()
+                [&format!("operation/{}", request.operation)],
+            operation
+        );
+        verify_release(&result, limits()).await.unwrap();
+    }
 }

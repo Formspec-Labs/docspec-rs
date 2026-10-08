@@ -1,5 +1,52 @@
 # Implementation and qualification status
 
+## Owned worker lifetime and graceful shutdown
+
+Catalog-using Engine services now execute in private owned Tokio tasks. A caller
+that disconnects or drops its future stops waiting; the existing operation retains
+its Engine, OS workspace ownership and shared maintenance guard through native
+I/O, lifecycle decisions and error reconciliation. Public release and input-capture
+entry points have already-admitted internal bodies, preventing nested read-lock
+acquisition behind a queued maintenance writer. Unrelated ordinary operations
+share admission; no global execution mutex or second worker registry was added.
+
+Owned request metadata is sized and charged to the existing shared Budget before
+cloning. The private task also retains a reservation for its inline future/closure
+and task allowance. These permits bound detached queued-work admission; they are
+not an exact heap or whole-process memory measurement. This adds one task and
+small request metadata work per service, without another payload scan, hash,
+verification or lifecycle record. Ordinary immutable readers remain catalog-free.
+
+`Engine::shutdown` stops new catalog admission and waits for existing owned work.
+The HTTP server drains it after graceful listener shutdown. Local initialization
+also owns its host lock independently of the caller. Private panic or runtime
+termination during unfinished private work marks the host uncertain and retains
+only its OS lock until process exit; subsequent work/reopen refuses. Normal returned errors finish
+custody. This does not claim that arbitrary injected adapters or detached native
+readers have been drained, or establish a remote storage fence.
+
+The [focused worker tests](reviews/worker-custody-unit-focused.log) passed for
+canceled blocking work, concurrent admission, bounded detached requests, permit
+recovery, resumable shutdown, actual Build/Refresh calls behind a queued writer,
+and private panic. The [native catalog and initialization tests](reviews/worker-custody-catalog-focused.log)
+passed for disconnected committed writes, lost acknowledgment, original-operation
+retry, caller-independent setup and forced unpolled setup termination. The full
+[repository gate](reviews/worker-custody-check.log) passed with normal stack limits.
+See the [independent review](reviews/worker-custody-review.md) for the corrected
+request-memory finding and residual qualification limits. Initial compilation
+errors in private method visibility and a slice-bound preflight were corrected;
+the original log remains with the passing evidence.
+
+The [resource snapshot](reviews/worker-custody-resources.json) separates development
+cache allocation from shared-volume availability. Existing corpus inputs, selected
+outputs and failed attempts were unchanged. No throughput, full-process memory or
+ordinary-call overhead result is claimed from these small correctness fixtures.
+
+Destructive maintenance, retirement generations, durable unavailability/removal
+intent, exact deletion reconciliation, compaction and fenced restore remain
+unfinished. No deletion or expiration is enabled. The full R1–R7 scope and
+complete Comments performance acceptance remain open.
+
 ## Shared protection inspection
 
 `Engine::inspect_retention`, CLI `inspect-retention` and HTTP
@@ -63,7 +110,8 @@ restore remain required. No expiration or deletion is enabled.
 The [worker-boundary review](reviews/retention-worker-design.md) supplies the next
 implementation step: retain engine and maintenance ownership in an admitted task
 through caller cancellation, then qualify nested calls and queued catalog effects.
-That design has not yet been implemented.
+The owned service boundary above implements that next step; destructive execution
+still requires its separate durable rules and qualification.
 
 ## Exact dependencies for reusable work
 
@@ -339,7 +387,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact general/scalar/group completion dependencies; read-only shared-root inspection with bounded native expansion; all cleanup disabled | Destructive inventory/worker qualification; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact general/scalar/group completion dependencies; read-only shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; all cleanup disabled | Destructive inventory/worker qualification; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

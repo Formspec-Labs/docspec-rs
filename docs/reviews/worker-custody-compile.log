@@ -1,0 +1,372 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0624]: method `admit_work` is private
+   --> src/engine/backfill.rs:185:14
+    |
+185 |           self.admit_work(move |engine| async move { engine.plan_backfill_admitted(&spec).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine/backfill.rs:185:31
+    |
+185 |         self.admit_work(move |engine| async move { engine.plan_backfill_admitted(&spec).await })
+    |                               ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+185 |         self.admit_work(move |engine: /* Type */| async move { engine.plan_backfill_admitted(&spec).await })
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/backfill.rs:333:14
+    |
+333 |           self.admit_work(move |engine| async move {
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine/backfill.rs:333:31
+    |
+333 |         self.admit_work(move |engine| async move {
+    |                               ^^^^^^
+334 |             engine.backfill_admitted(&spec, stop.as_deref()).await
+    |             ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+333 |         self.admit_work(move |engine: /* Type */| async move {
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/history.rs:27:14
+    |
+ 27 |           self.admit_work(move |engine| async move {
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+  --> src/engine/history.rs:27:31
+   |
+27 |         self.admit_work(move |engine| async move {
+   |                               ^^^^^^
+28 |             engine.prove_succession_admitted(&prior, &target).await
+   |             ------ type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+27 |         self.admit_work(move |engine: /* Type */| async move {
+   |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/inputs.rs:20:14
+    |
+ 20 |           self.admit_work(move |engine| async move { engine.seal_generation_admitted(&seal).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+  --> src/engine/inputs.rs:20:31
+   |
+20 |         self.admit_work(move |engine| async move { engine.seal_generation_admitted(&seal).await })
+   |                               ^^^^^^               ------ type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+20 |         self.admit_work(move |engine: /* Type */| async move { engine.seal_generation_admitted(&seal).await })
+   |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/inputs.rs:92:14
+    |
+ 92 |           self.admit_work(move |engine| async move { engine.capture_inputs_admitted(&inputs).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+  --> src/engine/inputs.rs:92:31
+   |
+92 |         self.admit_work(move |engine| async move { engine.capture_inputs_admitted(&inputs).await })
+   |                               ^^^^^^               ------ type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+92 |         self.admit_work(move |engine: /* Type */| async move { engine.capture_inputs_admitted(&inputs).await })
+   |                                     ++++++++++++
+
+error[E0277]: the size for values of type `[model::ObjectRef]` cannot be known at compilation time
+   --> src/engine/retention/inventory.rs:21:13
+    |
+ 20 |         inputs::metadata_size(
+    |         --------------------- required by a bound introduced by this call
+ 21 |             objects,
+    |             ^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `[model::ObjectRef]`
+note: required by an implicit `Sized` bound in `metadata_size`
+   --> src/engine/inputs.rs:392:37
+    |
+392 | pub(super) fn metadata_size(value: &impl Serialize, limit: usize) -> Result<usize> {
+    |                                     ^^^^^^^^^^^^^^ required by the implicit `Sized` requirement on this type parameter in `metadata_size`
+help: consider relaxing the implicit `Sized` restriction
+   --> src/engine/inputs.rs:392:51
+    |
+392 | pub(super) fn metadata_size(value: &impl Serialize + ?Sized, limit: usize) -> Result<usize> {
+    |                                                    ++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/retention/inventory.rs:25:14
+    |
+ 25 |           self.admit_work(
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+  --> src/engine/retention/inventory.rs:26:19
+   |
+26 |             move |engine| async move { engine.inspect_retention_admitted(&objects).await },
+   |                   ^^^^^^               ------ type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+26 |             move |engine: /* Type */| async move { engine.inspect_retention_admitted(&objects).await },
+   |                         ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine/retention.rs:119:14
+    |
+119 |           self.admit_work(move |engine| async move {
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine/retention.rs:119:31
+    |
+119 |         self.admit_work(move |engine| async move {
+    |                               ^^^^^^
+120 |             engine.abandon_admitted(&dataset, &operation, &reason).await
+    |             ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+119 |         self.admit_work(move |engine: /* Type */| async move {
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:225:14
+    |
+225 |           self.admit_work(move |engine| async move { engine.plan_request_admitted(&spec).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:225:31
+    |
+225 |         self.admit_work(move |engine| async move { engine.plan_request_admitted(&spec).await })
+    |                               ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+225 |         self.admit_work(move |engine: /* Type */| async move { engine.plan_request_admitted(&spec).await })
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:337:14
+    |
+337 |           self.admit_work(move |engine| async move { engine.inspect_admitted(&dataset).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:337:31
+    |
+337 |         self.admit_work(move |engine| async move { engine.inspect_admitted(&dataset).await })
+    |                               ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+337 |         self.admit_work(move |engine: /* Type */| async move { engine.inspect_admitted(&dataset).await })
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:354:14
+    |
+354 |           self.admit_work(move |engine| async move { engine.latest_admitted(&dataset).await })
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:354:31
+    |
+354 |         self.admit_work(move |engine| async move { engine.latest_admitted(&dataset).await })
+    |                               ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+354 |         self.admit_work(move |engine: /* Type */| async move { engine.latest_admitted(&dataset).await })
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:380:14
+    |
+380 |           self.admit_work(
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:381:19
+    |
+381 |             move |engine| async move { engine.release_admitted(&dataset, &version).await },
+    |                   ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+381 |             move |engine: /* Type */| async move { engine.release_admitted(&dataset, &version).await },
+    |                         ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:555:14
+    |
+555 |           self.admit_work(move |engine| async move {
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:555:31
+    |
+555 |         self.admit_work(move |engine| async move {
+    |                               ^^^^^^
+556 |             engine
+    |             ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+555 |         self.admit_work(move |engine: /* Type */| async move {
+    |                                     ++++++++++++
+
+error[E0624]: method `admit_work` is private
+   --> src/engine.rs:655:14
+    |
+655 |           self.admit_work(
+    |                ^^^^^^^^^^ private method
+    |
+   ::: src/engine/worker.rs:96:5
+    |
+ 96 | /     async fn admit_work<T, F, Fut>(&self, operation: F) -> Result<T>
+ 97 | |     where
+ 98 | |         T: Send + 'static,
+ 99 | |         F: FnOnce(Engine) -> Fut + Send + 'static,
+100 | |         Fut: Future<Output = Result<T>> + Send + 'static,
+    | |_________________________________________________________- private method defined here
+
+error[E0282]: type annotations needed
+   --> src/engine.rs:656:19
+    |
+656 |             move |engine| async move { engine.run_admitted(&spec, stop.as_deref()).await },
+    |                   ^^^^^^               ------ type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type
+    |
+656 |             move |engine: /* Type */| async move { engine.run_admitted(&spec, stop.as_deref()).await },
+    |                         ++++++++++++
+
+Some errors have detailed explanations: E0277, E0282, E0624.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `docspec` (lib) due to 27 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 27 previous errors

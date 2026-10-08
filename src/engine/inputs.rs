@@ -15,6 +15,15 @@ impl Engine {
     /// Refuses conflicting reseals, missing history, stale eligibility, mismatched
     /// producer declarations, invalid identities, or exhausted metadata capacity.
     pub async fn seal_generation(&self, seal: &GenerationSeal) -> Result<GenerationSeal> {
+        let memory = self.request_memory(seal)?;
+        let seal = seal.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.seal_generation_admitted(&seal).await
+        })
+        .await
+    }
+
+    async fn seal_generation_admitted(&self, seal: &GenerationSeal) -> Result<GenerationSeal> {
         let lifecycle = &self.inner.lifecycle;
         let memory = Arc::new(
             lifecycle
@@ -77,6 +86,18 @@ impl Engine {
     /// Refuses unknown or invalidated versions, unsealed or mixed generations,
     /// rebound identities, missing manifests, and exhausted metadata capacity.
     pub async fn capture_inputs(&self, inputs: &BTreeMap<Id, VersionRef>) -> Result<InputCoverage> {
+        let memory = self.request_memory(inputs)?;
+        let inputs = inputs.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.capture_inputs_admitted(&inputs).await
+        })
+        .await
+    }
+
+    pub(super) async fn capture_inputs_admitted(
+        &self,
+        inputs: &BTreeMap<Id, VersionRef>,
+    ) -> Result<InputCoverage> {
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);

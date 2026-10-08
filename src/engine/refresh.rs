@@ -17,7 +17,8 @@ impl Engine {
     /// # Errors
     /// Refuses malformed recipes, conflicting operation identities, or stale output bases.
     pub async fn plan_refresh(&self, spec: &RefreshSpec) -> Result<RunPlan> {
-        self.plan_request(&OperationRequest::Refresh(Box::new(spec.clone())))
+        let memory = self.request_memory(spec)?;
+        self.plan_request(OperationRequest::Refresh(Box::new(spec.clone())), memory)
             .await
     }
 
@@ -26,8 +27,13 @@ impl Engine {
     /// # Errors
     /// Refuses inadmissible inputs, invalid recipes, exhausted capacity, and stale selection guards.
     pub async fn refresh(&self, spec: &RefreshSpec) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Refresh(Box::new(spec.clone())), None)
-            .await
+        let memory = self.request_memory(spec)?;
+        self.run_internal(
+            OperationRequest::Refresh(Box::new(spec.clone())),
+            memory,
+            None,
+        )
+        .await
     }
 
     /// Interrupts after a durable refresh handoff for recovery qualification.
@@ -36,8 +42,10 @@ impl Engine {
     /// Returns the injected failure or an ordinary refresh refusal.
     #[cfg(feature = "test-util")]
     pub async fn refresh_until(&self, spec: &RefreshSpec, phase: &str) -> Result<ReleasePin> {
+        let memory = self.request_memory(&(spec, phase))?;
         self.run_internal(
-            &OperationRequest::Refresh(Box::new(spec.clone())),
+            OperationRequest::Refresh(Box::new(spec.clone())),
+            memory,
             Some(phase),
         )
         .await
@@ -50,7 +58,7 @@ impl Engine {
     ) -> Result<PhaseResult> {
         #[cfg(feature = "test-util")]
         work_started("admission");
-        let coverage = self.capture_inputs(&spec.inputs()).await?;
+        let coverage = self.capture_inputs_admitted(&spec.inputs()).await?;
         let budget = &self.inner.lifecycle.budget;
         let loaded = load_inputs(&coverage, budget).await?;
         if let RefreshTransform::Aggregate(aggregate) = &spec.transform {

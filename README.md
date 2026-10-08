@@ -91,6 +91,21 @@ An unmatched object is not permission to delete it: concurrent work, catalog
 recovery and worker ownership still require the separate retention execution
 boundary. Inspection changes no availability promise and removes no files.
 
+Catalog work keeps running after a caller disconnects or drops its future. The
+owned task retains workspace ownership, shared maintenance admission and its
+request/task memory reservation until the existing operation finishes. Unrelated
+datasets can still run concurrently; exhausted admission refuses more work.
+Use the same operation ID to retrieve or resume its retained result.
+
+Embedded callers must await `Engine::shutdown()` before stopping their Tokio
+runtime, then drop all engine clones to release the workspace. Shutdown stops new
+catalog work and drains admitted operations. The HTTP server does this after its
+graceful stop. If a private task panics or the runtime stops before private work
+finishes, that host stays unavailable until process exit because underlying
+blocking work may still finish.
+Immutable release streams keep their catalog-free behavior. This worker boundary
+does not enable deletion, expiration or restore.
+
 To stop an unfinished operation, use:
 
 ```sh

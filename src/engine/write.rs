@@ -100,7 +100,7 @@ impl Engine {
         let dataframe = context.sql(&spec.sql).await?;
         validate_plan(dataframe.logical_plan())?;
         if let Some(base) = &spec.base {
-            let release = self.release(&spec.dataset, base).await?;
+            let release = self.release_admitted(&spec.dataset, base).await?;
             let native = storage::open_pin(&release.dataset.groups["source"]).await?;
             if storage::defaults::evolved(native.metadata()) {
                 let dataframe = schema::normalize(
@@ -182,7 +182,7 @@ impl Engine {
         directory: &Path,
         admission: &PhaseResult,
     ) -> Result<Prepared> {
-        let base = self.release(&spec.dataset, &spec.base).await?;
+        let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         let before = base
             .dataset
             .groups

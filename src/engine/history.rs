@@ -18,6 +18,20 @@ impl Engine {
         prior: &VersionRef,
         target: &VersionRef,
     ) -> Result<SuccessionProof> {
+        let memory = self.request_memory(&(prior, target))?;
+        let prior = prior.clone();
+        let target = target.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.prove_succession_admitted(&prior, &target).await
+        })
+        .await
+    }
+
+    async fn prove_succession_admitted(
+        &self,
+        prior: &VersionRef,
+        target: &VersionRef,
+    ) -> Result<SuccessionProof> {
         if prior.dataset != target.dataset {
             return Err(invalid("coverage endpoints belong to different datasets"));
         }

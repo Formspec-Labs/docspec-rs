@@ -14,12 +14,13 @@ use datafusion::prelude::*;
 use futures::{StreamExt, TryStreamExt};
 use iceberg::Catalog;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicBool;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 mod backfill;
 #[doc(inline)]
@@ -39,9 +40,15 @@ mod refresh;
 mod retention;
 mod schema;
 mod verification;
+mod worker;
 mod write;
 
 /// Local execution host sharing catalog, admission, and resource accounting.
+///
+/// Once admitted, catalog operations finish in owned tasks even if their caller
+/// disconnects or drops its future. Use [`Self::abandon`] to revoke an unfinished
+/// operation's selection authority, and [`Self::shutdown`] before stopping the
+/// runtime. Immutable release streams do not acquire catalog admission.
 #[derive(Clone, Debug)]
 pub struct Engine {
     inner: Arc<Inner>,
@@ -52,7 +59,9 @@ struct Inner {
     root: PathBuf,
     lifecycle: Lifecycle,
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
-    _workspace: WorkspaceLock,
+    host: Arc<worker::Host>,
+    maintenance: Arc<RwLock<()>>,
+    closing: AtomicBool,
     owned_catalog: bool,
 }
 
@@ -120,10 +129,21 @@ impl Engine {
     /// # Errors
     /// Refuses a live owner, invalid limits, or catalog/storage initialization failure.
     pub async fn open(root: impl AsRef<Path>, limits: Limits) -> Result<Self> {
-        let ownership = WorkspaceLock::acquire(root.as_ref())?;
+        let runtime = worker::runtime()?;
+        let host = worker::Host::acquire(root.as_ref())?;
         let root = std::fs::canonicalize(root)?;
-        let catalog = storage::local_catalog(&root).await?;
-        Self::compose(root, catalog, limits, ownership, true)
+        let custody = worker::Custody::new(host.clone());
+        runtime
+            .spawn(async move {
+                let result = async {
+                    let catalog = storage::local_catalog(&root).await?;
+                    Self::compose(root, catalog, limits, host, true)
+                }
+                .await;
+                custody.complete();
+                result
+            })
+            .await?
     }
 
     /// Opens a workspace using an injected maintained catalog.
@@ -135,7 +155,7 @@ impl Engine {
         catalog: Arc<dyn Catalog>,
         limits: Limits,
     ) -> Result<Self> {
-        let ownership = WorkspaceLock::acquire(root.as_ref())?;
+        let ownership = worker::Host::acquire(root.as_ref())?;
         Self::compose(
             std::fs::canonicalize(root)?,
             catalog,
@@ -149,7 +169,7 @@ impl Engine {
         root: PathBuf,
         catalog: Arc<dyn Catalog>,
         limits: Limits,
-        ownership: WorkspaceLock,
+        ownership: Arc<worker::Host>,
         owned_catalog: bool,
     ) -> Result<Self> {
         let scratch = root.join("scratch");
@@ -160,7 +180,9 @@ impl Engine {
                 root,
                 lifecycle: Lifecycle::new(catalog, budget),
                 locks: Mutex::new(BTreeMap::new()),
-                _workspace: ownership,
+                host: ownership,
+                maintenance: Arc::new(RwLock::new(())),
+                closing: AtomicBool::new(false),
                 owned_catalog,
             }),
         })
@@ -185,7 +207,8 @@ impl Engine {
     /// # Errors
     /// Refuses conflicting operation identities or invalid requests.
     pub async fn plan(&self, spec: &RunSpec) -> Result<RunPlan> {
-        self.plan_request(&OperationRequest::Build(spec.clone()))
+        let memory = self.request_memory(spec)?;
+        self.plan_request(OperationRequest::Build(spec.clone()), memory)
             .await
     }
 
@@ -194,11 +217,23 @@ impl Engine {
     /// # Errors
     /// Refuses conflicting identities, stale bases or definitions, and invalid requests.
     pub async fn plan_update(&self, spec: &UpdateSpec) -> Result<RunPlan> {
-        self.plan_request(&OperationRequest::Update(spec.clone()))
+        let memory = self.request_memory(spec)?;
+        self.plan_request(OperationRequest::Update(spec.clone()), memory)
             .await
     }
 
-    async fn plan_request(&self, spec: &OperationRequest) -> Result<RunPlan> {
+    async fn plan_request(
+        &self,
+        spec: OperationRequest,
+        memory: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<RunPlan> {
+        self.admit_work(memory, move |engine| async move {
+            engine.plan_request_admitted(&spec).await
+        })
+        .await
+    }
+
+    async fn plan_request_admitted(&self, spec: &OperationRequest) -> Result<RunPlan> {
         validate_request(spec)?;
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
@@ -305,6 +340,15 @@ impl Engine {
     /// # Errors
     /// Refuses corrupt or oversized metadata.
     pub async fn inspect(&self, dataset: &Id) -> Result<BTreeMap<String, serde_json::Value>> {
+        let memory = self.request_memory(dataset)?;
+        let dataset = dataset.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.inspect_admitted(&dataset).await
+        })
+        .await
+    }
+
+    async fn inspect_admitted(&self, dataset: &Id) -> Result<BTreeMap<String, serde_json::Value>> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
@@ -316,6 +360,15 @@ impl Engine {
     /// # Errors
     /// Refuses datasets without a selected release or unavailable metadata.
     pub async fn latest(&self, dataset: &Id) -> Result<ReleasePin> {
+        let memory = self.request_memory(dataset)?;
+        let dataset = dataset.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.latest_admitted(&dataset).await
+        })
+        .await
+    }
+
+    async fn latest_admitted(&self, dataset: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
@@ -335,6 +388,16 @@ impl Engine {
     /// # Errors
     /// Refuses unknown versions, rebound identities, or unavailable lifecycle metadata.
     pub async fn release(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
+        let memory = self.request_memory(&(dataset, version))?;
+        let dataset = dataset.clone();
+        let version = version.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.release_admitted(&dataset, &version).await
+        })
+        .await
+    }
+
+    async fn release_admitted(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
@@ -497,6 +560,23 @@ impl Engine {
         reason: &str,
         definition: Option<String>,
     ) -> Result<u64> {
+        let memory = self.request_memory(&(dataset, reason, &definition))?;
+        let dataset = dataset.clone();
+        let reason = reason.to_owned();
+        self.admit_work(memory, move |engine| async move {
+            engine
+                .invalidate_admitted(&dataset, &reason, definition)
+                .await
+        })
+        .await
+    }
+
+    async fn invalidate_admitted(
+        &self,
+        dataset: &Id,
+        reason: &str,
+        definition: Option<String>,
+    ) -> Result<u64> {
         if reason.trim().is_empty() {
             return Err(Error::refusal(
                 "missing_reason",
@@ -547,7 +627,8 @@ impl Engine {
     /// Refuses mismatched inputs, stale eligibility, capacity exhaustion, or corrupt outputs.
     /// Earlier qualified phases remain retained after any failure.
     pub async fn run(&self, spec: &RunSpec) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Build(spec.clone()), None)
+        let memory = self.request_memory(spec)?;
+        self.run_internal(OperationRequest::Build(spec.clone()), memory, None)
             .await
     }
 
@@ -557,7 +638,8 @@ impl Engine {
     /// Returns `injected_failure` after the selected completion, or ordinary run errors.
     #[cfg(feature = "test-util")]
     pub async fn run_until(&self, spec: &RunSpec, phase: &str) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Build(spec.clone()), Some(phase))
+        let memory = self.request_memory(&(spec, phase))?;
+        self.run_internal(OperationRequest::Build(spec.clone()), memory, Some(phase))
             .await
     }
 
@@ -566,7 +648,8 @@ impl Engine {
     /// # Errors
     /// Refuses stale bases, overlapping inputs, schema mismatch or failed preparation.
     pub async fn update(&self, spec: &UpdateSpec) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Update(spec.clone()), None)
+        let memory = self.request_memory(spec)?;
+        self.run_internal(OperationRequest::Update(spec.clone()), memory, None)
             .await
     }
 
@@ -576,11 +659,25 @@ impl Engine {
     /// Returns the injected failure or ordinary update errors.
     #[cfg(feature = "test-util")]
     pub async fn update_until(&self, spec: &UpdateSpec, phase: &str) -> Result<ReleasePin> {
-        self.run_internal(&OperationRequest::Update(spec.clone()), Some(phase))
+        let memory = self.request_memory(&(spec, phase))?;
+        self.run_internal(OperationRequest::Update(spec.clone()), memory, Some(phase))
             .await
     }
 
     async fn run_internal(
+        &self,
+        spec: OperationRequest,
+        memory: tokio::sync::OwnedSemaphorePermit,
+        stop: Option<&str>,
+    ) -> Result<ReleasePin> {
+        let stop = stop.map(str::to_owned);
+        self.admit_work(memory, move |engine| async move {
+            engine.run_admitted(&spec, stop.as_deref()).await
+        })
+        .await
+    }
+
+    async fn run_admitted(
         &self,
         spec: &OperationRequest,
         stop: Option<&str>,
@@ -870,7 +967,7 @@ impl Engine {
                 None
             };
             let base = if let Some(base) = spec.base() {
-                Some(self.release(spec.dataset(), base).await?)
+                Some(self.release_admitted(spec.dataset(), base).await?)
             } else {
                 None
             };
