@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: this file contains an unclosed delimiter
+   --> src/engine/backfill/verification.rs:546:3
+    |
+  7 | pub(in crate::engine) async fn verify_binding_dependencies(dataset: &DatasetPin, budget: &Budget) -> Result<()> {
+    |                                                                                                                 - unclosed delimiter
+...
+546 | }
+    |  ^
+
+error: could not compile `docspec` (lib) due to 1 previous error

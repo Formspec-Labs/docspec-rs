@@ -8,12 +8,18 @@ mod expressions;
 mod preparation;
 mod verification;
 use expressions::Expressions;
-pub(super) use verification::verify_groups;
+pub(super) use verification::{verify_binding_dependencies, verify_groups};
 
 // Batches acknowledgments without retaining payloads or creating one lifecycle
 // transaction per row/file. A crash may repeat only the unacknowledged bundle.
 const COMPLETION_BUNDLE: usize = 16;
-const PROCESSOR: &str = "docspec.scalar-backfill.v1";
+const PROCESSOR: &str = "docspec.scalar-backfill.v2";
+
+pub(super) struct PreparedGroup {
+    pub table: TablePin,
+    pub native_field_ids: BTreeMap<i32, i32>,
+    pub input_fields: BTreeMap<String, i32>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Capture {
@@ -144,10 +150,11 @@ impl Engine {
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let base = self.release(&spec.dataset, &spec.base).await?;
         let native = storage::open_pin(&base.dataset.groups["source"]).await?;
-        Expressions::compile(
+        let expressions = Expressions::compile(
             &self.context(),
             native.metadata().current_schema(),
             &spec.group_definition(),
+            None,
         )?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
@@ -218,12 +225,7 @@ impl Engine {
         let objects = source_objects(&base.dataset.groups["source"]);
         for file in scan.files() {
             let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
-            let key = file_key(
-                &spec.group_definition(),
-                object,
-                native.metadata().current_schema(),
-                eligibility,
-            )?;
+            let key = file_key(object, &expressions, eligibility)?;
             if lifecycle
                 .get::<FileCompletion>(&view, &key)
                 .await?
@@ -386,12 +388,14 @@ impl Engine {
             return Err(invalid_group());
         }
         let definition = spec.group_definition();
-        let (prepared, native_field_ids) =
-            Box::pin(self.prepare_group(&request, &operation, source, &definition, stop)).await?;
+        let prepared =
+            Box::pin(self.prepare_group(&request, &operation, source, &definition, None, stop))
+                .await?;
         let binding = ComputedGroup {
             definition,
+            input_fields: prepared.input_fields,
             request: request.clone(),
-            native_field_ids,
+            native_field_ids: prepared.native_field_ids,
             source_metadata: source.metadata.clone(),
             base_manifest: capture.base_manifest.clone(),
         };
@@ -420,7 +424,7 @@ impl Engine {
             dataset.processor = PROCESSOR.into();
             dataset
                 .groups
-                .insert(spec.group.to_string(), prepared.clone());
+                .insert(spec.group.to_string(), prepared.table.clone());
             dataset
                 .computed
                 .insert(spec.group.to_string(), binding.clone());
@@ -563,20 +567,51 @@ fn source_objects(source: &TablePin) -> BTreeMap<&str, &ObjectRef> {
         .collect()
 }
 
-fn file_key(
-    spec: &GroupDefinition,
-    source: &ObjectRef,
-    schema: &iceberg::spec::Schema,
-    eligibility: u64,
-) -> Result<String> {
-    let bytes = serde_json::to_vec(&(
-        PROCESSOR,
-        source,
-        schema,
-        &spec.group,
-        &spec.definition,
-        &spec.fields,
-    ))?;
+/// Full source reconstructions declare correspondence by the prior current name.
+/// Updates retain exact IDs; they never reinterpret an old name under a new ID.
+pub(super) async fn inherited_inputs(
+    request: &OperationRequest,
+    previous: &ComputedGroup,
+    before: &TablePin,
+    after: &TablePin,
+) -> Result<BTreeMap<String, i32>> {
+    let rebuilt = match request {
+        OperationRequest::Build(_) => true,
+        OperationRequest::Refresh(spec) => spec.mode == RefreshMode::Full,
+        _ => false,
+    };
+    if !rebuilt {
+        return Ok(previous.input_fields.clone());
+    }
+    let before = storage::open_pin(before).await?;
+    let after = storage::open_pin(after).await?;
+    previous
+        .input_fields
+        .iter()
+        .map(|(alias, id)| {
+            let old = before
+                .metadata()
+                .current_schema()
+                .as_struct()
+                .fields()
+                .iter()
+                .find(|field| field.id == *id)
+                .ok_or_else(expressions::invalid_binding)?;
+            let new = after
+                .metadata()
+                .current_schema()
+                .as_struct()
+                .fields()
+                .iter()
+                .find(|field| field.name == old.name)
+                .ok_or_else(expressions::invalid_binding)?;
+            Ok((alias.clone(), new.id))
+        })
+        .collect()
+}
+
+fn file_key(source: &ObjectRef, expressions: &Expressions, eligibility: u64) -> Result<String> {
+    let bytes = serde_json::to_vec(&(source, &expressions.dependencies))?;
     Ok(format!(
         "phase/backfill/{eligibility}/{}",
         blake3::hash(&bytes).to_hex()
@@ -666,6 +701,180 @@ fn charge_assembly(bytes: usize, completion: &FileCompletion, limit: usize) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning() {
+        let root = tempfile::TempDir::new().unwrap();
+        let engine = Engine::open(root.path().join("workspace"), Limits::default())
+            .await
+            .unwrap();
+        let dataset = Id::new("cache").unwrap();
+        let prepared = engine
+            .write_frame(
+                &dataset,
+                &root.path().join("source"),
+                engine
+                    .context()
+                    .sql("SELECT CAST(1 AS BIGINT) AS old, CAST(100 AS BIGINT) AS spare")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let source = prepared.table;
+        let native = storage::open_pin(&source).await.unwrap();
+        let fields = native.metadata().current_schema().as_struct().fields();
+        let old_id = fields[0].id;
+        let spec = BackfillSpec {
+            dataset: dataset.clone(),
+            operation: Id::new("backfill").unwrap(),
+            base: Id::new("base").unwrap(),
+            definition: "v1".into(),
+            group: Id::new("derived").unwrap(),
+            group_definition: "scalar-v1".into(),
+            fields: vec![ComputedField {
+                id: 10,
+                name: "answer".into(),
+                expression: "old + 1".into(),
+            }],
+        };
+        let operation = Operation {
+            request_digest: "fixture".into(),
+            eligibility: 0,
+            epoch: 0,
+            boundary: 0,
+            definition: "v1".into(),
+            base: Some(spec.base.clone()),
+            base_manifest: None,
+            require_current_boundary: false,
+        };
+        let request = OperationRequest::Backfill(spec.clone());
+        let first = engine
+            .prepare_group(
+                &request,
+                &operation,
+                &source,
+                &spec.group_definition(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let before = engine.inspect(&dataset).await.unwrap();
+        let completions = before
+            .iter()
+            .filter(|(key, _)| key.starts_with("phase/backfill/"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<BTreeMap<_, _>>();
+        assert!(!completions.is_empty());
+        let mut renamed = fields[0].as_ref().clone();
+        renamed.name = "new name".into();
+        renamed.doc = Some("presentation only".into());
+        let new_schema = iceberg::spec::Schema::builder()
+            .with_fields([
+                fields[1].clone(),
+                Arc::new(renamed),
+                Arc::new(iceberg::spec::NestedField::optional(
+                    30,
+                    "old",
+                    iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
+                )),
+            ])
+            .build()
+            .unwrap();
+        let directory = root.path().join("evolved");
+        let metadata = native
+            .metadata()
+            .clone()
+            .into_builder(None)
+            .set_location(directory.to_string_lossy().into_owned())
+            .assign_uuid(uuid::Uuid::new_v4())
+            .add_current_schema(new_schema)
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        let identifier =
+            iceberg::TableIdent::new(native.identifier().namespace().clone(), "evolved".into());
+        let evolved = storage::register_candidate(
+            engine.inner.lifecycle.catalog.as_ref(),
+            &identifier,
+            move || Ok(metadata),
+            &engine.inner.lifecycle.budget,
+        )
+        .await
+        .unwrap();
+        let evolved = storage::pin(
+            &dataset,
+            &evolved,
+            source.rows,
+            &engine.inner.lifecycle.budget,
+            &source.objects,
+        )
+        .await
+        .unwrap();
+        let bound = engine
+            .prepare_group(
+                &request,
+                &operation,
+                &evolved,
+                &spec.group_definition(),
+                Some(&first.input_fields),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(bound.input_fields["old"], old_id);
+        let after = engine.inspect(&dataset).await.unwrap();
+        assert_eq!(
+            completions,
+            after
+                .iter()
+                .filter(|(key, _)| key.starts_with("phase/backfill/"))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        );
+        let data = |pin: &TablePin| {
+            pin.objects
+                .iter()
+                .filter(|object| object.path.ends_with(".parquet"))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(data(&first.table), data(&bound.table));
+        assert_ne!(first.table.metadata, bound.table.metadata);
+        // Same SQL and current source pin, but fresh name resolution consumes
+        // ID30 rather than ID1. Neither file nor whole-table reuse may collide.
+        let fresh = engine
+            .prepare_group(
+                &request,
+                &operation,
+                &evolved,
+                &spec.group_definition(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(fresh.input_fields["old"], 30);
+        assert_ne!(data(&fresh.table), data(&bound.table));
+        for (pin, expected) in [(&bound.table, Some(2)), (&fresh.table, None)] {
+            let table = storage::open_pin(pin).await.unwrap();
+            let batches = storage::read_batches(&table, &engine.inner.lifecycle.budget)
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+            let values = batches[0]
+                .column(2)
+                .as_any()
+                .downcast_ref::<arrow::array::Int64Array>()
+                .unwrap();
+            assert_eq!(values.iter().collect::<Vec<_>>(), vec![expected]);
+        }
+    }
+
     #[test]
     fn aggregate_completion_descriptors_cannot_exceed_assembly_allowance() {
         let object = ObjectRef {

@@ -501,6 +501,8 @@ impl BackfillSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedGroup {
     pub definition: GroupDefinition,
+    /// SQL input names bound to root field IDs in this exact source interpretation.
+    pub input_fields: BTreeMap<String, i32>,
     /// Operation establishing complete coverage; reused files retain their original identities.
     pub request: OperationRequest,
     pub native_field_ids: BTreeMap<i32, i32>,

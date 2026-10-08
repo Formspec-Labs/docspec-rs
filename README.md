@@ -93,7 +93,7 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 8 is the current greenfield
+remains unfinished. Release format 9 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group

@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.99s
+     Running tests/scalar_bindings.rs (target/debug/deps/scalar_bindings-54c1e5341b6b343e)
+
+running 3 tests
+test opposite_boolean_outputs_cannot_hide_each_other_in_value_comparison ... ok
+test redirected_rehashed_ancestor_does_not_change_an_authored_expression ... ok
+test cached_readback_requires_older_binding_manifests_and_origin_schemas ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.45s
+

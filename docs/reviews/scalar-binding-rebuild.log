@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.30s
+     Running tests/rebuild.rs (target/debug/deps/rebuild-71cd6360fd02d8fc)
+
+running 1 test
+test reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 4.06s
+

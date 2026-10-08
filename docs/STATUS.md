@@ -12,7 +12,7 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Public metadata-only evolution; global source IDs across full rebuilds; durable absence/default semantics; nested computed values; broader selective dependencies; full concurrent-ingestion cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
@@ -684,8 +684,9 @@ does not bound that temporary decoding memory or establish column pruning.
 No performance or whole-process memory result is claimed.
 
 This is a reader prerequisite for R3. The following checkpoint adds ID-preserving
-replacement candidates. Public schema operations, ID-bound computed dependencies,
-durable absence semantics and guarded schema cutover remain unfinished. Native
+replacement candidates. The scalar binding checkpoint below adds ID-bound computed
+dependencies. Public schema operations, durable absence semantics and guarded
+schema cutover remain unfinished. Native
 metadata changes alone do not establish that lifecycle behavior. See the
 implementation reviews and raw qualification logs under [reviews](reviews/).
 
@@ -729,3 +730,52 @@ cutover are still open. See the [consistency review](reviews/schema-write-consis
 paired-writer fixture reaching a later readback limit; its replacement uses an
 oversized affected value under the same allowance. All earlier suites passed, and
 the corrected updates suite, formatting, Clippy and doc tests passed afterward.
+
+## Scalar input-binding checkpoint
+
+Computed groups now retain the native field IDs selected by their original SQL
+input names. Renaming or reordering a consumed source field preserves its meaning;
+reusing the old name for a different ID does not redirect an inherited expression.
+Freshly authored SQL resolves against the current names. Full source rebuilds
+explicitly map prior IDs through the prior current names into the new schema;
+missing names refuse. This correspondence does not yet preserve global source
+IDs across full rebuilds.
+
+Per-file reuse depends on exact source bytes, the expression and output definition,
+resolved input IDs, and consumed native field types, requiredness and defaults.
+Unrelated fields, root display names and ordinary documentation changes no longer
+invalidate those computations. Expressions using DataFusion's `arrow_metadata`
+also retain documentation as a material dependency. Nested schema details remain
+conservative dependencies. Preparation keys additionally bind the exact source
+metadata and resolved inputs, preventing different interpretations of the same SQL
+from sharing a prepared group. Output-field presentation changes and equivalent SQL
+rewrites do not yet share computation.
+
+Independent verification reconstructs scalar values from the exact source and
+compares them by physical occurrence with null-safe equality. It also proves each
+binding through actual owning selections to the original authored backfill.
+Rehashed intermediate records cannot switch input fields or invent a different
+operation kind. Cached readback still requires the binding manifests and origin
+schemas. Release format 9 records the binding; earlier experiment outputs have no
+migration path.
+
+One request-local cache shares exact ancestor manifests across groups, enforces a
+combined serialized-byte limit, rejects conflicting references, and releases its
+admission when the request ends. Native schema metadata still uses the existing
+`open_pin` path and can be reread for each group/history step outside that manifest
+allowance. This is not a bound on total ancestry I/O or process memory. The new value
+check reads complete current source/group values and joins them; computation reuse
+does not eliminate that verification cost. No end-to-end speed claim is made.
+
+Fixtures establish actual native file-completion reuse after rename/reorder,
+different results for newly authored same-name SQL, full rebuild correspondence,
+metadata-dependent expressions, opposite Boolean errors, redirected history and
+missing dependencies during cached resume. The full repository gate passed. A
+subsequent test-only cache/admission probe was checked with formatting, all-target
+Clippy and the library suite. See the [consistency review](reviews/scalar-binding-consistency.md),
+[resource review](reviews/scalar-binding-resources.md),
+[full gate](reviews/scalar-binding-check.log) and
+[final library gate](reviews/scalar-binding-final-check.log).
+
+Public schema operations, durable absence/default interpretation, continuous
+ingestion cutover and the full Comments performance gate remain open.

@@ -662,9 +662,25 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
         .as_any()
         .downcast_ref::<Int64Array>()
         .unwrap();
-    for kind in ["duplicate", "unknown", "range", "null", "mapping"] {
+    for kind in [
+        "duplicate",
+        "unknown",
+        "range",
+        "null",
+        "mapping",
+        "values",
+        "binding",
+    ] {
         let mut forged = valid.clone();
-        if kind == "mapping" {
+        if kind == "binding" {
+            forged
+                .dataset
+                .computed
+                .get_mut("length")
+                .unwrap()
+                .input_fields
+                .insert("text".into(), 1);
+        } else if kind == "mapping" {
             forged
                 .dataset
                 .computed
@@ -683,6 +699,7 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
                 "unknown" => paths[0] = Some("unknown.parquet".into()),
                 "range" => positions[0] = Some(i64::MAX),
                 "null" => positions[0] = None,
+                "values" => {}
                 _ => unreachable!(),
             }
             let mut fields = schema.fields().to_vec();
@@ -695,7 +712,15 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
                 vec![
                     Arc::new(StringArray::from(paths)),
                     Arc::new(Int64Array::from(positions)),
-                    batch.column(2).clone(),
+                    if kind == "values" {
+                        arrow::compute::cast(
+                            &Int64Array::from(vec![Some(999); batch.num_rows()]),
+                            batch.column(2).data_type(),
+                        )
+                        .unwrap()
+                    } else {
+                        batch.column(2).clone()
+                    },
                 ],
             )
             .unwrap();
@@ -743,7 +768,11 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
         };
         assert_eq!(
             verify_release(&forged, limits()).await.unwrap_err().code(),
-            "invalid_group",
+            if kind == "values" {
+                "invalid_group_values"
+            } else {
+                "invalid_group"
+            },
             "{kind}"
         );
     }

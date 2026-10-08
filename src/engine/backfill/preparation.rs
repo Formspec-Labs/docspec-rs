@@ -9,8 +9,9 @@ impl Engine {
         operation: &Operation,
         source: &TablePin,
         definition: &GroupDefinition,
+        input_fields: Option<&BTreeMap<String, i32>>,
         stop: Option<&str>,
-    ) -> Result<(TablePin, BTreeMap<i32, i32>)> {
+    ) -> Result<PreparedGroup> {
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(request.dataset()).await;
         let native = storage::open_pin(source).await?;
@@ -18,11 +19,13 @@ impl Engine {
             &self.context(),
             native.metadata().current_schema(),
             definition,
+            input_fields,
         )?);
         let digest = blake3::hash(&serde_json::to_vec(&(
             PROCESSOR,
             &source.metadata,
             definition,
+            &expressions.input_fields,
         ))?)
         .to_hex()
         .to_string();
@@ -52,12 +55,7 @@ impl Engine {
             let mut completion_view = lifecycle.open(request.dataset()).await?;
             for file in scan.files() {
                 let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
-                let key = file_key(
-                    definition,
-                    object,
-                    native.metadata().current_schema(),
-                    operation.eligibility,
-                )?;
+                let key = file_key(object, &expressions, operation.eligibility)?;
                 let existing: Option<FileCompletion> =
                     lifecycle.get(&completion_view, &key).await?;
                 let completion = if let Some(existing) = existing {
@@ -161,6 +159,7 @@ impl Engine {
                 source,
                 &prepared,
                 definition,
+                &expressions.input_fields,
                 &expressions.native_field_ids,
                 &lifecycle.budget,
             )
@@ -174,7 +173,11 @@ impl Engine {
                 .await?;
         }
         stop_after(stop, "validation")?;
-        Ok((prepared, expressions.native_field_ids.clone()))
+        Ok(PreparedGroup {
+            table: prepared,
+            native_field_ids: expressions.native_field_ids.clone(),
+            input_fields: expressions.input_fields.clone(),
+        })
     }
 
     pub(super) async fn reserve_group(

@@ -78,8 +78,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v8";
-pub(crate) const FORMAT: u32 = 8;
+const PROCESSOR: &str = "docspec.dataset.v9";
+pub(crate) const FORMAT: u32 = 9;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -795,21 +795,30 @@ impl Engine {
             for (name, previous) in &base.dataset.computed {
                 self.check(&lifecycle.open(spec.dataset()).await?, &operation)
                     .await?;
-                let (prepared, native_field_ids) = Box::pin(self.prepare_group(
+                let input_fields = backfill::inherited_inputs(
+                    spec,
+                    previous,
+                    &base.dataset.groups["source"],
+                    &table,
+                )
+                .await?;
+                let prepared = Box::pin(self.prepare_group(
                     &captured_request,
                     &operation,
                     &table,
                     &previous.definition,
+                    Some(&input_fields),
                     None,
                 ))
                 .await?;
-                groups.insert(name.clone(), prepared);
+                groups.insert(name.clone(), prepared.table);
                 computed.insert(
                     name.clone(),
                     ComputedGroup {
                         definition: previous.definition.clone(),
+                        input_fields: prepared.input_fields,
                         request: captured_request.clone(),
-                        native_field_ids,
+                        native_field_ids: prepared.native_field_ids,
                         source_metadata: table.metadata.clone(),
                         base_manifest: base.manifest.clone(),
                     },
@@ -1486,7 +1495,8 @@ async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Resul
     if release.dataset.related.is_some() {
         verification::check_available(release, budget).await
     } else {
-        storage::check_available(release_objects(release), budget).await
+        storage::check_available(release_objects(release), budget).await?;
+        backfill::verify_binding_dependencies(&release.dataset, budget).await
     }
 }
 

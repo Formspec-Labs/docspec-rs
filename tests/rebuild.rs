@@ -42,6 +42,82 @@ fn rows() -> Vec<Row> {
 }
 
 #[tokio::test]
+async fn reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names() {
+    use arrow::array::{Int64Array, StringArray};
+    use futures::TryStreamExt;
+    let root = TempDir::new().unwrap();
+    let (engine, base, _) = enriched(root.path()).await;
+    let mut request = rebuild(root.path(), &base, "reordered", &rows());
+    request.sql = "SELECT text, id FROM input".into();
+    let result = engine.run(&request).await.unwrap();
+    assert_eq!(base.dataset.computed["a"].input_fields["text"], 2);
+    assert_eq!(result.dataset.computed["a"].input_fields["text"], 1);
+    assert_eq!(base.dataset.computed["b"].input_fields["id"], 1);
+    assert_eq!(result.dataset.computed["b"].input_fields["id"], 2);
+    let mut stream = engine.read_combined(&result).await.unwrap();
+    let mut actual = Vec::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let text = batch
+            .column_by_name("text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let lengths = arrow::compute::cast(
+            batch.column_by_name("text_length").unwrap(),
+            &arrow::datatypes::DataType::Int64,
+        )
+        .unwrap();
+        let lengths = lengths.as_any().downcast_ref::<Int64Array>().unwrap();
+        let next = batch
+            .column_by_name("next_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        actual.extend(
+            ids.iter()
+                .zip(text.iter())
+                .zip(lengths.iter())
+                .zip(next.iter())
+                .map(|(((id, text), length), next)| ((id, text.map(str::to_owned)), length, next)),
+        );
+    }
+    actual.sort();
+    let mut expected = rows()
+        .into_iter()
+        .map(|row| {
+            (
+                row.clone(),
+                row.1.as_ref().map(|s| s.chars().count() as i64),
+                row.0.map(|v| v + 1),
+            )
+        })
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(actual, expected);
+    // Current bindings cannot be substituted with their former IDs, even if a
+    // forged release is rehashed after that metadata edit.
+    let mut wrong = result.clone();
+    wrong.dataset.computed.get_mut("a").unwrap().input_fields =
+        base.dataset.computed["a"].input_fields.clone();
+    assert_eq!(
+        verify_release(&forged(root.path(), "old-binding", wrong), limits())
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_group"
+    );
+    verify_release(&result, limits()).await.unwrap();
+}
+
+#[tokio::test]
 async fn full_rebuild_requalifies_source_and_every_group_without_changing_history() {
     let root = TempDir::new().unwrap();
     let (engine, base, original) = enriched(root.path()).await;
