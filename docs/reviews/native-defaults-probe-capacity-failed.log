@@ -1,0 +1,19 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.36s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+
+thread 'storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen' (10044512) panicked at src/storage/occurrences/tests/defaults.rs:40:6:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen ... FAILED
+
+failures:
+
+failures:
+    storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.10s
+
+error: test failed, to rerun pass `--lib`

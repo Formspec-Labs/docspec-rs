@@ -1,0 +1,43 @@
+# Native defaults probe review
+
+**Verdict: APPROVE for a test-only native capability probe.** No blockers or warnings found. This review does not qualify public default/presence support, production V3 operations, or performance. Scope: the uncommitted `defaults.rs` and its module inclusion against `afa09d9976f8d9c584fb190f50ff0bab69681832`, reviewed October 8, 2026. Static review using the semi-formal code-review and Rust guidance; no Cargo execution or implementation changes.
+
+## Patch summary
+
+The patch adds one native lifecycle probe under the existing [test module](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests.rs:339), which is itself [test-only](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences.rs:420). It upgrades a cloned V2 table to V3, adds literal defaults, appends complete batches, changes the write default, partially rewrites the data, and reloads the resulting catalog entry. The only caller of the new helpers is the [new test](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:136). Production code and dependencies are unchanged; the maintained Iceberg dependency is [pinned to 0.10.1](/Users/mikewolfd/Work/spicy-stack/docspec-rs/Cargo.toml:22).
+
+## Function trace
+
+| Function | Inputs → output | Verified behavior |
+| --- | --- | --- |
+| [`fields`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:9) | Write-default integer → native schema | Stable IDs 1/7/9; nullable value initially defaults to 7; required Boolean marker initially defaults to false. |
+| [`register`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:26) | Candidate metadata, catalog, budget → table | Delegates to `register_candidate`; failures panic with candidate name. |
+| [`native_batches`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:45) | Table → collected batches | Bypasses application schema qualification deliberately; requests current field IDs plus the native file column, disables filtering, then strips and checks that column. |
+| [`rows`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:84) / [`batch`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:115) | Batches ↔ complete row tuples | Preserves nulls and duplicate multiplicity; sorting removes order dependence; asserts a non-null marker. Writing always supplies every column. |
+| [`fixture`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests.rs:13) | Temporary root → catalog and V2 tables | Writes two identical, separately named files, including duplicate and null IDs; asserts each write produced one file. |
+| [`register_candidate`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/tables.rs:81) | Prepared metadata → registered table | Reserves metadata capacity, writes bounded metadata in a blocking worker, then registers its retained path. |
+| [`write_batches`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage.rs:161) / [`append`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage.rs:209) | Complete batches → files → table | Uses the native Parquet writer and fast append transaction; enforces writer/batch admission. |
+| [`occurrence_schema`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences.rs:30) / [`read_schema`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/schema.rs:17) | Candidate table → schema or refusal | Historical absence plus an initial default or required addition remains unqualified. |
+| [`strip_file_column`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/schema.rs:102) | Native batch → application columns | Checks decoded size and exact metadata-column ID/type before removing the transient column. |
+| [`native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:136) | Fixture → lifecycle assertions | Connects all paths above; no application operation or selected release escapes the test. |
+
+## Data flow and invariants
+
+The test creates original file digests before changing metadata and checks them again at the end. Candidate registrations receive fresh UUIDs and locations. The expected row multiset starts from known fixture rows, then adds independently specified append rows; comparison does not discard duplicates. The rewrite removes exactly one original file's known rows from materialization and appends that same original `DataFile` alongside newly written rows. Final equality therefore exercises old absent fields and materialized fields together ([construction and final assertions](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:274)).
+
+The marker is ordinary stored data supplied by this test. An old missing marker reads as false; explicit null/value rows carry true. Changing `write_default` from 9 to 11 keeps `initial_default` at 7, and the test checks existing rows before adding the manually normalized new row ([transition](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:221)). Historical `Table` handles are reread after the rewrite, and original data-file digests remain equal. All artifacts live under the fixture's temporary root.
+
+## Test behavior and evidence
+
+The retained [passing log](/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/native-defaults-probe.log:5) reports success for this exact named test. Its assertion path covers old-file initial defaults, explicit null versus explicit default values, the stored marker, changed write-default metadata without reinterpretation of prior rows, mixed shared/rewritten files, catalog reload, and old-handle readability. The [negative assertion](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:176) also checks `unsupported_schema_evolution` through the application guard.
+
+The retained [earlier failure](/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/native-defaults-probe-capacity-failed.log:7) reports `capacity` during registration. The existing [small fixture budget](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests.rs:61) admits 2.125 MiB outside DataFusion because [the budget is split in half](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/budget.rs:83). Registration needs a 2 MiB metadata reservation plus the [1 MiB blocking-I/O reservation](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/budget.rs:128). This explains that refusal mechanism; the current probe explicitly provides 16 MiB total. The logs do not retain the exact earlier source revision or measure resident memory, and this review did not rerun them.
+
+## Findings
+
+- **OBSERVATION — test coverage:** Automatic omission normalization is outside this probe. [`batch`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:115) supplies complete arrays, including values 9 and 11; the [test comment](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:190) states that a future normalizer must do this. The probe proves persistence/read interpretation of the supplied representation, not automatic presence detection. Keep public support deferred until that admission path and its failures are qualified.
+- **OBSERVATION — test coverage/performance:** “Reopen” is a [same-process catalog load](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:301), not crash recovery. [`row_range().is_some()`](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:212) proves presence of row-range metadata, not row-ID uniqueness or continuity. `last_column_id == 9` does not test retired-ID allocation. The probe does not cover nested defaults, deletes, application lifecycle/publication, concurrent writers, or process failure. Its [collected native reader](/Users/mikewolfd/Work/spicy-stack/docspec-rs/src/storage/occurrences/tests/defaults.rs:79) is a tiny correctness fixture, not bounded-memory or throughput evidence. These are explicit scope limits, not blockers for this patch.
+
+## Conclusion
+
+**VERDICT: APPROVE.** The patch achieves the stated native-probe intent while retaining the application refusal. Coverage of changed paths: **ADEQUATE for this test-only scope**. Confidence: **HIGH for assertion scope and production isolation; execution evidence is the retained log, not an independent rerun**. No production V3 change or broader support claim follows from this certificate.
