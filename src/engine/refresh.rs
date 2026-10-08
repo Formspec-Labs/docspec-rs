@@ -192,7 +192,7 @@ impl Engine {
         {
             return Ok(selected);
         }
-        let authority = self.check(&view, operation).await?;
+        let authority = self.check(&view, operation, &spec.operation).await?;
         check_rebuild(
             &authority,
             &OperationRequest::Refresh(Box::new(spec.clone())),

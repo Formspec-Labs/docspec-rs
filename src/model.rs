@@ -48,6 +48,17 @@ impl<'de> Deserialize<'de> for Id {
 /// Stable retry identity; conflicting requests cannot reuse an operation.
 pub type OperationId = Id;
 
+/// An explicit decision to stop an operation while retaining its completed work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Abandonment {
+    pub dataset: Id,
+    pub operation: OperationId,
+    pub request_digest: String,
+    /// Revision of the original admission, not the abandonment commit.
+    pub operation_revision: i64,
+    pub reason: String,
+}
+
 /// An immutable object bound to its protection owner and exact bytes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectRef {

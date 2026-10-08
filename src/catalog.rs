@@ -37,6 +37,11 @@ pub(crate) struct SnapshotRows {
 }
 
 impl SnapshotRows {
+    /// Checks a retained key without decoding a potentially large result or reason.
+    pub(crate) fn contains_key(&self, key: &str) -> bool {
+        self.values.contains_key(key)
+    }
+
     /// Reads a value with its native commit revision and serialized byte charge.
     pub(crate) fn get_record<T: DeserializeOwned>(
         &self,

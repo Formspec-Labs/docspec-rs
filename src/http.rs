@@ -6,8 +6,8 @@
 use crate::{
     Engine, Error,
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
-        SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
+        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin,
+        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
     },
 };
 use axum::{
@@ -39,6 +39,10 @@ pub fn router(engine: Engine) -> Router {
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
         .route("/datasets/{dataset}", get(inspect))
+        .route(
+            "/datasets/{dataset}/operations/{operation}/abandon",
+            post(abandon),
+        )
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
         .route(
@@ -66,8 +70,13 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
-            "no_release" | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
+            "no_release" | "no_operation" | "missing_group" | "missing_evidence" => {
+                StatusCode::NOT_FOUND
+            }
             "operation_conflict"
+            | "operation_completed"
+            | "operation_abandoned"
+            | "abandonment_conflict"
             | "generation_conflict"
             | "stale_definition"
             | "stale_eligibility"
@@ -144,6 +153,23 @@ async fn inspect(
     Ok(Json(serde_json::json!(
         engine.inspect(&Id::new(dataset)?).await?
     )))
+}
+
+#[derive(serde::Deserialize)]
+struct AbandonRequest {
+    reason: String,
+}
+
+async fn abandon(
+    State(engine): State<Engine>,
+    Path((dataset, operation)): Path<(String, String)>,
+    Json(request): Json<AbandonRequest>,
+) -> Result<Json<Abandonment>, HttpError> {
+    Ok(Json(
+        engine
+            .abandon(&Id::new(dataset)?, &Id::new(operation)?, &request.reason)
+            .await?,
+    ))
 }
 async fn latest(
     State(engine): State<Engine>,

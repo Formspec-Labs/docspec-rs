@@ -60,6 +60,12 @@ enum Command {
     Resume { spec: PathBuf },
     /// Inspect current retained phase and authority records.
     Inspect { dataset: String },
+    /// Stop an unfinished operation; preserve its completed phases and retained files.
+    Abandon {
+        dataset: String,
+        operation: String,
+        reason: String,
+    },
     /// Resolve the current immutable release pin.
     Latest { dataset: String },
     /// Resolve an immutable historical release by its operation identity.
@@ -248,6 +254,15 @@ async fn main() -> anyhow::Result<()> {
                 Command::Inspect { dataset } => {
                     print_json(&engine.inspect(&Id::new(dataset)?).await?)?
                 }
+                Command::Abandon {
+                    dataset,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .abandon(&Id::new(dataset)?, &Id::new(operation)?, &reason)
+                        .await?,
+                )?,
                 Command::PlanUpdate { spec } => {
                     print_json(&engine.plan_update(&read_json::<UpdateSpec>(spec)?).await?)?
                 }

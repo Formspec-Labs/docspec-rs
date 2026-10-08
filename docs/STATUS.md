@@ -1,5 +1,47 @@
 # Implementation and qualification status
 
+## Explicit operation abandonment
+
+`Engine::abandon`, the CLI `abandon` command and HTTP operation endpoint record
+an explicit decision against an admitted, unfinished operation. The retained
+record binds its identity, original request digest and admission revision to the
+reason. Existing per-dataset locking and guarded native commits decide races
+with selection. Identical retries read that decision without another commit;
+already selected results refuse abandonment.
+
+All source, refresh, schema and scalar-group reservation/completion paths check
+the operation's abandonment key, as does the common selection path. These checks
+reuse the exact lifecycle snapshot cache and test key presence without decoding
+large results or reasons. They add no payload scan or ordinary-read validation.
+Completed phases remain reusable under their material identities by another
+operation ID. Readback releases, historical results and attempt protections all
+remain retained. Already-started native or blocking I/O may finish; abandonment
+is a logical fence, not worker termination or deletion authority.
+
+Source admission boundaries remain monotonic. A withdrawn admission does not
+become consumed input, so a fresh selected source still reconciles that gap before
+schema/backfill cutover. Direct cutover over abandoned gaps remains open. The
+architecture review recommends separating source coverage from the captured
+admission fence; schema changes should preserve their exact source boundary.
+
+The focused tests and full repository gate passed. The fixtures cover reopen/retry, shared
+phase and file-completion reuse, unchanged protections, late native source/group
+commits, lost abandonment/selection responses, CLI/HTTP, and source-boundary
+refusal. See [tests](../tests/abandonment.rs),
+[concurrency cases](../tests/rebuild_completion.rs) and the independent
+[code review](reviews/operation-abandonment-review.md),
+[focused log](reviews/operation-abandonment-focused.log) and
+[full gate](reviews/operation-abandonment-check.log). The
+[architecture review](reviews/retention-architecture-review.md) identifies the
+remaining typed root inventory, worker protection and exact deletion boundaries.
+No storage reclamation, phase expiry, release expiry, compaction or restore is
+claimed by this checkpoint.
+
+The [development resource record](reviews/operation-abandonment-resources.json)
+separates regenerated debug-cache storage from volume-wide free space, which also
+reflects other workstation activity. The cache remains available for continued
+implementation; retained experiment data and failure evidence were not removed.
+
 ## Comments performance and disk checkpoint
 
 The resumed source-processing slice over the frozen 10-million-Comments input
@@ -146,7 +188,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

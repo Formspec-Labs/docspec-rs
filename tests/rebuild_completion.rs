@@ -18,6 +18,7 @@ use iceberg::{
 use scalar::{fixture, id, input, limits, spec};
 use std::{
     collections::HashMap,
+    path::Path,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -30,6 +31,7 @@ const HANDOFF_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 struct Pause {
+    data: bool,
     committed: oneshot::Sender<Table>,
     release: oneshot::Receiver<()>,
 }
@@ -43,6 +45,10 @@ struct PausedCatalog {
 
 impl PausedCatalog {
     fn arm(&self) -> (oneshot::Receiver<Table>, oneshot::Sender<()>) {
+        self.arm_kind(true)
+    }
+
+    fn arm_kind(&self, data: bool) -> (oneshot::Receiver<Table>, oneshot::Sender<()>) {
         let (committed, observed) = oneshot::channel();
         let (release, resumed) = oneshot::channel();
         let mut next = self.next.lock().unwrap();
@@ -51,6 +57,7 @@ impl PausedCatalog {
             "the previous native commit pause is still armed"
         );
         *next = Some(Pause {
+            data,
             committed,
             release: resumed,
         });
@@ -63,10 +70,13 @@ impl Catalog for PausedCatalog {
     async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
         let is_data = commit.identifier().name() != "lifecycle";
         let committed = self.inner.update_table(commit).await?;
-        let pause = if is_data {
-            self.next.lock().unwrap().take()
-        } else {
-            None
+        let pause = {
+            let mut next = self.next.lock().unwrap();
+            if next.as_ref().is_some_and(|pause| pause.data == is_data) {
+                next.take()
+            } else {
+                None
+            }
         };
         if let Some(pause) = pause {
             // The real native commit has completed. The engine has not received
@@ -159,6 +169,197 @@ impl Catalog for PausedCatalog {
     async fn register_table(&self, ident: &TableIdent, metadata: String) -> iceberg::Result<Table> {
         self.inner.register_table(ident, metadata).await
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits() {
+    for backfill in [false, true] {
+        let root = TempDir::new().unwrap();
+        let (engine, base, _) = fixture(root.path(), false).await;
+        drop(engine);
+        let workspace = root.path().join("workspace");
+        let catalog = Arc::new(PausedCatalog {
+            inner: storage::local_catalog(&workspace).await.unwrap(),
+            next: Mutex::new(None),
+        });
+        let engine = Engine::with_catalog(&workspace, catalog.clone(), limits())
+            .await
+            .unwrap();
+        let source = input(&root.path().join("rebuild.parquet"), &[(Some(9000), None)]);
+        let request = RunSpec {
+            dataset: base.dataset.dataset.clone(),
+            operation: id("stopped"),
+            base: Some(base.id.clone()),
+            relationship: None,
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: base.dataset.definition.clone(),
+        };
+        let group = spec(&base, "stopped", "lengths", "text_length", "length(text)");
+        let (committed, release) = catalog.arm();
+        let worker = {
+            let engine = engine.clone();
+            let request = request.clone();
+            tokio::spawn(async move {
+                if backfill {
+                    engine.backfill(&group).await
+                } else {
+                    engine.run(&request).await
+                }
+            })
+        };
+        let native = tokio::time::timeout(HANDOFF_DEADLINE, committed)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(
+            HANDOFF_DEADLINE,
+            engine.abandon(
+                &request.dataset,
+                &request.operation,
+                "withdrawn during write",
+            ),
+        )
+        .await
+        .expect("abandonment must not wait for native I/O")
+        .unwrap();
+        let after_abandonment = engine.inspect(&request.dataset).await.unwrap();
+        release.send(()).unwrap();
+        let error = tokio::time::timeout(HANDOFF_DEADLINE, worker)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.code(), "operation_abandoned");
+        assert_eq!(engine.latest(&request.dataset).await.unwrap(), base);
+        assert_eq!(
+            engine.inspect(&request.dataset).await.unwrap(),
+            after_abandonment,
+            "late completion must not add lifecycle records"
+        );
+        // Abandonment is a logical fence, not permission to destroy files from
+        // the write that had already started. Its reservation is still retained.
+        assert!(Path::new(native.metadata_location_result().unwrap()).exists());
+        assert!(after_abandonment.iter().any(|(key, value)| {
+            key.starts_with("protection/")
+                && value["purpose"]
+                    .as_str()
+                    .is_some_and(|purpose| purpose.starts_with("stopped/"))
+                && value["retired"] == false
+        }));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lost_abandonment_response_reconciles_without_another_native_commit() {
+    use docspec::{budget::Budget, catalog::Lifecycle};
+    let root = TempDir::new().unwrap();
+    let (engine, base, _) = fixture(root.path(), false).await;
+    let request = spec(&base, "stopped", "lengths", "text_length", "length(text)");
+    assert_eq!(
+        engine
+            .backfill_until(&request, "processing")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    drop(engine);
+    let workspace = root.path().join("workspace");
+    let catalog = Arc::new(PausedCatalog {
+        inner: storage::local_catalog(&workspace).await.unwrap(),
+        next: Mutex::new(None),
+    });
+    let engine = Engine::with_catalog(&workspace, catalog.clone(), limits())
+        .await
+        .unwrap();
+    let (committed, release) = catalog.arm_kind(false);
+    let worker = {
+        let engine = engine.clone();
+        let request = request.clone();
+        tokio::spawn(async move {
+            engine
+                .abandon(&request.dataset, &request.operation, "withdrawn")
+                .await
+        })
+    };
+    let native = tokio::time::timeout(HANDOFF_DEADLINE, committed)
+        .await
+        .unwrap()
+        .unwrap();
+    worker.abort();
+    assert!(worker.await.unwrap_err().is_cancelled());
+    drop(release);
+    let decision = engine
+        .abandon(&request.dataset, &request.operation, "withdrawn")
+        .await
+        .unwrap();
+    assert_eq!(decision.operation, request.operation);
+    let lifecycle = Lifecycle::new(catalog, Budget::new(limits()).unwrap());
+    assert_eq!(
+        lifecycle.open(&request.dataset).await.unwrap().revision,
+        native.metadata().last_sequence_number()
+    );
+    assert_eq!(
+        engine.backfill(&request).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn selection_wins_over_abandonment_even_when_its_response_is_lost() {
+    let root = TempDir::new().unwrap();
+    let (engine, base, _) = fixture(root.path(), false).await;
+    let request = spec(&base, "finished", "lengths", "text_length", "length(text)");
+    assert_eq!(
+        engine
+            .backfill_until(&request, "readback")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    drop(engine);
+    let workspace = root.path().join("workspace");
+    let catalog = Arc::new(PausedCatalog {
+        inner: storage::local_catalog(&workspace).await.unwrap(),
+        next: Mutex::new(None),
+    });
+    let engine = Engine::with_catalog(&workspace, catalog.clone(), limits())
+        .await
+        .unwrap();
+    let (committed, release) = catalog.arm_kind(false);
+    let worker = {
+        let engine = engine.clone();
+        let request = request.clone();
+        tokio::spawn(async move { engine.backfill(&request).await })
+    };
+    tokio::time::timeout(HANDOFF_DEADLINE, committed)
+        .await
+        .unwrap()
+        .unwrap();
+    worker.abort();
+    assert!(worker.await.unwrap_err().is_cancelled());
+    drop(release);
+    assert_eq!(
+        engine
+            .abandon(&request.dataset, &request.operation, "too late")
+            .await
+            .unwrap_err()
+            .code(),
+        "operation_completed"
+    );
+    let selected = engine.latest(&request.dataset).await.unwrap();
+    assert_eq!(selected.id, request.operation);
+    assert_eq!(engine.backfill(&request).await.unwrap(), selected);
+    assert!(
+        !engine
+            .inspect(&request.dataset)
+            .await
+            .unwrap()
+            .contains_key("abandoned/finished")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

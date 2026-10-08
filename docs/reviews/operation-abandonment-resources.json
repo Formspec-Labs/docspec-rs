@@ -1,0 +1,8 @@
+{
+  "observed_at_utc": "2026-10-08T17:15:55.089163+00:00",
+  "preflight_volume_available_kib": 15735644,
+  "post_gate_volume_available_bytes": 19054407680,
+  "debug_cache_allocated_bytes": 6081515520,
+  "scope": "Development gate cache only. Whole-volume free space includes concurrent workstation activity; its change is not attributed solely to this task.",
+  "action": "Keep reusable debug artifacts for continued implementation. No retained corpus, results or failed experiment outputs were removed."
+}

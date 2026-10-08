@@ -36,6 +36,7 @@ pub use read::{read_evidence, read_group};
 mod aggregation;
 mod incremental;
 mod refresh;
+mod retention;
 mod schema;
 mod verification;
 mod write;
@@ -167,6 +168,7 @@ impl Engine {
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(spec.dataset()).await?;
+        self.check_not_abandoned(&view, spec.operation()).await?;
         let request = fingerprint(spec)?;
         let operation: Option<Operation> = lifecycle
             .get(&view, &format!("operation/{}", spec.operation()))
@@ -723,6 +725,7 @@ impl Engine {
             {
                 return Ok(result);
             }
+            self.check_not_abandoned(&view, spec.operation()).await?;
             let mut authority: Authority =
                 lifecycle.get(&view, "authority").await?.unwrap_or_default();
             if authority.definition.is_empty() {
@@ -853,8 +856,12 @@ impl Engine {
         let mut computed = BTreeMap::new();
         if let Some(base) = &base {
             for (name, previous) in &base.dataset.computed {
-                self.check(&lifecycle.open(spec.dataset()).await?, &operation)
-                    .await?;
+                self.check(
+                    &lifecycle.open(spec.dataset()).await?,
+                    &operation,
+                    spec.operation(),
+                )
+                .await?;
                 let input_fields = backfill::inherited_inputs(
                     spec,
                     previous,
@@ -889,7 +896,8 @@ impl Engine {
             if !computed.is_empty() {
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(spec.dataset()).await?;
-                self.check_completion(&view, &operation).await?;
+                self.check_completion(&view, &operation, spec.operation())
+                    .await?;
                 let key = format!("groups/{}", spec.operation());
                 if lifecycle
                     .get::<BTreeMap<String, ObjectRef>>(&view, &key)
@@ -990,7 +998,8 @@ impl Engine {
             // Equality above verifies serialization without scanning them again.
             let _guard = lock.lock().await;
             let view = lifecycle.open(spec.dataset()).await?;
-            self.check_completion(&view, &operation).await?;
+            self.check_completion(&view, &operation, spec.operation())
+                .await?;
             if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
                 completed
             } else {
@@ -1015,7 +1024,7 @@ impl Engine {
             {
                 return Ok(completed);
             }
-            let authority = self.check(&view, &operation).await?;
+            let authority = self.check(&view, &operation, spec.operation()).await?;
             if authority
                 .selected
                 .as_ref()
@@ -1034,7 +1043,13 @@ impl Engine {
         Ok(release)
     }
 
-    async fn check(&self, view: &crate::catalog::View, operation: &Operation) -> Result<Authority> {
+    async fn check(
+        &self,
+        view: &crate::catalog::View,
+        operation: &Operation,
+        id: &Id,
+    ) -> Result<Authority> {
+        self.check_not_abandoned(view, id).await?;
         let authority: Authority = self
             .inner
             .lifecycle
@@ -1049,7 +1064,9 @@ impl Engine {
         &self,
         view: &crate::catalog::View,
         operation: &Operation,
+        id: &Id,
     ) -> Result<()> {
+        self.check_not_abandoned(view, id).await?;
         let authority: Authority = self
             .inner
             .lifecycle
@@ -1068,7 +1085,7 @@ impl Engine {
         phase: &str,
     ) -> Result<Option<PhaseResult>> {
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
-        self.check(&view, operation).await?;
+        self.check(&view, operation, spec.operation()).await?;
         let found: Option<PhaseResult> = self
             .inner
             .lifecycle
@@ -1121,7 +1138,7 @@ impl Engine {
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
-        self.check(&view, operation).await?;
+        self.check(&view, operation, spec.operation()).await?;
         self.inner
             .lifecycle
             .commit(
@@ -1142,7 +1159,8 @@ impl Engine {
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
-        self.check_completion(&view, operation).await?;
+        self.check_completion(&view, operation, spec.operation())
+            .await?;
         let key = phase_key(
             spec,
             &operation.request_digest,

@@ -19,6 +19,8 @@ impl Engine {
     ) -> Result<PreparedGroup> {
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(request.dataset()).await;
+        let view = lifecycle.open(request.dataset()).await?;
+        self.check_not_abandoned(&view, request.operation()).await?;
         let native = storage::open_pin(source).await?;
         let expressions = Arc::new(Expressions::compile(
             &self.context(),
@@ -35,9 +37,7 @@ impl Engine {
         .to_hex()
         .to_string();
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
-        let prepared: Option<TablePin> = lifecycle
-            .get(&lifecycle.open(request.dataset()).await?, &prepared_key)
-            .await?;
+        let prepared: Option<TablePin> = lifecycle.get(&view, &prepared_key).await?;
         let prepared = if let Some(prepared) = prepared {
             storage::check_available(prepared.objects.clone(), &lifecycle.budget).await?;
             prepared
@@ -83,6 +83,7 @@ impl Engine {
                                 .await?;
                             let _guard = lock.lock().await;
                             let view = lifecycle.open(request.dataset()).await?;
+                            self.check_not_abandoned(&view, request.operation()).await?;
                             lifecycle
                                 .commit(
                                     &view,
@@ -141,8 +142,8 @@ impl Engine {
             .await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(request.dataset()).await?;
-            let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            check_preparation(&authority, operation)?;
+            self.check_completion(&view, operation, request.operation())
+                .await?;
             if let Some(existing) = lifecycle.get::<TablePin>(&view, &prepared_key).await? {
                 existing
             } else {
@@ -172,8 +173,8 @@ impl Engine {
             .await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(request.dataset()).await?;
-            let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            check_preparation(&authority, operation)?;
+            self.check_completion(&view, operation, request.operation())
+                .await?;
             lifecycle
                 .commit(&view, vec![record(&validation_key, &prepared.metadata)?])
                 .await?;
@@ -203,8 +204,8 @@ impl Engine {
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(request.dataset()).await?;
-        let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        check_preparation(&authority, operation)?;
+        self.check_completion(&view, operation, request.operation())
+            .await?;
         lifecycle
             .commit(
                 &view,
@@ -237,8 +238,8 @@ impl Engine {
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(request.dataset()).await?;
-        let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        check_preparation(&authority, operation)?;
+        self.check_completion(&view, operation, request.operation())
+            .await?;
         let mut changes = Vec::new();
         for (key, completion) in pending.iter() {
             if lifecycle.get::<FileCompletion>(&view, key).await?.is_none() {

@@ -149,6 +149,9 @@ impl Engine {
     pub async fn plan_backfill(&self, spec: &BackfillSpec) -> Result<BackfillPlan> {
         validate(spec)?;
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(&spec.dataset).await?;
+        self.check_not_abandoned(&view, &spec.operation).await?;
         let base = self.release(&spec.dataset, &spec.base).await?;
         let native = storage::open_pin(&base.dataset.groups["source"]).await?;
         let expressions = Expressions::compile(
@@ -157,8 +160,6 @@ impl Engine {
             &spec.group_definition(),
             None,
         )?;
-        let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
         let old: Option<Operation> = lifecycle
             .get(&view, &format!("operation/{}", spec.operation))
             .await?;
@@ -321,6 +322,7 @@ impl Engine {
             {
                 return Ok(result);
             }
+            self.check_not_abandoned(&view, &spec.operation).await?;
             let base: ReleasePin = lifecycle
                 .get(&view, &format!("result/{}", spec.base))
                 .await?
@@ -425,6 +427,7 @@ impl Engine {
                 }
                 let authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
+                self.check_not_abandoned(&view, &spec.operation).await?;
                 promotion(&authority, &operation, &capture, source, spec)?;
                 authority.release.ok_or_else(invalid_group)?
             };
@@ -498,9 +501,8 @@ impl Engine {
                 }
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
-                let authority: Authority =
-                    lifecycle.get(&view, "authority").await?.unwrap_or_default();
-                check_preparation(&authority, &operation)?;
+                self.check_completion(&view, &operation, &spec.operation)
+                    .await?;
                 if let Some(recorded) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
                     recorded
                 } else {

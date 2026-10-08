@@ -155,6 +155,51 @@ fn recipe(left: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
         }),
     }
 }
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn abandoned_refresh_cannot_select_but_new_operation_reuses_its_result() {
+    let root = TempDir::new().unwrap();
+    let (engine, left, right) = fixture(root.path()).await;
+    let mut request = recipe(&left, &right);
+    assert_eq!(
+        engine
+            .refresh_until(&request, "readback")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let before = engine.inspect(&request.dataset).await.unwrap();
+    let retained: ReleasePin =
+        serde_json::from_value(before[&format!("readback/{}", request.operation)].clone()).unwrap();
+    engine
+        .abandon(&request.dataset, &request.operation, "withdrawn")
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.refresh(&request).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+    assert_eq!(
+        engine.plan_refresh(&request).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+    assert_eq!(
+        engine.latest(&request.dataset).await.unwrap_err().code(),
+        "no_release"
+    );
+    request.operation = id("replacement");
+    let release = engine.refresh(&request).await.unwrap();
+    assert_eq!(release.dataset.groups, retained.dataset.groups);
+    let related = release.dataset.related.as_ref().unwrap();
+    let retained_related = retained.dataset.related.as_ref().unwrap();
+    assert_eq!(related.evidence, retained_related.evidence);
+    assert_eq!(related.coverage, retained_related.coverage);
+    assert_eq!(related.request.operation, request.operation);
+    assert_eq!(engine.latest(&left.dataset.dataset).await.unwrap(), left);
+    assert_eq!(engine.latest(&right.dataset.dataset).await.unwrap(), right);
+}
 fn join(spec: &RefreshSpec) -> &JoinTransform {
     let RefreshTransform::Join(join) = &spec.transform else {
         panic!("expected join");

@@ -70,6 +70,26 @@ currently rebuilds the complete result. The input path is a locator; its trusted
 expected digest determines the selected bytes. Original bytes, request SQL,
 processing revision and runtime dependency-lock digest are retained.
 
+To stop an unfinished operation, use:
+
+```sh
+target/debug/docspec --workspace workspaces/comments abandon comments initial "input selection withdrawn"
+```
+
+The library's `Engine::abandon` and HTTP
+`POST /datasets/comments/operations/initial/abandon` (JSON `{"reason":"input selection withdrawn"}`)
+record the same decision. Identical retries return it without another commit.
+That operation can no longer reserve work, acknowledge a completion or select a
+result. Already-started I/O may finish; its protection stays retained. Another
+operation ID can reuse phases completed before abandonment. Selected results
+cannot be abandoned, and this action removes no files or recovery phases.
+
+Abandonment preserves the admitted source boundary. If a withdrawn source
+admission leaves a gap after the selected boundary, schema/backfill cutover still
+needs an explicit new selected source to reconcile it. Direct cutover across
+abandoned gaps remains unfinished. This does not affect abandoning an independent
+backfill.
+
 For changes against a selected version, save an update request:
 
 ```json
