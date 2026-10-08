@@ -21,6 +21,7 @@ struct Capture {
     target: Option<ObjectRef>,
     target_binding: Option<ComputedGroup>,
     base_manifest: ObjectRef,
+    related: Option<Box<RelatedResult>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -98,6 +99,9 @@ impl Engine {
             .as_struct()
             .fields()
             .iter()
+            .filter(|field| {
+                release.dataset.related.is_none() || !refresh::TUPLE.contains(&field.name.as_str())
+            })
             .map(|field| format!("s.{}", quote(&field.name)))
             .collect::<Vec<_>>();
         context.register_table("source", crate::query::occurrences(source, budget.clone())?)?;
@@ -194,6 +198,7 @@ impl Engine {
                         .map(|pin| pin.metadata.clone()),
                     target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
                     base_manifest: base.manifest.clone(),
+                    related: base.dataset.related.clone(),
                 });
             plan.promotion_refusal =
                 check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
@@ -351,6 +356,7 @@ impl Engine {
                         .map(|pin| pin.metadata.clone()),
                     target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
                     base_manifest: base.manifest.clone(),
+                    related: base.dataset.related.clone(),
                 };
                 lifecycle.commit(&view, vec![record(format!("operation/{}", spec.operation), &operation)?,
                     record(format!("request/{}", spec.operation), &request)?, record(format!("backfill/{}", spec.operation), &capture)?,
@@ -436,7 +442,7 @@ impl Engine {
                 if recorded.dataset != dataset {
                     return Err(invalid_group());
                 }
-                storage::check_available(release_objects(&recorded), &lifecycle.budget).await?;
+                check_release_available(&recorded, &lifecycle.budget).await?;
                 recorded
             } else {
                 #[cfg(feature = "test-util")]
@@ -466,7 +472,16 @@ impl Engine {
                 }
             };
             stop_after(stop, "readback")?;
-            let _guard = lock.lock().await;
+            let dependencies = if release.dataset.related.is_some() {
+                Some(super::verification::available_graph(&release, &lifecycle.budget).await?)
+            } else {
+                None
+            };
+            let datasets = dependencies.as_ref().map_or_else(
+                || BTreeSet::from([spec.dataset.clone()]),
+                super::verification::DependencyGraph::datasets,
+            );
+            let _guards = self.lock_inputs(datasets).await;
             let view = lifecycle.open(&spec.dataset).await?;
             if let Some(completed) = lifecycle
                 .get(&view, &format!("result/{}", spec.operation))
@@ -479,7 +494,10 @@ impl Engine {
             if authority.release.as_ref() != Some(&current) {
                 continue;
             }
-            self.select(&view, authority, &release).await?;
+            if let Some(dependencies) = &dependencies {
+                Box::pin(self.guard_ancestors(dependencies, &release)).await?;
+            }
+            Box::pin(self.select(&view, authority, &release)).await?;
             stop_after(stop, "selection")?;
             return Ok(release);
         }
@@ -510,6 +528,7 @@ fn promotion(
         ));
     }
     if current.groups.get("source") != Some(source)
+        || current.related != capture.related
         || current.boundary != operation.boundary
         || authority.boundary != capture.admission_fence
         || authority.boundary != current.boundary

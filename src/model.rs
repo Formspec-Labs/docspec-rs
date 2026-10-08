@@ -79,6 +79,8 @@ pub struct DatasetPin {
     pub inputs: BTreeMap<String, ObjectRef>,
     /// Producer-declared relationship retained with this exact version.
     pub relationship: SourceRelationship,
+    /// Exact related inputs and contributor relation establishing this source table.
+    pub related: Option<Box<RelatedResult>>,
     pub definition: String,
     pub eligibility: u64,
     pub boundary: u64,
@@ -139,6 +141,115 @@ pub struct InputCoverage {
     pub generations: BTreeMap<Id, GenerationSeal>,
 }
 
+/// Which source supplies a field in a typed join.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinSide {
+    Left,
+    Right,
+}
+
+/// Unmatched occurrence behavior for an equality join.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Full,
+}
+
+/// Whether null join-key components match other null components.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NullMatching {
+    Never,
+    Equal,
+}
+
+/// Maximum matching partners per occurrence; duplicate business keys remain distinct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinCardinality {
+    ManyToMany,
+    ManyToOne,
+    OneToOne,
+}
+
+/// One equality condition between exact, equally typed source fields.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JoinKey {
+    pub left: String,
+    pub right: String,
+}
+
+/// One output field copied without coercion from a declared input role.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JoinField {
+    pub side: JoinSide,
+    pub field: String,
+    pub name: String,
+}
+
+/// A qualified equality join with explicit multiplicity and unmatched behavior.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JoinDefinition {
+    pub keys: Vec<JoinKey>,
+    pub kind: JoinKind,
+    pub nulls: NullMatching,
+    pub cardinality: JoinCardinality,
+    pub fields: Vec<JoinField>,
+}
+
+/// Selection policy while live producer heads continue advancing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshPolicy {
+    /// Accept complete forward coverage and report the observed remaining lag.
+    #[default]
+    Captured,
+    /// Require each consumed version to remain its producer's selected head.
+    Latest,
+}
+
+/// A reproducible full join refresh over exact native input versions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefreshSpec {
+    pub dataset: Id,
+    pub operation: Id,
+    /// None requires an absent output; otherwise capture the exact selected output.
+    pub base: Option<Id>,
+    pub definition: String,
+    pub left: VersionRef,
+    pub right: VersionRef,
+    pub join: JoinDefinition,
+    #[serde(default)]
+    pub policy: RefreshPolicy,
+    #[serde(default)]
+    pub relationship: Option<SourceRelationship>,
+}
+
+impl RefreshSpec {
+    /// Returns the exact input vector, independent of left/right processing roles.
+    pub fn inputs(&self) -> BTreeMap<Id, VersionRef> {
+        BTreeMap::from([
+            (self.left.dataset.clone(), self.left.clone()),
+            (self.right.dataset.clone(), self.right.clone()),
+        ])
+    }
+}
+
+/// Retained contributor evidence bound to a complete related-source computation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelatedResult {
+    pub request: RefreshSpec,
+    pub coverage: InputCoverage,
+    pub evidence: TablePin,
+}
+
 impl ReleasePin {
     /// Returns the exact identity used for accepted-history checks.
     pub fn version_ref(&self) -> VersionRef {
@@ -184,6 +295,7 @@ pub struct PhaseResult {
     pub table: Option<TablePin>,
     pub rows: u64,
     pub changes: Option<ChangePin>,
+    pub coverage: Option<InputCoverage>,
     pub metrics: WriteMetrics,
 }
 
@@ -315,6 +427,7 @@ pub enum OperationRequest {
     Build(RunSpec),
     Update(UpdateSpec),
     Backfill(BackfillSpec),
+    Refresh(Box<RefreshSpec>),
 }
 
 impl OperationRequest {
@@ -324,6 +437,7 @@ impl OperationRequest {
             Self::Build(spec) => &spec.dataset,
             Self::Update(spec) => &spec.dataset,
             Self::Backfill(spec) => &spec.dataset,
+            Self::Refresh(spec) => &spec.dataset,
         }
     }
     /// Returns the stable retry identity.
@@ -332,6 +446,7 @@ impl OperationRequest {
             Self::Build(spec) => &spec.operation,
             Self::Update(spec) => &spec.operation,
             Self::Backfill(spec) => &spec.operation,
+            Self::Refresh(spec) => &spec.operation,
         }
     }
     /// Returns the required active definition.
@@ -340,6 +455,7 @@ impl OperationRequest {
             Self::Build(spec) => &spec.definition,
             Self::Update(spec) => &spec.definition,
             Self::Backfill(spec) => &spec.definition,
+            Self::Refresh(spec) => &spec.definition,
         }
     }
     /// Returns the selected version whose composition this operation captures.
@@ -348,6 +464,7 @@ impl OperationRequest {
             Self::Build(spec) => spec.base.as_ref(),
             Self::Update(spec) => Some(&spec.base),
             Self::Backfill(spec) => Some(&spec.base),
+            Self::Refresh(spec) => spec.base.as_ref(),
         }
     }
     /// Lists bounded input declarations, excluding their payloads.
@@ -368,7 +485,7 @@ impl OperationRequest {
                 }
                 inputs
             }
-            Self::Backfill(_) => BTreeMap::new(),
+            Self::Backfill(_) | Self::Refresh(_) => BTreeMap::new(),
         }
     }
 
@@ -376,7 +493,9 @@ impl OperationRequest {
     pub(crate) fn input_key(&self, name: &str) -> String {
         match self {
             Self::Build(_) => name.to_owned(),
-            Self::Update(_) | Self::Backfill(_) => format!("{}/{name}", self.operation()),
+            Self::Update(_) | Self::Backfill(_) | Self::Refresh(_) => {
+                format!("{}/{name}", self.operation())
+            }
         }
     }
 }

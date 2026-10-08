@@ -124,12 +124,31 @@ impl Engine {
         }
     }
 
-    /// Called only after operation guards pass while holding the dataset selection lock.
+    /// Called after guards pass while holding the output and related source/family locks.
     pub(super) async fn select(
+        &self,
+        view: &View,
+        authority: Authority,
+        release: &ReleasePin,
+    ) -> Result<()> {
+        let progress = if let Some(related) = &release.dataset.related {
+            Some(
+                Box::pin(self.guard_inputs(&related.coverage, None, RefreshPolicy::Captured))
+                    .await?,
+            )
+        } else {
+            None
+        };
+        self.select_with_progress(view, authority, release, progress.as_ref())
+            .await
+    }
+
+    pub(super) async fn select_with_progress(
         &self,
         view: &View,
         mut authority: Authority,
         release: &ReleasePin,
+        progress: Option<&BTreeMap<Id, SuccessionProof>>,
     ) -> Result<()> {
         let lifecycle = &self.inner.lifecycle;
         if authority.selected.as_ref() != authority.release.as_ref().map(|old| &old.dataset) {
@@ -172,16 +191,15 @@ impl Engine {
                 .checked_add(1)
                 .ok_or_else(|| Error::refusal("revision_exhausted", "revision overflow"))?,
         );
-        lifecycle
-            .commit(
-                view,
-                vec![
-                    record("authority", authority)?,
-                    record(format!("result/{}", release.id), release)?,
-                    record(key, link)?,
-                ],
-            )
-            .await?;
+        let mut records = vec![
+            record("authority", authority)?,
+            record(format!("result/{}", release.id), release)?,
+            record(key, link)?,
+        ];
+        if let Some(progress) = progress {
+            records.push(record(format!("input-progress/{}", release.id), progress)?);
+        }
+        lifecycle.commit(view, records).await?;
         Ok(())
     }
 }

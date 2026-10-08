@@ -1,0 +1,4 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 6.99s
+     Running `target/debug/examples/layout_probe`
+DatasetPin=1160 ReleasePin=1272 Authority=2496 PhaseResult=1016 RelatedResult=696

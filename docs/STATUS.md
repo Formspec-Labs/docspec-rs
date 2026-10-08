@@ -14,9 +14,9 @@ or compatibility layer for legacy DocSpec.
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture and independent relationship verification; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Native related-input processing and guarded output selection; old/new-key affected-result discovery for joins; contributor evidence; joined and aggregate-group refresh against full reconstruction |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh | Old/new-key affected-result discovery; evidence-only adoption; computed input groups; aggregate contributors and incremental group refresh |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, backfill and native join refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
@@ -33,7 +33,7 @@ per-value evidence relationships or complete DocSpec conformance.
 | Iceberg and Iceberg SQL catalog 0.10.1 | Native reads/writes and expected-snapshot commits execute in integration tests. A narrow catalog guard prevents stale transaction refresh. Local ownership uses an OS lock. Remote multi-host use is unqualified. |
 | Arrow/Parquet 58 and DataFusion 53.1.0 | Exact retained flat and nested inputs pass an independent PyArrow comparison. The duplicate-removal regression demonstrates why component qualification is necessary. General SQL correctness and all source types are not established. |
 | Filesystem and SQLite | Process termination after acknowledged handoffs is exercised. Machine power loss, storage faults and host loss are not qualified. |
-| Resource controls | The application reserves reader/writer capacity; the shared DataFusion runtime bounds execution memory and spill. Whole-process memory includes allocations outside these controls. |
+| Resource controls | The application reserves reader/writer capacity; Budget owns the shared DataFusion execution/spill runtime. A native probe confirms leaked disk accounting after spill-quota failure; reopen is required until a maintained fix is qualified. Whole-process memory includes allocations outside these controls. |
 | Append-only lifecycle layout | Deliberately provisional. The bounded history probe exposed repeated scans; one disposable exact-snapshot cache reduced that cost. There is no durable auxiliary index. Cold lookup and retained metadata still grow with history. Warm admission and cold replay now enforce the same bound; history growth refuses new commits before acknowledged records become unreadable. |
 
 ## Delivery gates
@@ -474,3 +474,79 @@ prerequisite. Native joins, contributor relations, captured/latest output guards
 incremental discovery and full Q5 publication remain unfinished. Cleanup stays
 disabled; retention must account for seals and captured dependencies before it
 can retire their objects. No remote or Comments performance claim follows.
+
+
+## Native join refresh checkpoint
+
+`RefreshSpec` consumes exact left/right native source versions with explicit typed
+equality keys, null matching, inner/left/full membership, projected fields and
+partner cardinality. Processing uses the shared native occurrence reader and
+DataFusion; a semi join checks declared cardinality before writing a potentially
+multiplicative result. The full source result retains contributor positions, and a
+separate native evidence table retains their exact multiplicities. Combined reads
+hide these internal fields; source and evidence readers remain available through
+Rust, CLI and HTTP. Format 6 adds the related binding and contributor relation.
+
+Every expensive phase retains its result separately. Final selection takes the
+sorted output, source and family locks; checks exact output base, definition,
+eligibility, seals and equal/forward accepted input succession; then commits the
+release, succession and observed input progress together. Captured mode permits
+newer producer heads and reports lag. Latest additionally fences immediate heads
+for that refresh operation. Later backfill preserves exact related bindings and
+checks current dependencies under Captured semantics. It does not inherit a
+permanent Latest promise. A no-op refresh advances the source boundary and fences
+an older backfill even when its source table is reused.
+
+Independent readback uses an iterative, bounded semantic dependency graph. Exact
+identity conflicts and cycles refuse; shared dependencies are verified once per
+request. Composition history retains its existing shallow checks. Verification
+compares complete typed rows, including contributor positions, using signed grouped
+counts; a second comparison checks the evidence relation. Cached readback checks
+the dependency closure's object availability. Final selection retains that same
+bounded graph while checking ancestor eligibility, so invalidating an indirect
+source also fences new derived selection. Offline verification checks retained
+semantics and relationship declarations, not present eligibility, catalog acceptance
+or current heads.
+
+The implementation reuses the existing phase, selection, writer, native reader,
+backfill and HTTP stream services. The DataFusion runtime moved into the shared
+Budget so catalog-free relational verification uses the same finite pools. Native
+probes establish shared memory admission and normal spill-file accounting/custody.
+They also reproduce a DataFusion 53.1 quota-overrun bug: the global disk charge is
+updated before the per-file charge, so dropping a failed spill leaves a phantom
+charge. Reopening the runtime restores capacity. Automatic in-process recovery and
+a hard instantaneous scratch ceiling remain unqualified; no custom spill manager
+was introduced to mask that dependency gap.
+
+Review corrections include parenthesized composite null predicates, reserved
+verification aliases, symmetric offline parent rules, early cardinality refusal,
+transitive availability/eligibility and shared runtime ownership. Blocking object
+checks now share one helper and retain their copied inventory's admission until
+the worker exits, including after cancellation. A controlled queue/cancel test
+checks both availability and hash-verification workers.
+
+The initial test and later rebuild regressions hit default-stack overflows.
+Boxing the optional related binding keeps it out of ordinary pins' inline layout;
+the native [before](reviews/native-refresh-layout-before.log) and
+[after](reviews/native-refresh-layout-after.log) probe measured `DatasetPin` shrinking
+from 1,848 to 1,160 bytes and `Authority` from 3,872 to 2,496 bytes on this target.
+JSON shape stays unchanged. Large preparation, verification and selection futures
+also use heap storage at application boundaries. See the retained
+[initial failure](reviews/native-refresh-first-failed.log),
+[rebuild regression](reviews/native-refresh-regressions-failed.log),
+[catalog-race regression](reviews/native-refresh-race-stack-failed.log),
+[join fixtures](../tests/related_refresh.rs),
+[consistency review](reviews/native-refresh-consistency.md),
+[resource review](reviews/native-refresh-resources.md), and
+[gate output](reviews/native-refresh-check.log). Fixtures include actual CLI
+process termination after each acknowledged refresh phase and assertions that
+resume runs only missing work. The direct Rust matching oracle checks projected
+values and exact pairs independently of the generated SQL.
+
+This is the full-join reference needed to qualify incremental work. Incremental
+old/new-key discovery, computed input groups, aggregates, evidence-only adoption,
+logical identity across compaction, full maintenance/restore and remote publication
+remain open. Deliberate many-to-many output can still exceed local storage; there is
+no output-size bound. Verification scans full inputs/results and may execute the
+join repeatedly across required phases. No timing gain or 10M acceptance result is
+claimed. Cleanup remains disabled and must preserve these cross-dataset references.

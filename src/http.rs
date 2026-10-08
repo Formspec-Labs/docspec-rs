@@ -6,8 +6,8 @@
 use crate::{
     Engine, Error,
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, ReleasePin, RunSpec, SuccessionProof,
-        UpdateSpec, VersionRef,
+        BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
+        SuccessionProof, UpdateSpec, VersionRef,
     },
 };
 use axum::{
@@ -31,6 +31,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/updates/run", post(update))
         .route("/backfills/plan", post(plan_backfill))
         .route("/backfills/run", post(backfill))
+        .route("/refreshes/plan", post(plan_refresh))
+        .route("/refreshes/run", post(refresh))
         .route("/succession", post(succession))
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
@@ -45,6 +47,10 @@ pub fn router(engine: Engine) -> Router {
             "/datasets/{dataset}/versions/{version}/arrow/{group}",
             get(read_group),
         )
+        .route(
+            "/datasets/{dataset}/versions/{version}/evidence",
+            get(read_evidence),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(engine)
 }
@@ -58,11 +64,12 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
-            "no_release" | "missing_group" => StatusCode::NOT_FOUND,
+            "no_release" | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
             "operation_conflict"
             | "generation_conflict"
             | "stale_definition"
             | "stale_eligibility"
+            | "stale_input"
             | "coverage_regression" => StatusCode::CONFLICT,
             "stale_base" | "stale_source_boundary" | "stale_group" | "unproven_succession" => {
                 StatusCode::CONFLICT
@@ -153,6 +160,20 @@ async fn backfill(
     Ok(Json(engine.backfill(&spec).await?))
 }
 
+async fn plan_refresh(
+    State(engine): State<Engine>,
+    Json(spec): Json<RefreshSpec>,
+) -> Result<Json<crate::engine::RunPlan>, HttpError> {
+    Ok(Json(engine.plan_refresh(&spec).await?))
+}
+
+async fn refresh(
+    State(engine): State<Engine>,
+    Json(spec): Json<RefreshSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.refresh(&spec).await?))
+}
+
 #[derive(serde::Deserialize)]
 struct SuccessionRequest {
     prior: VersionRef,
@@ -174,29 +195,42 @@ async fn read_combined(
     State(engine): State<Engine>,
     Path((dataset, version)): Path<(String, String)>,
 ) -> Result<Response, HttpError> {
-    read(engine, dataset, version, None).await
+    read(engine, dataset, version, ReadKind::Combined).await
 }
 
 async fn read_group(
     State(engine): State<Engine>,
     Path((dataset, version, group)): Path<(String, String, String)>,
 ) -> Result<Response, HttpError> {
-    read(engine, dataset, version, Some(group)).await
+    read(engine, dataset, version, ReadKind::Group(group)).await
+}
+
+async fn read_evidence(
+    State(engine): State<Engine>,
+    Path((dataset, version)): Path<(String, String)>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, ReadKind::Evidence).await
+}
+
+enum ReadKind {
+    Combined,
+    Group(String),
+    Evidence,
 }
 
 async fn read(
     engine: Engine,
     dataset: String,
     version: String,
-    group: Option<String>,
+    kind: ReadKind,
 ) -> Result<Response, HttpError> {
     let release = engine
         .release(&Id::new(dataset)?, &Id::new(version)?)
         .await?;
-    let batches = if let Some(group) = group {
-        engine.read_group(&release, &group).await?
-    } else {
-        engine.read_combined(&release).await?
+    let batches = match kind {
+        ReadKind::Group(group) => engine.read_group(&release, &group).await?,
+        ReadKind::Combined => engine.read_combined(&release).await?,
+        ReadKind::Evidence => engine.read_evidence(&release).await?,
     };
     let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
         // The in-flight response retains local workspace ownership as well as

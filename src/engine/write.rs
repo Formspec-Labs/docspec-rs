@@ -53,9 +53,18 @@ impl Engine {
             .await?;
         let dataframe = context.sql(&spec.sql).await?;
         validate_plan(dataframe.logical_plan())?;
+        self.write_frame(&spec.dataset, directory, dataframe).await
+    }
+
+    pub(super) async fn write_frame(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        dataframe: DataFrame,
+    ) -> Result<Prepared> {
         let schema =
             iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(dataframe.schema().as_arrow())?;
-        let table = self.create_output(&spec.dataset, directory, schema).await?;
+        let table = self.create_output(dataset, directory, schema).await?;
         let budget = &self.inner.lifecycle.budget;
         let files = storage::write_batches(
             &table,
@@ -74,7 +83,7 @@ impl Engine {
             ..WriteMetrics::default()
         };
         let table = storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files).await?;
-        let table = storage::pin(&spec.dataset, &table, rows, budget, &[]).await?;
+        let table = storage::pin(dataset, &table, rows, budget, &[]).await?;
         Ok(Prepared {
             table,
             changes: None,
@@ -404,7 +413,7 @@ impl Engine {
     }
 }
 
-fn identifier(value: &str) -> String {
+pub(super) fn identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 fn key_match(keys: &[String], left: &str, right: &str) -> String {

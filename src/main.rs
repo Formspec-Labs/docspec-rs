@@ -4,10 +4,10 @@ use clap::{Parser, Subcommand};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_group, verify_input_coverage, verify_release},
+    engine::{read_evidence, read_group, verify_input_coverage, verify_release},
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, ReleasePin, RunSpec, UpdateSpec,
-        VersionRef,
+        BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
+        UpdateSpec, VersionRef,
     },
     storage,
 };
@@ -72,6 +72,10 @@ enum Command {
     CaptureInputs { spec: PathBuf },
     /// Verify retained input relationships without opening the catalog or payloads.
     VerifyInputs { coverage: PathBuf },
+    /// Explain retained native join work over exact input versions.
+    PlanRefresh { spec: PathBuf },
+    /// Run or resume a native equality join with contributor evidence.
+    Refresh { spec: PathBuf },
     /// Plan complete key replacements and deletions against an exact base.
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
@@ -82,6 +86,8 @@ enum Command {
     Backfill { spec: PathBuf },
     /// Stream a pinned combined view as Arrow IPC.
     ReadCombined { release: PathBuf, output: PathBuf },
+    /// Stream exact contributor pairs as Arrow IPC without the producer catalog.
+    ReadEvidence { release: PathBuf, output: PathBuf },
     /// Compare complete pinned results, preserving duplicate row counts.
     Compare {
         before: PathBuf,
@@ -118,6 +124,7 @@ enum PausedOperation {
     Build,
     Update,
     Backfill,
+    Refresh,
 }
 
 #[tokio::main(worker_threads = 12)]
@@ -145,13 +152,23 @@ async fn main() -> anyhow::Result<()> {
             verify_input_coverage(&read_json::<InputCoverage>(coverage)?, limits).await?;
             print_json(&serde_json::json!({"relationships_verified": true}))?;
         }
-        Command::Read {
-            release,
-            output,
-            group,
-        } => {
+        command @ (Command::Read { .. } | Command::ReadEvidence { .. }) => {
+            let (release, output, group) = match command {
+                Command::Read {
+                    release,
+                    output,
+                    group,
+                } => (release, output, Some(group)),
+                Command::ReadEvidence { release, output } => (release, output, None),
+                _ => unreachable!(),
+            };
             let release: ReleasePin = read_json(release)?;
-            let mut stream = read_group(&release, &group, &Budget::new(limits)?).await?;
+            let budget = Budget::new(limits)?;
+            let mut stream = if let Some(group) = group {
+                read_group(&release, &group, &budget).await?
+            } else {
+                read_evidence(&release, &budget).await?
+            };
             let file = std::fs::OpenOptions::new()
                 .create_new(true)
                 .write(true)
@@ -182,6 +199,11 @@ async fn main() -> anyhow::Result<()> {
                                 .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
                                 .await
                         }
+                        PausedOperation::Refresh => {
+                            engine
+                                .refresh_until(&read_json::<RefreshSpec>(spec)?, &phase)
+                                .await
+                        }
                     };
                     match result {
                         Err(error) if error.code() == "injected_failure" => {
@@ -206,6 +228,14 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Command::PlanUpdate { spec } => {
                     print_json(&engine.plan_update(&read_json::<UpdateSpec>(spec)?).await?)?
+                }
+                Command::PlanRefresh { spec } => print_json(
+                    &engine
+                        .plan_refresh(&read_json::<RefreshSpec>(spec)?)
+                        .await?,
+                )?,
+                Command::Refresh { spec } => {
+                    print_json(&engine.refresh(&read_json::<RefreshSpec>(spec)?).await?)?
                 }
                 Command::Update { spec } => {
                     print_json(&engine.update(&read_json::<UpdateSpec>(spec)?).await?)?

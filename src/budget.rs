@@ -1,6 +1,13 @@
 //! Shared byte admission and process-independent workspace ownership.
 
 use crate::{Error, Result};
+use datafusion::{
+    execution::{
+        memory_pool::FairSpillPool,
+        runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
+    },
+    prelude::{SessionConfig, SessionContext},
+};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -41,6 +48,7 @@ pub struct Budget {
     pub limits: Limits,
     bytes: Arc<Semaphore>,
     blocking_jobs: Arc<Semaphore>,
+    runtime: Arc<RuntimeEnv>,
 }
 impl Budget {
     /// Creates a shared pool after validating representable limits.
@@ -48,6 +56,14 @@ impl Budget {
     /// # Errors
     /// Refuses zero or unsupported capacities.
     pub fn new(limits: Limits) -> Result<Self> {
+        Self::create(limits, None)
+    }
+
+    pub(crate) fn in_workspace(limits: Limits, scratch: &Path) -> Result<Self> {
+        Self::create(limits, Some(scratch))
+    }
+
+    fn create(limits: Limits, scratch: Option<&Path>) -> Result<Self> {
         if limits.compute_threads == 0
             || limits.compute_threads > Semaphore::MAX_PERMITS
             || limits.memory_bytes == 0
@@ -63,11 +79,27 @@ impl Budget {
             ));
         }
         // The other half belongs to the shared DataFusion memory pool.
+        let mut runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(Arc::new(FairSpillPool::new(limits.memory_bytes / 2)))
+            .with_max_temp_directory_size(limits.scratch_bytes);
+        if let Some(scratch) = scratch {
+            runtime = runtime.with_temp_file_path(scratch);
+        }
         Ok(Self {
             bytes: Arc::new(Semaphore::new(limits.memory_bytes / 2)),
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
+            runtime: Arc::new(runtime.build()?),
             limits,
         })
+    }
+
+    pub(crate) fn context(&self) -> SessionContext {
+        SessionContext::new_with_config_rt(
+            SessionConfig::new()
+                .with_batch_size(self.limits.batch_rows)
+                .with_target_partitions(self.limits.compute_threads),
+            self.runtime.clone(),
+        )
     }
 
     pub(crate) async fn blocking<T: Send + 'static>(
@@ -154,6 +186,83 @@ impl Drop for WorkspaceLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contexts_share_native_memory_and_spill_accounting() {
+        use datafusion::execution::memory_pool::MemoryConsumer;
+        let root = tempfile::tempdir().unwrap();
+        let budget = Budget::in_workspace(
+            Limits {
+                memory_bytes: 8 << 20,
+                scratch_bytes: 1024,
+                ..Limits::default()
+            },
+            root.path(),
+        )
+        .unwrap();
+        let first = budget.context().runtime_env();
+        let second = budget.clone().context().runtime_env();
+        assert!(Arc::ptr_eq(&first, &second));
+        let one = MemoryConsumer::new("first verifier").register(&first.memory_pool);
+        let two = MemoryConsumer::new("second verifier").register(&second.memory_pool);
+        one.try_grow(4 << 20).unwrap();
+        assert!(two.try_grow(1).is_err());
+        drop(one);
+        two.try_grow(4 << 20).unwrap();
+        drop(two);
+        assert_eq!(first.memory_pool.reserved(), 0);
+        let mut spill = first
+            .disk_manager
+            .create_tmp_file("shared accounting probe")
+            .unwrap();
+        assert!(spill.path().starts_with(root.path()));
+        spill.inner().as_file().set_len(768).unwrap();
+        spill.update_disk_usage().unwrap();
+        assert_eq!(second.disk_manager.used_disk_space(), 768);
+        let retained = spill.clone();
+        let path = spill.path().to_owned();
+        drop(spill);
+        assert_eq!(first.disk_manager.used_disk_space(), 768);
+        drop(retained);
+        assert!(!path.exists());
+        assert_eq!(second.disk_manager.used_disk_space(), 0);
+    }
+
+    #[test]
+    fn pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen() {
+        // Capability probe for DataFusion 53.1: quota failure updates global
+        // usage before the file's own charge, so dropping it cannot refund it.
+        // Keep this limitation explicit until a maintained dependency fixes it.
+        let limits = Limits {
+            scratch_bytes: 16,
+            ..Limits::default()
+        };
+        let budget = Budget::new(limits.clone()).unwrap();
+        let manager = &budget.runtime.disk_manager;
+        let mut spill = manager.create_tmp_file("quota overrun probe").unwrap();
+        spill.inner().as_file().set_len(17).unwrap();
+        assert!(spill.update_disk_usage().is_err());
+        let path = spill.path().to_owned();
+        drop(spill);
+        assert!(!path.exists());
+        assert_eq!(manager.used_disk_space(), 17);
+        assert_eq!(manager.spilling_progress().active_files_count, 0);
+        let mut next = manager.create_tmp_file("retry after failure").unwrap();
+        next.inner().as_file().set_len(1).unwrap();
+        assert!(next.update_disk_usage().is_err());
+        drop(next);
+        drop(budget);
+        let fresh = Budget::new(limits).unwrap();
+        let mut spill = fresh
+            .runtime
+            .disk_manager
+            .create_tmp_file("reopened runtime")
+            .unwrap();
+        spill.inner().as_file().set_len(1).unwrap();
+        spill.update_disk_usage().unwrap();
+        drop(spill);
+        assert_eq!(fresh.runtime.disk_manager.used_disk_space(), 0);
+    }
 
     #[cfg(unix)]
     #[test]

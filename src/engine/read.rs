@@ -16,6 +16,14 @@ impl Engine {
         read_group(release, group, &self.inner.lifecycle.budget).await
     }
 
+    /// Streams the exact contributor pairs retained by a related result.
+    ///
+    /// # Errors
+    /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
+    pub async fn read_evidence(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
+        read_evidence(release, &self.inner.lifecycle.budget).await
+    }
+
     pub(crate) fn read_budget(&self) -> Budget {
         self.inner.lifecycle.budget.clone()
     }
@@ -36,6 +44,26 @@ pub async fn read_group(
         Error::refusal("missing_group", "release lacks the requested field group")
     })?;
     verify_release_with_budget(release, budget).await?;
+    read_pin(pin, budget).await
+}
+
+/// Streams independently verified contributor pairs without the producing catalog.
+///
+/// # Errors
+/// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
+pub async fn read_evidence(
+    release: &ReleasePin,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    let related =
+        release.dataset.related.as_ref().ok_or_else(|| {
+            Error::refusal("missing_evidence", "release has no contributor relation")
+        })?;
+    verify_release_with_budget(release, budget).await?;
+    read_pin(&related.evidence, budget).await
+}
+
+async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
     let table = storage::open_pin(pin).await?;
     let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
         table.metadata().current_schema(),

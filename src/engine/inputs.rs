@@ -136,7 +136,7 @@ impl Engine {
         Ok(coverage)
     }
 
-    async fn lock_inputs(&self, datasets: BTreeSet<Id>) -> Vec<OwnedMutexGuard<()>> {
+    pub(super) async fn lock_inputs(&self, datasets: BTreeSet<Id>) -> Vec<OwnedMutexGuard<()>> {
         let mut guards = Vec::with_capacity(datasets.len());
         for dataset in datasets {
             guards.push(self.lock(&dataset).await.lock_owned().await);
@@ -145,7 +145,7 @@ impl Engine {
     }
 
     // Caller holds this dataset's lock, together with any other input locks.
-    async fn qualify_input(&self, version: &VersionRef) -> Result<SourceRelationship> {
+    pub(super) async fn qualify_input(&self, version: &VersionRef) -> Result<SourceRelationship> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&version.dataset).await?;
         self.follows(&view, version, version).await?;
@@ -190,7 +190,7 @@ pub async fn verify_input_coverage(coverage: &InputCoverage, limits: Limits) -> 
     check_relationships(coverage, &relationships)
 }
 
-fn check_relationships(
+pub(super) fn check_relationships(
     coverage: &InputCoverage,
     relationships: &BTreeMap<Id, SourceRelationship>,
 ) -> Result<()> {
@@ -273,10 +273,26 @@ async fn read_relationship(
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<SourceRelationship> {
-    let size = usize::try_from(version.manifest.bytes).map_err(|_| capacity())?;
+    let header: InputHeader = read_manifest(&version.manifest, budget, bytes, memory).await?;
+    if header.format != FORMAT
+        || header.dataset != version.dataset
+        || header.version != version.version
+    {
+        return Err(invalid_relationship());
+    }
+    Ok(header.relationship)
+}
+
+pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'static>(
+    object: &ObjectRef,
+    budget: &Budget,
+    bytes: &mut usize,
+    memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<T> {
+    let size = usize::try_from(object.bytes).map_err(|_| capacity())?;
     *bytes = bytes.saturating_add(size);
     check_size(*bytes, budget.limits.max_metadata_bytes)?;
-    let version = version.clone();
+    let object = object.clone();
     let memory = memory.clone();
     let buffer = budget.reserve(size)?;
     budget
@@ -286,14 +302,14 @@ async fn read_relationship(
             // metadata reservation, in addition to the blocking I/O reservation.
             let _memory = memory;
             let _buffer = buffer;
-            let mut file = std::fs::File::open(&version.manifest.path)?;
+            let mut file = std::fs::File::open(&object.path)?;
             let corrupt = || {
                 Error::refusal(
                     "corrupt_object",
                     "input manifest differs from its declared bytes",
                 )
             };
-            if file.metadata()?.len() != version.manifest.bytes {
+            if file.metadata()?.len() != object.bytes {
                 return Err(corrupt());
             }
             // Read only admitted bytes plus an overflow probe, then hash and
@@ -302,18 +318,11 @@ async fn read_relationship(
             let mut bytes = vec![0; size];
             file.read_exact(&mut bytes)?;
             if file.read(&mut [0; 1])? != 0
-                || blake3::hash(&bytes).to_hex().as_str() != version.manifest.digest
+                || blake3::hash(&bytes).to_hex().as_str() != object.digest
             {
                 return Err(corrupt());
             }
-            let header: InputHeader = serde_json::from_slice(&bytes)?;
-            if header.format != FORMAT
-                || header.dataset != version.dataset
-                || header.version != version.version
-            {
-                return Err(invalid_relationship());
-            }
-            Ok(header.relationship)
+            Ok(serde_json::from_slice(&bytes)?)
         })
         .await
 }
@@ -322,9 +331,12 @@ pub(super) fn relationship(
     request: &OperationRequest,
     base: Option<&DatasetPin>,
 ) -> SourceRelationship {
-    if let OperationRequest::Build(spec) = request
-        && let Some(relationship) = &spec.relationship
-    {
+    let explicit = match request {
+        OperationRequest::Build(spec) => spec.relationship.as_ref(),
+        OperationRequest::Refresh(spec) => spec.relationship.as_ref(),
+        _ => None,
+    };
+    if let Some(relationship) = explicit {
         return relationship.clone();
     }
     base.map(|base| base.relationship.clone())
@@ -357,7 +369,7 @@ pub(super) fn invalid_relationship() -> Error {
 }
 
 // A counting sink bounds serialized metadata without allocating a second copy.
-fn metadata_size(value: &impl Serialize, limit: usize) -> Result<usize> {
+pub(super) fn metadata_size(value: &impl Serialize, limit: usize) -> Result<usize> {
     struct Counter {
         remaining: usize,
     }

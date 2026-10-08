@@ -93,7 +93,7 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 5 is the current greenfield
+remains unfinished. Release format 6 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group
@@ -138,7 +138,7 @@ Combined reads join group values to exact source-file row positions.
 The same `update` request works after group selection; `plan-update` includes group
 preparation. A no-op update preserves the exact source and group table pins while
 recording its new input coverage and empty source changes. Metadata-only schema
-changes, related-input joins and logical row identity across compaction remain
+changes, incremental related joins and logical row identity across compaction remain
 unfinished. Full independent
 release verification still reads retained inputs and data; file reuse does not
 establish population-independent backfill latency.
@@ -224,16 +224,81 @@ files remain reusable across that association change.
 Capture and `verify-inputs` read bounded manifests, not data payloads. The latter
 checks retained relationships without a catalog; it does not establish current
 eligibility, payload availability or who issued a supplied coverage record.
-This is the input-selection prerequisite for related refresh. Joined processing,
-contributor evidence, and guarded output selection are still unfinished.
+These captured rules also govern native join refresh and its final selection.
+
+## Refresh a native join
+
+A `RefreshSpec` names exact `left` and `right` version references, using the same
+`dataset`, `version`, `manifest` shape as generation members. Set `dataset` to the
+output dataset, `operation` to a stable retry identity, `definition` to the active
+recipe version, and `base` to the selected output version. `base: null` requires
+an absent output. The `join` portion declares every key and output field:
+
+```json
+{
+  "keys": [{"left": "docket_id", "right": "docket_id"}],
+  "kind": "left",
+  "nulls": "never",
+  "cardinality": "many_to_one",
+  "fields": [
+    {"side": "left", "field": "comment", "name": "comment"},
+    {"side": "right", "field": "title", "name": "docket_title"}
+  ]
+}
+```
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-refresh refresh.json
+target/debug/docspec --workspace workspaces/comments refresh refresh.json > joined-release.json
+target/debug/docspec verify joined-release.json
+target/debug/docspec read-evidence joined-release.json contributors.arrow
+```
+
+Supported joins are `inner`, `left`, and `full`, with `never` or `equal` null-key
+matching. Keys require identical scalar types. Projection copies declared source
+fields without coercion; reading computed input groups and aggregate refresh are
+not yet implemented. Cardinality is `many_to_many`, `many_to_one`, or `one_to_one`.
+Matching duplicate keys that violate the declared partner limit refuse before
+writing the joined output. Unmatched duplicates remain valid occurrences.
+
+Processing retains exact left/right file and row positions alongside the values.
+A separate evidence table retains contributor pairs and unmatched sides. Ordinary
+combined reads hide the position fields; native source reads retain them. These
+positions bind to the exact input pins, not stable logical IDs across rewrites.
+Independent verification reconstructs values and pair multiplicities from those
+inputs, traversing shared semantic dependencies once per verification request.
+
+`policy: "captured"` accepts complete forward input coverage even if newer inputs
+are selected during processing. `policy: "latest"` additionally requires each
+immediate input to remain selected at this operation's final commit. Inspect
+`input-progress/<operation>` for observed heads, revisions and selections behind.
+Latest is an operation policy; it is not a continuing freshness promise for later
+backfills. Every new selection checks current producer eligibility throughout its
+semantic dependency graph. Historical offline reads check retained semantics,
+without claiming current eligibility or accepted catalog history.
+
+A guarded commit selects the complete output and progress together. Backward
+coverage, role changes, stale output bases and invalidated dependencies refuse.
+Admission, matching, evidence, validation and readback have separate recovery
+checkpoints. Retry `refresh` with the same request; a completed operation reconciles
+its original result even after later source movement. Scalar backfills preserve
+related bindings, and based refresh preserves selected scalar group definitions.
+Use refresh to change a related output; raw build/update replacement refuses.
+
+This is the full-reconstruction reference path. Incremental old/new-key discovery,
+aggregate contributors, evidence-only adoption and complete-path performance remain
+open. No-op refresh over the same exact input references reuses retained source
+and evidence tables. New version references currently trigger reconstruction even
+when their source files match. Deliberate many-to-many fanout can be large; no
+output-size prediction or large-workload performance claim is made.
 
 ## HTTP access
 
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
 `POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `POST /succession`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
-`POST /generations/seal` and `POST /inputs/capture` accept the same metadata as
-the corresponding CLI commands.
+`POST /generations/seal`, `POST /inputs/capture`, `POST /refreshes/plan`, and
+`POST /refreshes/run` accept the same metadata as the corresponding CLI commands.
 CLI and HTTP call the same application services. HTTP accepts bounded JSON and
 streams Arrow IPC for bulk reads. One process owns a workspace; use HTTP to submit
 concurrent requests to that process.
@@ -246,7 +311,8 @@ curl --fail -o enriched.arrow http://127.0.0.1:7391/datasets/comments/versions/t
 ```
 
 The `/arrow/{group}` route reads a named physical field group; `/arrow` combines
-source fields with all selected scalar groups. Responses identify the dataset,
+source fields with all selected scalar groups. Related results also expose their
+contributor pairs at `/datasets/{dataset}/versions/{version}/evidence`. Responses identify the dataset,
 version and manifest digest in `docspec-*` headers. Each read verifies the complete
 retained release before sending its schema, so first-byte latency still depends
 on release size. Batches then follow client demand without a background producer
@@ -306,7 +372,11 @@ qualified.
 `--limits limits.json` accepts a partial resource profile. Defaults come from the
 proposal: 12 compute partitions, 24 GiB memory, 32 GiB scratch, bounded batches and
 metadata. DataFusion and application buffers share separate portions of the
-allowance, and the native spill manager enforces its scratch limit. These are
+allowance. All contexts cloned from a Budget share one execution pool and native
+spill manager, including catalog-free join verification. The pinned DataFusion
+spill manager checks disk usage after writes. Its quota-error accounting can
+remain charged after files are deleted; reopen the workspace/runtime before retrying
+a spill-quota failure. The capability probe is retained in `src/budget.rs`. These are
 admission controls, **not a qualified whole-process memory ceiling**. Native reads
 use serial file decoding and retain admission through stream consumption. Bulk
 copying and hashing use bounded blocking workers; canceling a caller keeps the

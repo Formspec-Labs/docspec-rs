@@ -1,0 +1,120 @@
+# Native related-refresh resource review
+
+No open actionable resource finding remains. The shared runtime, bounded dependency walk, early cardinality checks, and worker-owned inventory admission use the existing engine services. The final default-stack regression gate passes, including the previously failing completion-race fixture. **VERDICT: APPROVE** for this local full-refresh checkpoint.
+
+This is a static review of the uncommitted checkpoint against `b3c8e1f`, applying the semi-formal-code-review skill and applicable Microsoft Rust performance, library, resilience, and universal guidance. The reviewer read source, pinned dependency implementations, and owner-produced test evidence; the reviewer did not execute tests or modify Rust code. Scope is the local full equality-join reference path and its resource/recovery behavior, not incremental affected-key execution or whole-process qualification.
+
+## Findings and closure
+
+### NR-R1 — Verification helper names collided with legal output fields — CLOSED
+
+- **Severity/category:** WARNING / correctness.
+- **Location:** `src/engine/refresh.rs:636`, `equal_multisets`; `validate` in the same module.
+- **Scenario:** A valid output named `__weight` or `__total` collided with the initial generated signed-count query, although only the `__docspec_` namespace was reserved.
+- **Resolution:** The query now uses `__docspec_weight` and `__docspec_total`, within the already forbidden output namespace. Identifiers still pass through the shared quoting helper. The regression requests both former helper names plus a name containing a quote and space, then independently verifies the release (`tests/related_refresh.rs:665`).
+
+### NR-R2 — Declared cardinality violations were detected after writing fanout — CLOSED
+
+- **Severity/category:** WARNING / performance and resource correctness.
+- **Location:** `src/engine/refresh.rs:500`, called by `process_refresh` before `write_frame` at `src/engine/refresh.rs:100`.
+- **Scenario:** A ManyToOne or OneToOne recipe with matching duplicate keys could first materialize a Cartesian result and its evidence, then refuse during verification. A malformed declaration could exhaust storage before the known violation was reported.
+- **Resolution:** A semi join finds matching partner rows without multiplying them, then a grouped existence query checks duplicate keys before the output writer starts. It uses the exact composite-key predicate and null policy of the requested join. Unmatched duplicate keys remain legal. The final occurrence-based cardinality check remains independent of this precheck (`src/engine/refresh.rs:614`). The cardinality regression inspects the protected processing directory and requires it to be empty after refusal (`tests/related_refresh.rs:340–355`), proving this happens before native writer output. The unmatched-duplicate fixture exercises the valid outer-join case.
+
+### NR-R3 — Cached readback availability omitted transitive retained inputs — CLOSED
+
+- **Severity/category:** WARNING / recovery correctness.
+- **Location:** `src/engine.rs:1452`, `src/engine/verification.rs:72`, `src/engine/refresh.rs:155`.
+- **Scenario:** After a refresh completed readback, a retained input data file could disappear. The initial retry path checked only the derived release's direct objects and input manifest references, allowing selection although independent reconstruction would fail.
+- **Resolution:** Cached related readback and final selection use the same bounded semantic walk. Its availability mode checks each unique dependency's retained object inventory without recomputing finished joins. A regression hides a grandparent Parquet object after readback and asserts retry refusal and no selected output (`tests/related_refresh.rs:776`).
+
+### NR-R4 — Blocking inventory work could outlive its metadata admission — CLOSED
+
+- **Severity/category:** WARNING / resource correctness.
+- **Location:** `src/engine/verification.rs:144`; `src/storage.rs:103`, `verify_objects`, and `src/storage.rs:107`, `check_available`.
+- **Scenario:** The graph owns an aggregate metadata permit, but these helpers clone an inventory into a blocking worker that owns only its fixed I/O reservation. If the async caller is canceled during the worker, the graph permit is released while the worker still retains the inventory. This lets a new request reuse admission before the old metadata allocation is gone. The same helper issue exists for individual pin callers.
+- **Resolution:** Both helpers now call shared `check_objects`, which bounds the owned vector capacity and string buffers, reserves inventory bytes separately, and moves that reservation into the blocking worker (`src/storage.rs:126–159`). The actual-helper regression queues each helper behind a controlled blocking task, aborts the async caller, requires inventory admission to remain unavailable, then proves full capacity returns after the worker exits (`src/storage.rs:563–621`). This closes existing individual-pin callers as well as graph traversal without duplicating the worker code. The manifest parser retains its existing shared metadata/buffer ownership (`src/engine/inputs.rs:286`).
+
+## Patch summary
+
+Typed `RefreshSpec` recipes select exact left/right versions, copied fields, equality keys, null behavior, join membership, and maximum matching partners. The engine retains admission, processing, contributor evidence, validation, and readback separately. It uses native occurrence readers and the maintained DataFusion planner/executor, then existing native writers and lifecycle selection. No new SQL database, persistent dependency index, custom scheduler, or spill implementation is introduced.
+
+`Budget` now owns one maintained DataFusion runtime. Every context created from the same Budget, including internal independent-verification contexts, shares its finite execution memory and scratch accounting. Catalog-free `verify_release` creates one bounded Budget for that invocation; separately constructed Budget instances remain separate resource scopes. This removes the prior risk of verifier contexts silently using DataFusion defaults. Application byte admission remains separate from the native execution pool; neither establishes exact process resident memory.
+
+Independent verification traverses only semantic input dependencies. One request-local map deduplicates exact version identities, one iterative work stack avoids recursive graph traversal, and one cumulative metadata allowance limits the walk. Composition parents retain existing shallow checks. Final selection retains the graph, collects every output/source/family lock before acquiring any, and checks ancestors under Captured semantics plus the requested policy for immediate inputs.
+
+## Function trace
+
+| Function / method | File:line | Inputs and output | Verified behavior |
+| --- | --- | --- | --- |
+| `Budget::create`, `context` | `src/budget.rs:66`, `96` | Limits and optional workspace scratch → shared runtime / session | Configures FairSpillPool, native scratch limit, batch rows and target partitions; contexts clone the same runtime Arc. |
+| `Engine::compose`, `context` | `src/engine.rs:110`, `133` | Workspace and limits → engine / session | Creates workspace scratch and delegates runtime configuration to Budget. |
+| `prepare_and_select` | `src/engine.rs:551` | Stable operation → retained release | Reconciles an existing result before payload work; uses shared phase preparation, optional scalar-group preparation, readback, then guarded selection. |
+| `admit_refresh`, `process_refresh` | `src/engine/refresh.rs:46`, `81` | Exact recipe and captured coverage → retained inputs / prepared native table | Captures qualified inputs, verifies their retained dependency graph, opens exact source tables, checks cardinality, and uses the common writer. |
+| `prepare_evidence` | `src/engine/refresh.rs:103` | Completed source result → contributor table | Reuses an existing evidence completion or streams the exact source occurrence tuples through the same native writer; acknowledges separately. |
+| `check_objects` | `src/storage.rs:126` | Owned object inventory and check function → success/refusal | Applies a metadata cap and keeps the inventory reservation inside the queued/running worker through caller cancellation; shared by hashing and availability checks. |
+| `write_frame` | `src/engine/write.rs:59` | DataFusion frame → native TablePin | Uses existing batch-byte admission, native append, inventory hashing and pinning; does not collect full output batches in application memory. |
+| `load_inputs`, `read_release` | `src/engine/refresh.rs:361`, `383` | Captured references → bounded parsed releases | Charges coverage/manifests cumulatively, retains admission, and validates exact dataset/version/owner/format. |
+| `read_manifest` | `src/engine/inputs.rs:286` | ObjectRef and shared allowance → parsed manifest | Worker owns metadata and byte-buffer permits; one opened file, actual-size check, bounded read, overflow probe, hash and parse of the same bytes. |
+| `join_frame` | `src/engine/refresh.rs:406` | Typed recipe and exact releases → DataFrame | Uses serial admitted native occurrence providers, refuses key coercion/nested keys, quotes names, and preserves physical input multiplicity. |
+| `verify_related_with_inputs` | `src/engine/refresh.rs:557` | Source/evidence pins and verified inputs → success/refusal | Reconstructs expected rows, compares exact schemas and duplicate-aware complete row counts, verifies evidence objects, compares contributor multiplicities, and checks actual cardinality. |
+| `equal_multisets`, `has_rows` | `src/engine/refresh.rs:636`, `650` | Typed row relations → equality/refusal | Uses signed grouped counts and a one-row mismatch query; drops the query stream once a mismatch is found. |
+| `walk`, `available_graph` | `src/engine/verification.rs:79`, `72` | Root releases and Budget → retained graph | Bounds nodes/edges/manifests, refuses conflicting identities/cycles, hashes exact manifests, processes dependencies before parents, and yields cooperatively. |
+| `select_refresh`, `guard_ancestors` | `src/engine/refresh.rs:148`, `196` | Verified output and current authorities → atomic selection/refusal | Retains graph through complete sorted lock acquisition, rechecks all dependency eligibility/seals, and records immediate input progress with the selected result. |
+| `select`, `select_with_progress` | `src/engine/history.rs:128`, `146` | Locked authority and result → native lifecycle commit | Reuses the existing exact selection/succession commit and includes observed input progress. |
+| Backfill selection and combined read | `src/engine/backfill.rs:474`, `99` | Related result plus scalar group → retained composition / visible batches | Holds the complete dependency lock set at selection, preserves related identity, and hides internal occurrence fields from the ordinary combined view. |
+| Shared read services and transports | `src/engine/read.rs:23`, `src/http.rs:163`, `src/main.rs:155` | Exact release/request → bounded JSON or Arrow IPC | Rust, CLI and HTTP use the same engine/verifier; catalog-free evidence and verification branches do not create an Engine. |
+
+Pinned dependency trace, read from the Cargo registry under `/Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/`:
+
+| Dependency implementation | Evidence used |
+| --- | --- |
+| `datafusion-53.1.0/src/execution/context/mod.rs:337–355` | Default contexts create separate RuntimeEnv values; the maintained API explicitly requires one shared runtime to apply combined limits. |
+| `datafusion-execution-53.1.0/src/runtime_env.rs:409–420`, `442–461` | Workspace path and maximum scratch size configure the same disk-manager builder; an absent explicit memory pool would otherwise become UnboundedMemoryPool. |
+| `datafusion-execution-53.1.0/src/disk_manager.rs:401–430`, `441–454` | Quota validation follows global accounting but precedes per-file accounting; last-file-reference Drop subtracts the per-file value. This explains the reproduced phantom charge after quota failure. |
+
+## Data flow and invariants
+
+1. **Execution pools are shared, not recreated per query.** Budget clones retain one RuntimeEnv Arc; sessions use it with configured batch rows and partitions (`src/budget.rs:82–102`). The pinned DataFusion context implementation documents that independent default runtimes would enforce separate limits. Moving this responsibility to the existing Budget is smaller than adding a parallel verifier-runtime framework.
+2. **Payload streams keep existing admission and backpressure.** `query::NativePartition::execute` creates its reader lazily and moves Budget into the stream (`src/query.rs:59–78`). Native reads/occurrence reads remain serial. The writer checks each decoded output batch before writing and holds its permit through close (`src/storage.rs:162–207`). Join operators may retain native execution state and spill through the shared runtime. No application task collects the full joined result.
+3. **Verification cost follows the semantic graph.** The iterative walk stores each exact identity once, rejects a repeated identity with a different manifest, and refuses a visiting-node cycle (`src/engine/verification.rs:95–137`). It counts serialized manifest bytes and work/reference overhead cumulatively. This is conservative metadata admission, not an exact allocator or RSS measurement. Each node's local validation is deduplicated, but relational reconstruction still reads its required input rows; shared input payloads can be scanned by multiple distinct joins.
+4. **Selection owns a complete ordered lock set.** The graph's datasets plus every retained family are deduplicated before `lock_inputs`; no family lock is acquired afterward. Ancestor guards use Captured semantics; immediate guards additionally implement Latest and forward coverage (`src/engine/refresh.rs:148–252`, `src/engine/inputs.rs:139–165`). Backfill uses the same set. Live transitive invalidation therefore blocks new selection, while immutable historical readback remains valid. This is local workspace serialization, not distributed catalog qualification.
+5. **Reuse does not imply fresh selection eligibility.** Material phase keys omit output base and policy while retaining exact source versions, join definition and active eligibility. Completed source/evidence work can be reused, but the final guard checks current base, accepted input history and dependencies. The operation fingerprint still distinguishes selection policy and request identity. Existing result reconciliation precedes payload reopening (`src/engine.rs:563–573`).
+6. **Cardinality prechecks bound invalid fanout, not deliberate output size.** Semi joins avoid producing Cartesian duplicates merely to establish an invalid declaration. ManyToMany intentionally bypasses that check. Storage preflight cannot predict arbitrary fanout here, and the implementation does not claim an output-size or large-workload bound. Wide output batches still refuse at the existing writer boundary.
+7. **Native scratch exhaustion is a known dependency limitation.** The pinned DataFusion 53.1 disk manager updates global usage before recording a file's new charge. On quota error, dropping the file removes it but cannot refund the unmatched global charge. The capability test reproduces this and verifies a fresh runtime restores capacity (`src/budget.rs:232–264`). It also confirms accounting is checked after writes, not an instantaneous disk ceiling. README/STATUS explicitly require reopening before spill-quota retry; no custom reset weakens other live consumers' accounting.
+8. **Recovery keeps separate useful handoffs.** Source data, evidence and readback are independently acknowledged. CLI process-kill fixtures compare retained phase records and actual work markers on resume; a completed operation still reconciles its original result after later producer invalidation (`tests/related_refresh.rs:500`). Cleanup remains disabled; this checkpoint does not implement cross-dataset retirement.
+
+## Test behavior and evidence
+
+The reviewer inspected the following assertions and their passing owner-produced output in `docs/reviews/native-refresh-check.log`. No reviewer test execution was performed.
+
+| Test / assertion location | Behavior checked | Static assessment |
+| --- | --- | --- |
+| `all_join_kinds_preserve_duplicate_and_partial_null_occurrences`, `tests/related_refresh.rs:299`; Rust oracle at `:200` | Direct Rust matching independently computes typed values and left/right occurrence pairs for join kinds, null modes, duplicates, unmatched sides and empty inputs. Source/evidence reads compare exact multiplicities. | Meaningful independent oracle; does not merely compare two generated SQL plans. |
+| `cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles`, `tests/related_refresh.rs:325` | Invalid partner multiplicity refuses without selecting a result; self-join exact roles still match the oracle; output-as-input refuses. | Asserts the protected processing directory remains empty; distinguishes early refusal from the former late refusal. |
+| `quoted_helper_names_and_unmatched_duplicate_keys_are_supported`, `tests/related_refresh.rs:665` | Former helper names and quoted names verify; duplicate unmatched right keys are accepted in a OneToOne full join. | Direct NR-R1 regression and important precheck edge case. |
+| `offline_verifier_reconstructs_values_contributors_and_exact_input_graph`, `tests/related_refresh.rs:382` | Rebound valid tables, roles and fields refuse despite recomputed manifest hashes; tight cumulative metadata cap refuses; valid release verifies after catalog hiding. | Exercises semantic checks beyond checksums and graph budget failure. |
+| `captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress`, `tests/related_refresh.rs:445` | Captured mode accepts a forward historical input and records lag; Latest refuses a moved head; unchanged values with new input identity remain distinguishable; backward input coverage refuses. | Covers selection policy separately from immutable readback. |
+| `completed_phases_resume_and_original_selection_reconciles_after_invalidation`, `tests/related_refresh.rs:500` | Real CLI termination after each handoff; restart resumes only missing work; retained phase records remain exact; repeated success survives invalidation. | Meaningful recovery and completed-work reuse checks. |
+| `output_base_and_producer_eligibility_fence_selection_without_losing_work`, `tests/related_refresh.rs:557` | Competing output base and producer invalidation refuse adoption while retained preparation remains. | Covers eligibility changes after expensive work. |
+| `backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover`, `tests/related_refresh.rs:604` | Scalar composition retains exact related binding; no-op refresh reuses source pin and advances boundary; old pending cutover refuses. | Checks reuse and independent boundary semantics together. |
+| `cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility`, `tests/related_refresh.rs:776` | Missing grandparent data prevents resumed selection; restoring bytes then invalidating that ancestor still refuses; old immutable release continues to verify offline. | Direct NR-R3 and transitive guard coverage. |
+| `http_refresh_and_catalog_free_cli_verification_use_shared_services`, `tests/related_refresh.rs:817` | HTTP plan includes evidence, HTTP run matches the oracle, evidence HTTP IPC has the expected fields and multiplicity, and real CLI verification/evidence reads work with the catalog hidden without recreating it. | Covers thin interfaces and bounded independent runtime path. |
+| `canceled_inventory_checks_keep_worker_owned_metadata_admission`, `src/storage.rs:563` | Both real helpers remain queued after caller abort; inventory capacity stays reserved beyond the fixed I/O allowance; completion restores the full pool. | Direct NR-R4 cancellation/custody regression. |
+| `coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage`, `tests/related_refresh.rs:917` | Creates complete coupled generations, rejects mixed input generations without changing the selected result, then accepts exact next-generation coverage and checks the Rust oracle. | Exercises seals and family membership through the full join path. |
+| `contexts_share_native_memory_and_spill_accounting`, `src/budget.rs:191` | Runtime Arc equality, cross-context memory refusal/release, shared file charge, cloned-file custody and final deletion/refund. | Direct maintained-API probe of shared limits and normal custody. |
+| `pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen`, `src/budget.rs:232` | Quota error deletes file but retains phantom usage; another spill still fails; fresh Budget/runtime accepts and refunds it. | Records a limitation, not a recovery pass for the original runtime. |
+
+The initial join failure and subsequent rebuild/completion-race failures are retained in `docs/reviews/native-refresh-first-failed.log`, `native-refresh-regressions-failed.log`, and `native-refresh-race-stack-failed.log`. The Rust `size_of` probe in `examples/layout_probe.rs:2` measures inline type layout. Owner-produced `docs/reviews/native-refresh-layout-before.log` and `native-refresh-layout-after.log` show boxing `DatasetPin.related` reduces DatasetPin from 1,848 to 1,160 bytes, ReleasePin from 1,960 to 1,272 bytes, and Authority from 3,872 to 2,496 bytes on this target. This removes the large inline optional binding from ordinary pins; serde JSON shape stays the same. These are inline-layout measurements, not throughput or total RSS results. Refresh is also boxed inside OperationRequest, and large preparation/verification/selection futures use targeted heap storage. The final default-stack gate passes the previously failing paths; no enlarged thread stack is used as qualification.
+
+README (`README.md:229–291`, `372–388`) and STATUS (`docs/STATUS.md:479–552`) accurately describe full reconstruction, eager verification, exact physical occurrence identity, unfinished incremental discovery/aggregates/computed input groups, disabled cleanup, and deliberate ManyToMany growth. They make no throughput or 10M acceptance claim. Resource claims distinguish application/native admission from total resident memory and identify the maintained spill defect.
+
+The final retained gate output shows successful Clippy progression, passing unit and integration suites, the completion-race regression passing on the normal stack, and successful doc-test completion. The owner reports `./scripts/check` exited zero; the checked script runs formatting, locked all-target/all-feature Clippy with warnings denied, then locked all-feature tests. `docs/reviews/native-refresh-no-default.log` separately records the successful locked no-default-features build. Failed attempts and the native layout probe remain retained rather than being replaced by the passing result.
+
+## Conclusion
+
+VERDICT: APPROVE
+
+- All identified resource findings are closed in source and have direct passing regression assertions.
+- Coverage of changed paths: ADEQUATE. Tests cover independent duplicate/null/membership semantics, early cardinality refusal, exact contributor reads, bounded semantic dependencies, current ancestor eligibility, actual worker cancellation, coupled generations, shared native pools, process-kill recovery, and ordinary-operation regressions.
+- The design reuses maintained facilities and existing services without adding a persistent graph or parallel runtime abstraction. The measured inline-layout reduction addresses a concrete regression; no speed or total-memory improvement is inferred.
+- Confidence: HIGH for this local full-refresh reference checkpoint. Full-workload performance, hard RSS/scratch ceilings, automatic spill-quota recovery, incremental joins, remote publication, and retention remain outside qualification.

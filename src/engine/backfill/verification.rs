@@ -12,13 +12,14 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
     let mut checked_base: Option<(ObjectRef, DatasetPin)> = None;
     match &dataset.request {
         OperationRequest::Build(spec) => {
-            if dataset.inputs.len() != dataset.request.inputs().len() {
+            if dataset.related.is_some() || dataset.inputs.len() != dataset.request.inputs().len() {
                 return Err(invalid_group());
             }
             if let Some(version) = &spec.base {
                 let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
                 let base = read_manifest(parent, budget).await?;
                 if base.dataset != dataset.dataset
+                    || base.related.is_some()
                     || &base.version != version
                     || base.version == dataset.version
                     || dataset.boundary <= base.boundary
@@ -40,6 +41,9 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             }
         }
         OperationRequest::Update(_) => {
+            if dataset.related.is_some() {
+                return Err(invalid_group());
+            }
             let changes = dataset.changes.as_ref().ok_or_else(invalid_group)?;
             if dataset.parent_manifest.as_ref() != Some(&changes.base_manifest) {
                 return Err(invalid_group());
@@ -53,6 +57,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 }
             }
             if inherited_inputs != base.inputs
+                || base.related.is_some()
                 || dataset.relationship != base.relationship
                 || base.eligibility != dataset.eligibility
                 || dataset.boundary <= base.boundary
@@ -82,6 +87,8 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 || parent.version == dataset.version
                 || parent.groups.get("source") != Some(source)
                 || parent.inputs != dataset.inputs
+                || parent.related != dataset.related
+                || base.related != dataset.related
                 || parent.relationship != dataset.relationship
                 || base.relationship != dataset.relationship
                 || parent.boundary != dataset.boundary
@@ -107,6 +114,41 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 if dataset.groups.get(name) != parent.groups.get(name) {
                     return Err(invalid_group());
                 }
+            }
+        }
+        OperationRequest::Refresh(spec) => {
+            let related = dataset.related.as_ref().ok_or_else(invalid_group)?;
+            if &related.request != spec.as_ref()
+                || related.coverage.inputs != spec.inputs()
+                || !dataset.inputs.is_empty()
+            {
+                return Err(invalid_group());
+            }
+            if let Some(version) = &spec.base {
+                let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
+                let base = read_manifest(parent, budget).await?;
+                if base.dataset != dataset.dataset
+                    || &base.version != version
+                    || base.version == dataset.version
+                    || dataset.boundary <= base.boundary
+                    || dataset.eligibility < base.eligibility
+                    || (dataset.definition != base.definition
+                        && dataset.eligibility == base.eligibility)
+                    || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
+                    || base.related.as_ref().is_some_and(|previous| {
+                        previous.request.left.dataset != spec.left.dataset
+                            || previous.request.right.dataset != spec.right.dataset
+                    })
+                {
+                    return Err(invalid_group());
+                }
+                check_refreshed_groups(dataset, &base, parent)?;
+                checked_base = Some((parent.clone(), base));
+            } else if !dataset.computed.is_empty()
+                || dataset.parent_manifest.is_some()
+                || dataset.relationship != inputs::relationship(&dataset.request, None)
+            {
+                return Err(invalid_group());
             }
         }
     }
@@ -210,7 +252,7 @@ async fn verify_group(
                 return Err(invalid_group());
             }
         }
-        OperationRequest::Update(_) | OperationRequest::Build(_) => {
+        OperationRequest::Update(_) | OperationRequest::Build(_) | OperationRequest::Refresh(_) => {
             if base
                 .computed
                 .get(binding.definition.group.as_str())

@@ -101,32 +101,58 @@ pub async fn read_batches(
 }
 
 pub(crate) async fn verify_objects(objects: Vec<ObjectRef>, budget: &Budget) -> Result<()> {
-    budget
-        .blocking(move || {
-            for object in objects {
-                verify_object(&object)?;
-            }
-            Ok(())
-        })
-        .await
+    check_objects(objects, budget, verify_object).await
 }
 
 pub(crate) async fn check_available(objects: Vec<ObjectRef>, budget: &Budget) -> Result<()> {
+    check_objects(objects, budget, |object| {
+        let metadata = std::fs::metadata(&object.path).map_err(|_| {
+            Error::refusal(
+                "unavailable_phase",
+                "retained completion references an unavailable object",
+            )
+        })?;
+        if !metadata.is_file() || metadata.len() != object.bytes {
+            return Err(Error::refusal(
+                "unavailable_phase",
+                "retained completion object size changed",
+            ));
+        }
+        Ok(())
+    })
+    .await
+}
+
+async fn check_objects(
+    objects: Vec<ObjectRef>,
+    budget: &Budget,
+    check: fn(&ObjectRef) -> Result<()>,
+) -> Result<()> {
+    let bytes = objects.iter().fold(
+        objects
+            .capacity()
+            .saturating_mul(std::mem::size_of::<ObjectRef>()),
+        |total, object| {
+            total
+                .saturating_add(object.path.capacity())
+                .saturating_add(object.digest.capacity())
+                .saturating_add(object.owner.as_str().len())
+        },
+    );
+    if bytes > budget.limits.max_metadata_bytes {
+        return Err(Error::refusal(
+            "metadata_capacity",
+            "worker object inventory exceeds metadata allowance",
+        ));
+    }
+    let inventory = budget.reserve(bytes)?;
     budget
         .blocking(move || {
+            // Cancellation cannot release this owned inventory's admission while its
+            // blocking worker is still queued or reading retained files.
+            let _inventory = inventory;
             for object in objects {
-                let metadata = std::fs::metadata(&object.path).map_err(|_| {
-                    Error::refusal(
-                        "unavailable_phase",
-                        "retained completion references an unavailable object",
-                    )
-                })?;
-                if !metadata.is_file() || metadata.len() != object.bytes {
-                    return Err(Error::refusal(
-                        "unavailable_phase",
-                        "retained completion object size changed",
-                    ));
-                }
+                check(&object)?;
             }
             Ok(())
         })
@@ -532,6 +558,68 @@ mod tests {
         array::Int64Array,
         datatypes::{DataType, Field, Schema},
     };
+
+    #[test]
+    fn canceled_inventory_checks_keep_worker_owned_metadata_admission() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for full in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let path = root.path().join("retained");
+                std::fs::write(&path, b"retained bytes").unwrap();
+                let object = object(&Id::new("owner").unwrap(), &path).unwrap();
+                let budget = Budget::new(crate::budget::Limits {
+                    memory_bytes: 8 << 20,
+                    max_metadata_bytes: 1 << 20,
+                    compute_threads: 1,
+                    ..crate::budget::Limits::default()
+                })
+                .unwrap();
+                let (started, ready) = tokio::sync::oneshot::channel();
+                let (resume, paused) = std::sync::mpsc::channel();
+                let blocker = tokio::task::spawn_blocking(move || {
+                    started.send(()).unwrap();
+                    let _ = paused.recv();
+                });
+                ready.await.unwrap();
+                let worker_budget = budget.clone();
+                let caller = tokio::spawn(async move {
+                    if full {
+                        verify_objects(vec![object], &worker_budget).await
+                    } else {
+                        check_available(vec![object], &worker_budget).await
+                    }
+                });
+                let except_io_buffer = budget.limits.memory_bytes / 2 - (1 << 20);
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while budget.reserve(except_io_buffer).is_ok() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                caller.abort();
+                assert!(caller.await.unwrap_err().is_cancelled());
+                assert!(
+                    budget.reserve(except_io_buffer).is_err(),
+                    "queued worker still owns inventory beyond its fixed I/O buffer"
+                );
+                resume.send(()).unwrap();
+                blocker.await.unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while budget.reserve(budget.limits.memory_bytes / 2).is_err() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
+        });
+    }
 
     fn batch(values: Vec<Option<i64>>) -> RecordBatch {
         RecordBatch::try_new(

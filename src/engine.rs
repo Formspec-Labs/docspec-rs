@@ -10,10 +10,7 @@ use crate::{
     model::*,
     storage,
 };
-use datafusion::{
-    execution::{memory_pool::FairSpillPool, runtime_env::RuntimeEnvBuilder},
-    prelude::*,
-};
+use datafusion::prelude::*;
 use futures::{StreamExt, TryStreamExt};
 use iceberg::{Catalog, TableCreation};
 use serde::{Deserialize, Serialize};
@@ -33,7 +30,9 @@ mod inputs;
 pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
-pub use read::read_group;
+pub use read::{read_evidence, read_group};
+mod refresh;
+mod verification;
 mod write;
 
 /// Local execution host sharing catalog, admission, and resource accounting.
@@ -46,7 +45,6 @@ pub struct Engine {
 struct Inner {
     root: PathBuf,
     lifecycle: Lifecycle,
-    runtime: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
     _workspace: WorkspaceLock,
 }
@@ -75,8 +73,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v5";
-pub(crate) const FORMAT: u32 = 5;
+const PROCESSOR: &str = "docspec.dataset.v6";
+pub(crate) const FORMAT: u32 = 6;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -109,23 +107,13 @@ impl Engine {
         limits: Limits,
         ownership: WorkspaceLock,
     ) -> Result<Self> {
-        let budget = Budget::new(limits)?;
         let scratch = root.join("scratch");
         std::fs::create_dir_all(&scratch)?;
-        // Half the declared process allowance is reserved for native execution;
-        // readers, writers, metadata and other allocations require the remainder.
-        let runtime = Arc::new(
-            RuntimeEnvBuilder::new()
-                .with_memory_pool(Arc::new(FairSpillPool::new(budget.limits.memory_bytes / 2)))
-                .with_temp_file_path(scratch)
-                .with_max_temp_directory_size(budget.limits.scratch_bytes)
-                .build()?,
-        );
+        let budget = Budget::in_workspace(limits, &scratch)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 root,
                 lifecycle: Lifecycle::new(catalog, budget),
-                runtime,
                 locks: Mutex::new(BTreeMap::new()),
                 _workspace: ownership,
             }),
@@ -143,13 +131,7 @@ impl Engine {
     }
 
     fn context(&self) -> SessionContext {
-        let limits = &self.inner.lifecycle.budget.limits;
-        SessionContext::new_with_config_rt(
-            SessionConfig::new()
-                .with_batch_size(limits.batch_rows)
-                .with_target_partitions(limits.compute_threads),
-            self.inner.runtime.clone(),
-        )
+        self.inner.lifecycle.budget.context()
     }
 
     /// Explains retained phases without opening large input payloads.
@@ -201,6 +183,9 @@ impl Engine {
         let mut reusable_phases = Vec::new();
         let mut required_phases = Vec::new();
         let mut phases = PHASES.to_vec();
+        if matches!(spec, OperationRequest::Refresh(_)) {
+            phases.insert(2, "evidence");
+        }
         if let Some(version) = spec.base() {
             let base: ReleasePin = lifecycle
                 .get(&view, &format!("result/{version}"))
@@ -231,7 +216,7 @@ impl Engine {
                     .as_ref()
                     .map_or(authority.eligibility, |o| o.eligibility);
                 lifecycle
-                    .get::<PhaseResult>(&view, &phase_key(spec, &request, eligibility, phase))
+                    .get::<PhaseResult>(&view, &phase_key(spec, &request, eligibility, phase)?)
                     .await?
                     .is_some()
             };
@@ -354,7 +339,17 @@ impl Engine {
         let same_schema = first_schema == second_schema;
         let mut comparison = Comparison {
             same_schema,
-            same_inputs: before.dataset.inputs == after.dataset.inputs,
+            same_inputs: before.dataset.inputs == after.dataset.inputs
+                && before
+                    .dataset
+                    .related
+                    .as_ref()
+                    .map(|related| &related.coverage)
+                    == after
+                        .dataset
+                        .related
+                        .as_ref()
+                        .map(|related| &related.coverage),
             added_rows: None,
             removed_rows: None,
         };
@@ -368,14 +363,23 @@ impl Engine {
                 crate::query::table(table, self.inner.lifecycle.budget.clone())?,
             )?;
         }
-        let columns = first_schema
+        let visible = first_schema
             .fields()
+            .iter()
+            .filter(|field| {
+                !(group == "source"
+                    && before.dataset.related.is_some()
+                    && after.dataset.related.is_some()
+                    && refresh::TUPLE.contains(&field.name().as_str()))
+            })
+            .collect::<Vec<_>>();
+        let columns = visible
             .iter()
             .enumerate()
             .map(|(i, field)| format!("\"{}\" AS c{i}", field.name().replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(", ");
-        let group_columns = (0..first_schema.fields().len())
+        let group_columns = (0..visible.len())
             .map(|i| format!("c{i}"))
             .collect::<Vec<_>>()
             .join(", ");
@@ -624,6 +628,8 @@ impl Engine {
 
         let admission = if let Some(phase) = self.phase(spec, &operation, "admission").await? {
             phase
+        } else if let OperationRequest::Refresh(refresh) = spec {
+            Box::pin(self.admit_refresh(refresh, &operation)).await?
         } else {
             #[cfg(feature = "test-util")]
             work_started("admission");
@@ -667,6 +673,7 @@ impl Engine {
                 table: None,
                 rows: 0,
                 changes: None,
+                coverage: None,
                 metrics: WriteMetrics::default(),
             };
             self.complete(spec, &operation, &phase).await?
@@ -685,6 +692,9 @@ impl Engine {
                 }
                 OperationRequest::Update(update) => {
                     self.process_update(update, &directory, &admission).await?
+                }
+                OperationRequest::Refresh(refresh) => {
+                    Box::pin(self.process_refresh(refresh, &directory, &admission)).await?
                 }
                 OperationRequest::Backfill(_) => {
                     return Err(Error::refusal(
@@ -710,6 +720,7 @@ impl Engine {
                 rows: prepared.table.rows,
                 table: Some(prepared.table),
                 changes: prepared.changes,
+                coverage: admission.coverage.clone(),
                 metrics: prepared.metrics,
             };
             self.complete(spec, &operation, &phase).await?
@@ -719,11 +730,21 @@ impl Engine {
         let table = processing.table.clone().ok_or_else(|| {
             Error::refusal("corrupt_phase", "processing completion has no table pin")
         })?;
+        let related = if let OperationRequest::Refresh(refresh) = spec {
+            Some(Box::new(
+                Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?,
+            ))
+        } else {
+            None
+        };
         if self.phase(spec, &operation, "validation").await?.is_none() {
             #[cfg(feature = "test-util")]
             work_started("validation");
             verify_table(&table, &lifecycle.budget).await?;
             verify_changes(spec, &table, processing.changes.as_ref(), &lifecycle.budget).await?;
+            if let Some(related) = &related {
+                Box::pin(refresh::verify_related(&table, related, &lifecycle.budget)).await?;
+            }
             let phase = PhaseResult {
                 phase: "validation".into(),
                 ..processing.clone()
@@ -804,6 +825,7 @@ impl Engine {
             computed,
             inputs,
             relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
+            related,
             changes: processing.changes.clone(),
             definition: operation.definition.clone(),
             eligibility: operation.eligibility,
@@ -825,7 +847,7 @@ impl Engine {
                     "retained readback differs from the prepared result",
                 ));
             }
-            storage::check_available(release_objects(&release), &lifecycle.budget).await?;
+            check_release_available(&release, &lifecycle.budget).await?;
             release
         } else {
             #[cfg(feature = "test-util")]
@@ -869,6 +891,11 @@ impl Engine {
             }
         };
         stop_after(stop, "readback")?;
+        if let OperationRequest::Refresh(refresh) = spec {
+            let selected = Box::pin(self.select_refresh(refresh, &operation, &release)).await?;
+            stop_after(stop, "selection")?;
+            return Ok(selected);
+        }
         {
             let _guard = lock.lock().await;
             let view = lifecycle.open(spec.dataset()).await?;
@@ -890,7 +917,7 @@ impl Engine {
                 ));
             }
             check_group_rebuild(&authority, spec)?;
-            self.select(&view, authority, &release).await?;
+            Box::pin(self.select(&view, authority, &release)).await?;
         }
         stop_after(stop, "selection")?;
         Ok(release)
@@ -941,7 +968,7 @@ impl Engine {
                     &operation.request_digest,
                     operation.eligibility,
                     phase,
-                ),
+                )?,
             )
             .await?;
         if let Some(found) = &found {
@@ -1008,7 +1035,7 @@ impl Engine {
             &operation.request_digest,
             operation.eligibility,
             &phase.phase,
-        );
+        )?;
         // Another attempt may have completed the same deterministic phase. Preserve
         // that generation rather than relabeling or replacing its evidence.
         if let Some(completed) = self.inner.lifecycle.get::<PhaseResult>(&view, &key).await? {
@@ -1023,7 +1050,15 @@ impl Engine {
     }
 }
 
-fn phase_key(spec: &OperationRequest, request: &str, eligibility: u64, phase: &str) -> String {
+fn phase_key(
+    spec: &OperationRequest,
+    request: &str,
+    eligibility: u64,
+    phase: &str,
+) -> Result<String> {
+    if let OperationRequest::Refresh(refresh) = spec {
+        return refresh::phase_key(refresh, eligibility, phase);
+    }
     if phase == "admission" {
         let mut hash = blake3::Hasher::new();
         for (name, input) in spec.inputs() {
@@ -1031,7 +1066,7 @@ fn phase_key(spec: &OperationRequest, request: &str, eligibility: u64, phase: &s
             hash.update(name.as_bytes());
             hash.update(input.digest.as_bytes());
         }
-        return format!("phase/input/{}/{phase}", hash.finalize().to_hex());
+        return Ok(format!("phase/input/{}/{phase}", hash.finalize().to_hex()));
     }
     if let OperationRequest::Build(build) = spec {
         // The selected composition determines admission and promotion, but does
@@ -1046,12 +1081,12 @@ fn phase_key(spec: &OperationRequest, request: &str, eligibility: u64, phase: &s
             hash.update(&(value.len() as u64).to_le_bytes());
             hash.update(value.as_bytes());
         }
-        return format!(
+        return Ok(format!(
             "phase/build/{}/{eligibility}/{phase}",
             hash.finalize().to_hex()
-        );
+        ));
     }
-    format!("phase/{request}/{eligibility}/{phase}")
+    Ok(format!("phase/{request}/{eligibility}/{phase}"))
 }
 fn conflicting_operation() -> Error {
     Error::refusal(
@@ -1090,6 +1125,7 @@ fn check_preparation(authority: &Authority, operation: &Operation) -> Result<()>
 
 fn check_group_rebuild(authority: &Authority, request: &OperationRequest) -> Result<()> {
     inputs::check_rebuild(authority, request)?;
+    refresh::check_rebuild(authority, request)?;
     if matches!(request, OperationRequest::Build(build) if build.base.is_none())
         && authority
             .selected
@@ -1152,12 +1188,18 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
         OperationRequest::Backfill(spec) => {
             serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})
         }
+        OperationRequest::Refresh(spec) => {
+            serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "left": spec.left, "right": spec.right, "join": spec.join, "policy": spec.policy, "relationship": spec.relationship}})
+        }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
         .to_hex()
         .to_string())
 }
 fn validate_request(spec: &OperationRequest) -> Result<()> {
+    if let OperationRequest::Refresh(spec) = spec {
+        return refresh::validate(spec);
+    }
     if let OperationRequest::Backfill(spec) = spec {
         return backfill::validate(spec);
     }
@@ -1372,6 +1414,16 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
     let mut objects = vec![release.manifest.clone()];
     objects.extend(dataset.parent_manifest.iter().cloned());
     objects.extend(dataset.inputs.values().cloned());
+    if let Some(related) = &dataset.related {
+        objects.extend(
+            related
+                .coverage
+                .inputs
+                .values()
+                .map(|version| version.manifest.clone()),
+        );
+        objects.extend(related.evidence.objects.iter().cloned());
+    }
     objects.extend(
         dataset
             .groups
@@ -1397,23 +1449,20 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
     objects
 }
 
+async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Result<()> {
+    if release.dataset.related.is_some() {
+        verification::check_available(release, budget).await
+    } else {
+        storage::check_available(release_objects(release), budget).await
+    }
+}
+
 async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Result<()> {
-    let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
-    if release.manifest.bytes > budget.limits.max_metadata_bytes as u64 {
-        return Err(Error::refusal(
-            "metadata_capacity",
-            "release manifest exceeds reader budget",
-        ));
-    }
-    storage::verify_object(&release.manifest)?;
-    let decoded: DatasetPin =
-        serde_json::from_reader(std::fs::File::open(&release.manifest.path)?)?;
-    if decoded != release.dataset {
-        return Err(Error::refusal(
-            "release_mismatch",
-            "release manifest does not match its pin",
-        ));
-    }
+    verification::verify_all(&[release], budget).await
+}
+
+async fn verify_local_release(release: &ReleasePin, budget: &Budget) -> Result<()> {
+    let decoded = &release.dataset;
     if decoded.format != FORMAT
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
@@ -1439,7 +1488,7 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
         .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
     verify_changes(&decoded.request, source, decoded.changes.as_ref(), budget).await?;
     verify_table(source, budget).await?;
-    backfill::verify_groups(&decoded, budget).await?;
+    backfill::verify_groups(decoded, budget).await?;
     Ok(())
 }
 
@@ -1456,7 +1505,12 @@ async fn verify_changes(
         )
     };
     let (spec, changes) = match (request, changes) {
-        (OperationRequest::Build(_) | OperationRequest::Backfill(_), None) => return Ok(()),
+        (
+            OperationRequest::Build(_)
+            | OperationRequest::Backfill(_)
+            | OperationRequest::Refresh(_),
+            None,
+        ) => return Ok(()),
         (OperationRequest::Update(spec), Some(changes)) => (spec, changes),
         _ => return Err(invalid()),
     };
