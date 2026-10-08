@@ -147,6 +147,7 @@ establish population-independent backfill latency.
 target/debug/docspec --workspace workspaces/comments latest comments
 target/debug/docspec --workspace workspaces/comments release comments initial
 target/debug/docspec --workspace workspaces/comments compare old.json new.json
+target/debug/docspec --workspace workspaces/comments check-succession old.json new.json
 target/debug/docspec --workspace workspaces/comments invalidate comments "dependency correction"
 target/debug/docspec --workspace workspaces/comments serve
 ```
@@ -173,8 +174,17 @@ work remains retained. Rebase with the same input, query, definition and eligibi
 reuses qualified source work. Changing dependency eligibility recomputes it.
 Builds without an explicit base still refuse to replace selected computed groups.
 
+`check-succession` proves that the target follows the prior version on the observed
+accepted history. Each selection records its actual predecessor in the same native
+commit as the result and selected head. The check uses exact manifest identities
+and retained lifecycle records; optional change files and payload reads are not
+needed. It reports accepted selections advanced and behind the observed head.
+These counts describe selection history, not elapsed time or upstream acquisition
+completeness. Missing, malformed, backward or orphaned history refuses. The check
+does not establish payload availability; use `verify` for that.
+
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
-`POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `GET /datasets/{dataset}`,
+`POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `POST /succession`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
 CLI and HTTP call the same application services. HTTP accepts bounded JSON;
 the CLI streams bulk reads. One process owns a workspace; use HTTP to submit
@@ -209,6 +219,9 @@ repeated metadata scans after the history probe demonstrated their cost; it adds
 no durable index or second source of truth. Warm commits and cold replay enforce
 the same history budget; new work refuses before that bound makes acknowledged
 records unreadable. History compaction remains required for long-running use.
+An accepted-history check retains that loaded immutable state and its memory
+reservation throughout traversal, so unrelated dataset activity cannot trigger
+repeated scans. It yields cooperatively while walking the bounded history.
 
 Full comparisons connect DataFusion's maintained `StreamingTable` to the same
 native Iceberg reader used for independent verification. This small adapter

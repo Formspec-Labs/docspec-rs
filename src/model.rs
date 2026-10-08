@@ -96,6 +96,48 @@ pub struct ReleasePin {
     pub verified: bool,
 }
 
+/// Exact identity of one accepted release, without embedding its payload inventory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionRef {
+    pub dataset: Id,
+    pub version: Id,
+    pub manifest: ObjectRef,
+}
+
+impl ReleasePin {
+    /// Returns the exact identity used for accepted-history checks.
+    pub fn version_ref(&self) -> VersionRef {
+        VersionRef {
+            dataset: self.dataset.dataset.clone(),
+            version: self.id.clone(),
+            manifest: self.manifest.clone(),
+        }
+    }
+}
+
+/// Accepted predecessor, committed atomically with the selected result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Succession {
+    pub selected: VersionRef,
+    pub predecessor: Option<VersionRef>,
+    /// Descriptive source admission boundary; ordering comes from predecessor links.
+    pub boundary: u64,
+    pub eligibility: u64,
+}
+
+/// Evidence that target coverage follows prior coverage on the observed selected chain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SuccessionProof {
+    pub prior: VersionRef,
+    pub target: VersionRef,
+    pub observed_head: VersionRef,
+    pub observed_revision: i64,
+    /// Accepted selections between prior and target, including composition-only changes.
+    pub selections_advanced: usize,
+    /// Accepted selections after target at this observation, not elapsed time or acquisition lag.
+    pub selections_behind: usize,
+}
+
 /// An expensive completed phase retained independently of its parent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhaseResult {
@@ -119,6 +161,8 @@ pub struct Authority {
     pub boundary: u64,
     pub selected: Option<DatasetPin>,
     pub release: Option<ReleasePin>,
+    /// Native revision that selected this release, preserved across later admissions.
+    pub selection_revision: Option<i64>,
 }
 
 /// Objects protected by an owner before a consumer can promise their availability.

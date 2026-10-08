@@ -13,8 +13,8 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs | Evidence-only changes; history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Multiple pinned related inputs; old/new-key affected-result discovery for joins; joined and aggregate-group refresh against full reconstruction |
+| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal; bounded accepted-history proof; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Multiple pinned related inputs; old/new-key affected-result discovery for joins; joined and aggregate-group refresh against full reconstruction |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; combined CLI reads; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource qualification; broader fault tests; HTTP bulk streaming; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
@@ -329,3 +329,50 @@ Workspace ownership now explicitly unlocks before closing its descriptor. The
 full gate passes with that fix. Descriptor inheritance is a plausible explanation
 for the transient failures, not a traced cause of that particular run. See the
 [lock review and failed regression](reviews/workspace-release.md).
+
+## Accepted-history checkpoint
+
+Successful selection now commits a `Succession` row alongside the result and
+authority. Its predecessor is the actual selected version under the same guard,
+including when an independent group merges with a sibling selected after its
+request was captured. Admission order and composition parents do not determine
+accepted order. Retrying a completed operation leaves the recorded link unchanged.
+
+`prove_succession`, CLI `check-succession` and HTTP `POST /succession` inspect one
+captured lifecycle snapshot. The traversal follows the observed head through the
+target to the prior version, requiring exact manifest identities, matching native
+commit revisions for each result/link pair, and strictly decreasing predecessor
+revisions. The authority retains its exact selection revision across later
+admissions and invalidations. Both proof and selection require the head link to
+match that revision and its recorded source boundary and eligibility. A rewritten
+head pair or an authority predeclaring a future commit therefore refuses. Both
+endpoints must belong to that selected chain, even when equal.
+Missing, malformed, backward, rebound or orphaned history refuses. Proofs report
+selection counts, not elapsed time or completeness of external acquisition.
+
+The proof reads no payloads and does not depend on optional change tables. It is
+an ordering prerequisite for related-input refresh, not an availability check or
+a complete change-history certificate. Existing experimental workspaces without
+these records refuse; ordering is never inferred from operation names or source
+admission numbers. Payload verification, retention and restore remain separate.
+
+Traversal retains the existing immutable row cache and its memory reservation
+through cooperative yields. A reviewer identified that reentering the single cache
+for every link could replay the entire lifecycle after unrelated dataset activity.
+The corrected path uses a retained handle without adding another cache or index.
+A regression removes the old native directory after cache replacement and checks
+both readable retained rows and reservation release. Serialized-byte and link
+bounds limit history traversal; full cold replay still grows with retained history.
+
+See [succession tests](../tests/succession.rs), the
+[consistency review](reviews/succession-consistency.md),
+[resource review](reviews/succession-resources.md), and
+[gate output](reviews/succession-check.log). This does not complete multiple-input
+selection, coupled-generation declarations, joins or aggregate refresh under R5.
+
+The first full gate stopped when a recovery fixture inherited the production
+32 GiB scratch profile while available disk approached that size. The
+[failed output is retained](reviews/succession-disk-failed.log). The shared
+process-kill harness now writes an explicit small-fixture resource profile and
+passes it to both the interrupted worker and resume. Production resource limits
+are unchanged; these fixtures do not qualify the production performance target.

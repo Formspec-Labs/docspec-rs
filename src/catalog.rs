@@ -29,11 +29,24 @@ pub struct Lifecycle {
 }
 
 #[derive(Debug)]
-struct SnapshotRows {
+pub(crate) struct SnapshotRows {
     metadata: String,
     values: BTreeMap<String, (i64, String)>,
     history_bytes: usize,
     _reservation: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl SnapshotRows {
+    /// Reads a value with its native commit revision and serialized byte charge.
+    pub(crate) fn get_record<T: DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<(i64, usize, T)>> {
+        self.values
+            .get(key)
+            .map(|(revision, json)| Ok((*revision, json.len(), serde_json::from_str(json)?)))
+            .transpose()
+    }
 }
 
 /// One immutable read boundary for an application decision.
@@ -103,12 +116,11 @@ impl Lifecycle {
     /// # Errors
     /// Refuses malformed rows, oversized metadata, or invalid serialized values.
     pub async fn get<T: DeserializeOwned>(&self, view: &View, key: &str) -> Result<Option<T>> {
-        self.rows(view)
+        Ok(self
+            .rows(view)
             .await?
-            .values
-            .get(key)
-            .map(|(_, json)| serde_json::from_str(json).map_err(Error::from))
-            .transpose()
+            .get_record(key)?
+            .map(|(_, _, value)| value))
     }
 
     /// Lists current records at one authority boundary within the metadata budget.
@@ -124,7 +136,8 @@ impl Lifecycle {
             .collect()
     }
 
-    async fn rows(&self, view: &View) -> Result<Arc<SnapshotRows>> {
+    /// Retains one immutable state and its byte reservation across cache replacement.
+    pub(crate) async fn rows(&self, view: &View) -> Result<Arc<SnapshotRows>> {
         let metadata = view.table.metadata_location_result()?.to_owned();
         if let Some(hit) = self
             .cache
@@ -417,5 +430,67 @@ impl Catalog for GuardedCatalog {
     }
     async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
         self.inner.register_table(t, m).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::Limits;
+
+    #[tokio::test]
+    async fn retained_snapshot_survives_cache_replacement_and_holds_its_reservation() {
+        let root = tempfile::tempdir().unwrap();
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 64 << 20,
+            scratch_bytes: 16 << 20,
+            batch_rows: 32,
+            max_batch_bytes: 4096,
+            max_metadata_bytes: 1 << 20,
+        })
+        .unwrap();
+        let lifecycle = Lifecycle::new(
+            storage::local_catalog(root.path()).await.unwrap(),
+            budget.clone(),
+        );
+        let a = lifecycle.open(&Id::new("a").unwrap()).await.unwrap();
+        let a = lifecycle
+            .commit(&a, vec![record("key", "first").unwrap()])
+            .await
+            .unwrap();
+        let retained = lifecycle.rows(&a).await.unwrap();
+        let weak = Arc::downgrade(&retained);
+        let b = lifecycle.open(&Id::new("b").unwrap()).await.unwrap();
+        let b = lifecycle
+            .commit(&b, vec![record("key", "other dataset").unwrap()])
+            .await
+            .unwrap();
+        assert_ne!(
+            retained.metadata,
+            lifecycle.rows(&b).await.unwrap().metadata
+        );
+        // The old native files are now inaccessible. Record reads must still use
+        // the retained state; a cache lookup and replay would fail here.
+        std::fs::rename(
+            a.table.metadata().location(),
+            root.path().join("unavailable-a"),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                retained.get_record::<String>("key").unwrap(),
+                Some((a.revision, 7, "first".into()))
+            );
+        }
+        assert_eq!(Arc::strong_count(&retained), 1);
+        let remaining = budget.limits.memory_bytes / 2 - 2 * budget.limits.max_metadata_bytes;
+        let available = budget.reserve(remaining).unwrap();
+        assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
+        drop(retained);
+        assert!(weak.upgrade().is_none());
+        let reclaimed = budget.reserve(budget.limits.max_metadata_bytes).unwrap();
+        assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
+        drop((available, reclaimed));
     }
 }

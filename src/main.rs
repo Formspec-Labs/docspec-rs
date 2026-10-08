@@ -61,6 +61,8 @@ enum Command {
     Latest { dataset: String },
     /// Resolve an immutable historical release by its operation identity.
     Release { dataset: String, version: String },
+    /// Prove that target follows prior on accepted history, without reading payloads.
+    CheckSuccession { prior: PathBuf, target: PathBuf },
     /// Plan complete key replacements and deletions against an exact base.
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
@@ -240,6 +242,15 @@ async fn main() -> anyhow::Result<()> {
                         .release(&Id::new(dataset)?, &Id::new(version)?)
                         .await?,
                 )?,
+                Command::CheckSuccession { prior, target } => {
+                    let prior: ReleasePin = read_json(prior)?;
+                    let target: ReleasePin = read_json(target)?;
+                    print_json(
+                        &engine
+                            .prove_succession(&prior.version_ref(), &target.version_ref())
+                            .await?,
+                    )?;
+                }
                 Command::Compare {
                     before,
                     after,

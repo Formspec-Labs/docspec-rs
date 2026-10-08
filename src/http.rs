@@ -5,7 +5,7 @@
 
 use crate::{
     Engine, Error,
-    model::{BackfillSpec, Id, ReleasePin, RunSpec, UpdateSpec},
+    model::{BackfillSpec, Id, ReleasePin, RunSpec, SuccessionProof, UpdateSpec, VersionRef},
 };
 use axum::{
     Json, Router,
@@ -24,6 +24,7 @@ pub fn router(engine: Engine) -> Router {
         .route("/updates/run", post(update))
         .route("/backfills/plan", post(plan_backfill))
         .route("/backfills/run", post(backfill))
+        .route("/succession", post(succession))
         .route("/datasets/{dataset}", get(inspect))
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
@@ -45,7 +46,9 @@ impl IntoResponse for HttpError {
             | "stale_definition"
             | "stale_eligibility"
             | "coverage_regression" => StatusCode::CONFLICT,
-            "stale_base" | "stale_source_boundary" | "stale_group" => StatusCode::CONFLICT,
+            "stale_base" | "stale_source_boundary" | "stale_group" | "unproven_succession" => {
+                StatusCode::CONFLICT
+            }
             "capacity" | "metadata_capacity" | "disk_capacity" => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };
@@ -116,4 +119,21 @@ async fn backfill(
     Json(spec): Json<BackfillSpec>,
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.backfill(&spec).await?))
+}
+
+#[derive(serde::Deserialize)]
+struct SuccessionRequest {
+    prior: VersionRef,
+    target: VersionRef,
+}
+
+async fn succession(
+    State(engine): State<Engine>,
+    Json(request): Json<SuccessionRequest>,
+) -> Result<Json<SuccessionProof>, HttpError> {
+    Ok(Json(
+        engine
+            .prove_succession(&request.prior, &request.target)
+            .await?,
+    ))
 }

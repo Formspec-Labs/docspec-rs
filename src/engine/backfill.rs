@@ -474,23 +474,12 @@ impl Engine {
             {
                 return Ok(completed);
             }
-            let mut authority: Authority =
-                lifecycle.get(&view, "authority").await?.unwrap_or_default();
+            let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
             promotion(&authority, &operation, &capture, source, spec)?;
             if authority.release.as_ref() != Some(&current) {
                 continue;
             }
-            authority.selected = Some(release.dataset.clone());
-            authority.release = Some(release.clone());
-            lifecycle
-                .commit(
-                    &view,
-                    vec![
-                        record("authority", authority)?,
-                        record(format!("result/{}", spec.operation), &release)?,
-                    ],
-                )
-                .await?;
+            self.select(&view, authority, &release).await?;
             stop_after(stop, "selection")?;
             return Ok(release);
         }

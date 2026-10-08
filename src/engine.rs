@@ -27,6 +27,7 @@ use tokio::sync::Mutex;
 mod backfill;
 #[doc(inline)]
 pub use backfill::BackfillPlan;
+mod history;
 mod write;
 
 /// Local execution host sharing catalog, admission, and resource accounting.
@@ -848,7 +849,7 @@ impl Engine {
             {
                 return Ok(completed);
             }
-            let mut authority = self.check(&view, &operation).await?;
+            let authority = self.check(&view, &operation).await?;
             if authority
                 .selected
                 .as_ref()
@@ -860,17 +861,7 @@ impl Engine {
                 ));
             }
             check_group_rebuild(&authority, spec)?;
-            authority.selected = Some(release.dataset.clone());
-            authority.release = Some(release.clone());
-            lifecycle
-                .commit(
-                    &view,
-                    vec![
-                        record("authority", authority)?,
-                        record(format!("result/{}", spec.operation()), &release)?,
-                    ],
-                )
-                .await?;
+            self.select(&view, authority, &release).await?;
         }
         stop_after(stop, "selection")?;
         Ok(release)
