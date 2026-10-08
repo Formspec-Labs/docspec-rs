@@ -10,7 +10,7 @@ or compatibility layer for legacy DocSpec.
 
 | Requirement | Implemented locally | Required work remaining |
 | --- | --- | --- |
-| R1 Durable data and commits | Retained input bytes; native tables; guarded selection; stable retry identity; completed phase reuse; process-kill recovery | Broader durability failures; partial applied updates; complete occurrence/value identity and evidence semantics |
+| R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; native shared-file candidate probe; guarded selection; stable retry identity; completed phase reuse; process-kill recovery | Broader durability failures; partial applied updates; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; full-query replacement; explicit definition invalidation; historical schema reads | Stable field identities; independently computed groups; pending/null/failure outcomes; backfill and exact-boundary cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity | Typed changes from actual writes; inserts, replacements, deletions and evidence-only change records |
@@ -55,3 +55,22 @@ stale dependency refusal and independent reading. Concurrent field-group updates
 shared cleanup, related-input selection, old-actor restore, the full metadata-growth
 matrix and the complete consumer path remain unqualified. See the original
 [qualification plan](requirements/07-operations-qualification.md).
+
+## Shared-file storage checkpoint
+
+The maintained Iceberg append operation can create a fresh candidate table that
+references unchanged Parquet files alongside replacement files. The native probe
+checks unchanged bytes and modification time, retained old membership, exact new
+membership including duplicates/nulls, preserved inherited ownership, and reads
+without the original catalog. Unknown external objects, conflicting inherited
+identities and missing inventory references refuse. Native statistics sidecars
+participate in ownership and inventory checks; interpreting their contents is not
+qualified by the reference-only test.
+
+Inventories traverse the snapshots named by the exact native metadata and decode
+each shared manifest once. They describe snapshot read dependencies, not a catalog
+backup or full restore point: previous metadata-log files, catalog bookkeeping and
+provider authority still require the R6 restore implementation. Delete-bearing
+current snapshots explicitly refuse this candidate-sharing path until delete
+semantics are qualified. This storage checkpoint does not implement affected-key
+discovery, application-level incremental commits, shared retention or backfill.

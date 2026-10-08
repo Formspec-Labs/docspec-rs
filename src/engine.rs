@@ -552,12 +552,7 @@ impl Engine {
             let files = storage::write_batches(&table, stream, &lifecycle.budget).await?;
             let rows = files.iter().map(|f| f.record_count()).sum();
             let table = storage::append(&table, lifecycle.catalog.as_ref(), files).await?;
-            let owner = spec.dataset.clone();
-            let max_entries = lifecycle.budget.limits.max_metadata_bytes / 512;
-            let pin = lifecycle
-                .budget
-                .blocking(move || storage::pin(&owner, &table, rows, max_entries))
-                .await?;
+            let pin = storage::pin(&spec.dataset, &table, rows, &lifecycle.budget, &[]).await?;
             let phase = PhaseResult {
                 operation: spec.operation.clone(),
                 phase: "processing".into(),
@@ -972,6 +967,7 @@ fn stop_after(stop: Option<&str>, phase: &str) -> Result<()> {
 pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
     storage::verify_objects(pin.objects.clone(), budget).await?;
     let table = storage::open_pin(pin).await?;
+    storage::check_inventory(pin, &table, budget).await?;
     let mut rows = 0;
     if pin.snapshot.is_some() {
         let stream = storage::read_batches(&table, budget).await?;

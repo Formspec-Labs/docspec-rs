@@ -94,8 +94,10 @@ the same history budget; new work refuses before that bound makes acknowledged
 records unreadable. History compaction remains required for long-running use.
 
 Owned output directories are protected before writes. Automatic expiration and
-metadata deletion are disabled. Everything remains retained; removal, compaction,
-cross-dataset object sharing and restore are not implemented. This conservative
+metadata deletion are disabled. Everything remains retained; application-level removal, compaction,
+cross-dataset sharing and restore are not implemented. A native storage probe
+qualifies sharing unchanged Parquet files across candidate snapshots while
+preserving their original owner and exact read dependencies. This conservative
 local behavior avoids promising a cleanup or recovery mechanism that has not been
 qualified.
 
