@@ -1,0 +1,18 @@
+{
+  "source": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/comments-current-release/capture-02/comments.parquet",
+  "capture_record": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/comments-current-release/capture-02/RESULT.json",
+  "capture_record_sha256": "dd0933c0cf79e4f258c67f71042c1619318f367c803a0eef0638f236c92e80f2",
+  "bytes": 6680266997,
+  "sha256": "4512d7f5a9d63ada860ec092834c7538fd046a89878daccad42f7f664f827ac8",
+  "expected_sha256": "4512d7f5a9d63ada860ec092834c7538fd046a89878daccad42f7f664f827ac8",
+  "matches": true,
+  "source_identity": {
+    "tableUuid": "01a0d3fc-be18-70b0-abeb-e0f6e58d6cff",
+    "snapshotId": 7932544697392812642,
+    "schemaId": 6
+  },
+  "rows_reported": 26418078,
+  "schema_reported": "comment_id: string\ndocket_id: string\nagency_code: string\nfirst_name: string\nlast_name: string\norganization: string\ncategory: string\ntitle: string\ncomment: string\ndocument_type: string\nposted_date: string\nmodify_date: string\nreceive_date: string\nattachments_json: string\ntext_content: string\ntext_extraction_status: string\npdf_extraction_results_json: string\ncomment_on_document_id: string\ncomment_on_object_id: string\noriginal_document_id: string\ncomment_reference_values_json: string\nsubtype: string\nduplicate_comments: string",
+  "elapsed_seconds": 4.230817079544067,
+  "scope": "Local captured original bytes only; subset and receipts qualification pending"
+}
