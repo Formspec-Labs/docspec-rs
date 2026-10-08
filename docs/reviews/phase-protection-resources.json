@@ -1,0 +1,9 @@
+{
+  "recorded_at": "2026-10-08 23:42:11 UTC",
+  "debug_path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug",
+  "debug_allocated_bytes": 8225984512,
+  "shared_volume_free_bytes": 16884998144,
+  "measurement": "Post-gate snapshot, not a peak. du allocated blocks may count shared APFS extents; shared-volume free space includes other work.",
+  "cleanup": "None. These debug outputs served the completed gate and remain reusable. No retained inputs, results, failed attempts or qualification evidence were removed.",
+  "corpus_benchmark": false
+}

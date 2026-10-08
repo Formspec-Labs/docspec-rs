@@ -178,6 +178,17 @@ impl Engine {
                 }
                 if key.starts_with("reference-binding/") {
                     let binding: super::owners::ReferenceBinding = decode(json)?;
+                    if super::owners::earlier_binding(&rows, &view, key, revision, &binding)? {
+                        if !retired_phases.contains(&PhaseGeneration {
+                            key: binding.key,
+                            revision,
+                        }) {
+                            return Err(invalid_inventory(
+                                "superseded binding has no exact retirement",
+                            ));
+                        }
+                        continue;
+                    }
                     let required = super::owners::validate_binding(
                         &rows, &view, key, revision, &binding, limit,
                     )?;

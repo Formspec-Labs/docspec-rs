@@ -1,11 +1,14 @@
 //! Recoverable row-local field groups, selected against an exact source boundary.
 
+use super::retention::owners::ReferenceProtections;
 use super::*;
 use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
 mod expressions;
 mod preparation;
+#[cfg(all(test, feature = "test-util"))]
+mod protection_tests;
 mod verification;
 use expressions::Expressions;
 pub(super) use verification::{verify_binding_dependencies, verify_groups};
@@ -19,6 +22,7 @@ pub(super) struct PreparedGroup {
     pub table: TablePin,
     pub native_field_ids: BTreeMap<i32, i32>,
     pub input_fields: BTreeMap<String, i32>,
+    pub protections: Option<ReferenceProtections>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -501,7 +505,7 @@ impl Engine {
         let mut retained_readback = self
             .retained_backfill_readback(spec, &operation, &capture, &base)
             .await?;
-        let (prepared, binding) = if let Some(readback) = &retained_readback {
+        let (prepared, binding, prepared_protections) = if let Some(readback) = &retained_readback {
             (
                 readback
                     .dataset
@@ -515,6 +519,11 @@ impl Engine {
                     .get(spec.group.as_str())
                     .ok_or_else(invalid_group)?
                     .clone(),
+                readback
+                    .protections
+                    .as_ref()
+                    .map(ReferenceProtections::duplicate)
+                    .transpose()?,
             )
         } else {
             if base.manifest.bytes > lifecycle.budget.limits.max_metadata_bytes as u64 {
@@ -532,10 +541,13 @@ impl Engine {
             let definition = spec.group_definition();
             let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
             checks.trust(&base, &lifecycle.budget).await?;
+            let view = lifecycle.open(&spec.dataset).await?;
+            let source_protections = self.request_protections(&view, &spec.operation).await?;
             let prepared = Box::pin(self.prepare_group(
                 &request,
                 &operation,
                 source,
+                source_protections.as_ref(),
                 &definition,
                 None,
                 stop,
@@ -550,12 +562,12 @@ impl Engine {
                 source_metadata: source.metadata.clone(),
                 base_manifest: capture.base_manifest.clone(),
             };
-            (prepared.table, binding)
+            (prepared.table, binding, prepared.protections)
         };
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
         loop {
-            let current = {
+            let (current, current_protections) = {
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
                 if let Some(completed) = lifecycle
@@ -568,8 +580,27 @@ impl Engine {
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
                 self.check_not_abandoned(&view, &spec.operation).await?;
                 promotion(&authority, &operation, &capture, source, spec)?;
-                authority.release.ok_or_else(invalid_group)?
+                let current = authority.release.ok_or_else(invalid_group)?;
+                let key = format!("result/{}", current.id);
+                let protections = self.retained_protections(&view, &key).await?;
+                if protections.is_some() {
+                    let rows = lifecycle.rows(&view).await?;
+                    let _memory = rows.reserve_decoded(&lifecycle.budget, &[&key])?;
+                    let recorded: ReleasePin = lifecycle
+                        .get(&view, &key)
+                        .await?
+                        .ok_or_else(invalid_group)?;
+                    if recorded != current {
+                        return Err(invalid_group());
+                    }
+                }
+                (current, protections)
             };
+            let mut readback_protections = prepared_protections
+                .as_ref()
+                .map(ReferenceProtections::duplicate)
+                .transpose()?;
+            ReferenceProtections::inherit(&mut readback_protections, current_protections.as_ref())?;
             let mut dataset = current.dataset.clone();
             dataset.format = operation.result_format;
             dataset.parent_manifest = Some(current.manifest.clone());
@@ -602,15 +633,21 @@ impl Engine {
                 spec.operation,
                 blake3::hash(&serialized).to_hex()
             );
-            let recorded: Option<ReleasePin> = if retained_readback
+            let recorded: Option<Retained<ReleasePin>> = if retained_readback
                 .as_ref()
                 .is_some_and(|readback| readback.dataset == dataset)
             {
                 retained_readback.take()
             } else {
-                lifecycle
-                    .get(&lifecycle.open(&spec.dataset).await?, &readback_key)
-                    .await?
+                let view = lifecycle.open(&spec.dataset).await?;
+                if let Some(value) = lifecycle.get(&view, &readback_key).await? {
+                    Some(Retained {
+                        value,
+                        protections: self.retained_protections(&view, &readback_key).await?,
+                    })
+                } else {
+                    None
+                }
             };
             let release = if let Some(recorded) = recorded {
                 if recorded.dataset != dataset {
@@ -654,13 +691,24 @@ impl Engine {
                 let view = lifecycle.open(&spec.dataset).await?;
                 self.check_completion(&view, &operation, &spec.operation)
                     .await?;
-                if let Some(recorded) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
-                    recorded
+                if let Some(value) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
+                    Retained {
+                        value,
+                        protections: self.retained_protections(&view, &readback_key).await?,
+                    }
                 } else {
-                    lifecycle
-                        .commit(&view, vec![record(&readback_key, &release)?])
-                        .await?;
-                    release
+                    let records = completion_records(
+                        &spec.dataset,
+                        &view,
+                        &readback_key,
+                        &release,
+                        readback_protections.as_ref(),
+                    )?;
+                    lifecycle.commit(&view, records).await?;
+                    Retained {
+                        value: release,
+                        protections: readback_protections,
+                    }
                 }
             };
             stop_after(stop, "readback")?;
@@ -700,7 +748,7 @@ impl Engine {
             }
             Box::pin(self.select(&view, authority, &release)).await?;
             stop_after(stop, "selection")?;
-            return Ok(release);
+            return Ok(release.value);
         }
     }
 
@@ -710,7 +758,7 @@ impl Engine {
         operation: &Operation,
         capture: &Capture,
         base: &ReleasePin,
-    ) -> Result<Option<ReleasePin>> {
+    ) -> Result<Option<Retained<ReleasePin>>> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
         let rows = lifecycle.rows(&view).await?;
@@ -729,7 +777,7 @@ impl Engine {
             .groups
             .get("source")
             .ok_or_else(invalid_group)?;
-        let mut retained: Option<(i64, ReleasePin)> = None;
+        let mut retained: Option<(i64, &str, ReleasePin)> = None;
         for (key, revision, json) in readbacks {
             tokio::task::consume_budget().await;
             let readback: ReleasePin = serde_json::from_str(json)?;
@@ -768,7 +816,7 @@ impl Engine {
             {
                 return Err(invalid_group());
             }
-            if let Some((_, previous)) = &retained
+            if let Some((_, _, previous)) = &retained
                 && (previous.dataset.groups.get(spec.group.as_str()) != Some(table)
                     || previous.dataset.computed.get(spec.group.as_str()) != Some(binding))
             {
@@ -777,11 +825,21 @@ impl Engine {
                     format!("retained readback {key} binds a different target generation"),
                 ));
             }
-            if retained.as_ref().is_none_or(|(prior, _)| revision > *prior) {
-                retained = Some((revision, readback));
+            if retained
+                .as_ref()
+                .is_none_or(|(prior, _, _)| revision > *prior)
+            {
+                retained = Some((revision, key, readback));
             }
         }
-        Ok(retained.map(|(_, readback)| readback))
+        if let Some((_, key, value)) = retained {
+            Ok(Some(Retained {
+                value,
+                protections: self.retained_protections(&view, key).await?,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -1037,6 +1095,7 @@ mod tests {
                 &request,
                 &operation,
                 &source,
+                None,
                 &spec.group_definition(),
                 None,
                 None,
@@ -1102,6 +1161,7 @@ mod tests {
                 &request,
                 &operation,
                 &evolved,
+                None,
                 &spec.group_definition(),
                 Some(&first.input_fields),
                 None,
@@ -1135,6 +1195,7 @@ mod tests {
                 &request,
                 &operation,
                 &evolved,
+                None,
                 &spec.group_definition(),
                 None,
                 None,

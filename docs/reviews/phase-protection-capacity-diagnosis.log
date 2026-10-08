@@ -1,0 +1,68 @@
+    Finished `test` profile [unoptimized] target(s) in 1.49s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+test engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope ... FAILED
+
+failures:
+
+---- engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSvfqmS/workspace/objects/owner-a/5569bd9ca9454ed48798c91b8fedaced/data/994500c8-7cc0-48b5-8cb9-4db2e9b1613b-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSvfqmS/workspace/objects/owner-b/07cd82a54ea541708d5eb7ed3846e1ec/data/d3723af2-949d-4455-9170-263310442b0a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSvfqmS/workspace/objects/consumer/cff908e4ae4647cfbf63cf2de8a6c1db/data/5d07cfc8-1ea3-4530-8831-0d26a8dfb987-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+
+thread 'engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope' (15013891) panicked at src/engine/retention/owners/phase_tests.rs:555:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: Backtrace [{ fn: "std::backtrace::Backtrace::create" }, { fn: "docspec::error::Error::refusal" }, { fn: "docspec::budget::Budget::reserve::{{closure}}" }, { fn: "core::result::Result<T,E>::map_err" }, { fn: "docspec::budget::Budget::reserve" }, { fn: "docspec::storage::write_batches::{{closure}}" }, { fn: "docspec::catalog::Lifecycle::commit::{{closure}}" }, { fn: "docspec::engine::backfill::preparation::<impl docspec::engine::Engine>::prepare_group::{{closure}}" }, { fn: "<core::pin::Pin<P> as core::future::future::Future>::poll" }, { fn: "docspec::engine::backfill::<impl docspec::engine::Engine>::prepare_backfill::{{closure}}" }, { fn: "<core::pin::Pin<P> as core::future::future::Future>::poll" }, { fn: "docspec::engine::backfill::<impl docspec::engine::Engine>::backfill_admitted::{{closure}}" }, { fn: "docspec::engine::backfill::<impl docspec::engine::Engine>::backfill_internal::{{closure}}::{{closure}}::{{closure}}" }, { fn: "docspec::engine::worker::<impl docspec::engine::Engine>::spawn_work::{{closure}}" }, { fn: "<core::pin::Pin<P> as core::future::future::Future>::poll" }, { fn: "tokio::runtime::task::core::Core<T,S>::poll::{{closure}}" }, { fn: "tokio::runtime::task::core::Core<T,S>::poll" }, { fn: "tokio::runtime::task::harness::poll_future::{{closure}}" }, { fn: "<core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once" }, { fn: "std::panicking::catch_unwind::do_call" }, { fn: "___rust_try" }, { fn: "std::panic::catch_unwind" }, { fn: "tokio::runtime::task::harness::poll_future" }, { fn: "tokio::runtime::task::harness::Harness<T,S>::poll_inner" }, { fn: "tokio::runtime::task::harness::Harness<T,S>::poll" }, { fn: "tokio::runtime::task::raw::poll" }, { fn: "tokio::runtime::task::raw::RawTask::poll" }, { fn: "tokio::runtime::task::LocalNotified<S>::run" }, { fn: "tokio::runtime::scheduler::current_thread::Context::run_task::{{closure}}::{{closure}}" }, { fn: "tokio::runtime::scheduler::current_thread::Context::run_task::{{closure}}" }, { fn: "tokio::runtime::scheduler::current_thread::Context::enter" }, { fn: "tokio::runtime::scheduler::current_thread::Context::run_task" }, { fn: "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}" }, { fn: "tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}" }, { fn: "tokio::runtime::context::scoped::Scoped<T>::set" }, { fn: "tokio::runtime::context::set_scheduler::{{closure}}" }, { fn: "std::thread::local::LocalKey<T>::try_with" }, { fn: "std::thread::local::LocalKey<T>::with" }, { fn: "tokio::runtime::context::set_scheduler" }, { fn: "tokio::runtime::scheduler::current_thread::CoreGuard::enter" }, { fn: "tokio::runtime::scheduler::current_thread::CoreGuard::block_on" }, { fn: "tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}" }, { fn: "tokio::runtime::context::runtime::enter_runtime" }, { fn: "tokio::runtime::scheduler::current_thread::CurrentThread::block_on" }, { fn: "tokio::runtime::runtime::Runtime::block_on_inner" }, { fn: "tokio::runtime::runtime::Runtime::block_on" }, { fn: "docspec::engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope" }, { fn: "docspec::engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope::{{closure}}" }, { fn: "core::ops::function::FnOnce::call_once" }, { fn: "test::__rust_begin_short_backtrace" }, { fn: "test::run_test::{{closure}}" }, { fn: "std::sys::backtrace::__rust_begin_short_backtrace" }, { fn: "core::ops::function::FnOnce::call_once{{vtable.shim}}" }, { fn: "std::sys::thread::unix::Thread::new::thread_start" }, { fn: "__pthread_cond_wait" }] }
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::result::unwrap_failed
+   3: docspec::engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope::{{closure}}
+   4: <core::pin::Pin<P> as core::future::future::Future>::poll
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+   6: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+   8: tokio::runtime::scheduler::current_thread::Context::enter
+   9: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+  11: tokio::runtime::context::scoped::Scoped<T>::set
+  12: tokio::runtime::context::set_scheduler::{{closure}}
+  13: std::thread::local::LocalKey<T>::try_with
+  14: std::thread::local::LocalKey<T>::with
+  15: tokio::runtime::context::set_scheduler
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+  17: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+  18: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+  19: tokio::runtime::context::runtime::enter_runtime
+  20: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+  21: tokio::runtime::runtime::Runtime::block_on_inner
+  22: tokio::runtime::runtime::Runtime::block_on
+  23: docspec::engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope
+  24: docspec::engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope::{{closure}}
+  25: core::ops::function::FnOnce::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 94 filtered out; finished in 6.53s
+
+error: test failed, to rerun pass `--lib`

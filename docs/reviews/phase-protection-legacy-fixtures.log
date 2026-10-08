@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 14.96s
+     Running tests/backfill_dependencies.rs (target/debug/deps/backfill_dependencies-dbc2fc20ad28de60)
+
+running 2 tests
+test empty_source_completions_retain_dependencies_without_file_work ... ok
+test legacy_group_completions_resume_and_keep_unknown_dependencies ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.19s
+
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.26s
+

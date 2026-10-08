@@ -6,6 +6,8 @@ use crate::engine::backfill::{FileCompletion, PreparedCompletion};
 use std::path::Component;
 
 #[cfg(all(test, feature = "test-util"))]
+mod phase_tests;
+#[cfg(all(test, feature = "test-util"))]
 mod tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +57,40 @@ pub(in crate::engine) struct ReferenceProtections {
 }
 
 impl ReferenceProtections {
+    pub(in crate::engine) fn duplicate(&self) -> Result<Self> {
+        let bytes = inputs::metadata_size(&(&self.consumer, &self.references), self.limit)?
+            .saturating_mul(4)
+            .saturating_add(4096);
+        let count = u32::try_from(bytes).map_err(|_| capacity())?;
+        let memory = self
+            ._memory
+            .semaphore()
+            .clone()
+            .try_acquire_many_owned(count)
+            .map_err(|_| capacity())?;
+        Ok(Self {
+            consumer: self.consumer.clone(),
+            references: self.references.clone(),
+            limit: self.limit,
+            _memory: memory,
+        })
+    }
+
+    /// Unknown provenance cannot become qualified by combining it with known work.
+    pub(in crate::engine) fn inherit(
+        target: &mut Option<Self>,
+        incoming: Option<&Self>,
+    ) -> Result<()> {
+        match (target.as_mut(), incoming) {
+            (Some(target), Some(incoming)) => target.merge(incoming.duplicate()?),
+            (_, None) => {
+                *target = None;
+                Ok(())
+            }
+            (None, Some(_)) => Ok(()),
+        }
+    }
+
     pub(in crate::engine) fn empty(consumer: &Id, budget: &Budget) -> Result<Self> {
         Ok(Self {
             consumer: consumer.clone(),
@@ -252,6 +288,37 @@ pub(super) fn validate_binding(
     Ok(required)
 }
 
+// Replacing a retired completion from unknown legacy inputs may leave its older
+// binding row in history. It never protects the new generation. The caller must
+// also validate the retirement receipt (or use the inventory's validated set).
+pub(super) fn earlier_binding(
+    rows: &SnapshotRows,
+    view: &View,
+    key: &str,
+    revision: i64,
+    binding: &ReferenceBinding,
+) -> Result<bool> {
+    let claim_revision = rows.revision(&binding.key).ok_or_else(invalid)?;
+    if claim_revision <= revision {
+        return Ok(false);
+    }
+    if key != binding_key(&binding.key)
+        || binding.revision != revision
+        || revision <= 0
+        || claim_revision > view.revision
+        || &crate::catalog::lifecycle_ident(&binding.consumer) != view.table.identifier()
+    {
+        return Err(invalid());
+    }
+    let (retirement_revision, _) =
+        super::phases::retirement_marker(rows, view, &binding.key, revision)?
+            .ok_or_else(invalid)?;
+    if retirement_revision >= claim_revision {
+        return Err(invalid());
+    }
+    Ok(true)
+}
+
 pub(super) fn validate_reference(
     reference: &OwnerProtectionRef,
     grant: &OwnerProtection,
@@ -319,6 +386,15 @@ pub(super) fn available(rows: &SnapshotRows, view: &View, object: &ObjectRef) ->
 }
 
 impl Engine {
+    pub(in crate::engine) async fn request_protections(
+        &self,
+        view: &View,
+        operation: &Id,
+    ) -> Result<Option<ReferenceProtections>> {
+        self.retained_protections(view, &admission::dependencies_key(operation))
+            .await
+    }
+
     /// Loads immutable references after checking the exact local claim identity.
     ///
     /// No owner is reopened: tokens cannot retire in this checkpoint. Callers may
@@ -376,6 +452,12 @@ impl Engine {
             read_retained(&rows, &key, limit)?.ok_or_else(invalid)?;
         if binding.key != claim {
             return Err(invalid());
+        }
+        if earlier_binding(&rows, view, &key, revision, &binding)? {
+            if !super::phases::phase_retired(&rows, view, claim, revision)? {
+                return Err(invalid());
+            }
+            return Ok(None);
         }
         let required = validate_binding(&rows, view, &key, revision, &binding, limit)?;
         Ok(Some((binding, required, memory)))

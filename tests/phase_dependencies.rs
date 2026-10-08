@@ -90,6 +90,19 @@ async fn processing_keeps_its_consumed_input_when_an_admission_key_is_rebound() 
             rebound.outputs[0].path = replacement.to_string_lossy().into_owned();
             record(*admission_key, &rebound).unwrap()
         };
+        // The replaced generation must really be retired. Its previous binding
+        // cannot remain authoritative after either legacy or material rebinding.
+        let retirement = engine
+            .plan_phase_retirement(
+                &build.dataset,
+                &id("old-material-generation"),
+                std::slice::from_ref(&change_record.0),
+                "replace the dependency fixture generation",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&retirement).await.unwrap();
+        let view = lifecycle.open(&build.dataset).await.unwrap();
         lifecycle.commit(&view, vec![change_record]).await.unwrap();
         std::fs::remove_file(&build.input).unwrap();
         let release = if update {

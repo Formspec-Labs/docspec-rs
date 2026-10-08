@@ -55,7 +55,7 @@ impl Engine {
         &self,
         spec: &RefreshSpec,
         operation: &Operation,
-    ) -> Result<PhaseResult> {
+    ) -> Result<Retained<PhaseResult>> {
         #[cfg(feature = "test-util")]
         work_started("admission");
         let budget = &self.inner.lifecycle.budget;
@@ -91,10 +91,12 @@ impl Engine {
             metrics: WriteMetrics::default(),
             dependencies: Some(PhaseDependencies::default()),
         };
+        let protections = self.request_protections(&view, &spec.operation).await?;
         self.complete(
             &OperationRequest::Refresh(Box::new(spec.clone())),
             operation,
-            &phase,
+            phase,
+            protections,
         )
         .await
     }
@@ -130,9 +132,9 @@ impl Engine {
         &self,
         spec: &RefreshSpec,
         operation: &Operation,
-        processing: &PhaseResult,
+        processing: &Retained<PhaseResult>,
         stop: Option<&str>,
-    ) -> Result<RelatedResult> {
+    ) -> Result<Retained<RelatedResult>> {
         let request = OperationRequest::Refresh(Box::new(spec.clone()));
         let dependencies = processing.dependencies.clone().map(|mut dependencies| {
             if spec.mode == RefreshMode::Full
@@ -196,15 +198,24 @@ impl Engine {
                 table: Some(prepared.table),
                 metrics: prepared.metrics,
                 dependencies,
-                ..processing.clone()
+                ..processing.value.clone()
             };
-            self.complete(&request, operation, &phase).await?
+            let protections = processing
+                .protections
+                .as_ref()
+                .map(ReferenceProtections::duplicate)
+                .transpose()?;
+            self.complete(&request, operation, phase, protections)
+                .await?
         };
         stop_after(stop, "evidence")?;
-        Ok(RelatedResult {
-            request: spec.clone(),
-            coverage: processing.coverage.clone().ok_or_else(invalid)?,
-            evidence: evidence.table.ok_or_else(invalid)?,
+        Ok(Retained {
+            value: RelatedResult {
+                request: spec.clone(),
+                coverage: processing.coverage.clone().ok_or_else(invalid)?,
+                evidence: evidence.value.table.ok_or_else(invalid)?,
+            },
+            protections: evidence.protections,
         })
     }
 

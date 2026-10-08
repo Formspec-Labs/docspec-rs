@@ -6,7 +6,7 @@
 use crate::{
     Error, Result,
     budget::{Budget, Limits, WorkspaceLock},
-    catalog::{Lifecycle, record},
+    catalog::{Lifecycle, View, record},
     model::*,
     storage,
 };
@@ -39,6 +39,7 @@ mod aggregation;
 mod incremental;
 mod refresh;
 mod retention;
+use retention::owners::ReferenceProtections;
 mod schema;
 mod verification;
 mod worker;
@@ -64,6 +65,42 @@ struct Inner {
     maintenance: Arc<RwLock<()>>,
     closing: AtomicBool,
     owned_catalog: bool,
+}
+
+// A retained value and its protection always come from the same native view.
+// None means unknown legacy protection, not a qualified empty dependency set.
+struct Retained<T> {
+    value: T,
+    protections: Option<ReferenceProtections>,
+}
+
+struct PreparedSource {
+    admission: Option<Retained<PhaseResult>>,
+    processing: Retained<PhaseResult>,
+}
+
+impl<T> std::ops::Deref for Retained<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+fn completion_records<T: Serialize>(
+    consumer: &Id,
+    view: &View,
+    key: &str,
+    completion: &T,
+    protections: Option<&ReferenceProtections>,
+) -> Result<Vec<(String, serde_json::Value)>> {
+    let claim = record(key, completion)?;
+    let binding = protections
+        .map(|scope| scope.binding(consumer, view, key, &claim.1))
+        .transpose()?;
+    let mut records = vec![claim];
+    records.extend(binding);
+    Ok(records)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -743,7 +780,7 @@ impl Engine {
         operation: &'a Operation,
         request: &'a str,
         stop: Option<&'a str>,
-    ) -> futures::future::BoxFuture<'a, Result<(Option<PhaseResult>, PhaseResult)>> {
+    ) -> futures::future::BoxFuture<'a, Result<PreparedSource>> {
         Box::pin(async move {
             let lifecycle = &self.inner.lifecycle;
             if let Some(processing) = self.phase(spec, operation, "processing").await? {
@@ -781,7 +818,10 @@ impl Engine {
                 };
                 stop_after(stop, "admission")?;
                 stop_after(stop, "processing")?;
-                return Ok((admission, processing));
+                return Ok(PreparedSource {
+                    admission,
+                    processing,
+                });
             }
             let admission = if let Some(phase) = self.phase(spec, operation, "admission").await? {
                 phase
@@ -856,7 +896,8 @@ impl Engine {
                     metrics: WriteMetrics::default(),
                     dependencies: Some(PhaseDependencies::default()),
                 };
-                self.complete(spec, operation, &phase).await?
+                let protections = self.request_protections(&view, spec.operation()).await?;
+                self.complete(spec, operation, phase, protections).await?
             };
             stop_after(stop, "admission")?;
 
@@ -918,11 +959,17 @@ impl Engine {
                         tables: Vec::new(),
                     }),
                 };
-                self.complete(spec, operation, &phase).await?
+                let view = lifecycle.open(spec.dataset()).await?;
+                let mut protections = self.request_protections(&view, spec.operation()).await?;
+                ReferenceProtections::inherit(&mut protections, admission.protections.as_ref())?;
+                self.complete(spec, operation, phase, protections).await?
             };
             stop_after(stop, "processing")?;
 
-            Ok((Some(admission), processing))
+            Ok(PreparedSource {
+                admission: Some(admission),
+                processing,
+            })
         })
     }
 
@@ -1082,13 +1129,14 @@ impl Engine {
 
             // Readback is an independent retained promise. Earlier phase retirement
             // must not force its already qualified values through preparation again.
+            let retained_view = lifecycle.open(spec.dataset()).await?;
             if let Some(release) = lifecycle
-                .get::<ReleasePin>(
-                    &lifecycle.open(spec.dataset()).await?,
-                    &format!("readback/{}", spec.operation()),
-                )
+                .get::<ReleasePin>(&retained_view, &format!("readback/{}", spec.operation()))
                 .await?
             {
+                let _protections = self
+                    .retained_protections(&retained_view, &format!("readback/{}", spec.operation()))
+                    .await?;
                 if !release.verified
                     || &release.id != spec.operation()
                     || &release.dataset.dataset != spec.dataset()
@@ -1113,7 +1161,10 @@ impl Engine {
                 return self.select_prepared(spec, &operation, release, stop).await;
             }
 
-            let (admission, processing) = self
+            let PreparedSource {
+                admission,
+                processing,
+            } = self
                 .prepare_source(spec, &operation, &request, stop)
                 .await?;
 
@@ -1121,9 +1172,7 @@ impl Engine {
                 Error::refusal("corrupt_phase", "processing completion has no table pin")
             })?;
             let related = if let OperationRequest::Refresh(refresh) = spec {
-                Some(Box::new(
-                    Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?,
-                ))
+                Some(Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?)
             } else {
                 None
             };
@@ -1143,7 +1192,9 @@ impl Engine {
                     }
                     dependencies
                 });
-            if let Some(validated) = self.phase(spec, &operation, "validation").await? {
+            let validated = if let Some(validated) =
+                self.phase(spec, &operation, "validation").await?
+            {
                 if validated.table != processing.table
                     || validated.outputs != processing.outputs
                     || validated.rows != processing.rows
@@ -1153,6 +1204,7 @@ impl Engine {
                 {
                     return Err(self.phase_generation_conflict(spec, &operation, "validation")?);
                 }
+                validated
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("validation");
@@ -1177,11 +1229,37 @@ impl Engine {
                 let phase = PhaseResult {
                     phase: "validation".into(),
                     dependencies: validation_dependencies,
-                    ..processing.clone()
+                    ..processing.value.clone()
                 };
-                self.complete(spec, &operation, &phase).await?;
-            }
+                let mut protections = processing
+                    .protections
+                    .as_ref()
+                    .map(ReferenceProtections::duplicate)
+                    .transpose()?;
+                if let Some(related) = &related {
+                    ReferenceProtections::inherit(&mut protections, related.protections.as_ref())?;
+                }
+                self.complete(spec, &operation, phase, protections).await?
+            };
             stop_after(stop, "validation")?;
+            let protection_view = lifecycle.open(spec.dataset()).await?;
+            let mut readback_protections = self
+                .request_protections(&protection_view, spec.operation())
+                .await?;
+            ReferenceProtections::inherit(
+                &mut readback_protections,
+                processing.protections.as_ref(),
+            )?;
+            ReferenceProtections::inherit(
+                &mut readback_protections,
+                validated.protections.as_ref(),
+            )?;
+            if let Some(related) = &related {
+                ReferenceProtections::inherit(
+                    &mut readback_protections,
+                    related.protections.as_ref(),
+                )?;
+            }
 
             // A full rebuild declares a complete new input. Updates retain the prior
             // source evidence because they only replace a subset of its rows.
@@ -1233,12 +1311,17 @@ impl Engine {
                         &captured_request,
                         &operation,
                         &table,
+                        readback_protections.as_ref(),
                         &previous.definition,
                         Some(&input_fields),
                         None,
                         &mut checks,
                     ))
                     .await?;
+                    ReferenceProtections::inherit(
+                        &mut readback_protections,
+                        prepared.protections.as_ref(),
+                    )?;
                     groups.insert(name.clone(), prepared.table);
                     computed.insert(
                         name.clone(),
@@ -1282,19 +1365,23 @@ impl Engine {
                                 ),
                             ));
                         }
+                        let protections = self.retained_protections(&view, &key).await?;
+                        ReferenceProtections::inherit(
+                            &mut readback_protections,
+                            protections.as_ref(),
+                        )?;
                     } else {
-                        lifecycle
-                            .commit(
-                                &view,
-                                vec![record(
-                                    key,
-                                    CompletedGroups::Captured {
-                                        outputs: completed,
-                                        source: (&table).into(),
-                                    },
-                                )?],
-                            )
-                            .await?;
+                        let records = completion_records(
+                            spec.dataset(),
+                            &view,
+                            &key,
+                            &CompletedGroups::Captured {
+                                outputs: completed,
+                                source: (&table).into(),
+                            },
+                            readback_protections.as_ref(),
+                        )?;
+                        lifecycle.commit(&view, records).await?;
                     }
                 }
             }
@@ -1307,7 +1394,7 @@ impl Engine {
                 computed,
                 inputs,
                 relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
-                related,
+                related: related.map(|related| Box::new(related.value)),
                 changes: processing.changes.clone(),
                 definition: captured_request.result_definition().to_owned(),
                 eligibility: operation.eligibility,
@@ -1326,8 +1413,9 @@ impl Engine {
             // Readback has an operation-specific manifest because coverage can advance
             // while the same expensive materialized values remain reusable.
             let readback_key = format!("readback/{}", spec.operation());
+            let readback_view = lifecycle.open(spec.dataset()).await?;
             let release = if let Some(release) = lifecycle
-                .get::<ReleasePin>(&lifecycle.open(spec.dataset()).await?, &readback_key)
+                .get::<ReleasePin>(&readback_view, &readback_key)
                 .await?
             {
                 if release.dataset != dataset {
@@ -1337,7 +1425,12 @@ impl Engine {
                     ));
                 }
                 check_release_available(&release, &lifecycle.budget).await?;
-                release
+                Retained {
+                    value: release,
+                    protections: self
+                        .retained_protections(&readback_view, &readback_key)
+                        .await?,
+                }
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("readback");
@@ -1384,16 +1477,28 @@ impl Engine {
                 self.check_completion(&view, &operation, spec.operation())
                     .await?;
                 if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
-                    completed
+                    Retained {
+                        value: completed,
+                        protections: self.retained_protections(&view, &readback_key).await?,
+                    }
                 } else {
-                    lifecycle
-                        .commit(&view, vec![record(&readback_key, &release)?])
-                        .await?;
-                    release
+                    let records = completion_records(
+                        spec.dataset(),
+                        &view,
+                        &readback_key,
+                        &release,
+                        readback_protections.as_ref(),
+                    )?;
+                    lifecycle.commit(&view, records).await?;
+                    Retained {
+                        value: release,
+                        protections: readback_protections,
+                    }
                 }
             };
             stop_after(stop, "readback")?;
-            self.select_prepared(spec, &operation, release, stop).await
+            self.select_prepared(spec, &operation, release.value, stop)
+                .await
         })
     }
 
@@ -1479,23 +1584,19 @@ impl Engine {
         spec: &OperationRequest,
         operation: &Operation,
         phase: &str,
-    ) -> Result<Option<PhaseResult>> {
+    ) -> Result<Option<Retained<PhaseResult>>> {
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
         self.check(&view, operation, spec.operation()).await?;
-        let found: Option<PhaseResult> = self
-            .active_completion(
-                &view,
-                &phase_key(
-                    spec,
-                    &operation.request_digest,
-                    operation.eligibility,
-                    phase,
-                    operation.base_manifest.as_ref(),
-                    operation.schema_key.as_ref(),
-                )?,
-            )
-            .await?;
-        if let Some(found) = &found {
+        let key = phase_key(
+            spec,
+            &operation.request_digest,
+            operation.eligibility,
+            phase,
+            operation.base_manifest.as_ref(),
+            operation.schema_key.as_ref(),
+        )?;
+        let found: Option<PhaseResult> = self.active_completion(&view, &key).await?;
+        if let Some(found) = found {
             for output in &found.outputs {
                 if std::fs::metadata(&output.path)?.len() != output.bytes {
                     return Err(Error::refusal(
@@ -1505,8 +1606,12 @@ impl Engine {
                 }
             }
             tracing::info!(phase, operation = %spec.operation(), "reusing qualified phase");
+            return Ok(Some(Retained {
+                value: found,
+                protections: self.retained_protections(&view, &key).await?,
+            }));
         }
-        Ok(found)
+        Ok(None)
     }
 
     fn phase_generation_conflict(
@@ -1570,8 +1675,9 @@ impl Engine {
         &self,
         spec: &OperationRequest,
         operation: &Operation,
-        phase: &PhaseResult,
-    ) -> Result<PhaseResult> {
+        phase: PhaseResult,
+        protections: Option<ReferenceProtections>,
+    ) -> Result<Retained<PhaseResult>> {
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
@@ -1594,14 +1700,19 @@ impl Engine {
             {
                 return Err(self.phase_generation_conflict(spec, operation, &phase.phase)?);
             }
-            return Ok(completed);
+            return Ok(Retained {
+                value: completed,
+                protections: self.retained_protections(&view, &key).await?,
+            });
         }
-        self.inner
-            .lifecycle
-            .commit(&view, vec![record(key, phase)?])
-            .await?;
+        let records =
+            completion_records(spec.dataset(), &view, &key, &phase, protections.as_ref())?;
+        self.inner.lifecycle.commit(&view, records).await?;
         tracing::info!(phase = phase.phase, rows = phase.rows, operation = %spec.operation(), "phase durably complete");
-        Ok(phase.clone())
+        Ok(Retained {
+            value: phase,
+            protections,
+        })
     }
 }
 

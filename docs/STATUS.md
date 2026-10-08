@@ -1,5 +1,53 @@
 # Implementation and qualification status
 
+## Protection follows completed work
+
+New source, processing, evidence and validation completions carry their input
+protections in the same native commit. Scalar file, prepared-group, validation,
+coordinated-group and readback handoffs use the same rule. Reused work keeps the
+binding of the actual winning generation, including work originally completed by
+another operation. Combining outputs combines their existing scopes; it does not
+reacquire owners, walk historical dependencies or rehash payloads.
+
+Unknown older provenance stays unknown downstream. When a bound completion is
+explicitly retired and an unbound replacement appears, its old binding cannot
+qualify the replacement. Readers and inventory require retirement of that exact
+native generation before treating the obsolete binding as absent. Other revision
+mismatches refuse. Scalar acknowledgment bundles account for copied bindings as
+well as completion records under the existing metadata and memory limits.
+
+The [focused recovery checks](reviews/phase-protection-focused.log) passed for
+identical input bytes retained by different owners, exact completion reuse and
+unknown replacement generations. The [complete repository gate](reviews/phase-protection-check-complete.log)
+passed formatting, strict linting, and all library and integration checks, including
+scalar retries/reopen, refresh evidence, schema admission and coordinated groups. The
+[independent review](reviews/phase-protection-review.md) approves the scoped change.
+
+The [initial gate](reviews/phase-protection-check-final.log) exposed fixture
+problems. Static reservation accounting showed that the pre-existing scalar path
+already fills the 256 MiB profile's 128 MiB shared pool before request overhead.
+The combined schema/backfill fixture now uses the established 512 MiB scalar test
+profile; other small-memory tests and production limits are unchanged. The
+[diagnostic log](reviews/phase-protection-capacity-diagnosis.log) retains the failure.
+The legacy dependency fixture now explicitly retires its bound predecessor before
+installing an unknown replacement, preserving the production generation checks.
+The same correction applies to the integration fixtures that replace phase and
+scalar completion records. Their [targeted suites](reviews/phase-protection-legacy-fixtures.log)
+passed with the original reuse and output assertions intact; the
+[earlier integration failure](reviews/phase-protection-check-repaired.log) remains retained.
+The intermediate [retention run](reviews/phase-protection-retention.log) and
+[lint failure](reviews/phase-protection-check.log) remain retained. No corpus
+benchmark, payload revalidation or cleanup was added.
+The [post-gate resource snapshot](reviews/phase-protection-resources.json) records
+allocated debug-cache blocks and shared-volume free space separately from dataset
+storage. It is not a peak measurement; the build outputs remain reusable.
+
+Final result/selection bindings, newly selected siblings and observed input heads
+remain unfinished. Backfill readbacks that consume an unbound selected result
+therefore remain unbound. Grants are still permanent, and physical removal stays
+disabled. This checkpoint does not complete retention, restore, hosted adapters or
+the full R1–R7 and performance qualification plan.
+
 ## Protected request admission and managed input reuse
 
 New Build, Update, Refresh, Schema and Backfill requests acquire protection for
@@ -49,9 +97,9 @@ including formatting, strict all-target linting and the complete test suite.
 The [resource snapshot](reviews/admission-protection-resources.json) separates
 development-cache allocation from shared-volume free space; it is not a peak.
 
-This checkpoint covers initial request admission. Independently retained phases,
-readbacks, later sibling composition, actual selection predecessors and observed
-input heads still need binding integration. Grants remain permanently active;
+This checkpoint covers initial request admission; the section above records later
+phase integration. Selected sibling composition, actual selection predecessors
+and observed input heads still need binding integration. Grants remain permanently active;
 legacy histories still require conservative inventory. Physical cleanup, token
 retirement, compaction, fenced restore, hosted qualification and the remaining
 R1–R7 work remain unfinished. No corpus benchmark or cleanup was performed here.

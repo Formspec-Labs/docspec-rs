@@ -123,7 +123,7 @@ impl Engine {
         &self,
         spec: &SchemaSpec,
         operation: &Operation,
-    ) -> Result<PhaseResult> {
+    ) -> Result<Retained<PhaseResult>> {
         #[cfg(feature = "test-util")]
         work_started("admission");
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
@@ -146,8 +146,15 @@ impl Engine {
                 ..PhaseDependencies::default()
             }),
         };
-        self.complete(&OperationRequest::Schema(spec.clone()), operation, &phase)
-            .await
+        let view = self.inner.lifecycle.open(&spec.dataset).await?;
+        let protections = self.request_protections(&view, &spec.operation).await?;
+        self.complete(
+            &OperationRequest::Schema(spec.clone()),
+            operation,
+            phase,
+            protections,
+        )
+        .await
     }
 
     pub(super) async fn process_schema(

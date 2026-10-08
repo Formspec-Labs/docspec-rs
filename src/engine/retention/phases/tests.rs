@@ -182,6 +182,19 @@ async fn legacy_processing_cannot_adopt_a_replacement_admission() {
         .unwrap();
     let mut legacy: PhaseResult = serde_json::from_value(value.clone()).unwrap();
     legacy.dependencies = None;
+    // Install a genuinely unknown legacy generation. Retiring the bound
+    // predecessor prevents its protection from qualifying this replacement.
+    let processing_plan = engine
+        .plan_phase_retirement(
+            &spec.dataset,
+            &id("prior-processing-format"),
+            std::slice::from_ref(processing_key),
+            "replace the fixture with legacy dependency metadata",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&processing_plan).await.unwrap();
+    let view = lifecycle.open(&spec.dataset).await.unwrap();
     lifecycle
         .commit(&view, vec![record(processing_key, &legacy).unwrap()])
         .await

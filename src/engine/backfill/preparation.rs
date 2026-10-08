@@ -12,6 +12,7 @@ impl Engine {
         request: &OperationRequest,
         operation: &Operation,
         source: &TablePin,
+        source_protections: Option<&ReferenceProtections>,
         definition: &GroupDefinition,
         input_fields: Option<&BTreeMap<String, i32>>,
         stop: Option<&str>,
@@ -39,7 +40,7 @@ impl Engine {
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
         let prepared: Option<PreparedCompletion> =
             self.active_completion(&view, &prepared_key).await?;
-        let prepared = if let Some(prepared) = prepared {
+        let (prepared, mut protections) = if let Some(prepared) = prepared {
             check_group_dependencies(
                 &prepared_key,
                 prepared.dependencies.as_ref(),
@@ -47,7 +48,10 @@ impl Engine {
                 &prepared.table,
             )?;
             storage::check_available(prepared.table.objects.clone(), &lifecycle.budget).await?;
-            prepared.table
+            (
+                prepared.table,
+                self.retained_protections(&view, &prepared_key).await?,
+            )
         } else {
             #[cfg(feature = "test-util")]
             work_started("backfill-assembly");
@@ -60,6 +64,9 @@ impl Engine {
             let mut completions = BTreeMap::new();
             let mut files = Vec::new();
             let mut inherited = Vec::new();
+            let mut protections = source_protections
+                .map(ReferenceProtections::duplicate)
+                .transpose()?;
             let _assembly = lifecycle
                 .budget
                 .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
@@ -71,6 +78,8 @@ impl Engine {
                 let existing: Option<FileCompletion> =
                     self.active_completion(&completion_view, &key).await?;
                 let completion = if let Some(existing) = existing {
+                    let retained = self.retained_protections(&completion_view, &key).await?;
+                    ReferenceProtections::inherit(&mut protections, retained.as_ref())?;
                     existing
                 } else {
                     let result = self
@@ -89,8 +98,13 @@ impl Engine {
                             completion
                         }
                         Err(error) => {
-                            self.acknowledge_files(request, operation, &mut completions)
-                                .await?;
+                            self.acknowledge_files(
+                                request,
+                                operation,
+                                &mut completions,
+                                source_protections,
+                            )
+                            .await?;
                             let _guard = lock.lock().await;
                             let view = lifecycle.open(request.dataset()).await?;
                             self.check_not_abandoned(&view, request.operation()).await?;
@@ -119,8 +133,13 @@ impl Engine {
                 ) {
                     Ok(bytes) => assembly_bytes = bytes,
                     Err(error) => {
-                        self.acknowledge_files(request, operation, &mut completions)
-                            .await?;
+                        self.acknowledge_files(
+                            request,
+                            operation,
+                            &mut completions,
+                            source_protections,
+                        )
+                        .await?;
                         return Err(error);
                     }
                 }
@@ -132,13 +151,18 @@ impl Engine {
                 if completions.len() >= COMPLETION_BUNDLE
                     || bytes >= lifecycle.budget.limits.max_metadata_bytes / 8
                 {
-                    self.acknowledge_files(request, operation, &mut completions)
-                        .await?;
+                    self.acknowledge_files(
+                        request,
+                        operation,
+                        &mut completions,
+                        source_protections,
+                    )
+                    .await?;
                     stop_after(stop, "files")?;
                     completion_view = lifecycle.open(request.dataset()).await?;
                 }
             }
-            self.acknowledge_files(request, operation, &mut completions)
+            self.acknowledge_files(request, operation, &mut completions, source_protections)
                 .await?;
             stop_after(stop, "files")?;
             let output = storage::append(&output, lifecycle.catalog.as_ref(), files).await?;
@@ -164,7 +188,10 @@ impl Engine {
                     source,
                     &existing.table,
                 )?;
-                existing.table
+                (
+                    existing.table,
+                    self.retained_protections(&view, &prepared_key).await?,
+                )
             } else {
                 let completed = PreparedCompletion {
                     dependencies: Some(GroupDependencies {
@@ -173,20 +200,31 @@ impl Engine {
                     }),
                     table: prepared,
                 };
-                lifecycle
-                    .commit(&view, vec![record(&prepared_key, &completed)?])
-                    .await?;
-                completed.table
+                let records = completion_records(
+                    request.dataset(),
+                    &view,
+                    &prepared_key,
+                    &completed,
+                    protections.as_ref(),
+                )?;
+                lifecycle.commit(&view, records).await?;
+                (completed.table, protections)
             }
         };
         stop_after(stop, "processing")?;
         let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
-        let validated: Option<ValidationCompletion> = self
-            .active_completion(&lifecycle.open(request.dataset()).await?, &validation_key)
-            .await?;
-        if let Some(validated) = validated {
+        let view = lifecycle.open(request.dataset()).await?;
+        let validated: Option<ValidationCompletion> =
+            self.active_completion(&view, &validation_key).await?;
+        let validation_protections = if let Some(validated) = validated {
             check_validation(&validation_key, &validated, source, &prepared)?;
+            self.retained_protections(&view, &validation_key).await?
         } else {
+            let mut validation_protections = protections
+                .as_ref()
+                .map(ReferenceProtections::duplicate)
+                .transpose()?;
+            ReferenceProtections::inherit(&mut validation_protections, source_protections)?;
             #[cfg(feature = "test-util")]
             work_started("backfill-validation");
             verification::verify_group_data(
@@ -207,6 +245,7 @@ impl Engine {
                 self.active_completion(&view, &validation_key).await?;
             if let Some(existing) = existing {
                 check_validation(&validation_key, &existing, source, &prepared)?;
+                self.retained_protections(&view, &validation_key).await?
             } else {
                 let completed = ValidationCompletion {
                     output: prepared.metadata.clone(),
@@ -215,16 +254,24 @@ impl Engine {
                         output: (&prepared).into(),
                     }),
                 };
-                lifecycle
-                    .commit(&view, vec![record(&validation_key, &completed)?])
-                    .await?;
+                let records = completion_records(
+                    request.dataset(),
+                    &view,
+                    &validation_key,
+                    &completed,
+                    validation_protections.as_ref(),
+                )?;
+                lifecycle.commit(&view, records).await?;
+                validation_protections
             }
-        }
+        };
+        ReferenceProtections::inherit(&mut protections, validation_protections.as_ref())?;
         stop_after(stop, "validation")?;
         Ok(PreparedGroup {
             table: prepared,
             native_field_ids: expressions.native_field_ids.clone(),
             input_fields: expressions.input_fields.clone(),
+            protections,
         })
     }
 
@@ -271,6 +318,7 @@ impl Engine {
         request: &OperationRequest,
         operation: &Operation,
         pending: &mut BTreeMap<String, FileCompletion>,
+        source_protections: Option<&ReferenceProtections>,
     ) -> Result<()> {
         if pending.is_empty() {
             return Ok(());
@@ -282,14 +330,41 @@ impl Engine {
         self.check_completion(&view, operation, request.operation())
             .await?;
         let mut changes = Vec::new();
+        let mut bindings = Vec::new();
+        let mut bytes = 0usize;
         for (key, completion) in pending.iter() {
             if self
                 .active_completion::<FileCompletion>(&view, key)
                 .await?
                 .is_none()
             {
-                changes.push(record(key, completion)?);
+                // Each serialized binding is a separate copy until commit.
+                // Keep its admitted scope alive and cap the combined bundle,
+                // including bindings, before accumulating another record.
+                let binding = source_protections
+                    .map(ReferenceProtections::duplicate)
+                    .transpose()?;
+                let records = completion_records(
+                    request.dataset(),
+                    &view,
+                    key,
+                    completion,
+                    binding.as_ref(),
+                )?;
+                bytes = bytes.saturating_add(inputs::metadata_size(
+                    &records,
+                    lifecycle
+                        .budget
+                        .limits
+                        .max_metadata_bytes
+                        .saturating_sub(bytes),
+                )?);
+                bindings.extend(binding);
+                changes.extend(records);
             }
+            // A concurrent winner keeps its own value and binding. Assembly has
+            // already consumed this candidate's outputs under source_protections;
+            // it must not replace that scope with the unconsumed winner's scope.
         }
         if !changes.is_empty() {
             lifecycle.commit(&view, changes).await?;

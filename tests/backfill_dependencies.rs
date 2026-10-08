@@ -13,7 +13,7 @@ use docspec::{
     model::{NativeSnapshotRef, ObjectRef, TablePin},
     storage,
 };
-use scalar::{fixture, limits, spec};
+use scalar::{fixture, id, limits, spec};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -70,6 +70,20 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
         let output: ObjectRef = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(output, prepared.metadata);
         assert_dependencies(value, &base.dataset.groups["source"], &prepared);
+    }
+    if legacy {
+        // Retire the modern generations before replacing their record shapes;
+        // their existing protection bindings must not qualify the legacy values.
+        let plan = engine
+            .plan_phase_retirement(
+                &request.dataset,
+                &id("legacy-shapes"),
+                &retained.keys().cloned().collect::<Vec<_>>(),
+                "replace fixture completions with unknown legacy generations",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&plan).await.unwrap();
     }
     drop(engine);
 
