@@ -5,7 +5,7 @@ use docspec::{
     Engine,
     budget::{Budget, Limits},
     engine::verify_release,
-    model::{Id, ReleasePin, RunSpec},
+    model::{Id, ReleasePin, RunSpec, UpdateSpec},
     storage,
 };
 use futures::TryStreamExt;
@@ -56,6 +56,10 @@ enum Command {
     Latest { dataset: String },
     /// Resolve an immutable historical release by its operation identity.
     Release { dataset: String, version: String },
+    /// Plan complete key replacements and deletions against an exact base.
+    PlanUpdate { spec: PathBuf },
+    /// Apply or resume an update using its stable operation identity.
+    Update { spec: PathBuf },
     /// Compare complete pinned results, preserving duplicate row counts.
     Compare {
         before: PathBuf,
@@ -163,6 +167,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Command::Inspect { dataset } => {
                     print_json(&engine.inspect(&Id::new(dataset)?).await?)?
+                }
+                Command::PlanUpdate { spec } => {
+                    print_json(&engine.plan_update(&read_json::<UpdateSpec>(spec)?).await?)?
+                }
+                Command::Update { spec } => {
+                    print_json(&engine.update(&read_json::<UpdateSpec>(spec)?).await?)?
                 }
                 Command::Latest { dataset } => {
                     print_json(&engine.latest(&Id::new(dataset)?).await?)?

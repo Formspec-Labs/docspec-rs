@@ -1,0 +1,66 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 0.53s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.54s
+     Running unittests src/lib.rs (target/debug/deps/docspec-efbf2aad8a1e634f)
+
+running 3 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b46666612abab237)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-a51f0d13c06df605)
+
+running 19 tests
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+test dependency_correction_fences_adoption_without_output_change ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+test independent_reader_rejects_same_size_corruption ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... ok
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test empty_output_keeps_schema_and_readable_history ... ok
+test comparison_preserves_duplicates_and_historical_release ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test plan_and_run_apply_the_same_definition_fence ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.54s
+
+     Running tests/updates.rs (target/debug/deps/updates-fb985ec712b81c56)
+
+running 11 tests
+test affected_base_corruption_is_refused_before_rewriting ... ok
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.91s
+
+   Doc-tests docspec
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -53,6 +53,47 @@ currently rebuilds the complete result. The input path is a locator; its trusted
 expected digest determines the selected bytes. Original bytes, request SQL,
 processing revision and runtime dependency-lock digest are retained.
 
+For changes against a selected version, save an update request:
+
+```json
+{
+  "dataset": "comments",
+  "operation": "update-001",
+  "definition": "comments-v1",
+  "base": "initial",
+  "keys": ["comment_id"],
+  "replacements": {
+    "path": "/absolute/path/replacement-comments.parquet",
+    "digest": "<64-character BLAKE3 digest>"
+  },
+  "deletions": {
+    "path": "/absolute/path/deleted-comment-keys.parquet",
+    "digest": "<64-character BLAKE3 digest>"
+  }
+}
+```
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-update update.json
+target/debug/docspec --workspace workspaces/comments update update.json > updated-release.json
+```
+
+Replacement rows must contain the complete existing schema. Each supplied key
+replaces every old row with that key, allowing duplicate and one-to-many results.
+Deletion files contain only the named key columns; omit `deletions` when unused.
+Composite keys match as tuples, and null key components match nulls. Overlapping
+replacement and deletion keys refuse. A changed selected base refuses the update;
+prepare a new operation against the new version instead of retrying a stale decision.
+Repeat the same request to resume or recover its already selected release.
+
+Updates retain typed removed and added rows with exact before/after native
+metadata, the base release and stable native key field IDs. Unaffected source files
+are shared; affected files supply both kept and removed rows in one joined read.
+The independently verified release and old versions remain readable without the
+catalog. This supports source updates; dependent field groups and general
+incremental SQL remain unfinished. Release format 2 is the current greenfield
+format; there is no reader migration for earlier experiment outputs.
+
 ```sh
 target/debug/docspec --workspace workspaces/comments latest comments
 target/debug/docspec --workspace workspaces/comments release comments initial
@@ -66,11 +107,21 @@ target/debug/docspec --workspace workspaces/comments serve
 the old selected release. Pass `--definition comments-v2` to activate a replacement
 definition explicitly. A new operation is required after invalidation.
 
-The loopback HTTP API exposes `POST /plan`, `POST /run`, `GET /datasets/{dataset}`,
+The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
+`POST /updates/run`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
 CLI and HTTP call the same application services. HTTP accepts bounded JSON;
 the CLI streams bulk reads. One process owns a workspace; use HTTP to submit
 concurrent requests to that process.
+
+Update inspection includes observed file scans, reused files/bytes, newly written
+data files/bytes and removed/added row counts. Writes include temporary prepared
+keys and change tables; metadata and verification I/O are not included in these
+write counters. Distinct affected keys are prepared once using bounded native
+writers and DataFusion execution. Discovery still probes every source file, and
+verification still reads the complete result and retained inputs. These limits
+prevent a claim that update time is independent of dataset size. Disk preflight
+uses conservative compressed-file estimates, not an output-size guarantee.
 
 ## Small implementation, native storage
 
@@ -129,6 +180,12 @@ values and duplicates, null versus empty strings, empty outputs, catalog-free
 reads, historical comparisons, same-size corruption, stale dependencies,
 nonregressing coverage, competing retries, HTTP behavior and real process kills
 after durable handoffs. Fault controls compile only with `test-util`.
+
+[Update tests](tests/updates.rs) compare applied results and change rows with
+independent reconstruction. They cover duplicate and null keys, quoted composite
+keys, nested values, deletion to an empty table, empty updates, stale-base races,
+competing retries, corrupted base files, altered change declarations, HTTP routes,
+retained-phase recovery and failure while the paired writers are active.
 
 The [retained-data experiment](experiments/local-reuse/protocol.md) uses a separate
 PyArrow reader and preserves raw commands, outputs, timing and memory measurements.

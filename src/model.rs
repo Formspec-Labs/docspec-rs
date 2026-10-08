@@ -79,7 +79,8 @@ pub struct DatasetPin {
     pub definition: String,
     pub eligibility: u64,
     pub boundary: u64,
-    pub request: RunSpec,
+    pub request: OperationRequest,
+    pub changes: Option<ChangePin>,
     pub processor: String,
 }
 
@@ -102,6 +103,8 @@ pub struct PhaseResult {
     pub outputs: Vec<ObjectRef>,
     pub table: Option<TablePin>,
     pub rows: u64,
+    pub changes: Option<ChangePin>,
+    pub metrics: WriteMetrics,
 }
 
 /// Mutable eligibility and coverage facts checked by the same lifecycle commit.
@@ -143,4 +146,106 @@ pub struct RunSpec {
     pub expected_digest: String,
     pub sql: String,
     pub definition: String,
+}
+
+/// A selected local input with an expected immutable byte identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputSpec {
+    pub path: String,
+    pub digest: String,
+}
+
+/// Complete replacement rows and deletion keys against an exact selected version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateSpec {
+    pub dataset: Id,
+    pub operation: OperationId,
+    pub definition: String,
+    pub base: Id,
+    pub keys: Vec<String>,
+    pub replacements: InputSpec,
+    pub deletions: Option<InputSpec>,
+}
+
+/// A typed request sharing the same recovery and guarded selection path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "spec", rename_all = "snake_case")]
+pub enum OperationRequest {
+    Build(RunSpec),
+    Update(UpdateSpec),
+}
+
+impl OperationRequest {
+    /// Returns the dataset whose authority selects this operation.
+    pub fn dataset(&self) -> &Id {
+        match self {
+            Self::Build(spec) => &spec.dataset,
+            Self::Update(spec) => &spec.dataset,
+        }
+    }
+    /// Returns the stable retry identity.
+    pub fn operation(&self) -> &Id {
+        match self {
+            Self::Build(spec) => &spec.operation,
+            Self::Update(spec) => &spec.operation,
+        }
+    }
+    /// Returns the required active definition.
+    pub fn definition(&self) -> &str {
+        match self {
+            Self::Build(spec) => &spec.definition,
+            Self::Update(spec) => &spec.definition,
+        }
+    }
+    /// Returns the version that an update is allowed to replace.
+    pub fn base(&self) -> Option<&Id> {
+        match self {
+            Self::Build(_) => None,
+            Self::Update(spec) => Some(&spec.base),
+        }
+    }
+    /// Lists bounded input declarations, excluding their payloads.
+    pub fn inputs(&self) -> BTreeMap<String, InputSpec> {
+        match self {
+            Self::Build(spec) => BTreeMap::from([(
+                "input".into(),
+                InputSpec {
+                    path: spec.input.clone(),
+                    digest: spec.expected_digest.clone(),
+                },
+            )]),
+            Self::Update(spec) => {
+                let mut inputs =
+                    BTreeMap::from([("replacements".into(), spec.replacements.clone())]);
+                if let Some(input) = &spec.deletions {
+                    inputs.insert("deletions".into(), input.clone());
+                }
+                inputs
+            }
+        }
+    }
+}
+
+/// Typed before/after rows from applied writes, selected with their exact result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangePin {
+    pub base_version: Id,
+    pub base_manifest: ObjectRef,
+    pub before_metadata: ObjectRef,
+    pub after_metadata: ObjectRef,
+    pub key_field_ids: Vec<i32>,
+    pub removed: TablePin,
+    pub added: TablePin,
+}
+
+/// Counts observed while discovering and writing a candidate; no reporting scan.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteMetrics {
+    pub files_scanned: u64,
+    pub files_reused: u64,
+    pub data_files_written: u64,
+    pub bytes_reused: u64,
+    pub bytes_written: u64,
+    pub rows_removed: u64,
+    pub rows_added: u64,
 }

@@ -10,17 +10,18 @@ or compatibility layer for legacy DocSpec.
 
 | Requirement | Implemented locally | Required work remaining |
 | --- | --- | --- |
-| R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; native shared-file candidate probe; guarded selection; stable retry identity; completed phase reuse; process-kill recovery | Broader durability failures; partial applied updates; complete occurrence/value identity and evidence semantics |
+| R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery for builds | Broader durability failures; source-update process-kill qualification; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; full-query replacement; explicit definition invalidation; historical schema reads | Stable field identities; independently computed groups; pending/null/failure outcomes; backfill and exact-boundary cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity | Typed changes from actual writes; inserts, replacements, deletions and evidence-only change records |
+| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs | Evidence-only changes; history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal | Multiple pinned related inputs; old/new-key affected-result discovery; joins and affected-group refresh against full reconstruction |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify and compare; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
-The CLI exposes implemented operations only. Unsupported updates currently require
-an explicit full query; there is no claim of general incremental SQL or independent
-column backfill. A retained source file establishes whole-input provenance, not
+The CLI exposes implemented operations only. Source updates support complete key
+replacement and deletion against an exact base; unsupported transformations require
+an explicit full query. General incremental SQL and independent column backfill
+remain unfinished. A retained source file establishes whole-input provenance, not
 per-value evidence relationships or complete DocSpec conformance.
 
 ## Component qualifications
@@ -72,5 +73,37 @@ each shared manifest once. They describe snapshot read dependencies, not a catal
 backup or full restore point: previous metadata-log files, catalog bookkeeping and
 provider authority still require the R6 restore implementation. Delete-bearing
 current snapshots explicitly refuse this candidate-sharing path until delete
-semantics are qualified. This storage checkpoint does not implement affected-key
-discovery, application-level incremental commits, shared retention or backfill.
+semantics are qualified. The source-update checkpoint below adds affected-key
+discovery and guarded selection. Shared retention and backfill remain unfinished.
+
+## Source-update checkpoint
+
+`UpdateSpec` binds a selected base, typed replacement rows and optional deletion
+keys. A key replaces all matching old rows; composite keys use null-safe equality.
+Overlap refuses. The application prepares distinct keys once, shares unaffected
+native files, and sends kept/removed rows from each affected file to bounded
+writers. Added rows share their files with the selected source table. Stable
+native field IDs are preserved, including nested values. No schema change is
+accepted through this operation.
+
+The common phase path retains admission, processing, validation and readback.
+Every phase and final selection checks the captured base. Competing attempts of
+the same operation reconcile its durable result. Changes bind the base manifest,
+exact before/after metadata, key IDs, typed removed/added tables and row counts.
+Base bytes are verified before rewriting; validation and independent readback
+verify the change tables. These checks establish retained integrity, while fixture
+reconstruction separately checks applied value semantics.
+
+See [update tests](../tests/updates.rs), the independent
+[consistency review](reviews/updates-consistency.md) and
+[resource review](reviews/updates-resources.md). The tests include failure while
+paired writers are active and resume without the original input files. Source
+updates have not yet been subjected to actual process termination or the full
+Q1–Q8 matrix. Build process-kill qualification remains separate evidence.
+
+Physical file reuse is asserted, but end-to-end update performance is unqualified.
+Discovery still reads source files to find affected keys. Native pin creation,
+validation and readback still hash/read full result inventories and retained
+inputs. Write counters exclude metadata and verification I/O. File-count/history
+scaling and complete-path performance measurements remain required; no speedup is
+claimed for this checkpoint.

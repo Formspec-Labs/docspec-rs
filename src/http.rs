@@ -5,7 +5,7 @@
 
 use crate::{
     Engine, Error,
-    model::{Id, ReleasePin, RunSpec},
+    model::{Id, ReleasePin, RunSpec, UpdateSpec},
 };
 use axum::{
     Json, Router,
@@ -20,6 +20,8 @@ pub fn router(engine: Engine) -> Router {
     Router::new()
         .route("/plan", post(plan))
         .route("/run", post(run))
+        .route("/updates/plan", post(plan_update))
+        .route("/updates/run", post(update))
         .route("/datasets/{dataset}", get(inspect))
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
@@ -41,6 +43,7 @@ impl IntoResponse for HttpError {
             | "stale_definition"
             | "stale_eligibility"
             | "coverage_regression" => StatusCode::CONFLICT,
+            "stale_base" => StatusCode::CONFLICT,
             "capacity" | "metadata_capacity" | "disk_capacity" => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };
@@ -62,6 +65,18 @@ async fn run(
     Json(spec): Json<RunSpec>,
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.run(&spec).await?))
+}
+async fn plan_update(
+    State(engine): State<Engine>,
+    Json(spec): Json<UpdateSpec>,
+) -> Result<Json<crate::engine::RunPlan>, HttpError> {
+    Ok(Json(engine.plan_update(&spec).await?))
+}
+async fn update(
+    State(engine): State<Engine>,
+    Json(spec): Json<UpdateSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.update(&spec).await?))
 }
 async fn inspect(
     State(engine): State<Engine>,

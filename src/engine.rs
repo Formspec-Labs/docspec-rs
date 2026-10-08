@@ -24,6 +24,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+mod write;
+
 /// Local execution host sharing catalog, admission, and resource accounting.
 #[derive(Clone, Debug)]
 pub struct Engine {
@@ -46,6 +48,7 @@ struct Operation {
     epoch: u64,
     boundary: u64,
     definition: String,
+    base: Option<Id>,
 }
 
 /// A bounded explanation of reuse and work remaining before selection.
@@ -60,7 +63,7 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.sql-parquet.v1";
+const PROCESSOR: &str = "docspec.dataset.v2";
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -141,14 +144,28 @@ impl Engine {
     /// # Errors
     /// Refuses conflicting operation identities or invalid requests.
     pub async fn plan(&self, spec: &RunSpec) -> Result<RunPlan> {
-        validate_spec(spec)?;
-        let lock = self.lock(&spec.dataset).await;
+        self.plan_request(&OperationRequest::Build(spec.clone()))
+            .await
+    }
+
+    /// Plans an update without opening its large input payloads.
+    ///
+    /// # Errors
+    /// Refuses conflicting identities, stale bases or definitions, and invalid requests.
+    pub async fn plan_update(&self, spec: &UpdateSpec) -> Result<RunPlan> {
+        self.plan_request(&OperationRequest::Update(spec.clone()))
+            .await
+    }
+
+    async fn plan_request(&self, spec: &OperationRequest) -> Result<RunPlan> {
+        validate_request(spec)?;
+        let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
+        let view = lifecycle.open(spec.dataset()).await?;
         let request = fingerprint(spec)?;
         let operation: Option<Operation> = lifecycle
-            .get(&view, &format!("operation/{}", spec.operation))
+            .get(&view, &format!("operation/{}", spec.operation()))
             .await?;
         if operation
             .as_ref()
@@ -157,10 +174,11 @@ impl Engine {
             return Err(conflicting_operation());
         }
         let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        let key = format!("result/{}", spec.operation);
+        let key = format!("result/{}", spec.operation());
         let completed = lifecycle.get::<ReleasePin>(&view, &key).await?.is_some();
         if !completed {
             check_definition(&authority, spec)?;
+            check_base(&authority, spec.base())?;
         }
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
@@ -170,7 +188,7 @@ impl Engine {
         for phase in PHASES {
             let exists = if phase == "readback" {
                 lifecycle
-                    .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation))
+                    .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
                     .await?
                     .is_some()
             } else {
@@ -189,8 +207,8 @@ impl Engine {
             }
         }
         Ok(RunPlan {
-            dataset: spec.dataset.clone(),
-            operation: spec.operation.clone(),
+            dataset: spec.dataset().clone(),
+            operation: spec.operation().clone(),
             completed,
             reusable_phases,
             required_phases,
@@ -408,7 +426,8 @@ impl Engine {
     /// Refuses mismatched inputs, stale eligibility, capacity exhaustion, or corrupt outputs.
     /// Earlier qualified phases remain retained after any failure.
     pub async fn run(&self, spec: &RunSpec) -> Result<ReleasePin> {
-        self.run_internal(spec, None).await
+        self.run_internal(&OperationRequest::Build(spec.clone()), None)
+            .await
     }
 
     /// Interrupts after a durable phase for lifecycle fault qualification.
@@ -417,25 +436,81 @@ impl Engine {
     /// Returns `injected_failure` after the selected completion, or ordinary run errors.
     #[cfg(feature = "test-util")]
     pub async fn run_until(&self, spec: &RunSpec, phase: &str) -> Result<ReleasePin> {
-        self.run_internal(spec, Some(phase)).await
+        self.run_internal(&OperationRequest::Build(spec.clone()), Some(phase))
+            .await
     }
 
-    async fn run_internal(&self, spec: &RunSpec, stop: Option<&str>) -> Result<ReleasePin> {
-        validate_spec(spec)?;
+    /// Applies complete key replacements and deletions against one exact base.
+    ///
+    /// # Errors
+    /// Refuses stale bases, overlapping inputs, schema mismatch or failed preparation.
+    pub async fn update(&self, spec: &UpdateSpec) -> Result<ReleasePin> {
+        self.run_internal(&OperationRequest::Update(spec.clone()), None)
+            .await
+    }
+
+    /// Interrupts an update after a durable phase for recovery qualification.
+    ///
+    /// # Errors
+    /// Returns the injected failure or ordinary update errors.
+    #[cfg(feature = "test-util")]
+    pub async fn update_until(&self, spec: &UpdateSpec, phase: &str) -> Result<ReleasePin> {
+        self.run_internal(&OperationRequest::Update(spec.clone()), Some(phase))
+            .await
+    }
+
+    async fn run_internal(
+        &self,
+        spec: &OperationRequest,
+        stop: Option<&str>,
+    ) -> Result<ReleasePin> {
+        validate_request(spec)?;
         let request = fingerprint(spec)?;
-        let lock = self.lock(&spec.dataset).await;
+        let result = self.prepare_and_select(spec, stop).await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error.code() != "injected_failure")
+        {
+            // A competing attempt may select this exact operation while this
+            // caller is preparing or checking its base. Reconcile durable success.
+            let lock = self.lock(spec.dataset()).await;
+            let _guard = lock.lock().await;
+            let lifecycle = &self.inner.lifecycle;
+            let view = lifecycle.open(spec.dataset()).await?;
+            let operation: Option<Operation> = lifecycle
+                .get(&view, &format!("operation/{}", spec.operation()))
+                .await?;
+            if operation.is_some_and(|operation| operation.request_digest == request)
+                && let Some(completed) = lifecycle
+                    .get(&view, &format!("result/{}", spec.operation()))
+                    .await?
+            {
+                return Ok(completed);
+            }
+        }
+        result
+    }
+
+    async fn prepare_and_select(
+        &self,
+        spec: &OperationRequest,
+        stop: Option<&str>,
+    ) -> Result<ReleasePin> {
+        validate_request(spec)?;
+        let request = fingerprint(spec)?;
+        let lock = self.lock(spec.dataset()).await;
         let lifecycle = &self.inner.lifecycle;
         let operation = {
             let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
+            let view = lifecycle.open(spec.dataset()).await?;
             let old: Option<Operation> = lifecycle
-                .get(&view, &format!("operation/{}", spec.operation))
+                .get(&view, &format!("operation/{}", spec.operation()))
                 .await?;
             if old.as_ref().is_some_and(|o| o.request_digest != request) {
                 return Err(conflicting_operation());
             }
             if let Some(result) = lifecycle
-                .get(&view, &format!("result/{}", spec.operation))
+                .get(&view, &format!("result/{}", spec.operation()))
                 .await?
             {
                 return Ok(result);
@@ -443,9 +518,10 @@ impl Engine {
             let mut authority: Authority =
                 lifecycle.get(&view, "authority").await?.unwrap_or_default();
             if authority.definition.is_empty() {
-                authority.definition = spec.definition.clone();
+                authority.definition = spec.definition().to_owned();
             }
             check_definition(&authority, spec)?;
+            check_base(&authority, spec.base())?;
             if let Some(old) = old {
                 check_authority(&authority, &old)?;
                 old
@@ -459,15 +535,16 @@ impl Engine {
                     epoch: authority.epoch,
                     boundary: authority.boundary,
                     definition: authority.definition.clone(),
+                    base: spec.base().cloned(),
                 };
                 lifecycle
                     .commit(
                         &view,
                         vec![
                             record("authority", &authority)?,
-                            record(format!("operation/{}", spec.operation), &operation)?,
-                        record(format!("request/{}", spec.operation), spec)?,
-                        record(format!("runtime/{}", spec.operation), serde_json::json!({
+                            record(format!("operation/{}", spec.operation()), &operation)?,
+                        record(format!("request/{}", spec.operation()), spec)?,
+                        record(format!("runtime/{}", spec.operation()), serde_json::json!({
                             "processor": PROCESSOR, "package_version": env!("CARGO_PKG_VERSION"),
                             "dependency_lock_blake3": blake3::hash(include_bytes!("../Cargo.lock")).to_hex().as_str(),
                             "limits": lifecycle.budget.limits,
@@ -483,7 +560,12 @@ impl Engine {
             phase
         } else {
             let directory = self.reserve_attempt(spec, &operation, "admission").await?;
-            let size = std::fs::metadata(&spec.input)?.len();
+            let inputs = spec.inputs();
+            let size = inputs
+                .values()
+                .try_fold(0u64, |sum, input| -> Result<u64> {
+                    Ok(sum.saturating_add(std::fs::metadata(&input.path)?.len()))
+                })?;
             let available = fs2::available_space(&self.inner.root)?;
             if available
                 < size
@@ -495,22 +577,29 @@ impl Engine {
                     "input, output and declared scratch do not fit available disk",
                 ));
             }
-            let owner = spec.dataset.clone();
-            let source = PathBuf::from(&spec.input);
-            let destination = directory.join("source.parquet");
-            let expected = spec.expected_digest.clone();
-            let input = lifecycle
-                .budget
-                .blocking(move || storage::copy_verified(&owner, &source, &destination, &expected))
-                .await?;
+            let mut outputs = Vec::new();
+            for (name, input) in inputs {
+                let owner = spec.dataset().clone();
+                let source = PathBuf::from(input.path);
+                let destination = directory.join(format!("{name}.parquet"));
+                let retained = lifecycle
+                    .budget
+                    .blocking(move || {
+                        storage::copy_verified(&owner, &source, &destination, &input.digest)
+                    })
+                    .await?;
+                outputs.push(retained);
+            }
             let phase = PhaseResult {
-                operation: spec.operation.clone(),
+                operation: spec.operation().clone(),
                 phase: "admission".into(),
                 request_digest: request.clone(),
                 eligibility: operation.eligibility,
-                outputs: vec![input],
+                outputs,
                 table: None,
                 rows: 0,
+                changes: None,
+                metrics: WriteMetrics::default(),
             };
             self.complete(spec, &operation, &phase).await?
         };
@@ -520,47 +609,32 @@ impl Engine {
             phase
         } else {
             let directory = self.reserve_attempt(spec, &operation, "processing").await?;
-            let context = self.context();
-            let input = admission.outputs.first().ok_or_else(|| {
-                Error::refusal("corrupt_phase", "admission has no retained input")
-            })?;
-            context
-                .register_parquet("input", &input.path, ParquetReadOptions::default())
-                .await?;
-            let dataframe = context.sql(&spec.sql).await?;
-            validate_plan(dataframe.logical_plan())?;
-            let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
-                dataframe.schema().as_arrow(),
-            )?;
-            let view = lifecycle.open(&spec.dataset).await?;
-            let table = lifecycle
-                .catalog
-                .create_table(
-                    view.table.identifier().namespace(),
-                    TableCreation::builder()
-                        .name(format!("data_{}", uuid::Uuid::new_v4().simple()))
-                        .location(directory.to_string_lossy().into_owned())
-                        .schema(schema)
-                        .properties(storage::table_properties())
-                        .build(),
-                )
-                .await?;
-            let stream = dataframe
-                .execute_stream()
-                .await?
-                .map(|b| b.map_err(Error::from));
-            let files = storage::write_batches(&table, stream, &lifecycle.budget).await?;
-            let rows = files.iter().map(|f| f.record_count()).sum();
-            let table = storage::append(&table, lifecycle.catalog.as_ref(), files).await?;
-            let pin = storage::pin(&spec.dataset, &table, rows, &lifecycle.budget, &[]).await?;
+            let prepared = match spec {
+                OperationRequest::Build(build) => {
+                    self.process_build(build, &directory, &admission).await?
+                }
+                OperationRequest::Update(update) => {
+                    self.process_update(update, &directory, &admission).await?
+                }
+            };
+            let mut outputs = prepared.table.objects.clone();
+            if let Some(changes) = &prepared.changes {
+                outputs.push(changes.base_manifest.clone());
+                outputs.extend(changes.removed.objects.clone());
+                outputs.extend(changes.added.objects.clone());
+            }
+            outputs.sort_by(|left, right| left.path.cmp(&right.path));
+            outputs.dedup();
             let phase = PhaseResult {
-                operation: spec.operation.clone(),
+                operation: spec.operation().clone(),
                 phase: "processing".into(),
                 request_digest: request.clone(),
                 eligibility: operation.eligibility,
-                outputs: pin.objects.clone(),
-                table: Some(pin),
-                rows,
+                outputs,
+                rows: prepared.table.rows,
+                table: Some(prepared.table),
+                changes: prepared.changes,
+                metrics: prepared.metrics,
             };
             self.complete(spec, &operation, &phase).await?
         };
@@ -571,6 +645,7 @@ impl Engine {
         })?;
         if self.phase(spec, &operation, "validation").await?.is_none() {
             verify_table(&table, &lifecycle.budget).await?;
+            verify_changes(spec, &table, processing.changes.as_ref(), &lifecycle.budget).await?;
             let phase = PhaseResult {
                 phase: "validation".into(),
                 ..processing.clone()
@@ -579,16 +654,25 @@ impl Engine {
         }
         stop_after(stop, "validation")?;
 
-        let input = admission
-            .outputs
-            .first()
-            .ok_or_else(|| Error::refusal("corrupt_phase", "admission has no retained input"))?;
+        let mut inputs = if let Some(base) = spec.base() {
+            self.release(spec.dataset(), base).await?.dataset.inputs
+        } else {
+            BTreeMap::new()
+        };
+        for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
+            let name = match spec {
+                OperationRequest::Build(_) => name.clone(),
+                OperationRequest::Update(_) => format!("{}/{name}", spec.operation()),
+            };
+            inputs.insert(name, input.clone());
+        }
         let dataset = DatasetPin {
-            format: 1,
-            dataset: spec.dataset.clone(),
-            version: spec.operation.clone(),
+            format: 2,
+            dataset: spec.dataset().clone(),
+            version: spec.operation().clone(),
             groups: BTreeMap::from([("source".into(), table)]),
-            inputs: BTreeMap::from([("input".into(), input.clone())]),
+            inputs,
+            changes: processing.changes.clone(),
             definition: operation.definition.clone(),
             eligibility: operation.eligibility,
             boundary: operation.boundary,
@@ -597,9 +681,9 @@ impl Engine {
         };
         // Readback has an operation-specific manifest because coverage can advance
         // while the same expensive materialized values remain reusable.
-        let readback_key = format!("readback/{}", spec.operation);
+        let readback_key = format!("readback/{}", spec.operation());
         let release = if let Some(release) = lifecycle
-            .get::<ReleasePin>(&lifecycle.open(&spec.dataset).await?, &readback_key)
+            .get::<ReleasePin>(&lifecycle.open(spec.dataset()).await?, &readback_key)
             .await?
         {
             release
@@ -607,7 +691,7 @@ impl Engine {
             let directory = self.reserve_attempt(spec, &operation, "release").await?;
             let path = directory.join("release.json");
             storage::write_new(&path, &serde_json::to_vec_pretty(&dataset)?)?;
-            let manifest = storage::object(&spec.dataset, &path)?;
+            let manifest = storage::object(spec.dataset(), &path)?;
             // Decode the serialized release independently of the producing context.
             let decoded: DatasetPin = serde_json::from_reader(std::fs::File::open(&path)?)?;
             if decoded != dataset {
@@ -617,14 +701,14 @@ impl Engine {
                 ));
             }
             let release = ReleasePin {
-                id: spec.operation.clone(),
+                id: spec.operation().clone(),
                 dataset,
                 manifest,
                 verified: true,
             };
             verify_release_with_budget(&release, &lifecycle.budget).await?;
             let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
+            let view = lifecycle.open(spec.dataset()).await?;
             self.check(&view, &operation).await?;
             if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
                 completed
@@ -638,9 +722,9 @@ impl Engine {
         stop_after(stop, "readback")?;
         {
             let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
+            let view = lifecycle.open(spec.dataset()).await?;
             if let Some(completed) = lifecycle
-                .get(&view, &format!("result/{}", spec.operation))
+                .get(&view, &format!("result/{}", spec.operation()))
                 .await?
             {
                 return Ok(completed);
@@ -663,7 +747,7 @@ impl Engine {
                     &view,
                     vec![
                         record("authority", authority)?,
-                        record(format!("result/{}", spec.operation), &release)?,
+                        record(format!("result/{}", spec.operation()), &release)?,
                     ],
                 )
                 .await?;
@@ -685,11 +769,11 @@ impl Engine {
 
     async fn phase(
         &self,
-        spec: &RunSpec,
+        spec: &OperationRequest,
         operation: &Operation,
         phase: &str,
     ) -> Result<Option<PhaseResult>> {
-        let view = self.inner.lifecycle.open(&spec.dataset).await?;
+        let view = self.inner.lifecycle.open(spec.dataset()).await?;
         self.check(&view, operation).await?;
         let found: Option<PhaseResult> = self
             .inner
@@ -713,14 +797,14 @@ impl Engine {
                     ));
                 }
             }
-            tracing::info!(phase, operation = %spec.operation, "reusing qualified phase");
+            tracing::info!(phase, operation = %spec.operation(), "reusing qualified phase");
         }
         Ok(found)
     }
 
     async fn reserve_attempt(
         &self,
-        spec: &RunSpec,
+        spec: &OperationRequest,
         operation: &Operation,
         purpose: &str,
     ) -> Result<PathBuf> {
@@ -729,18 +813,18 @@ impl Engine {
             .inner
             .root
             .join("objects")
-            .join(spec.dataset.as_str())
+            .join(spec.dataset().as_str())
             .join(id.as_str());
         let reservation = Protection {
             id: id.clone(),
-            consumer: spec.dataset.clone(),
-            purpose: format!("{}/{}", spec.operation, purpose),
+            consumer: spec.dataset().clone(),
+            purpose: format!("{}/{}", spec.operation(), purpose),
             paths: vec![format!("{}/", directory.display())],
             retired: false,
         };
-        let lock = self.lock(&spec.dataset).await;
+        let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(&spec.dataset).await?;
+        let view = self.inner.lifecycle.open(spec.dataset()).await?;
         self.check(&view, operation).await?;
         self.inner
             .lifecycle
@@ -755,13 +839,13 @@ impl Engine {
 
     async fn complete(
         &self,
-        spec: &RunSpec,
+        spec: &OperationRequest,
         operation: &Operation,
         phase: &PhaseResult,
     ) -> Result<PhaseResult> {
-        let lock = self.lock(&spec.dataset).await;
+        let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(&spec.dataset).await?;
+        let view = self.inner.lifecycle.open(spec.dataset()).await?;
         self.check(&view, operation).await?;
         let key = phase_key(
             spec,
@@ -778,15 +862,20 @@ impl Engine {
             .lifecycle
             .commit(&view, vec![record(key, phase)?])
             .await?;
-        tracing::info!(phase = phase.phase, rows = phase.rows, operation = %spec.operation, "phase durably complete");
+        tracing::info!(phase = phase.phase, rows = phase.rows, operation = %spec.operation(), "phase durably complete");
         Ok(phase.clone())
     }
 }
 
-fn phase_key(spec: &RunSpec, request: &str, eligibility: u64, phase: &str) -> String {
-    // Byte admission does not depend on the query or its later qualification.
+fn phase_key(spec: &OperationRequest, request: &str, eligibility: u64, phase: &str) -> String {
     if phase == "admission" {
-        return format!("phase/input/{}/{phase}", spec.expected_digest);
+        let mut hash = blake3::Hasher::new();
+        for (name, input) in spec.inputs() {
+            hash.update(&(name.len() as u64).to_le_bytes());
+            hash.update(name.as_bytes());
+            hash.update(input.digest.as_bytes());
+        }
+        return format!("phase/input/{}/{phase}", hash.finalize().to_hex());
     }
     format!("phase/{request}/{eligibility}/{phase}")
 }
@@ -806,10 +895,10 @@ fn check_authority(authority: &Authority, operation: &Operation) -> Result<()> {
             "definition, dependency qualification or authority changed; start a new operation",
         ));
     }
-    Ok(())
+    check_base(authority, operation.base.as_ref())
 }
-fn check_definition(authority: &Authority, spec: &RunSpec) -> Result<()> {
-    if !authority.definition.is_empty() && authority.definition != spec.definition {
+fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()> {
+    if !authority.definition.is_empty() && authority.definition != spec.definition() {
         return Err(Error::refusal(
             "stale_definition",
             "activate the definition explicitly before running",
@@ -817,16 +906,60 @@ fn check_definition(authority: &Authority, spec: &RunSpec) -> Result<()> {
     }
     Ok(())
 }
-fn fingerprint(spec: &RunSpec) -> Result<String> {
-    // Locators and retry IDs do not change material inputs. The processor revision
-    // is explicit; changes to its semantics require advancing this identifier.
-    let bytes = serde_json::to_vec(&(
-        PROCESSOR,
-        &spec.expected_digest,
-        &spec.sql,
-        &spec.definition,
-    ))?;
-    Ok(blake3::hash(&bytes).to_hex().to_string())
+fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
+    if let Some(expected) = expected
+        && authority
+            .selected
+            .as_ref()
+            .is_none_or(|selected| &selected.version != expected)
+    {
+        return Err(Error::refusal(
+            "stale_base",
+            "the selected version changed; submit a new update against its exact base",
+        ));
+    }
+    Ok(())
+}
+fn fingerprint(spec: &OperationRequest) -> Result<String> {
+    let material = match spec {
+        OperationRequest::Build(spec) => {
+            serde_json::json!({"build": [&spec.expected_digest, &spec.sql, &spec.definition]})
+        }
+        OperationRequest::Update(spec) => {
+            serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
+        }
+    };
+    Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
+        .to_hex()
+        .to_string())
+}
+fn validate_request(spec: &OperationRequest) -> Result<()> {
+    if let OperationRequest::Build(build) = spec {
+        return validate_spec(build);
+    }
+    if spec.definition().is_empty()
+        || spec.inputs().values().any(|input| {
+            input.digest.len() != 64 || !input.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    {
+        return Err(Error::refusal(
+            "invalid_request",
+            "expected BLAKE3 input digests and a nonempty definition",
+        ));
+    }
+    if let OperationRequest::Update(update) = spec {
+        let unique: std::collections::BTreeSet<_> = update.keys.iter().collect();
+        if update.keys.is_empty()
+            || unique.len() != update.keys.len()
+            || update.base == update.operation
+        {
+            return Err(Error::refusal(
+                "invalid_update",
+                "update needs distinct key fields and a different base operation",
+            ));
+        }
+    }
+    Ok(())
 }
 fn validate_spec(spec: &RunSpec) -> Result<()> {
     if spec.expected_digest.len() != 64
@@ -1011,15 +1144,21 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
             "release manifest does not match its pin",
         ));
     }
-    if decoded.format != 1
+    if decoded.format != 2
         || release.id != decoded.version
-        || decoded.request.dataset != decoded.dataset
-        || decoded.request.operation != decoded.version
-        || decoded.request.definition != decoded.definition
-        || decoded
-            .inputs
-            .get("input")
-            .is_none_or(|input| input.digest != decoded.request.expected_digest)
+        || decoded.request.dataset() != &decoded.dataset
+        || decoded.request.operation() != &decoded.version
+        || decoded.request.definition() != decoded.definition
+        || decoded.request.inputs().iter().any(|(name, input)| {
+            let key = match &decoded.request {
+                OperationRequest::Build(_) => name.clone(),
+                OperationRequest::Update(_) => format!("{}/{name}", decoded.version),
+            };
+            decoded
+                .inputs
+                .get(&key)
+                .is_none_or(|retained| retained.digest != input.digest)
+        })
     {
         return Err(Error::refusal(
             "release_mismatch",
@@ -1027,8 +1166,91 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
         ));
     }
     storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
+    let source = decoded
+        .groups
+        .get("source")
+        .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
+    verify_changes(&decoded.request, source, decoded.changes.as_ref(), budget).await?;
     for pin in decoded.groups.values() {
         verify_table(pin, budget).await?;
+    }
+    Ok(())
+}
+
+async fn verify_changes(
+    request: &OperationRequest,
+    source: &TablePin,
+    changes: Option<&ChangePin>,
+    budget: &Budget,
+) -> Result<()> {
+    let invalid = || {
+        Error::refusal(
+            "invalid_changes",
+            "change rows, schemas or endpoints differ from the captured request and result",
+        )
+    };
+    let (spec, changes) = match (request, changes) {
+        (OperationRequest::Build(_), None) => return Ok(()),
+        (OperationRequest::Update(spec), Some(changes)) => (spec, changes),
+        _ => return Err(invalid()),
+    };
+    let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
+    if changes.base_manifest.bytes > budget.limits.max_metadata_bytes as u64 {
+        return Err(Error::refusal(
+            "metadata_capacity",
+            "base manifest exceeds reader budget",
+        ));
+    }
+    storage::verify_objects(
+        vec![
+            changes.base_manifest.clone(),
+            changes.before_metadata.clone(),
+        ],
+        budget,
+    )
+    .await?;
+    let before: DatasetPin =
+        serde_json::from_reader(std::fs::File::open(&changes.base_manifest.path)?)?;
+    let before_source = before.groups.get("source").ok_or_else(invalid)?;
+    if before.format != 2
+        || before.dataset != spec.dataset
+        || before.version != spec.base
+        || changes.base_version != spec.base
+        || changes.before_metadata != before_source.metadata
+        || changes.after_metadata != source.metadata
+        || before_source
+            .rows
+            .checked_sub(changes.removed.rows)
+            .and_then(|rows| rows.checked_add(changes.added.rows))
+            != Some(source.rows)
+    {
+        return Err(invalid());
+    }
+    let native_before = storage::open_pin(before_source).await?;
+    let native_after = storage::open_pin(source).await?;
+    let expected_ids: Option<Vec<_>> = spec
+        .keys
+        .iter()
+        .map(|name| {
+            native_before
+                .metadata()
+                .current_schema()
+                .field_by_name(name)
+                .map(|field| field.id)
+        })
+        .collect();
+    if expected_ids.as_ref() != Some(&changes.key_field_ids)
+        || native_before.metadata().current_schema() != native_after.metadata().current_schema()
+    {
+        return Err(invalid());
+    }
+    for pin in [&changes.removed, &changes.added] {
+        verify_table(pin, budget).await?;
+        if storage::open_pin(pin).await?.metadata().current_schema()
+            != native_after.metadata().current_schema()
+        {
+            return Err(invalid());
+        }
     }
     Ok(())
 }

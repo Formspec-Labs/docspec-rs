@@ -136,11 +136,17 @@ where
     let mut writer = UnpartitionedWriter::new(DataFileWriterBuilder::new(rolling));
     futures::pin_mut!(batches);
     while let Some(batch) = batches.try_next().await? {
+        if batch.num_rows() == 0 {
+            continue;
+        }
         let bytes = batch.get_array_memory_size();
         if bytes > budget.limits.max_batch_bytes {
             return Err(Error::refusal(
                 "oversized_batch",
-                "decoded batch exceeds byte admission; reduce batch rows or split oversized values",
+                format!(
+                    "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
+                    budget.limits.max_batch_bytes
+                ),
             ));
         }
         writer.write(batch).await?;
@@ -444,6 +450,10 @@ pub(crate) async fn pin(
 
 pub(crate) async fn check_inventory(pin: &TablePin, table: &Table, budget: &Budget) -> Result<()> {
     let inventory = snapshot_files(table, budget).await?;
+    check_inventory_files(pin, &inventory)
+}
+
+pub(crate) fn check_inventory_files(pin: &TablePin, inventory: &SnapshotFiles) -> Result<()> {
     let pinned = pin
         .objects
         .iter()
