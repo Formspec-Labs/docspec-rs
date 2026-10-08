@@ -1,0 +1,30 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0432]: unresolved import `docspec::model::InputFile`
+ --> tests/related_refresh/incremental.rs:4:22
+  |
+4 | use docspec::model::{InputFile, TablePin, UpdateSpec};
+  |                      ^^^^^^^^^ no `InputFile` in `model`
+  |
+  = help: consider importing this struct instead:
+          iceberg::io::InputFile
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+    --> tests/related_refresh/incremental.rs:184:13
+     |
+ 184 |             verify_release(&joined).await.unwrap();
+     |             ^^^^^^^^^^^^^^--------- argument #2 of type `Limits` is missing
+     |
+note: function defined here
+    --> src/engine.rs:1438:14
+     |
+1438 | pub async fn verify_release(release: &ReleasePin, limits: Limits) -> Result<()> {
+     |              ^^^^^^^^^^^^^^
+help: provide the argument
+     |
+ 184 |             verify_release(&joined, /* Limits */).await.unwrap();
+     |                                   ++++++++++++++
+
+Some errors have detailed explanations: E0061, E0432.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `docspec` (test "related_refresh") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

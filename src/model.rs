@@ -214,7 +214,18 @@ pub enum RefreshPolicy {
     Latest,
 }
 
-/// A reproducible full join refresh over exact native input versions.
+/// Work selection for refreshing a related result.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshMode {
+    /// Reconstruct the complete result from captured inputs.
+    #[default]
+    Full,
+    /// Replace complete match groups affected by changed native files.
+    Incremental,
+}
+
+/// A reproducible join refresh over exact native input versions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshSpec {
@@ -228,6 +239,8 @@ pub struct RefreshSpec {
     pub join: JoinDefinition,
     #[serde(default)]
     pub policy: RefreshPolicy,
+    #[serde(default)]
+    pub mode: RefreshMode,
     #[serde(default)]
     pub relationship: Option<SourceRelationship>,
 }

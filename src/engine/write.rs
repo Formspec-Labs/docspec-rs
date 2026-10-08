@@ -14,6 +14,24 @@ pub(super) struct Prepared {
     pub metrics: WriteMetrics,
 }
 
+/// An explicit replacement scope, separate from potentially expensive new rows.
+pub(super) struct Replacement<'a> {
+    pub dataset: &'a Id,
+    pub directory: &'a Path,
+    pub before: &'a TablePin,
+    pub keys: &'a [String],
+    pub scope: DataFrame,
+    pub replacement: DataFrame,
+    pub replacement_bytes: Option<u64>,
+}
+
+pub(super) struct Applied {
+    pub table: TablePin,
+    pub removed: TablePin,
+    pub added: TablePin,
+    pub metrics: WriteMetrics,
+}
+
 impl Engine {
     pub(super) async fn create_output(
         &self,
@@ -103,13 +121,7 @@ impl Engine {
             .groups
             .get("source")
             .ok_or_else(|| Error::refusal("invalid_base", "base has no source table"))?;
-        let budget = &self.inner.lifecycle.budget;
-        // Rewritten files will leave the next inventory. Check their old byte
-        // identities before reading so corruption cannot become a new valid result.
-        storage::verify_objects(before.objects.clone(), budget).await?;
         let native = storage::open_pin(before).await?;
-        let inventory = storage::snapshot_files(&native, budget).await?;
-        storage::check_inventory_files(before, &inventory)?;
         let context = self.context();
         let request = OperationRequest::Update(spec.clone());
         for ((name, _), object) in request.inputs().iter().zip(&admission.outputs) {
@@ -194,20 +206,82 @@ impl Engine {
                 ));
             }
         }
-        let marker = format!("__docspec_match_{}", uuid::Uuid::new_v4().simple());
         let scope_sql = if spec.deletions.is_some() {
             format!(
-                "SELECT DISTINCT {keys}, TRUE AS {marker} FROM replacements UNION SELECT DISTINCT {keys}, TRUE AS {marker} FROM deletions"
+                "SELECT DISTINCT {keys} FROM replacements UNION SELECT DISTINCT {keys} FROM deletions"
             )
         } else {
-            format!("SELECT DISTINCT {keys}, TRUE AS {marker} FROM replacements")
+            format!("SELECT DISTINCT {keys} FROM replacements")
         };
         let scope = context.sql(&scope_sql).await?;
+        let applied = self
+            .replace_keys(Replacement {
+                dataset: &spec.dataset,
+                directory,
+                before,
+                keys: &spec.keys,
+                scope,
+                replacement,
+                replacement_bytes: Some(
+                    admission
+                        .outputs
+                        .iter()
+                        .fold(0_u64, |sum, object| sum.saturating_add(object.bytes)),
+                ),
+            })
+            .await?;
+        let Applied {
+            table,
+            removed,
+            added,
+            metrics,
+        } = applied;
+        let changes = ChangePin {
+            base_version: spec.base.clone(),
+            base_manifest: base.manifest,
+            before_metadata: before.metadata.clone(),
+            after_metadata: table.metadata.clone(),
+            key_field_ids: field_ids,
+            removed,
+            added,
+        };
+        Ok(Prepared {
+            table,
+            changes: Some(changes),
+            metrics,
+        })
+    }
+    /// Replaces complete key groups and retains actual applied rows with shared files.
+    pub(super) async fn replace_keys(&self, request: Replacement<'_>) -> Result<Applied> {
+        let Replacement {
+            dataset,
+            directory,
+            before,
+            keys,
+            scope,
+            replacement,
+            replacement_bytes,
+        } = request;
+        let budget = &self.inner.lifecycle.budget;
+        storage::verify_objects(before.objects.clone(), budget).await?;
+        let native = storage::open_pin(before).await?;
+        let inventory = storage::snapshot_files(&native, budget).await?;
+        storage::check_inventory_files(before, &inventory)?;
+        let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+        if !same_fields(&schema, replacement.schema().as_arrow())? {
+            return Err(Error::refusal(
+                "schema_mismatch",
+                "replacement rows must preserve the complete native schema",
+            ));
+        }
+        let context = self.context();
+        let marker = format!("__docspec_match_{}", uuid::Uuid::new_v4().simple());
+        let scope = scope.with_column(&marker, datafusion::prelude::lit(true))?;
         // Prepare distinct keys once. A logical view would rescan all input rows
         // and repeat DISTINCT for every source-file probe and rewrite.
         let scope_table = self
             .create_output(
-                &spec.dataset,
+                dataset,
                 &directory.join("keys"),
                 iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(scope.schema().as_arrow())?,
             )
@@ -253,27 +327,21 @@ impl Engine {
                 &context,
                 &format!(
                     "SELECT 1 FROM {name} l INNER JOIN affected_keys r ON {} LIMIT 1",
-                    key_match(&spec.keys, "l", "r")
+                    key_match(keys, "l", "r")
                 ),
             )
             .await?
             {
                 rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
                 // One joined decode supplies both kept rows and actual removed rows.
-                changed.push(context.sql(&format!("SELECT l.*, r.{marker} IS NOT NULL AS {marker} FROM {name} l LEFT JOIN affected_keys r ON {}", key_match(&spec.keys, "l", "r"))).await?);
+                changed.push(context.sql(&format!("SELECT l.*, r.{marker} IS NOT NULL AS {marker} FROM {name} l LEFT JOIN affected_keys r ON {}", key_match(keys, "l", "r"))).await?);
             } else {
                 shared.push(file.clone());
             }
         }
         let required = rewrite_bytes
             .saturating_mul(2)
-            .saturating_add(
-                admission
-                    .outputs
-                    .iter()
-                    .fold(0_u64, |sum, object| sum.saturating_add(object.bytes))
-                    .saturating_mul(2),
-            )
+            .saturating_add(replacement_bytes.unwrap_or(0).saturating_mul(2))
             .saturating_add(budget.limits.scratch_bytes);
         if fs2::available_space(&self.inner.root)? < required {
             return Err(Error::refusal(
@@ -283,21 +351,21 @@ impl Engine {
         }
         let candidate = self
             .create_output(
-                &spec.dataset,
+                dataset,
                 &directory.join("data"),
                 native.metadata().current_schema().as_ref().clone(),
             )
             .await?;
         let removed = self
             .create_output(
-                &spec.dataset,
+                dataset,
                 &directory.join("removed"),
                 native.metadata().current_schema().as_ref().clone(),
             )
             .await?;
         let added = self
             .create_output(
-                &spec.dataset,
+                dataset,
                 &directory.join("added"),
                 native.metadata().current_schema().as_ref().clone(),
             )
@@ -345,10 +413,22 @@ impl Engine {
         )?;
         let added_files = storage::write_batches(
             &candidate,
-            replacement
-                .execute_stream()
-                .await?
-                .map(|batch| batch.map_err(Error::from)),
+            replacement.execute_stream().await?.map(|batch| {
+                let batch = batch.map_err(Error::from)?;
+                // Join fanout has no honest input-byte upper bound. Keep
+                // scratch and bounded writer buffers available as rows arrive.
+                let reserve = budget
+                    .limits
+                    .scratch_bytes
+                    .saturating_add((budget.limits.max_batch_bytes as u64).saturating_mul(4));
+                if fs2::available_space(&self.inner.root)? < reserve {
+                    return Err(Error::refusal(
+                        "disk_capacity",
+                        "replacement writer and declared scratch no longer fit available disk",
+                    ));
+                }
+                Ok(batch)
+            }),
             budget,
         )
         .await?;
@@ -382,32 +462,17 @@ impl Engine {
             before.clone()
         } else {
             let candidate = storage::append(&candidate, catalog, shared).await?;
-            storage::pin(&spec.dataset, &candidate, rows, budget, &before.objects).await?
+            storage::pin(dataset, &candidate, rows, budget, &before.objects).await?
         };
         let removed = storage::append(&removed, catalog, removed_files).await?;
         let added = storage::append(&added, catalog, added_files).await?;
-        let removed =
-            storage::pin(&spec.dataset, &removed, metrics.rows_removed, budget, &[]).await?;
-        let added = storage::pin(
-            &spec.dataset,
-            &added,
-            metrics.rows_added,
-            budget,
-            &table.objects,
-        )
-        .await?;
-        let changes = ChangePin {
-            base_version: spec.base.clone(),
-            base_manifest: base.manifest,
-            before_metadata: before.metadata.clone(),
-            after_metadata: table.metadata.clone(),
-            key_field_ids: field_ids,
+        let removed = storage::pin(dataset, &removed, metrics.rows_removed, budget, &[]).await?;
+        let added =
+            storage::pin(dataset, &added, metrics.rows_added, budget, &table.objects).await?;
+        Ok(Applied {
+            table,
             removed,
             added,
-        };
-        Ok(Prepared {
-            table,
-            changes: Some(changes),
             metrics,
         })
     }

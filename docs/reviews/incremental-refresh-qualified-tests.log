@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.35s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 7 tests
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 94.92s

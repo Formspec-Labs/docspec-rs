@@ -184,6 +184,7 @@ impl Engine {
                 boundary: base.dataset.boundary,
                 definition: spec.definition.clone(),
                 base: Some(spec.base.clone()),
+                base_manifest: None,
                 require_current_boundary: false,
             });
             let capture = lifecycle
@@ -345,6 +346,7 @@ impl Engine {
                     boundary: base.dataset.boundary,
                     definition: spec.definition.clone(),
                     base: Some(spec.base.clone()),
+                    base_manifest: None,
                     require_current_boundary: false,
                 };
                 let capture = Capture {

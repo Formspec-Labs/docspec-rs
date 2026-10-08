@@ -1,0 +1,617 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 3.23s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 1 test
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... FAILED
+
+failures:
+
+---- incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+EXPECTED ORACLE: [
+    (
+        None,
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/dockets/d12e531c7d0c4186aceff506ea54fb47/data/data/482b2b2d-bad9-4290-a2ed-5d2c34198c23-00000.parquet",
+                0,
+            ),
+        ),
+        None,
+        Some(
+            "changed-null",
+        ),
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/23b9047d2b494b1780a5f0652195fc34/data/data/d5905ecc-5c89-458f-b550-ef948f6eeda4-00000.parquet",
+                0,
+            ),
+        ),
+        None,
+        Some(
+            "new-unmatched",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+                0,
+            ),
+        ),
+        None,
+        Some(
+            "moved",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+                1,
+            ),
+        ),
+        None,
+        Some(
+            "moved",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+                2,
+            ),
+        ),
+        None,
+        Some(
+            "partial",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+                0,
+            ),
+        ),
+        None,
+        Some(
+            "duplicate",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+                1,
+            ),
+        ),
+        None,
+        Some(
+            "duplicate",
+        ),
+        None,
+    ),
+    (
+        Some(
+            (
+                "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+                2,
+            ),
+        ),
+        None,
+        Some(
+            "left-null",
+        ),
+        None,
+    ),
+]
+ACTUAL: [
+    RecordBatch {
+        schema: Schema {
+            fields: [
+                Field {
+                    name: "__docspec_left_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "1",
+                    },
+                },
+                Field {
+                    name: "__docspec_left_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "2",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "3",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "4",
+                    },
+                },
+                Field {
+                    name: "left_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "5",
+                    },
+                },
+                Field {
+                    name: "right_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "6",
+                    },
+                },
+            ],
+            metadata: {},
+        },
+        columns: [
+            StringArray
+            [
+              null,
+              null,
+            ],
+            PrimitiveArray<Int64>
+            [
+              null,
+              null,
+            ],
+            StringArray
+            [
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/dockets/8d62bea2884d4521bae92c18dcf2eb2d/data/data/3c2f8340-4cf4-4278-b20a-37d457940cf3-00000.parquet",
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/dockets/8d62bea2884d4521bae92c18dcf2eb2d/data/data/3c2f8340-4cf4-4278-b20a-37d457940cf3-00000.parquet",
+            ],
+            PrimitiveArray<Int64>
+            [
+              2,
+              1,
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+            StringArray
+            [
+              null,
+              "all-null",
+            ],
+        ],
+        row_count: 2,
+    },
+    RecordBatch {
+        schema: Schema {
+            fields: [
+                Field {
+                    name: "__docspec_left_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "1",
+                    },
+                },
+                Field {
+                    name: "__docspec_left_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "2",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "3",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "4",
+                    },
+                },
+                Field {
+                    name: "left_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "5",
+                    },
+                },
+                Field {
+                    name: "right_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "6",
+                    },
+                },
+            ],
+            metadata: {},
+        },
+        columns: [
+            StringArray
+            [
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+            ],
+            PrimitiveArray<Int64>
+            [
+              1,
+              0,
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+            PrimitiveArray<Int64>
+            [
+              null,
+              null,
+            ],
+            StringArray
+            [
+              "duplicate",
+              "duplicate",
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+        ],
+        row_count: 2,
+    },
+    RecordBatch {
+        schema: Schema {
+            fields: [
+                Field {
+                    name: "__docspec_left_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "1",
+                    },
+                },
+                Field {
+                    name: "__docspec_left_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "2",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "3",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "4",
+                    },
+                },
+                Field {
+                    name: "left_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "5",
+                    },
+                },
+                Field {
+                    name: "right_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "6",
+                    },
+                },
+            ],
+            metadata: {},
+        },
+        columns: [
+            StringArray
+            [
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/23b9047d2b494b1780a5f0652195fc34/data/data/d5905ecc-5c89-458f-b550-ef948f6eeda4-00000.parquet",
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+            ],
+            PrimitiveArray<Int64>
+            [
+              0,
+              2,
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+            PrimitiveArray<Int64>
+            [
+              null,
+              null,
+            ],
+            StringArray
+            [
+              "new-unmatched",
+              "partial",
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+        ],
+        row_count: 2,
+    },
+    RecordBatch {
+        schema: Schema {
+            fields: [
+                Field {
+                    name: "__docspec_left_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "1",
+                    },
+                },
+                Field {
+                    name: "__docspec_left_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "2",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "3",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "4",
+                    },
+                },
+                Field {
+                    name: "left_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "5",
+                    },
+                },
+                Field {
+                    name: "right_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "6",
+                    },
+                },
+            ],
+            metadata: {},
+        },
+        columns: [
+            StringArray
+            [
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/1b1af84e-4863-4ff7-9ebc-eeb7fa0d43c6-00000.parquet",
+            ],
+            PrimitiveArray<Int64>
+            [
+              0,
+              1,
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+            PrimitiveArray<Int64>
+            [
+              null,
+              null,
+            ],
+            StringArray
+            [
+              "moved",
+              "moved",
+            ],
+            StringArray
+            [
+              null,
+              null,
+            ],
+        ],
+        row_count: 2,
+    },
+    RecordBatch {
+        schema: Schema {
+            fields: [
+                Field {
+                    name: "__docspec_left_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "1",
+                    },
+                },
+                Field {
+                    name: "__docspec_left_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "2",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_file",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "3",
+                    },
+                },
+                Field {
+                    name: "__docspec_right_row",
+                    data_type: Int64,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "4",
+                    },
+                },
+                Field {
+                    name: "left_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "5",
+                    },
+                },
+                Field {
+                    name: "right_text",
+                    data_type: Utf8,
+                    nullable: true,
+                    metadata: {
+                        "PARQUET:field_id": "6",
+                    },
+                },
+            ],
+            metadata: {},
+        },
+        columns: [
+            StringArray
+            [
+              null,
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/comments/57f5c020c78546e689fe90ddc960b365/data/data/e28f9dce-7448-41ce-b9bb-7a76aa742ff7-00000.parquet",
+            ],
+            PrimitiveArray<Int64>
+            [
+              null,
+              2,
+            ],
+            StringArray
+            [
+              "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKrp2ZO/workspace/objects/dockets/d12e531c7d0c4186aceff506ea54fb47/data/data/482b2b2d-bad9-4290-a2ed-5d2c34198c23-00000.parquet",
+              null,
+            ],
+            PrimitiveArray<Int64>
+            [
+              0,
+              null,
+            ],
+            StringArray
+            [
+              null,
+              "left-null",
+            ],
+            StringArray
+            [
+              "changed-null",
+              null,
+            ],
+        ],
+        row_count: 2,
+    },
+]
+
+thread 'incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders' (9019299) panicked at tests/related_refresh/incremental.rs:216:17:
+invalid_related_result: typed row multiplicities differ between expected and actual
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 13.69s
+
+error: test failed, to rerun pass `--test related_refresh`

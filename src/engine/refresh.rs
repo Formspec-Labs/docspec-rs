@@ -83,7 +83,11 @@ impl Engine {
         spec: &RefreshSpec,
         directory: &Path,
         admission: &PhaseResult,
+        operation: &Operation,
     ) -> Result<Prepared> {
+        if spec.mode == RefreshMode::Incremental {
+            return Box::pin(self.process_incremental(spec, directory, admission, operation)).await;
+        }
         let coverage = admission.coverage.as_ref().ok_or_else(invalid)?;
         if coverage.inputs != spec.inputs() {
             return Err(invalid());
@@ -116,18 +120,22 @@ impl Engine {
             let directory = self
                 .reserve_attempt(&request, operation, "evidence")
                 .await?;
-            let context = self.context();
-            context.register_table(
-                "matches",
-                crate::query::table(
-                    storage::open_pin(processing.table.as_ref().ok_or_else(invalid)?).await?,
-                    self.inner.lifecycle.budget.clone(),
-                )?,
-            )?;
-            let frame = context
-                .sql(&format!("SELECT {} FROM matches", tuple_columns(None)))
-                .await?;
-            let prepared = self.write_frame(&spec.dataset, &directory, frame).await?;
+            let prepared = if spec.mode == RefreshMode::Incremental {
+                Box::pin(self.incremental_evidence(spec, &directory, processing, operation)).await?
+            } else {
+                let context = self.context();
+                context.register_table(
+                    "matches",
+                    crate::query::table(
+                        storage::open_pin(processing.table.as_ref().ok_or_else(invalid)?).await?,
+                        self.inner.lifecycle.budget.clone(),
+                    )?,
+                )?;
+                let frame = context
+                    .sql(&format!("SELECT {} FROM matches", tuple_columns(None)))
+                    .await?;
+                self.write_frame(&spec.dataset, &directory, frame).await?
+            };
             let phase = PhaseResult {
                 phase: "evidence".into(),
                 outputs: prepared.table.objects.clone(),
@@ -327,8 +335,23 @@ pub(super) fn check_rebuild(authority: &Authority, request: &OperationRequest) -
     Ok(())
 }
 
-pub(super) fn phase_key(spec: &RefreshSpec, eligibility: u64, phase: &str) -> Result<String> {
-    let material = if phase == "admission" {
+pub(super) fn phase_key(
+    spec: &RefreshSpec,
+    eligibility: u64,
+    phase: &str,
+    base_manifest: Option<&ObjectRef>,
+) -> Result<String> {
+    let material = if spec.mode == RefreshMode::Incremental {
+        serde_json::to_vec(&(
+            PROCESSOR,
+            spec.mode,
+            base_manifest.ok_or_else(invalid)?,
+            &spec.left,
+            &spec.right,
+            &spec.join,
+            &spec.definition,
+        ))?
+    } else if phase == "admission" {
         serde_json::to_vec(&(PROCESSOR, &spec.left, &spec.right))?
     } else {
         serde_json::to_vec(&(
@@ -350,7 +373,7 @@ pub(super) struct LoadedInputs {
     _metadata: Arc<tokio::sync::OwnedSemaphorePermit>,
 }
 impl LoadedInputs {
-    fn borrowed(&self) -> BTreeMap<Id, &ReleasePin> {
+    pub(super) fn borrowed(&self) -> BTreeMap<Id, &ReleasePin> {
         self.releases
             .iter()
             .map(|(dataset, release)| (dataset.clone(), release))
@@ -358,7 +381,7 @@ impl LoadedInputs {
     }
 }
 
-async fn load_inputs(coverage: &InputCoverage, budget: &Budget) -> Result<LoadedInputs> {
+pub(super) async fn load_inputs(coverage: &InputCoverage, budget: &Budget) -> Result<LoadedInputs> {
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = inputs::metadata_size(coverage, budget.limits.max_metadata_bytes)?;
     let mut releases = BTreeMap::new();
@@ -410,7 +433,6 @@ async fn join_frame(
     budget: &Budget,
 ) -> Result<DataFrame> {
     validate(spec)?;
-    let mut schemas = Vec::new();
     for (alias, version) in [("join_left", &spec.left), ("join_right", &spec.right)] {
         let release = releases.get(&version.dataset).ok_or_else(invalid)?;
         if release.version_ref() != *version {
@@ -418,11 +440,29 @@ async fn join_frame(
         }
         let native =
             storage::open_pin(release.dataset.groups.get("source").ok_or_else(invalid)?).await?;
-        schemas.push(iceberg::arrow::schema_to_arrow_schema(
-            native.metadata().current_schema(),
-        )?);
         context.register_table(alias, crate::query::occurrences(native, budget.clone())?)?;
     }
+    join_registered(context, spec).await
+}
+
+pub(super) async fn join_registered(
+    context: &SessionContext,
+    spec: &RefreshSpec,
+) -> Result<DataFrame> {
+    let schemas = [
+        context
+            .table("join_left")
+            .await?
+            .schema()
+            .as_arrow()
+            .clone(),
+        context
+            .table("join_right")
+            .await?
+            .schema()
+            .as_arrow()
+            .clone(),
+    ];
     for key in &spec.join.keys {
         let left = schemas[0].field_with_name(&key.left)?;
         let right = schemas[1].field_with_name(&key.right)?;
@@ -581,7 +621,10 @@ pub(super) async fn verify_related_with_inputs(
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
     let native = storage::open_pin(source).await?;
     if *native.metadata().current_schema().as_ref() != expected_schema {
-        return Err(invalid());
+        return Err(Error::refusal(
+            "invalid_related_result",
+            "native result schema differs from the declared complete join",
+        ));
     }
     context.register_table("expected", expected.into_view())?;
     context.register_table("actual", crate::query::table(native, budget.clone())?)?;
@@ -607,7 +650,10 @@ pub(super) async fn verify_related_with_inputs(
             .as_arrow(),
     )?;
     if *evidence.metadata().current_schema().as_ref() != evidence_schema {
-        return Err(invalid());
+        return Err(Error::refusal(
+            "invalid_related_result",
+            "contributor evidence schema differs from the selected native result",
+        ));
     }
     context.register_table("evidence", crate::query::table(evidence, budget.clone())?)?;
     equal_multisets(&context, "actual", "evidence", &tuple_columns(None)).await?;
@@ -643,7 +689,10 @@ async fn equal_multisets(
         "SELECT 1 FROM (SELECT {columns}, SUM(__docspec_weight) AS __docspec_total FROM (SELECT {columns}, CAST(1 AS BIGINT) AS __docspec_weight FROM {left} UNION ALL SELECT {columns}, CAST(-1 AS BIGINT) AS __docspec_weight FROM {right}) GROUP BY {columns}) WHERE __docspec_total <> 0 LIMIT 1"
     );
     if has_rows(context, &sql).await? {
-        return Err(invalid());
+        return Err(Error::refusal(
+            "invalid_related_result",
+            format!("typed row multiplicities differ between {left} and {right}"),
+        ));
     }
     Ok(())
 }
@@ -656,7 +705,7 @@ async fn has_rows(context: &SessionContext, sql: &str) -> Result<bool> {
     }
     Ok(false)
 }
-fn tuple_columns(alias: Option<&str>) -> String {
+pub(super) fn tuple_columns(alias: Option<&str>) -> String {
     TUPLE
         .iter()
         .map(|name| match alias {

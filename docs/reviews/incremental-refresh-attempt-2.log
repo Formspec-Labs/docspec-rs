@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: this file contains an unclosed delimiter
+   --> src/engine/incremental.rs:437:12
+    |
+433 | fn check_manifest(base: &ReleasePin, operation: &Operation) -> Result<()> {
+    |                                                                           - unclosed delimiter
+...
+437 |     Ok(())
+    |           ^
+
+error: could not compile `docspec` (lib) due to 1 previous error

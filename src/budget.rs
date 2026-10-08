@@ -97,7 +97,14 @@ impl Budget {
         SessionContext::new_with_config_rt(
             SessionConfig::new()
                 .with_batch_size(self.limits.batch_rows)
-                .with_target_partitions(self.limits.compute_threads),
+                .with_target_partitions(self.limits.compute_threads)
+                // DataFusion 53.1's dynamic join bounds use ordinary comparisons
+                // even for null-safe joins, dropping matching partial-null keys.
+                // Keep other pruning enabled; qualify an upstream fix before reuse.
+                .set_bool(
+                    "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
+                    false,
+                ),
             self.runtime.clone(),
         )
     }

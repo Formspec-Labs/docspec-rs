@@ -24,13 +24,16 @@ use tokio::sync::Mutex;
 mod backfill;
 #[doc(inline)]
 pub use backfill::BackfillPlan;
+mod changes;
 mod history;
+use changes::verify_changes;
 mod inputs;
 #[doc(inline)]
 pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
 pub use read::{read_evidence, read_group};
+mod incremental;
 mod refresh;
 mod verification;
 mod write;
@@ -57,6 +60,7 @@ struct Operation {
     boundary: u64,
     definition: String,
     base: Option<Id>,
+    base_manifest: Option<ObjectRef>,
     /// Explicit rebuilds fence later source admissions before replacing the selection.
     require_current_boundary: bool,
 }
@@ -73,8 +77,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v6";
-pub(crate) const FORMAT: u32 = 6;
+const PROCESSOR: &str = "docspec.dataset.v7";
+pub(crate) const FORMAT: u32 = 7;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -176,6 +180,7 @@ impl Engine {
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
             check_group_rebuild(&authority, spec)?;
+            self.check_incremental(&authority, spec).await?;
         }
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
@@ -216,7 +221,19 @@ impl Engine {
                     .as_ref()
                     .map_or(authority.eligibility, |o| o.eligibility);
                 lifecycle
-                    .get::<PhaseResult>(&view, &phase_key(spec, &request, eligibility, phase)?)
+                    .get::<PhaseResult>(
+                        &view,
+                        &phase_key(
+                            spec,
+                            &request,
+                            eligibility,
+                            phase,
+                            operation
+                                .as_ref()
+                                .and_then(|o| o.base_manifest.as_ref())
+                                .or_else(|| incremental::manifest_ref(&authority, spec)),
+                        )?,
+                    )
                     .await?
                     .is_some()
             };
@@ -581,6 +598,7 @@ impl Engine {
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
             check_group_rebuild(&authority, spec)?;
+            self.check_incremental(&authority, spec).await?;
             if let Some(old) = old {
                 check_authority(&authority, &old)?;
                 old
@@ -595,6 +613,7 @@ impl Engine {
                     boundary: authority.boundary,
                     definition: authority.definition.clone(),
                     base: spec.base().cloned(),
+                    base_manifest: incremental::base_manifest(&authority, spec),
                     require_current_boundary: matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
                 };
                 lifecycle
@@ -694,7 +713,8 @@ impl Engine {
                     self.process_update(update, &directory, &admission).await?
                 }
                 OperationRequest::Refresh(refresh) => {
-                    Box::pin(self.process_refresh(refresh, &directory, &admission)).await?
+                    Box::pin(self.process_refresh(refresh, &directory, &admission, &operation))
+                        .await?
                 }
                 OperationRequest::Backfill(_) => {
                     return Err(Error::refusal(
@@ -917,6 +937,7 @@ impl Engine {
                 ));
             }
             check_group_rebuild(&authority, spec)?;
+            self.check_incremental(&authority, spec).await?;
             Box::pin(self.select(&view, authority, &release)).await?;
         }
         stop_after(stop, "selection")?;
@@ -968,6 +989,7 @@ impl Engine {
                     &operation.request_digest,
                     operation.eligibility,
                     phase,
+                    operation.base_manifest.as_ref(),
                 )?,
             )
             .await?;
@@ -1035,6 +1057,7 @@ impl Engine {
             &operation.request_digest,
             operation.eligibility,
             &phase.phase,
+            operation.base_manifest.as_ref(),
         )?;
         // Another attempt may have completed the same deterministic phase. Preserve
         // that generation rather than relabeling or replacing its evidence.
@@ -1055,9 +1078,10 @@ fn phase_key(
     request: &str,
     eligibility: u64,
     phase: &str,
+    base_manifest: Option<&ObjectRef>,
 ) -> Result<String> {
     if let OperationRequest::Refresh(refresh) = spec {
-        return refresh::phase_key(refresh, eligibility, phase);
+        return refresh::phase_key(refresh, eligibility, phase, base_manifest);
     }
     if phase == "admission" {
         let mut hash = blake3::Hasher::new();
@@ -1105,6 +1129,14 @@ fn check_authority(authority: &Authority, operation: &Operation) -> Result<()> {
         ));
     }
     check_base(authority, operation.base.as_ref())?;
+    if operation.base_manifest.as_ref().is_some_and(|manifest| {
+        authority.release.as_ref().map(|release| &release.manifest) != Some(manifest)
+    }) {
+        return Err(Error::refusal(
+            "stale_base",
+            "selected base manifest differs from the captured operation",
+        ));
+    }
     if operation.require_current_boundary && authority.boundary != operation.boundary {
         return Err(Error::refusal(
             "stale_source_boundary",
@@ -1189,7 +1221,7 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})
         }
         OperationRequest::Refresh(spec) => {
-            serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "left": spec.left, "right": spec.right, "join": spec.join, "policy": spec.policy, "relationship": spec.relationship}})
+            serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "left": spec.left, "right": spec.right, "join": spec.join, "policy": spec.policy, "mode": spec.mode, "relationship": spec.relationship}})
         }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
@@ -1489,88 +1521,5 @@ async fn verify_local_release(release: &ReleasePin, budget: &Budget) -> Result<(
     verify_changes(&decoded.request, source, decoded.changes.as_ref(), budget).await?;
     verify_table(source, budget).await?;
     backfill::verify_groups(decoded, budget).await?;
-    Ok(())
-}
-
-async fn verify_changes(
-    request: &OperationRequest,
-    source: &TablePin,
-    changes: Option<&ChangePin>,
-    budget: &Budget,
-) -> Result<()> {
-    let invalid = || {
-        Error::refusal(
-            "invalid_changes",
-            "change rows, schemas or endpoints differ from the captured request and result",
-        )
-    };
-    let (spec, changes) = match (request, changes) {
-        (
-            OperationRequest::Build(_)
-            | OperationRequest::Backfill(_)
-            | OperationRequest::Refresh(_),
-            None,
-        ) => return Ok(()),
-        (OperationRequest::Update(spec), Some(changes)) => (spec, changes),
-        _ => return Err(invalid()),
-    };
-    let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
-    if changes.base_manifest.bytes > budget.limits.max_metadata_bytes as u64 {
-        return Err(Error::refusal(
-            "metadata_capacity",
-            "base manifest exceeds reader budget",
-        ));
-    }
-    storage::verify_objects(
-        vec![
-            changes.base_manifest.clone(),
-            changes.before_metadata.clone(),
-        ],
-        budget,
-    )
-    .await?;
-    let before: DatasetPin =
-        serde_json::from_reader(std::fs::File::open(&changes.base_manifest.path)?)?;
-    let before_source = before.groups.get("source").ok_or_else(invalid)?;
-    if before.format != FORMAT
-        || before.dataset != spec.dataset
-        || before.version != spec.base
-        || changes.base_version != spec.base
-        || changes.before_metadata != before_source.metadata
-        || changes.after_metadata != source.metadata
-        || before_source
-            .rows
-            .checked_sub(changes.removed.rows)
-            .and_then(|rows| rows.checked_add(changes.added.rows))
-            != Some(source.rows)
-    {
-        return Err(invalid());
-    }
-    let native_before = storage::open_pin(before_source).await?;
-    let native_after = storage::open_pin(source).await?;
-    let expected_ids: Option<Vec<_>> = spec
-        .keys
-        .iter()
-        .map(|name| {
-            native_before
-                .metadata()
-                .current_schema()
-                .field_by_name(name)
-                .map(|field| field.id)
-        })
-        .collect();
-    if expected_ids.as_ref() != Some(&changes.key_field_ids)
-        || native_before.metadata().current_schema() != native_after.metadata().current_schema()
-    {
-        return Err(invalid());
-    }
-    for pin in [&changes.removed, &changes.added] {
-        verify_table(pin, budget).await?;
-        if storage::open_pin(pin).await?.metadata().current_schema()
-            != native_after.metadata().current_schema()
-        {
-            return Err(invalid());
-        }
-    }
     Ok(())
 }

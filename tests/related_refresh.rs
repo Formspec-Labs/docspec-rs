@@ -11,8 +11,8 @@ use docspec::{
     engine::verify_release,
     model::{
         BackfillSpec, ComputedField, Id, JoinCardinality, JoinDefinition, JoinField, JoinKey,
-        JoinKind, JoinSide, NullMatching, ObjectRef, RefreshPolicy, RefreshSpec, ReleasePin,
-        RunSpec, SuccessionProof,
+        JoinKind, JoinSide, NullMatching, ObjectRef, RefreshMode, RefreshPolicy, RefreshSpec,
+        ReleasePin, RunSpec, SuccessionProof,
     },
     storage,
 };
@@ -125,6 +125,7 @@ fn recipe(left: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
         left: left.version_ref(),
         right: right.version_ref(),
         policy: RefreshPolicy::Captured,
+        mode: RefreshMode::Full,
         relationship: None,
         join: JoinDefinition {
             keys: ["a", "b"]
@@ -983,3 +984,6 @@ async fn coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage(
     )
     .await;
 }
+
+#[path = "related_refresh/incremental.rs"]
+mod incremental;

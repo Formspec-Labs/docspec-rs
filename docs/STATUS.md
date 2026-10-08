@@ -13,8 +13,8 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh | Old/new-key affected-result discovery; evidence-only adoption; computed input groups; aggregate contributors and incremental group refresh |
+| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source and join writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption | General evidence-only changes; computed input groups; aggregate contributors and incremental group refresh |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, backfill and native join refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
@@ -96,8 +96,8 @@ Every phase and final selection checks the captured base. Competing attempts of
 the same operation reconcile its durable result. Changes bind the base manifest,
 exact before/after metadata, key IDs, typed removed/added tables and row counts.
 Base bytes are verified before rewriting; validation and independent readback
-verify the change tables. These checks establish retained integrity, while fixture
-reconstruction separately checks applied value semantics.
+verify the change tables, removed-row membership and exact multiset reconstruction.
+Fixtures additionally compare the applied source values against request semantics.
 
 See [update tests](../tests/updates.rs), the independent
 [consistency review](reviews/updates-consistency.md) and
@@ -543,10 +543,66 @@ process termination after each acknowledged refresh phase and assertions that
 resume runs only missing work. The direct Rust matching oracle checks projected
 values and exact pairs independently of the generated SQL.
 
-This is the full-join reference needed to qualify incremental work. Incremental
-old/new-key discovery, computed input groups, aggregates, evidence-only adoption,
+This full-join reference also qualifies the incremental checkpoint below.
+Computed input groups, aggregates, general evidence-only changes,
 logical identity across compaction, full maintenance/restore and remote publication
 remain open. Deliberate many-to-many output can still exceed local storage; there is
 no output-size bound. Verification scans full inputs/results and may execute the
 join repeatedly across required phases. No timing gain or 10M acceptance result is
 claimed. Cleanup remains disabled and must preserve these cross-dataset references.
+
+
+## Incremental equality-join checkpoint
+
+`RefreshMode::Incremental` keeps the same lifecycle services and adds one explicit
+work choice. It requires an exact selected related base and unchanged join recipe,
+producer roles, native source schemas and output qualification. The offline reader
+checks the same provenance rules, including equality of the composition parent and
+change base manifest. Unsupported changes require an explicit full refresh.
+
+Changed-file discovery captures each old/new native inventory once and streams
+keys from removed and added files. It materializes the union of those keys, expands
+them across both old and new inputs, and prepares old output contributor tuples
+once. The shared replacement writer then shares unaffected output files and emits
+the actual removed/added rows while computing the scoped join once. Evidence uses
+the same replacement writer and applied tuples. New source versions with identical
+files retain exact output/evidence pins and empty changes while advancing coverage.
+
+This deliberately treats rewritten files as changed occurrences. It has no durable
+index or general incremental SQL compiler. Discovery and verification still scan
+broadly; file sharing proves fewer rewrites in the fixtures, not delta-proportional
+elapsed time. Counters cover direct changed-file extraction and replacement writer
+work; they omit scoped relational scans, tuple discovery, cardinality checks,
+metadata and independent verification. They are not total I/O measurements.
+
+The shared change reader now verifies removed-row membership and the duplicate-aware
+equation `after = before - removed + added`. It reads the prior source shallowly,
+without recursively replaying historical deltas. Preparation checks retained base
+manifests and old source bytes without reconstructing the old join. Final independent
+verification still reconstructs the complete target join.
+
+The new source-intent oracle exposed a pinned DataFusion 53.1 defect: dynamic join
+filters use ordinary min/max and membership predicates for null-safe joins, which
+can discard null matches during Parquet reading. The timing-dependent failure also
+left stale right-only rows in a derived result; verification refused selection.
+The shared query configuration disables only join dynamic-filter pushdown. Other
+pruning remains enabled. Re-enabling this optimization requires an upstream fix
+and qualification; its performance cost has not been measured. See the retained
+[source oracle failure](reviews/incremental-refresh-source-oracle.log) and
+[tuple diagnostic](reviews/incremental-refresh-empty-side-diagnostic.log).
+
+[Incremental fixtures](../tests/related_refresh/incremental.rs) compare source-update
+intent, joined values and contributor pairs against direct Rust reconstruction.
+They exercise first/last partners, simultaneous producer changes, moved keys,
+duplicates, partial nulls, empty inputs, exact no-op adoption and unchanged-file
+bytes/modification times. The [computed-group fixture](reviews/incremental-refresh-computed-groups.log)
+also checks that selected scalar groups preserve unchanged files and exact no-op
+pins across incremental joins. Real killed workers resume processing/evidence/readback
+handoffs; rebased work cannot reuse a prior base's delta. Rehashed forgeries test
+balanced foreign removals, unsupported incremental provenance and rebound manifests.
+Disk refusal preserves admission for a retry under a smaller scratch profile.
+
+See the [consistency review](reviews/incremental-refresh-consistency.md),
+[resource review](reviews/incremental-refresh-resources.md) and
+[gate output](reviews/incremental-refresh-check.log). The full R1–R7 lifecycle,
+10M Comments gate, maintenance/restore, provider publication and Dagster remain open.

@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0425]: cannot find value `replacement_bytes` in this scope
+   --> src/engine/incremental.rs:235:13
+    |
+235 |             replacement_bytes,
+    |             ^^^^^^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `docspec` (lib) due to 1 previous error

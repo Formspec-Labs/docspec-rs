@@ -93,7 +93,7 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 6 is the current greenfield
+remains unfinished. Release format 7 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group
@@ -138,7 +138,7 @@ Combined reads join group values to exact source-file row positions.
 The same `update` request works after group selection; `plan-update` includes group
 preparation. A no-op update preserves the exact source and group table pins while
 recording its new input coverage and empty source changes. Metadata-only schema
-changes, incremental related joins and logical row identity across compaction remain
+changes, computed input groups and logical row identity across compaction remain
 unfinished. Full independent
 release verification still reads retained inputs and data; file reuse does not
 establish population-independent backfill latency.
@@ -285,12 +285,25 @@ its original result even after later source movement. Scalar backfills preserve
 related bindings, and based refresh preserves selected scalar group definitions.
 Use refresh to change a related output; raw build/update replacement refuses.
 
-This is the full-reconstruction reference path. Incremental old/new-key discovery,
-aggregate contributors, evidence-only adoption and complete-path performance remain
-open. No-op refresh over the same exact input references reuses retained source
-and evidence tables. New version references currently trigger reconstruction even
-when their source files match. Deliberate many-to-many fanout can be large; no
-output-size prediction or large-workload performance claim is made.
+Refresh defaults to `"mode": "full"`. Set `"mode": "incremental"` to replace
+complete match groups affected by old and new keys in changed native input files.
+This includes newly possible matches, removed partners, duplicate fanout and
+partial-null keys. Rewritten input files have new occurrence identities, so their
+complete key groups are recomputed. Source and evidence files outside the affected
+scope remain shared; identical input files under new versions adopt the exact
+prior output and evidence pins while advancing coverage.
+
+Incremental mode requires a selected related base with unchanged join definition,
+input roles, native schemas and output eligibility. Unsupported changes return
+`full_refresh_required`; submit an explicit full refresh. Reusable incremental
+phases bind the exact base manifest. Applied changes use contributor tuple field
+IDs and retain actual removed/added rows, including remove-and-add of the same
+unchanged pair when its group is recomputed. Independent verification checks
+removed-row membership and reconstructs the new multiset from the old one.
+
+Computed input groups, aggregate contributors, general evidence-only changes and
+complete-path performance remain open. Deliberate many-to-many fanout can be large;
+there is no output-size upper bound or large-workload performance claim.
 
 ## HTTP access
 
@@ -324,11 +337,16 @@ their schema. This local codec currently refuses Arrow dictionary array schemas.
 Update inspection includes observed file scans, reused files/bytes, newly written
 data files/bytes and removed/added row counts. Writes include temporary prepared
 keys and change tables; metadata and verification I/O are not included in these
-write counters. Distinct affected keys are prepared once using bounded native
+write counters. Incremental join counters also omit scoped input scans, tuple
+discovery and cardinality preflights; they are partial writer/discovery counters,
+not total file decodes or complete-path I/O. Distinct affected keys are prepared once using bounded native
 writers and DataFusion execution. Discovery still probes every source file, and
 verification still reads the complete result and retained inputs. These limits
 prevent a claim that update time is independent of dataset size. Disk preflight
-uses conservative compressed-file estimates, not an output-size guarantee.
+uses compressed-file estimates where available. Join fanout has no input-byte
+upper bound: it preflights affected rewrites and scratch, then checks free space
+as replacement batches reach the admitted writer. Native flushes and concurrent
+disk users can still exhaust space; completed phases remain retained.
 
 ## Small implementation, native storage
 

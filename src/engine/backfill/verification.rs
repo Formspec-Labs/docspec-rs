@@ -142,9 +142,22 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 {
                     return Err(invalid_group());
                 }
+                if spec.mode == RefreshMode::Incremental {
+                    if dataset
+                        .changes
+                        .as_ref()
+                        .map(|changes| &changes.base_manifest)
+                        != Some(parent)
+                    {
+                        return Err(invalid_group());
+                    }
+                    super::super::incremental::qualify(spec, &base, dataset.eligibility, budget)
+                        .await?;
+                }
                 check_refreshed_groups(dataset, &base, parent)?;
                 checked_base = Some((parent.clone(), base));
-            } else if !dataset.computed.is_empty()
+            } else if spec.mode == RefreshMode::Incremental
+                || !dataset.computed.is_empty()
                 || dataset.parent_manifest.is_some()
                 || dataset.relationship != inputs::relationship(&dataset.request, None)
             {
