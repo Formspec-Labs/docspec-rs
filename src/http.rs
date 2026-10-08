@@ -6,8 +6,9 @@
 use crate::{
     Engine, Error,
     model::{
-        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin,
-        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
+        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
+        ReleasePin, RetentionInspection, RunSpec, SchemaSpec, SuccessionProof, UpdateSpec,
+        VersionRef,
     },
 };
 use axum::{
@@ -38,6 +39,7 @@ pub fn router(engine: Engine) -> Router {
         .route("/succession", post(succession))
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
+        .route("/retention/inspect", post(inspect_retention))
         .route("/datasets/{dataset}", get(inspect))
         .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
@@ -62,6 +64,13 @@ pub fn router(engine: Engine) -> Router {
 }
 
 struct HttpError(Error);
+
+async fn inspect_retention(
+    State(engine): State<Engine>,
+    Json(objects): Json<Vec<ObjectRef>>,
+) -> Result<Json<RetentionInspection>, HttpError> {
+    Ok(Json(engine.inspect_retention(&objects).await?))
+}
 impl From<Error> for HttpError {
     fn from(error: Error) -> Self {
         Self(error)

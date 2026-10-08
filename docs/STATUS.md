@@ -1,5 +1,70 @@
 # Implementation and qualification status
 
+## Shared protection inspection
+
+`Engine::inspect_retention`, CLI `inspect-retention` and HTTP
+`POST /retention/inspect` accept exact candidate object references and report a
+first protecting record, the lifecycle snapshots observed, and deduplicated
+logical protected/unmatched bytes. This answers why known objects remain retained
+without scanning their payloads. It is an explicit maintenance diagnostic;
+ordinary reads and processing do not call it.
+
+The owned embedded catalog is enumerated once. Each dataset or family lifecycle
+view is visited separately through the existing bounded snapshot cache. Typed
+records cover selected/history/readback releases, general and scalar completions,
+operation/request captures, related inputs, generation seals, succession,
+coordinated groups and attempt reservations. Complete table/release pins supply
+their retained inventories directly. Compact dependencies expand bounded immutable
+release or native metadata when that inventory is not already available.
+
+New prepared and validated backfill records retain exact source/output snapshots,
+including empty inputs without file completions. Schema admission retains its
+base release, and coordinated-group completion retains its source snapshot.
+Legacy records still resume without rewriting their provenance; missing dependency
+information refuses retention inspection. Unknown record families, discarded
+fields, unsupported phase kinds and conflicting identities also refuse. Native
+schema/history collections match their stable IDs when the maintained library
+reorders them during decoding/serialization.
+
+The inspection holds bounded candidate, visited-metadata and first-blocker state.
+It uses a single namespace listing rather than the adapter's repeated full query
+per namespace. Known pins avoid redundant native expansion; the complete-pin
+fixture asserts zero external metadata reads. These are verified call-path and
+fixture results, not large-history performance measurements. The maintained
+catalog allocates its listing before application admission, native manifest reads
+can repeat across distinct metadata generations, and the metadata-object counter
+does not count all underlying requests or bytes. Whole-process memory and scaling
+remain unqualified. Strict field preservation adds bounded metadata decoding and
+serialization work only during this explicit inspection.
+
+Focused tests passed for isolated phase roots, empty-source worker loss/reopen,
+legacy reuse, schema interpretation, active refresh inputs, shared external
+release dependencies, missing payloads, unknown metadata, native binding mismatch,
+capacity refusal, and matching CLI/HTTP results. See the
+[inventory cases](../tests/retention_inspection.rs),
+[backfill recovery cases](../tests/backfill_dependencies.rs),
+[focused result](reviews/retention-inspection-focused.log) and
+[independent review](reviews/retention-inspection-review.md).
+The full [repository gate](reviews/retention-inspection-check.log) passed with
+normal stack limits. Early test compilation mistakes and a missing native runtime
+were corrected; their focused logs remain alongside the final evidence. The first
+full gate stopped at a test-only lint, corrected before the passing complete run.
+The [resource snapshot](reviews/retention-inspection-resources.json) separates
+development cache allocation from shared-volume capacity; existing corpus and
+benchmark artifacts were unchanged.
+
+This report is read-only and observes separate table boundaries, not an atomic
+catalog-wide snapshot. Unmatched objects are not certified reclaimable. Injected
+catalogs remain unqualified. All issued releases and unfinished reservations stay
+protected; catalog-internal recovery state is not a removal candidate service.
+Exact-generation retirement, worker exclusion, fresh plan intersection, durable
+unavailability/removal intents, per-object reconciliation, compaction and fenced
+restore remain required. No expiration or deletion is enabled.
+The [worker-boundary review](reviews/retention-worker-design.md) supplies the next
+implementation step: retain engine and maintenance ownership in an admitted task
+through caller cancellation, then qualify nested calls and queued catalog effects.
+That design has not yet been implemented.
+
 ## Exact dependencies for reusable work
 
 New processing completions retain the exact admitted copies they consumed.
@@ -32,12 +97,12 @@ The full [repository gate](reviews/phase-dependencies-check.log) passed, includi
 formatting, strict all-target linting and the complete tests with normal stack
 limits. No large-data benchmark was rerun for this metadata change.
 
-The [retention design review](reviews/retention-inventory-design.md) identifies
-the remaining work: complete typed roots and native dependency expansion,
-independently interpretable prepared/validation backfill dependencies, retirement
-of exact completion generations, worker exclusion, durable removal intents and
-exact deletion outcomes. Phase retirement, physical cleanup, compaction and
-restore remain unfinished. No expiration or deletion is enabled here.
+The [retention design review](reviews/retention-inventory-design.md) established
+the typed inventory and backfill dependencies implemented by the inspection work
+above. Retirement of exact completion generations, worker
+exclusion, durable removal intents and exact deletion outcomes remain required.
+Phase retirement, physical cleanup, compaction and restore remain unfinished.
+No expiration or deletion is enabled here.
 
 ## Explicit operation abandonment
 
@@ -274,7 +339,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact dependency capture for new general phases and scalar file completions; all cleanup disabled | Complete shared-owner roots and dependency expansion; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact general/scalar/group completion dependencies; read-only shared-root inspection with bounded native expansion; all cleanup disabled | Destructive inventory/worker qualification; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

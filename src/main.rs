@@ -6,8 +6,8 @@ use docspec::{
     budget::{Budget, Limits},
     engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
-        SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin,
+        RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     storage,
 };
@@ -60,6 +60,8 @@ enum Command {
     Resume { spec: PathBuf },
     /// Inspect current retained phase and authority records.
     Inspect { dataset: String },
+    /// Explain protection for exact objects; this does not authorize removal.
+    InspectRetention { objects: PathBuf },
     /// Stop an unfinished operation; preserve its completed phases and retained files.
     Abandon {
         dataset: String,
@@ -254,6 +256,11 @@ async fn main() -> anyhow::Result<()> {
                 Command::Inspect { dataset } => {
                     print_json(&engine.inspect(&Id::new(dataset)?).await?)?
                 }
+                Command::InspectRetention { objects } => print_json(
+                    &engine
+                        .inspect_retention(&read_json::<Vec<ObjectRef>>(objects)?)
+                        .await?,
+                )?,
                 Command::Abandon {
                     dataset,
                     operation,

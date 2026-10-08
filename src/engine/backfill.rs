@@ -22,24 +22,53 @@ pub(super) struct PreparedGroup {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct Capture {
-    admission_fence: u64,
-    target: Option<ObjectRef>,
-    target_binding: Option<ComputedGroup>,
-    base_manifest: ObjectRef,
-    related: Option<Box<RelatedResult>>,
+pub(in crate::engine) struct Capture {
+    pub(in crate::engine) admission_fence: u64,
+    pub(in crate::engine) target: Option<ObjectRef>,
+    pub(in crate::engine) target_binding: Option<ComputedGroup>,
+    pub(in crate::engine) base_manifest: ObjectRef,
+    pub(in crate::engine) related: Option<Box<RelatedResult>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct FileCompletion {
-    source: ObjectRef,
+pub(in crate::engine) struct FileCompletion {
+    pub(in crate::engine) source: ObjectRef,
     /// Exact schema/default interpretation used for this physical source file.
     /// Missing on older completions; not part of the material reuse key.
     #[serde(default)]
-    source_metadata: Option<ObjectRef>,
-    rows: u64,
-    descriptor: ObjectRef,
-    outputs: Vec<ObjectRef>,
+    pub(in crate::engine) source_metadata: Option<ObjectRef>,
+    pub(in crate::engine) rows: u64,
+    pub(in crate::engine) descriptor: ObjectRef,
+    pub(in crate::engine) outputs: Vec<ObjectRef>,
+}
+
+/// Exact source and output consumed by group assembly or validation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::engine) struct GroupDependencies {
+    pub(in crate::engine) source: NativeSnapshotRef,
+    pub(in crate::engine) output: NativeSnapshotRef,
+}
+
+/// A prepared group with independently readable recovery dependencies.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(in crate::engine) struct PreparedCompletion {
+    // Preserve the original TablePin shape for retained records and readers.
+    #[serde(flatten)]
+    pub(in crate::engine) table: TablePin,
+    /// Absence on an older completion remains unknown to retention.
+    #[serde(default)]
+    pub(in crate::engine) dependencies: Option<GroupDependencies>,
+}
+
+/// A validation acknowledgment with the exact snapshots it checked.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(in crate::engine) struct ValidationCompletion {
+    // Preserve the original ObjectRef shape; its identity still decides reuse.
+    #[serde(flatten)]
+    pub(in crate::engine) output: ObjectRef,
+    /// Absence on an older acknowledgment remains unknown to retention.
+    #[serde(default)]
+    pub(in crate::engine) dependencies: Option<GroupDependencies>,
 }
 
 /// Progress against a captured source; completed files remain usable after stale promotion.

@@ -132,13 +132,16 @@ impl Engine {
             phase: "admission".into(),
             request_digest: operation.request_digest.clone(),
             eligibility: operation.eligibility,
-            outputs: vec![base.manifest],
+            outputs: vec![base.manifest.clone()],
             table: None,
             rows: 0,
             changes: None,
             coverage: None,
             metrics: WriteMetrics::default(),
-            dependencies: Some(PhaseDependencies::default()),
+            dependencies: Some(PhaseDependencies {
+                base_manifest: Some(base.manifest),
+                ..PhaseDependencies::default()
+            }),
         };
         self.complete(&OperationRequest::Schema(spec.clone()), operation, &phase)
             .await

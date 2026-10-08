@@ -1,0 +1,5 @@
+ Downloading crates ...
+  Downloaded serde_ignored v0.1.14
+    Checking serde_ignored v0.1.14
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 4.61s

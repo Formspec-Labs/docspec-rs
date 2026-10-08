@@ -77,6 +77,20 @@ work, without another payload read. Older completions remain resumable; missing
 dependency information does not authorize future cleanup. Retention and physical
 cleanup remain unfinished.
 
+When investigating retained disk use, `inspect-retention objects.json` accepts a
+JSON array of exact object references already present in release pins. It reports
+one protecting record per object, observed catalog boundaries and deduplicated
+logical byte totals. The library method `Engine::inspect_retention` and HTTP
+`POST /retention/inspect` provide the same inspection. Complete retained pins
+supply their existing file inventories; other dependencies require only bounded
+metadata reads. Use the known references without hashing the payloads again.
+
+This inspection currently supports the owned local catalog. Unknown dependencies
+refuse inspection, including older completion records that did not capture them.
+An unmatched object is not permission to delete it: concurrent work, catalog
+recovery and worker ownership still require the separate retention execution
+boundary. Inspection changes no availability promise and removes no files.
+
 To stop an unfinished operation, use:
 
 ```sh

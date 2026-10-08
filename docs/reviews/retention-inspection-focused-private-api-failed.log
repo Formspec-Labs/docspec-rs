@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0603]: function `object` is private
+   --> tests/retention_inspection.rs:154:43
+    |
+154 |             serde_json::to_value(storage::object(&source.metadata.owner, &path).unwrap()).unwrap();
+    |                                           ^^^^^^ private function
+    |
+note: the function `object` is defined here
+   --> src/storage.rs:278:1
+    |
+278 | pub(crate) fn object(owner: &Id, path: &Path) -> Result<ObjectRef> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0603]: function `object` is private
+   --> tests/retention_inspection.rs:250:39
+    |
+250 |         serde_json::to_value(storage::object(&source.metadata.owner, &path).unwrap()).unwrap();
+    |                                       ^^^^^^ private function
+    |
+note: the function `object` is defined here
+   --> src/storage.rs:278:1
+    |
+278 | pub(crate) fn object(owner: &Id, path: &Path) -> Result<ObjectRef> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `docspec` (test "retention_inspection") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

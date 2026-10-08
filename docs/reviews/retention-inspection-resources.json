@@ -1,0 +1,8 @@
+{
+  "observed_at": "2026-10-08T18:49:42.866155+00:00",
+  "scope": "Development cache and shared volume during final repository validation; no new corpus benchmark.",
+  "debug_cache_allocated_bytes": 7743004672,
+  "volume_available_bytes": 35284758528,
+  "limits": "Volume availability includes unrelated workstation activity. No peak retained-data or scratch measurement is claimed.",
+  "retained_experiments": "Existing Comments inputs, outputs and failed attempts were not changed."
+}

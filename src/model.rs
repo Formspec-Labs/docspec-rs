@@ -485,6 +485,44 @@ pub struct Protection {
     pub retired: bool,
 }
 
+/// Exact lifecycle snapshot observed during a read-only protection inspection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionBoundary {
+    pub table: String,
+    pub metadata: String,
+    pub revision: i64,
+}
+
+/// One retained record sufficient to protect a candidate object.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionBlocker {
+    pub table: String,
+    pub key: String,
+    pub revision: i64,
+}
+
+/// A candidate's first protection witness, not an exhaustive list of owners.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectProtection {
+    pub object: ObjectRef,
+    pub blocker: Option<RetentionBlocker>,
+}
+
+/// Read-only protection evidence; unmatched objects are not authorized for removal.
+///
+/// Each table has its own observed boundary. Concurrent work can add references
+/// during or after inspection. Removal requires fresh eligibility, worker
+/// exclusion and a durable exact intent, none of which this report supplies.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionInspection {
+    pub boundaries: Vec<RetentionBoundary>,
+    pub objects: Vec<ObjectProtection>,
+    pub protected_bytes: u64,
+    pub unmatched_bytes: u64,
+    /// Unique release or native metadata files decoded, excluding lifecycle rows.
+    pub metadata_objects_read: usize,
+}
+
 /// Full multiset comparison of one field group; duplicate observations count separately.
 #[derive(Clone, Debug, Serialize)]
 pub struct Comparison {

@@ -1,0 +1,4 @@
+    Updating crates.io index
+     Locking 1 package to latest Rust 1.94 compatible version
+      Adding serde_ignored v0.1.14
+note: pass `--verbose` to see 8 unchanged dependencies behind latest

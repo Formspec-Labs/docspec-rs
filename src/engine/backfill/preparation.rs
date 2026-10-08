@@ -37,10 +37,10 @@ impl Engine {
         .to_hex()
         .to_string();
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
-        let prepared: Option<TablePin> = lifecycle.get(&view, &prepared_key).await?;
+        let prepared: Option<PreparedCompletion> = lifecycle.get(&view, &prepared_key).await?;
         let prepared = if let Some(prepared) = prepared {
-            storage::check_available(prepared.objects.clone(), &lifecycle.budget).await?;
-            prepared
+            storage::check_available(prepared.table.objects.clone(), &lifecycle.budget).await?;
+            prepared.table
         } else {
             #[cfg(feature = "test-util")]
             work_started("backfill-assembly");
@@ -147,21 +147,31 @@ impl Engine {
             let view = lifecycle.open(request.dataset()).await?;
             self.check_completion(&view, operation, request.operation())
                 .await?;
-            if let Some(existing) = lifecycle.get::<TablePin>(&view, &prepared_key).await? {
-                existing
+            if let Some(existing) = lifecycle
+                .get::<PreparedCompletion>(&view, &prepared_key)
+                .await?
+            {
+                existing.table
             } else {
+                let completed = PreparedCompletion {
+                    dependencies: Some(GroupDependencies {
+                        source: source.into(),
+                        output: (&prepared).into(),
+                    }),
+                    table: prepared,
+                };
                 lifecycle
-                    .commit(&view, vec![record(&prepared_key, &prepared)?])
+                    .commit(&view, vec![record(&prepared_key, &completed)?])
                     .await?;
-                prepared
+                completed.table
             }
         };
         stop_after(stop, "processing")?;
         let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
-        let validated: Option<ObjectRef> = lifecycle
+        let validated: Option<ValidationCompletion> = lifecycle
             .get(&lifecycle.open(request.dataset()).await?, &validation_key)
             .await?;
-        if validated.as_ref() != Some(&prepared.metadata) {
+        if validated.as_ref().map(|completed| &completed.output) != Some(&prepared.metadata) {
             #[cfg(feature = "test-util")]
             work_started("backfill-validation");
             verification::verify_group_data(
@@ -178,9 +188,20 @@ impl Engine {
             let view = lifecycle.open(request.dataset()).await?;
             self.check_completion(&view, operation, request.operation())
                 .await?;
-            lifecycle
-                .commit(&view, vec![record(&validation_key, &prepared.metadata)?])
-                .await?;
+            let existing: Option<ValidationCompletion> =
+                lifecycle.get(&view, &validation_key).await?;
+            if existing.as_ref().map(|completed| &completed.output) != Some(&prepared.metadata) {
+                let completed = ValidationCompletion {
+                    output: prepared.metadata.clone(),
+                    dependencies: Some(GroupDependencies {
+                        source: source.into(),
+                        output: (&prepared).into(),
+                    }),
+                };
+                lifecycle
+                    .commit(&view, vec![record(&validation_key, &completed)?])
+                    .await?;
+            }
         }
         stop_after(stop, "validation")?;
         Ok(PreparedGroup {

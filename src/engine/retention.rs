@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::View;
 use std::collections::BTreeSet;
 
+mod inventory;
+
 impl Engine {
     /// Proves that every unselected admission in a captured interval was abandoned.
     /// Caller uses the same locked view for admission or final selection.

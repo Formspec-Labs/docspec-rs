@@ -53,6 +53,7 @@ struct Inner {
     lifecycle: Lifecycle,
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
     _workspace: WorkspaceLock,
+    owned_catalog: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,6 +76,17 @@ struct Operation {
     schema_key: Option<String>,
     /// Explicit rebuilds fence later source admissions before replacing the selection.
     require_current_boundary: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum CompletedGroups {
+    Captured {
+        outputs: BTreeMap<String, ObjectRef>,
+        source: NativeSnapshotRef,
+    },
+    // Old progress records remain readable, but their source is unknown to cleanup.
+    Legacy(BTreeMap<String, ObjectRef>),
 }
 
 /// A bounded explanation of reuse and work remaining before selection.
@@ -111,7 +123,7 @@ impl Engine {
         let ownership = WorkspaceLock::acquire(root.as_ref())?;
         let root = std::fs::canonicalize(root)?;
         let catalog = storage::local_catalog(&root).await?;
-        Self::compose(root, catalog, limits, ownership)
+        Self::compose(root, catalog, limits, ownership, true)
     }
 
     /// Opens a workspace using an injected maintained catalog.
@@ -124,7 +136,13 @@ impl Engine {
         limits: Limits,
     ) -> Result<Self> {
         let ownership = WorkspaceLock::acquire(root.as_ref())?;
-        Self::compose(std::fs::canonicalize(root)?, catalog, limits, ownership)
+        Self::compose(
+            std::fs::canonicalize(root)?,
+            catalog,
+            limits,
+            ownership,
+            false,
+        )
     }
 
     fn compose(
@@ -132,6 +150,7 @@ impl Engine {
         catalog: Arc<dyn Catalog>,
         limits: Limits,
         ownership: WorkspaceLock,
+        owned_catalog: bool,
     ) -> Result<Self> {
         let scratch = root.join("scratch");
         std::fs::create_dir_all(&scratch)?;
@@ -142,6 +161,7 @@ impl Engine {
                 lifecycle: Lifecycle::new(catalog, budget),
                 locks: Mutex::new(BTreeMap::new()),
                 _workspace: ownership,
+                owned_catalog,
             }),
         })
     }
@@ -234,10 +254,7 @@ impl Engine {
         for phase in phases {
             let exists = if phase == "groups" {
                 lifecycle
-                    .get::<BTreeMap<String, ObjectRef>>(
-                        &view,
-                        &format!("groups/{}", spec.operation()),
-                    )
+                    .get::<CompletedGroups>(&view, &format!("groups/{}", spec.operation()))
                     .await?
                     .is_some()
             } else if phase == "readback" {
@@ -967,7 +984,7 @@ impl Engine {
                         .await?;
                     let key = format!("groups/{}", spec.operation());
                     if lifecycle
-                        .get::<BTreeMap<String, ObjectRef>>(&view, &key)
+                        .get::<CompletedGroups>(&view, &key)
                         .await?
                         .is_none()
                     {
@@ -977,7 +994,16 @@ impl Engine {
                             .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
                             .collect();
                         lifecycle
-                            .commit(&view, vec![record(key, completed)?])
+                            .commit(
+                                &view,
+                                vec![record(
+                                    key,
+                                    CompletedGroups::Captured {
+                                        outputs: completed,
+                                        source: (&table).into(),
+                                    },
+                                )?],
+                            )
                             .await?;
                     }
                 }

@@ -1,0 +1,93 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.88s
+     Running tests/backfill_dependencies.rs (target/debug/deps/backfill_dependencies-dbc2fc20ad28de60)
+
+running 2 tests
+test empty_source_completions_retain_dependencies_without_file_work ... ok
+test legacy_group_completions_resume_and_keep_unknown_dependencies ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.10s
+
+     Running tests/retention_inspection.rs (target/debug/deps/retention_inspection-a93ba5b57e41f0bf)
+
+running 6 tests
+test family_only_namespace_retains_external_release_dependencies_once ... ok
+test candidate_identity_capacity_and_transport_boundaries_are_explicit ... ok
+test each_backfill_completion_independently_protects_its_consumed_source ... FAILED
+test unknown_and_legacy_roots_refuse_instead_of_reporting_unprotected ... ok
+test completed_and_interrupted_roots_protect_without_opening_payloads ... ok
+test schema_admission_and_evolved_group_metadata_preserve_native_interpretation ... FAILED
+
+failures:
+
+---- each_backfill_completion_independently_protects_its_consumed_source stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/85c8a55ac88541fcb3bcb58e1b364e4c/data/d3819a24-974f-482f-89cb-00d55da51095-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/85c8a55ac88541fcb3bcb58e1b364e4c/data/d3819a24-974f-482f-89cb-00d55da51095-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/85c8a55ac88541fcb3bcb58e1b364e4c/data/d3819a24-974f-482f-89cb-00d55da51095-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/50cdb24a3daa4947aa57fc2fc25b7cd5/data/1bba16a4-99e5-4d4e-8a2c-dedb5d52b589-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/50cdb24a3daa4947aa57fc2fc25b7cd5/data/22998bd4-7647-447b-8690-fd8b3ad13719-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDPxw8M/workspace/objects/comments/50cdb24a3daa4947aa57fc2fc25b7cd5/data/331ebd48-68d3-4562-8e1b-33c485dd6b58-00000.parquet
+
+thread 'each_backfill_completion_independently_protects_its_consumed_source' (13215207) panicked at tests/retention_inspection.rs:120:66:
+called `Result::unwrap()` on an `Err` value: Error { code: "iceberg", message: "DataInvalid => Runtime must be provided with TableBuilder.runtime()", source: Some(DataInvalid => Runtime must be provided with TableBuilder.runtime()
+), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- schema_admission_and_evolved_group_metadata_preserve_native_interpretation stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/fc032f90fe8746db89582d3fa143f271/data/5491a97c-ba52-4677-9c4f-58a2629ebc6f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/fc032f90fe8746db89582d3fa143f271/data/5491a97c-ba52-4677-9c4f-58a2629ebc6f-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/fc032f90fe8746db89582d3fa143f271/data/5491a97c-ba52-4677-9c4f-58a2629ebc6f-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/b5c0f7f1c5cd4c7ca7bf12c6a2b95fc5/data/2b392c12-99c2-4321-b324-153c145a7554-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/b5c0f7f1c5cd4c7ca7bf12c6a2b95fc5/data/cbeaf4dc-443e-42d1-b5be-bbd6cea82489-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/b5c0f7f1c5cd4c7ca7bf12c6a2b95fc5/data/dada41a9-b77a-4792-9112-f96274c47779-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/7afd775024084a2cb88b97b551dbad38/data/ab02fdb3-d13f-49d8-ae78-9fd4c341828a-00000.parquet
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpCVGEht/workspace/objects/comments/84ad9199f0824a338e6be6d2e60ec8ed/data/7c78884d-015a-4896-bae1-18e65ba68ed5-00000.parquet
+
+thread 'schema_admission_and_evolved_group_metadata_preserve_native_interpretation' (13215209) panicked at tests/retention_inspection.rs:270:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "iceberg", message: "DataInvalid => Runtime must be provided with TableBuilder.runtime()", source: Some(DataInvalid => Runtime must be provided with TableBuilder.runtime()
+), backtrace: <disabled> }
+
+
+failures:
+    each_backfill_completion_independently_protects_its_consumed_source
+    schema_admission_and_evolved_group_metadata_preserve_native_interpretation
+
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.08s
+
+error: test failed, to rerun pass `--test retention_inspection`
