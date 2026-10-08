@@ -33,6 +33,7 @@ pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
 pub use read::{read_evidence, read_group};
+mod aggregation;
 mod incremental;
 mod refresh;
 mod verification;
@@ -77,8 +78,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v7";
-pub(crate) const FORMAT: u32 = 7;
+const PROCESSOR: &str = "docspec.dataset.v8";
+pub(crate) const FORMAT: u32 = 8;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -387,7 +388,7 @@ impl Engine {
                 !(group == "source"
                     && before.dataset.related.is_some()
                     && after.dataset.related.is_some()
-                    && refresh::TUPLE.contains(&field.name().as_str()))
+                    && refresh::hidden_field(field.name()))
             })
             .collect::<Vec<_>>();
         let columns = visible
@@ -1221,7 +1222,7 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})
         }
         OperationRequest::Refresh(spec) => {
-            serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "left": spec.left, "right": spec.right, "join": spec.join, "policy": spec.policy, "mode": spec.mode, "relationship": spec.relationship}})
+            serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "transform": spec.transform, "policy": spec.policy, "mode": spec.mode, "relationship": spec.relationship}})
         }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)

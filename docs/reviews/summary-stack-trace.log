@@ -1,0 +1,101 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) settings set -- target.run-args  "aggregation::summary_coverage_guards" "--nocapture"
+(lldb) run
+
+running 1 test
+guard fixture: enter
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before first
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before newer
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before pending
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 96125 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 96125 stopped
+* thread #2, name = 'aggregation::summary_coverage_guards_and_rebase_preserve_comple', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe036a0)
+    frame #0: 0x00000001040bf178 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd + 16
+related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd:
+->  0x1040bf178 <+16>: str    xzr, [sp]
+    0x1040bf17c <+20>: sub    sp, sp, #0x80
+    0x1040bf180 <+24>: add    x9, sp, #0x538
+    0x1040bf184 <+28>: str    x9, [sp, #0x1a8]
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.
+(lldb) thread backtrace -c 60
+* thread #2, name = 'aggregation::summary_coverage_guards_and_rebase_preserve_comple', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe036a0)
+  * frame #0: 0x00000001040bf178 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd + 16
+    frame #1: 0x0000000104077dd8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name::hf7970ef8d66587b6 + 20
+    frame #2: 0x00000001040b10d8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_data_type_helper::hd5ee7b766a70323e + 2000
+    frame #3: 0x0000000104065a9c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_data_type::h8e3203e812e83a2c + 44
+    frame #4: 0x0000000104052b84 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hbe9a0326eb229dec + 60
+    frame #5: 0x0000000104128250 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::h8a50fe6a1c5cbaf5 + 48
+    frame #6: 0x000000010403b2b4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h3a1c9ca0fed14a78 + 64
+    frame #7: 0x000000010405096c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 280
+    frame #8: 0x000000010405f3f8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #9: 0x000000010408fd5c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::_$u7b$$u7b$closure$u7d$$u7d$::h364fc05f32d272b8 + 80
+    frame #10: 0x0000000104128d70 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::he8f3ae1bc2c98981 + 56
+    frame #11: 0x000000010403aa98 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h0c845ba6572b9080 + 40
+    frame #12: 0x000000010408efbc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::h40693becc326e5d7 + 572
+    frame #13: 0x000000010405f620 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 816
+    frame #14: 0x000000010403836c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #15: 0x0000000104268c6c related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hc135016bc223f1f8 + 24
+    frame #16: 0x000000010410ecf4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::hae348042fb8246f6 + 96
+    frame #17: 0x00000001040a4660 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated::h81bfc7e7d6e16b31 + 20
+    frame #18: 0x00000001040530f4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hd3ff2ec3b61f8255 + 16
+    frame #19: 0x000000010403a16c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::with_state::h3b588a3db529ddbe + 44
+    frame #20: 0x00000001040518b4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 4192
+    frame #21: 0x000000010405f3f8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #22: 0x000000010403836c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #23: 0x00000001040a9860 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_join_constraint::hf8b926000aafbaa5 + 132
+    frame #24: 0x00000001040454f0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_joins::hb00ccc5199936bba + 2996
+    frame #25: 0x00000001040ac548 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_and_joins::h07086e6e26d9498b + 192
+    frame #26: 0x0000000104268c00 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hb1c44cf9b20ffe60 + 24
+    frame #27: 0x000000010410d8cc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::h9dca7c8cde5fcf72 + 104
+    frame #28: 0x00000001040bbb08 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_with_joins::h9abc692b496f2d50 + 64
+    frame #29: 0x0000000104055068 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_select::h5961a7f0220e9894 + 5276
+    frame #30: 0x000000010406cc78 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query_body::hee12bf7aac49c476 + 104
+    frame #31: 0x0000000104046e84 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::_$u7b$$u7b$closure$u7d$$u7d$::h645a63b12e5bf522 + 1068
+    frame #32: 0x0000000104046a34 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::h1268472b367ce16d + 200
+    frame #33: 0x00000001040684c0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_statement::h86503e952b8f30a8 + 4204
+    frame #34: 0x0000000101384a3c related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_and_handle_statement::h18cb9b30f1f61f14 + 40
+    frame #35: 0x0000000101382330 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statement::h0fe2bee314f72f03 + 172
+    frame #36: 0x00000001013836f0 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statements::h052a996030a87e41 + 292
+    frame #37: 0x00000001011cf800 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::sql_to_statement::h90fa2bea0499a095 + 604
+    frame #38: 0x00000001011d0ed4 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::create_logical_plan::_$u7b$$u7b$closure$u7d$$u7d$::h42908669bc3b8376 + 272
+    frame #39: 0x0000000101091c44 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql_with_options::_$u7b$$u7b$closure$u7d$$u7d$::h5e19e3eabd5497cd + 452
+    frame #40: 0x000000010109da90 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql::_$u7b$$u7b$closure$u7d$$u7d$::hcf8c6cf50f8a3cdf + 448
+    frame #41: 0x000000010071d628 related_refresh-36f3e2d2ba35a1a6`docspec::engine::write::any_rows::_$u7b$$u7b$closure$u7d$$u7d$::h385077f02bb5b1dd + 392
+    frame #42: 0x0000000100714cb4 related_refresh-36f3e2d2ba35a1a6`docspec::engine::write::_$LT$impl$u20$docspec..engine..Engine$GT$::replace_keys::_$u7b$$u7b$closure$u7d$$u7d$::h998d4052f12abd58 + 11704
+    frame #43: 0x000000010065c600 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hab309e410356e8dd + 36
+    frame #44: 0x00000001006ffb7c related_refresh-36f3e2d2ba35a1a6`docspec::engine::aggregation::_$LT$impl$u20$docspec..engine..Engine$GT$::process_aggregation::_$u7b$$u7b$closure$u7d$$u7d$::h647f658a43e3bb38 + 9712
+    frame #45: 0x000000010065c4e8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h8f4a399cc3b00762 + 36
+    frame #46: 0x0000000100705990 related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::h69cd77fe0d7e1aa1 + 5392
+    frame #47: 0x000000010065c518 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h92bb1133f828b277 + 36
+    frame #48: 0x000000010072ac8c related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::process_refresh::_$u7b$$u7b$closure$u7d$$u7d$::h9cdb6d80df2a799c + 1244
+    frame #49: 0x000000010065c2e0 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h3417439169eaad8e + 36
+    frame #50: 0x00000001005b1168 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h52758bb146e4904e + 25724
+    frame #51: 0x000000010065c188 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h023f0dfed71f6cda + 36
+    frame #52: 0x00000001005a8018 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::hc3366299c0b4bdd6 + 1116
+    frame #53: 0x00000001000bf200 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::refresh_until::_$u7b$$u7b$closure$u7d$$u7d$::h023300aad9ceea26 + 636
+    frame #54: 0x00000001000727d0 related_refresh-36f3e2d2ba35a1a6`related_refresh::aggregation::summary_coverage_guards_and_rebase_preserve_completed_work::_$u7b$$u7b$closure$u7d$$u7d$::h256fcbb725cd5265 + 2776
+    frame #55: 0x0000000100089e8c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h110bf98a599e0adf + 36
+    frame #56: 0x0000000100089eb4 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h6ab0bf34e1be448f + 28
+    frame #57: 0x0000000100103460 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h91b7d717a3fd007d + 28
+    frame #58: 0x00000001001032ac related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h1ff6329a95540e5e + 208
+    frame #59: 0x0000000100101998 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::enter::h7f79107f74715fc3 + 288

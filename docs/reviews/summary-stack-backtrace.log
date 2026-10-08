@@ -1,0 +1,39 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) settings set -- target.run-args  "aggregation::summary_coverage_guards" "--nocapture"
+(lldb) run
+
+running 1 test
+guard fixture: enter
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before first
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before newer
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+guard fixture: before pending
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 95826 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 95826 stopped
+* thread #2, name = 'aggregation::summary_coverage_guards_and_rebase_preserve_comple', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe036a0)
+    frame #0: 0x00000001040bf178 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd + 16
+related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd:
+->  0x1040bf178 <+16>: str    xzr, [sp]
+    0x1040bf17c <+20>: sub    sp, sp, #0x80
+    0x1040bf180 <+24>: add    x9, sp, #0x538
+    0x1040bf184 <+28>: str    x9, [sp, #0x1a8]
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.

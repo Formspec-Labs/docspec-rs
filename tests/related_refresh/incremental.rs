@@ -31,7 +31,7 @@ fn write_rows(path: &Path, rows: &[Row], keys_only: bool) -> InputSpec {
         digest: storage::digest(path).unwrap().0,
     }
 }
-async fn update(
+pub(super) async fn update(
     engine: &Engine,
     root: &Path,
     base: &ReleasePin,
@@ -92,19 +92,20 @@ async fn update(
     release
 }
 fn next(base: &ReleasePin, left: &ReleasePin, right: &ReleasePin, operation: &str) -> RefreshSpec {
-    RefreshSpec {
+    let mut spec = RefreshSpec {
         operation: id(operation),
         base: Some(base.id.clone()),
-        left: left.version_ref(),
-        right: right.version_ref(),
         mode: RefreshMode::Incremental,
         ..base.dataset.related.as_ref().unwrap().request.clone()
-    }
+    };
+    join_mut(&mut spec).left = left.version_ref();
+    join_mut(&mut spec).right = right.version_ref();
+    spec
 }
 fn row(a: Option<i64>, b: Option<i64>, value: &str) -> Row {
     (a, b, Some(value.into()))
 }
-async fn files(pin: &TablePin) -> BTreeSet<String> {
+pub(super) async fn files(pin: &TablePin) -> BTreeSet<String> {
     let budget = Budget::new(limits()).unwrap();
     let native = storage::open_pin(pin).await.unwrap();
     let mut stream = storage::read_occurrences(&native, &budget)
@@ -127,8 +128,8 @@ async fn incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_i
             let root = TempDir::new().unwrap();
             let (engine, mut left, mut right) = fixture(root.path()).await;
             let mut spec = recipe(&left, &right);
-            spec.join.kind = kind;
-            spec.join.nulls = nulls;
+            join_mut(&mut spec).join.kind = kind;
+            join_mut(&mut spec).join.nulls = nulls;
             let mut joined = engine
                 .refresh(&spec)
                 .await
@@ -152,7 +153,12 @@ async fn incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_i
                 .refresh(&spec)
                 .await
                 .unwrap_or_else(|error| panic!("{kind:?} {nulls:?} {}: {error}", spec.operation));
-            check(&engine, &joined, &oracle(&left, &right, &spec.join).await).await;
+            check(
+                &engine,
+                &joined,
+                &oracle(&left, &right, &join(&spec).join).await,
+            )
+            .await;
             // Move a key through deletion+insertion, add duplicate partners on
             // both sides, retain partial-null unmatched tuples under SQL equality.
             left = update(
@@ -185,7 +191,12 @@ async fn incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_i
                 .refresh(&spec)
                 .await
                 .unwrap_or_else(|error| panic!("{kind:?} {nulls:?} {}: {error}", spec.operation));
-            check(&engine, &joined, &oracle(&left, &right, &spec.join).await).await;
+            check(
+                &engine,
+                &joined,
+                &oracle(&left, &right, &join(&spec).join).await,
+            )
+            .await;
             // The opposite producer admission order must yield the same complete
             // captured semantics, with an empty right side and retained left rows.
             right = update(
@@ -217,7 +228,12 @@ async fn incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_i
                 .refresh(&spec)
                 .await
                 .unwrap_or_else(|error| panic!("{kind:?} {nulls:?} {}: {error}", spec.operation));
-            check(&engine, &joined, &oracle(&left, &right, &spec.join).await).await;
+            check(
+                &engine,
+                &joined,
+                &oracle(&left, &right, &join(&spec).join).await,
+            )
+            .await;
             verify_release(&joined, limits()).await.unwrap();
         }
     }
@@ -325,7 +341,7 @@ async fn incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop
         &oracle(
             &left,
             &right,
-            &joined.dataset.related.as_ref().unwrap().request.join,
+            &join(&joined.dataset.related.as_ref().unwrap().request).join,
         )
         .await,
     )
@@ -362,7 +378,7 @@ async fn incremental_refuses_unqualified_recipes_before_admission_and_binds_mode
     let first = engine.refresh(&recipe(&left, &right)).await.unwrap();
     let before = engine.inspect(&id("joined")).await.unwrap();
     let mut spec = next(&first, &left, &right, "changed-recipe");
-    spec.join.nulls = NullMatching::Never;
+    join_mut(&mut spec).join.nulls = NullMatching::Never;
     assert_eq!(
         engine.refresh(&spec).await.unwrap_err().code(),
         "full_refresh_required"
@@ -420,7 +436,12 @@ async fn incremental_killed_workers_reuse_processing_evidence_and_readback() {
         for (key, value) in before.iter().filter(|(key, _)| key.starts_with("phase/")) {
             assert_eq!(after.get(key), Some(value));
         }
-        check(&engine, &release, &oracle(&left, &right, &spec.join).await).await;
+        check(
+            &engine,
+            &release,
+            &oracle(&left, &right, &join(&spec).join).await,
+        )
+        .await;
         assert_eq!(engine.refresh(&spec).await.unwrap(), release);
     }
 }
@@ -581,7 +602,7 @@ async fn incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_
     // valid identity delta cannot qualify it as incremental execution.
     let mut full = next(&noop, &left, &right, "changed-recipe");
     full.mode = RefreshMode::Full;
-    full.join.nulls = NullMatching::Never;
+    join_mut(&mut full).join.nulls = NullMatching::Never;
     let changed = engine.refresh(&full).await.unwrap();
     let mut bad = changed.clone();
     let mut changes = noop.dataset.changes.clone().unwrap();

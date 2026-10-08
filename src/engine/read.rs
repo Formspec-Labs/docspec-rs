@@ -16,7 +16,7 @@ impl Engine {
         read_group(release, group, &self.inner.lifecycle.budget).await
     }
 
-    /// Streams the exact contributor pairs retained by a related result.
+    /// Streams the exact contributor occurrences retained by a related result.
     ///
     /// # Errors
     /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
@@ -47,7 +47,7 @@ pub async fn read_group(
     read_pin(pin, budget).await
 }
 
-/// Streams independently verified contributor pairs without the producing catalog.
+/// Streams independently verified contributor occurrences without the producing catalog.
 ///
 /// # Errors
 /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.

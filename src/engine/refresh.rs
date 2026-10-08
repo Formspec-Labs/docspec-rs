@@ -1,4 +1,4 @@
-//! Native equality joins, retained contributors, and guarded forward input coverage.
+//! Native related results, retained contributors, and guarded forward input coverage.
 
 use super::write::{Prepared, identifier as quote};
 use super::*;
@@ -12,7 +12,7 @@ pub(super) const TUPLE: [&str; 4] = [
 ];
 
 impl Engine {
-    /// Plans retained join work over exact native inputs without reading their payloads.
+    /// Plans retained related work over exact native inputs without reading their payloads.
     ///
     /// # Errors
     /// Refuses malformed recipes, conflicting operation identities, or stale output bases.
@@ -21,10 +21,10 @@ impl Engine {
             .await
     }
 
-    /// Runs or resumes a complete native join with retained contributor evidence.
+    /// Runs or resumes native joins or summaries with retained contributor evidence.
     ///
     /// # Errors
-    /// Refuses inadmissible inputs, invalid joins, exhausted capacity, and stale selection guards.
+    /// Refuses inadmissible inputs, invalid recipes, exhausted capacity, and stale selection guards.
     pub async fn refresh(&self, spec: &RefreshSpec) -> Result<ReleasePin> {
         self.run_internal(&OperationRequest::Refresh(Box::new(spec.clone())), None)
             .await
@@ -54,6 +54,10 @@ impl Engine {
         let budget = &self.inner.lifecycle.budget;
         let loaded = load_inputs(&coverage, budget).await?;
         verification::verify_all(&loaded.releases.values().collect::<Vec<_>>(), budget).await?;
+        if let RefreshTransform::Aggregate(aggregate) = &spec.transform {
+            aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
+                .await?;
+        }
         let phase = PhaseResult {
             operation: spec.operation.clone(),
             phase: "admission".into(),
@@ -94,9 +98,9 @@ impl Engine {
         }
         let loaded = load_inputs(coverage, &self.inner.lifecycle.budget).await?;
         let context = self.context();
-        let frame = join_frame(
+        let frame = source_frame(
             &context,
-            spec,
+            &spec.transform,
             &loaded.borrowed(),
             &self.inner.lifecycle.budget,
         )
@@ -124,16 +128,33 @@ impl Engine {
                 Box::pin(self.incremental_evidence(spec, &directory, processing, operation)).await?
             } else {
                 let context = self.context();
-                context.register_table(
-                    "matches",
-                    crate::query::table(
-                        storage::open_pin(processing.table.as_ref().ok_or_else(invalid)?).await?,
-                        self.inner.lifecycle.budget.clone(),
-                    )?,
-                )?;
-                let frame = context
-                    .sql(&format!("SELECT {} FROM matches", tuple_columns(None)))
-                    .await?;
+                match &spec.transform {
+                    RefreshTransform::Join(_) => {
+                        context.register_table(
+                            "matches",
+                            crate::query::table(
+                                storage::open_pin(processing.table.as_ref().ok_or_else(invalid)?)
+                                    .await?,
+                                self.inner.lifecycle.budget.clone(),
+                            )?,
+                        )?;
+                    }
+                    RefreshTransform::Aggregate(aggregate) => {
+                        let loaded = load_inputs(
+                            processing.coverage.as_ref().ok_or_else(invalid)?,
+                            &self.inner.lifecycle.budget,
+                        )
+                        .await?;
+                        aggregation::register_input(
+                            &context,
+                            aggregate,
+                            &loaded.borrowed(),
+                            &self.inner.lifecycle.budget,
+                        )
+                        .await?;
+                    }
+                }
+                let frame = evidence_frame(&context, &spec.transform, "matches").await?;
                 self.write_frame(&spec.dataset, &directory, frame).await?
             };
             let phase = PhaseResult {
@@ -182,12 +203,11 @@ impl Engine {
             .as_ref()
             .and_then(|dataset| dataset.related.as_ref());
         if let Some(previous) = previous
-            && (previous.request.left.dataset != spec.left.dataset
-                || previous.request.right.dataset != spec.right.dataset)
+            && (!previous.request.transform.same_roles(&spec.transform))
         {
             return Err(Error::refusal(
                 "incomparable_inputs",
-                "changing input datasets or join roles requires explicit reconciliation",
+                "changing transform kind or input roles requires explicit reconciliation",
             ));
         }
         let progress = self
@@ -264,15 +284,28 @@ impl Engine {
 pub(super) fn validate(spec: &RefreshSpec) -> Result<()> {
     if spec.definition.trim().is_empty()
         || spec.base.as_ref() == Some(&spec.operation)
-        || spec.left.dataset == spec.dataset
-        || spec.right.dataset == spec.dataset
-        || (spec.left.dataset == spec.right.dataset && spec.left != spec.right)
+        || spec
+            .transform
+            .versions()
+            .iter()
+            .any(|v| v.dataset == spec.dataset)
+    {
+        return Err(Error::refusal(
+            "invalid_refresh",
+            "refresh needs exact external inputs and distinct output identity",
+        ));
+    }
+    let spec = match &spec.transform {
+        RefreshTransform::Join(spec) => spec,
+        RefreshTransform::Aggregate(spec) => return aggregation::validate(&spec.grouping),
+    };
+    if (spec.left.dataset == spec.right.dataset && spec.left != spec.right)
         || spec.join.keys.is_empty()
         || spec.join.fields.is_empty()
     {
         return Err(Error::refusal(
             "invalid_refresh",
-            "refresh needs exact external inputs, distinct output identity, keys and fields",
+            "join needs consistent input roles, keys and fields",
         ));
     }
     let names: BTreeSet<_> = spec
@@ -346,21 +379,13 @@ pub(super) fn phase_key(
             PROCESSOR,
             spec.mode,
             base_manifest.ok_or_else(invalid)?,
-            &spec.left,
-            &spec.right,
-            &spec.join,
+            &spec.transform,
             &spec.definition,
         ))?
     } else if phase == "admission" {
-        serde_json::to_vec(&(PROCESSOR, &spec.left, &spec.right))?
+        serde_json::to_vec(&(PROCESSOR, spec.inputs()))?
     } else {
-        serde_json::to_vec(&(
-            PROCESSOR,
-            &spec.left,
-            &spec.right,
-            &spec.join,
-            &spec.definition,
-        ))?
+        serde_json::to_vec(&(PROCESSOR, &spec.transform, &spec.definition))?
     };
     Ok(format!(
         "phase/refresh/{}/{eligibility}/{phase}",
@@ -428,11 +453,10 @@ pub(super) async fn read_release(
 
 async fn join_frame(
     context: &SessionContext,
-    spec: &RefreshSpec,
+    spec: &JoinTransform,
     releases: &BTreeMap<Id, &ReleasePin>,
     budget: &Budget,
 ) -> Result<DataFrame> {
-    validate(spec)?;
     for (alias, version) in [("join_left", &spec.left), ("join_right", &spec.right)] {
         let release = releases.get(&version.dataset).ok_or_else(invalid)?;
         if release.version_ref() != *version {
@@ -447,7 +471,7 @@ async fn join_frame(
 
 pub(super) async fn join_registered(
     context: &SessionContext,
-    spec: &RefreshSpec,
+    spec: &JoinTransform,
 ) -> Result<DataFrame> {
     let schemas = [
         context
@@ -616,39 +640,42 @@ pub(super) async fn verify_related_with_inputs(
         .collect::<Result<_>>()?;
     inputs::check_relationships(&related.coverage, &relationships)?;
     let context = budget.context();
-    let expected = join_frame(&context, &related.request, releases, budget).await?;
+    validate(&related.request)?;
+    let expected = source_frame(&context, &related.request.transform, releases, budget).await?;
     let expected_schema =
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
     let native = storage::open_pin(source).await?;
     if *native.metadata().current_schema().as_ref() != expected_schema {
         return Err(Error::refusal(
             "invalid_related_result",
-            "native result schema differs from the declared complete join",
+            "native result schema differs from the declared computation",
         ));
     }
     context.register_table("expected", expected.into_view())?;
     context.register_table("actual", crate::query::table(native, budget.clone())?)?;
-    // Count complete typed rows, including input occurrence tuples. This checks
-    // duplicates, visible values, nulls, missing matches and unmatched membership.
-    let mut columns = TUPLE.iter().map(|name| quote(name)).collect::<Vec<_>>();
-    columns.extend(
-        related
-            .request
-            .join
-            .fields
-            .iter()
-            .map(|field| quote(&field.name)),
-    );
+    let columns = context
+        .table("expected")
+        .await?
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| quote(field.name()))
+        .collect::<Vec<_>>();
     equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
     verify_table(&related.evidence, budget).await?;
     let evidence = storage::open_pin(&related.evidence).await?;
+    let expected_evidence = evidence_frame(&context, &related.request.transform, "actual").await?;
+    let evidence_columns = expected_evidence
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| quote(field.name()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let evidence_schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
-        context
-            .sql(&format!("SELECT {} FROM actual", tuple_columns(None)))
-            .await?
-            .schema()
-            .as_arrow(),
+        expected_evidence.schema().as_arrow(),
     )?;
+    context.register_table("expected_evidence", expected_evidence.into_view())?;
     if *evidence.metadata().current_schema().as_ref() != evidence_schema {
         return Err(Error::refusal(
             "invalid_related_result",
@@ -656,8 +683,11 @@ pub(super) async fn verify_related_with_inputs(
         ));
     }
     context.register_table("evidence", crate::query::table(evidence, budget.clone())?)?;
-    equal_multisets(&context, "actual", "evidence", &tuple_columns(None)).await?;
-    for side in match related.request.join.cardinality {
+    equal_multisets(&context, "expected_evidence", "evidence", &evidence_columns).await?;
+    let RefreshTransform::Join(join) = &related.request.transform else {
+        return Ok(());
+    };
+    for side in match join.join.cardinality {
         JoinCardinality::ManyToMany => vec![],
         JoinCardinality::ManyToOne => vec![0],
         JoinCardinality::OneToOne => vec![0, 2],
@@ -720,4 +750,42 @@ fn invalid() -> Error {
         "invalid_related_result",
         "related values, contributor evidence or captured input identities disagree",
     )
+}
+
+async fn source_frame(
+    context: &SessionContext,
+    transform: &RefreshTransform,
+    releases: &BTreeMap<Id, &ReleasePin>,
+    budget: &Budget,
+) -> Result<DataFrame> {
+    match transform {
+        RefreshTransform::Join(join) => join_frame(context, join, releases, budget).await,
+        RefreshTransform::Aggregate(aggregate) => {
+            aggregation::register_input(context, aggregate, releases, budget).await?;
+            aggregation::aggregate_frame(context, &aggregate.grouping, "aggregate_input").await
+        }
+    }
+}
+async fn evidence_frame(
+    context: &SessionContext,
+    transform: &RefreshTransform,
+    source: &str,
+) -> Result<DataFrame> {
+    match transform {
+        RefreshTransform::Join(_) => Ok(context
+            .sql(&format!("SELECT {} FROM {source}", tuple_columns(None)))
+            .await?),
+        RefreshTransform::Aggregate(aggregate) => {
+            aggregation::evidence_frame(context, &aggregate.grouping, "aggregate_input").await
+        }
+    }
+}
+pub(super) fn output_keys(transform: &RefreshTransform) -> Vec<String> {
+    match transform {
+        RefreshTransform::Join(_) => TUPLE.map(str::to_owned).to_vec(),
+        RefreshTransform::Aggregate(aggregate) => aggregation::keys(&aggregate.grouping),
+    }
+}
+pub(super) fn hidden_field(name: &str) -> bool {
+    TUPLE.contains(&name) || name == aggregation::GLOBAL
 }

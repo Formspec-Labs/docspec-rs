@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.95s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 19 tests
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 97.92s
+

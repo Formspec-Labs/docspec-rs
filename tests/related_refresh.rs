@@ -11,8 +11,8 @@ use docspec::{
     engine::verify_release,
     model::{
         BackfillSpec, ComputedField, Id, JoinCardinality, JoinDefinition, JoinField, JoinKey,
-        JoinKind, JoinSide, NullMatching, ObjectRef, RefreshMode, RefreshPolicy, RefreshSpec,
-        ReleasePin, RunSpec, SuccessionProof,
+        JoinKind, JoinSide, JoinTransform, NullMatching, ObjectRef, RefreshMode, RefreshPolicy,
+        RefreshSpec, RefreshTransform, ReleasePin, RunSpec, SuccessionProof,
     },
     storage,
 };
@@ -122,36 +122,50 @@ fn recipe(left: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
         operation: id("initial"),
         base: None,
         definition: "v1".into(),
-        left: left.version_ref(),
-        right: right.version_ref(),
         policy: RefreshPolicy::Captured,
         mode: RefreshMode::Full,
         relationship: None,
-        join: JoinDefinition {
-            keys: ["a", "b"]
-                .into_iter()
-                .map(|name| JoinKey {
-                    left: name.into(),
-                    right: name.into(),
-                })
-                .collect(),
-            kind: JoinKind::Left,
-            nulls: NullMatching::Equal,
-            cardinality: JoinCardinality::ManyToMany,
-            fields: vec![
-                JoinField {
-                    side: JoinSide::Left,
-                    field: "text".into(),
-                    name: "left_text".into(),
-                },
-                JoinField {
-                    side: JoinSide::Right,
-                    field: "text".into(),
-                    name: "right_text".into(),
-                },
-            ],
-        },
+        transform: RefreshTransform::Join(JoinTransform {
+            left: left.version_ref(),
+            right: right.version_ref(),
+            join: JoinDefinition {
+                keys: ["a", "b"]
+                    .into_iter()
+                    .map(|name| JoinKey {
+                        left: name.into(),
+                        right: name.into(),
+                    })
+                    .collect(),
+                kind: JoinKind::Left,
+                nulls: NullMatching::Equal,
+                cardinality: JoinCardinality::ManyToMany,
+                fields: vec![
+                    JoinField {
+                        side: JoinSide::Left,
+                        field: "text".into(),
+                        name: "left_text".into(),
+                    },
+                    JoinField {
+                        side: JoinSide::Right,
+                        field: "text".into(),
+                        name: "right_text".into(),
+                    },
+                ],
+            },
+        }),
     }
+}
+fn join(spec: &RefreshSpec) -> &JoinTransform {
+    let RefreshTransform::Join(join) = &spec.transform else {
+        panic!("expected join");
+    };
+    join
+}
+fn join_mut(spec: &mut RefreshSpec) -> &mut JoinTransform {
+    let RefreshTransform::Join(join) = &mut spec.transform else {
+        panic!("expected join");
+    };
+    join
 }
 fn text(batch: &RecordBatch, name: &str, row: usize) -> Option<String> {
     let array = batch
@@ -304,20 +318,25 @@ async fn all_join_kinds_preserve_duplicate_and_partial_null_occurrences() {
         for nulls in [NullMatching::Never, NullMatching::Equal] {
             let mut spec = recipe(&left, &right);
             spec.dataset = id(&format!("{kind:?}-{nulls:?}").to_lowercase());
-            spec.join.kind = kind;
-            spec.join.nulls = nulls;
-            let expected = oracle(&left, &right, &spec.join).await;
+            join_mut(&mut spec).join.kind = kind;
+            join_mut(&mut spec).join.nulls = nulls;
+            let expected = oracle(&left, &right, &join(&spec).join).await;
             let release = engine.refresh(&spec).await.unwrap();
             check(&engine, &release, &expected).await;
         }
     }
     let empty = source(&engine, root.path(), "empty", "initial", None, &[]).await;
     let mut spec = recipe(&empty, &right);
-    spec.join.kind = JoinKind::Full;
+    join_mut(&mut spec).join.kind = JoinKind::Full;
     let release = engine.refresh(&spec).await.unwrap();
-    check(&engine, &release, &oracle(&empty, &right, &spec.join).await).await;
+    check(
+        &engine,
+        &release,
+        &oracle(&empty, &right, &join(&spec).join).await,
+    )
+    .await;
     spec.dataset = id("both-empty");
-    spec.right = empty.version_ref();
+    join_mut(&mut spec).right = empty.version_ref();
     let release = engine.refresh(&spec).await.unwrap();
     check(&engine, &release, &[]).await;
 }
@@ -329,7 +348,7 @@ async fn cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles() {
     for cardinality in [JoinCardinality::ManyToOne, JoinCardinality::OneToOne] {
         let mut spec = recipe(&left, &right);
         spec.dataset = id(&format!("{cardinality:?}").to_lowercase());
-        spec.join.cardinality = cardinality;
+        join_mut(&mut spec).join.cardinality = cardinality;
         assert_eq!(
             engine.refresh(&spec).await.unwrap_err().code(),
             "join_cardinality"
@@ -358,7 +377,12 @@ async fn cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles() {
     }
     let mut spec = recipe(&left, &left);
     let release = engine.refresh(&spec).await.unwrap();
-    check(&engine, &release, &oracle(&left, &left, &spec.join).await).await;
+    check(
+        &engine,
+        &release,
+        &oracle(&left, &left, &join(&spec).join).await,
+    )
+    .await;
     spec.dataset = left.dataset.dataset.clone();
     assert_eq!(
         engine.plan_refresh(&spec).await.unwrap_err().code(),
@@ -389,7 +413,7 @@ async fn offline_verifier_reconstructs_values_contributors_and_exact_input_graph
     // for this recipe's values or contributors, even with a fresh manifest hash.
     let mut other = spec.clone();
     other.dataset = id("other");
-    other.join.kind = JoinKind::Inner;
+    join_mut(&mut other).join.kind = JoinKind::Inner;
     let different = engine.refresh(&other).await.unwrap();
     for (name, mutate) in ["source", "evidence", "roles", "values"]
         .into_iter()
@@ -409,9 +433,10 @@ async fn offline_verifier_reconstructs_values_contributors_and_exact_input_graph
             "roles" | "values" => {
                 let related = bad.dataset.related.as_mut().unwrap();
                 if mutate == "roles" {
-                    std::mem::swap(&mut related.request.left, &mut related.request.right);
+                    let join = join_mut(&mut related.request);
+                    std::mem::swap(&mut join.left, &mut join.right);
                 } else {
-                    related.request.join.fields[0].side = JoinSide::Right;
+                    join_mut(&mut related.request).join.fields[0].side = JoinSide::Right;
                 }
                 bad.dataset.request =
                     docspec::model::OperationRequest::Refresh(Box::new(related.request.clone()));
@@ -481,7 +506,7 @@ async fn captured_selection_records_lag_latest_refuses_and_coverage_cannot_regre
     );
     captured.operation = id("advance");
     captured.base = Some(result.id.clone());
-    captured.left = newer.version_ref();
+    join_mut(&mut captured).left = newer.version_ref();
     let advanced = engine.refresh(&captured).await.unwrap();
     let comparison = engine.compare(&result, &advanced, "source").await.unwrap();
     assert_eq!(comparison.added_rows, Some(0));
@@ -489,7 +514,7 @@ async fn captured_selection_records_lag_latest_refuses_and_coverage_cannot_regre
     assert!(!comparison.same_inputs);
     captured.operation = id("regress");
     captured.base = Some(advanced.id.clone());
-    captured.left = left.version_ref();
+    join_mut(&mut captured).left = left.version_ref();
     assert_eq!(
         engine.refresh(&captured).await.unwrap_err().code(),
         "coverage_regression"
@@ -544,7 +569,12 @@ async fn completed_phases_resume_and_original_selection_reconciles_after_invalid
         for (key, value) in before.iter().filter(|(key, _)| key.starts_with("phase/")) {
             assert_eq!(after.get(key), Some(value), "{phase}: {key}");
         }
-        check(&engine, &release, &oracle(&left, &right, &spec.join).await).await;
+        check(
+            &engine,
+            &release,
+            &oracle(&left, &right, &join(&spec).join).await,
+        )
+        .await;
         engine
             .invalidate(&left.dataset.dataset, "evidence correction", None)
             .await
@@ -667,9 +697,9 @@ async fn quoted_helper_names_and_unmatched_duplicate_keys_are_supported() {
     let root = TempDir::new().unwrap();
     let (engine, left, right) = fixture(root.path()).await;
     let mut spec = recipe(&left, &right);
-    spec.join.fields[0].name = "__weight".into();
-    spec.join.fields[1].name = "__total".into();
-    spec.join.fields.push(JoinField {
+    join_mut(&mut spec).join.fields[0].name = "__weight".into();
+    join_mut(&mut spec).join.fields[1].name = "__total".into();
+    join_mut(&mut spec).join.fields.push(JoinField {
         side: JoinSide::Left,
         field: "a".into(),
         name: "quote\" and space".into(),
@@ -678,9 +708,9 @@ async fn quoted_helper_names_and_unmatched_duplicate_keys_are_supported() {
     verify_release(&release, limits()).await.unwrap();
     let empty = source(&engine, root.path(), "empty", "initial", None, &[]).await;
     spec.dataset = id("unmatched-duplicates");
-    spec.left = empty.version_ref();
-    spec.join.kind = JoinKind::Full;
-    spec.join.cardinality = JoinCardinality::OneToOne;
+    join_mut(&mut spec).left = empty.version_ref();
+    join_mut(&mut spec).join.kind = JoinKind::Full;
+    join_mut(&mut spec).join.cardinality = JoinCardinality::OneToOne;
     // Duplicate right keys have no matching left partner, so no occurrence fans out.
     let release = engine.refresh(&spec).await.unwrap();
     assert_eq!(
@@ -764,11 +794,11 @@ async fn offline_parent_rules_reject_related_conversion_and_role_rebinding() {
 fn nested_recipe(joined: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
     let mut spec = recipe(joined, right);
     spec.dataset = id("nested");
-    spec.join.keys = vec![JoinKey {
+    join_mut(&mut spec).join.keys = vec![JoinKey {
         left: "right_text".into(),
         right: "text".into(),
     }];
-    spec.join.fields[0].field = "left_text".into();
+    join_mut(&mut spec).join.fields[0].field = "left_text".into();
     spec
 }
 
@@ -846,7 +876,12 @@ async fn http_refresh_and_catalog_free_cli_verification_use_shared_services() {
     assert_eq!(response.status(), StatusCode::OK);
     let release: ReleasePin =
         serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
-    check(&engine, &release, &oracle(&left, &right, &spec.join).await).await;
+    check(
+        &engine,
+        &release,
+        &oracle(&left, &right, &join(&spec).join).await,
+    )
+    .await;
     let response = app
         .oneshot(
             Request::get("/datasets/joined/versions/initial/evidence")
@@ -964,7 +999,7 @@ async fn coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage(
     );
     assert_eq!(engine.latest(&next.dataset).await.unwrap(), first);
     next.operation = id("complete");
-    next.right = second_right.version_ref();
+    join_mut(&mut next).right = second_right.version_ref();
     let result = engine.refresh(&next).await.unwrap();
     assert_eq!(
         result
@@ -980,10 +1015,16 @@ async fn coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage(
     check(
         &engine,
         &result,
-        &oracle(&second_left, &second_right, &next.join).await,
+        &oracle(&second_left, &second_right, &join(&next).join).await,
     )
     .await;
 }
 
 #[path = "related_refresh/incremental.rs"]
 mod incremental;
+
+#[path = "related_refresh/aggregation.rs"]
+mod aggregation;
+
+#[path = "related_refresh/aggregation_types.rs"]
+mod aggregation_types;

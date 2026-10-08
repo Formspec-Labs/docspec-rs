@@ -225,7 +225,83 @@ pub enum RefreshMode {
     Incremental,
 }
 
-/// A reproducible join refresh over exact native input versions.
+/// Equality join inputs and their declared matching rules.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JoinTransform {
+    pub left: VersionRef,
+    pub right: VersionRef,
+    pub join: JoinDefinition,
+}
+
+/// Fixed-state aggregate functions with exact integer sums.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AggregateFunction {
+    CountRows,
+    Count { field: String },
+    Sum { field: String },
+    Min { field: String },
+    Max { field: String },
+}
+
+/// One named aggregate output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggregateField {
+    pub name: String,
+    pub function: AggregateFunction,
+}
+
+/// Complete group recomputation; an empty key list denotes one global group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggregationDefinition {
+    pub keys: Vec<String>,
+    pub aggregates: Vec<AggregateField>,
+}
+
+/// Aggregation over exact native input occurrences, including joined results.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggregateTransform {
+    pub input: VersionRef,
+    pub grouping: AggregationDefinition,
+}
+
+/// Qualified related computations sharing the same refresh lifecycle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RefreshTransform {
+    Join(JoinTransform),
+    Aggregate(AggregateTransform),
+}
+impl RefreshTransform {
+    pub(crate) fn versions(&self) -> Vec<&VersionRef> {
+        match self {
+            Self::Join(join) => vec![&join.left, &join.right],
+            Self::Aggregate(aggregate) => vec![&aggregate.input],
+        }
+    }
+    pub(crate) fn same_roles(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+            && self
+                .versions()
+                .iter()
+                .map(|v| &v.dataset)
+                .eq(other.versions().iter().map(|v| &v.dataset))
+    }
+    pub(crate) fn same_definition(&self, other: &Self) -> bool {
+        self.same_roles(other)
+            && match (self, other) {
+                (Self::Join(a), Self::Join(b)) => a.join == b.join,
+                (Self::Aggregate(a), Self::Aggregate(b)) => a.grouping == b.grouping,
+                _ => false,
+            }
+    }
+}
+
+/// A reproducible refresh over exact native input versions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshSpec {
@@ -234,9 +310,7 @@ pub struct RefreshSpec {
     /// None requires an absent output; otherwise capture the exact selected output.
     pub base: Option<Id>,
     pub definition: String,
-    pub left: VersionRef,
-    pub right: VersionRef,
-    pub join: JoinDefinition,
+    pub transform: RefreshTransform,
     #[serde(default)]
     pub policy: RefreshPolicy,
     #[serde(default)]
@@ -246,12 +320,13 @@ pub struct RefreshSpec {
 }
 
 impl RefreshSpec {
-    /// Returns the exact input vector, independent of left/right processing roles.
+    /// Returns the exact input vector, independent of processing roles.
     pub fn inputs(&self) -> BTreeMap<Id, VersionRef> {
-        BTreeMap::from([
-            (self.left.dataset.clone(), self.left.clone()),
-            (self.right.dataset.clone(), self.right.clone()),
-        ])
+        self.transform
+            .versions()
+            .into_iter()
+            .map(|version| (version.dataset.clone(), version.clone()))
+            .collect()
     }
 }
 

@@ -22,7 +22,7 @@ pub(super) fn base_manifest(
 fn full_refresh() -> Error {
     Error::refusal(
         "full_refresh_required",
-        "incremental refresh requires a qualified related base with unchanged input roles, native schemas and join definition",
+        "incremental refresh requires a qualified related base with unchanged input roles, native schemas and transform definition",
     )
 }
 
@@ -73,15 +73,43 @@ impl Engine {
         for release in previous.releases.values() {
             storage::verify_objects(source(release)?.objects.clone(), budget).await?;
         }
+        match &spec.transform {
+            RefreshTransform::Join(_) => {
+                Box::pin(self.process_incremental_join(spec, directory, &base, &previous, &current))
+                    .await
+            }
+            RefreshTransform::Aggregate(_) => {
+                Box::pin(self.process_aggregation(spec, directory, &base, &previous, &current))
+                    .await
+            }
+        }
+    }
+
+    async fn process_incremental_join(
+        &self,
+        spec: &RefreshSpec,
+        directory: &Path,
+        base: &ReleasePin,
+        previous: &refresh::LoadedInputs,
+        current: &refresh::LoadedInputs,
+    ) -> Result<write::Prepared> {
+        let budget = &self.inner.lifecycle.budget;
+        let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
+        let RefreshTransform::Join(join) = &spec.transform else {
+            return Err(full_refresh());
+        };
+        let RefreshTransform::Join(previous_join) = &related.request.transform else {
+            return Err(full_refresh());
+        };
         let context = self.context();
         let mut discovery = WriteMetrics::default();
         for (index, old_version, new_version) in [
-            (0, &related.request.left, &spec.left),
-            (1, &related.request.right, &spec.right),
+            (0, &previous_join.left, &join.left),
+            (1, &previous_join.right, &join.right),
         ] {
             let old = source(&previous.releases[&old_version.dataset])?;
             let new = source(&current.releases[&new_version.dataset])?;
-            let keys = spec
+            let keys = join
                 .join
                 .keys
                 .iter()
@@ -140,7 +168,7 @@ impl Engine {
         // Null-safe membership also includes unmatched partial-null groups under
         // ordinary SQL equality. The actual join keeps its declared null policy.
         for side in 0..2 {
-            let predicate = spec
+            let predicate = join
                 .join
                 .keys
                 .iter()
@@ -164,7 +192,7 @@ impl Engine {
         }
         context.register_table(
             "before",
-            crate::query::table(storage::open_pin(source(&base)?).await?, budget.clone())?,
+            crate::query::table(storage::open_pin(source(base)?).await?, budget.clone())?,
         )?;
         let mut joins = Vec::new();
         for side in 0..2 {
@@ -190,8 +218,8 @@ impl Engine {
             "join_right",
             context.table("new_scope_1").await?.into_view(),
         )?;
-        let replacement = refresh::join_registered(&context, spec).await?;
-        let before = source(&base)?;
+        let replacement = refresh::join_registered(&context, join).await?;
+        let before = source(base)?;
         let native = storage::open_pin(before).await?;
         let key_field_ids = TUPLE
             .iter()
@@ -236,7 +264,7 @@ impl Engine {
 
     // Capture each native inventory once, read only changed files, and stream
     // typed keys. Paths identify occurrences even when two files contain equal bytes.
-    async fn changed_keys(
+    pub(super) async fn changed_keys(
         &self,
         dataset: &Id,
         directory: &Path,
@@ -298,7 +326,13 @@ impl Engine {
             .iter()
             .map(|key| schema.index_of(key))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let key_schema = Arc::new(Schema::new(
+        let key_schema = Arc::new(Schema::new(if keys.is_empty() {
+            vec![arrow::datatypes::Field::new(
+                "k0",
+                arrow::datatypes::DataType::Int64,
+                true,
+            )]
+        } else {
             indices
                 .iter()
                 .enumerate()
@@ -309,8 +343,8 @@ impl Engine {
                         .with_name(format!("k{index}"))
                         .with_nullable(true)
                 })
-                .collect::<Vec<_>>(),
-        ));
+                .collect::<Vec<_>>()
+        }));
         let table = self
             .create_output(
                 dataset,
@@ -330,27 +364,40 @@ impl Engine {
             )
             .collect::<Vec<_>>();
         let scanned = changed.len() as u64;
-        let rows = futures::stream::iter(changed)
-            .map(|(scan, path)| scan.read_file(path, budget))
-            .try_flatten()
-            .map_ok(move |batch| {
-                RecordBatch::try_new(
-                    key_schema.clone(),
-                    indices
-                        .iter()
-                        .map(|index| batch.column(*index).clone())
-                        .collect(),
-                )
-                .map_err(Error::from)
-            })
-            .and_then(futures::future::ready)
-            .boxed();
+        let rows = if keys.is_empty() {
+            // Global scope depends only on immutable file membership. Do not decode payloads.
+            let batch = RecordBatch::try_new(
+                key_schema.clone(),
+                vec![Arc::new(arrow::array::Int64Array::from(if scanned == 0 {
+                    vec![]
+                } else {
+                    vec![0]
+                }))],
+            )?;
+            futures::stream::once(async { Ok(batch) }).boxed()
+        } else {
+            futures::stream::iter(changed)
+                .map(|(scan, path)| scan.read_file(path, budget))
+                .try_flatten()
+                .map_ok(move |batch| {
+                    RecordBatch::try_new(
+                        key_schema.clone(),
+                        indices
+                            .iter()
+                            .map(|index| batch.column(*index).clone())
+                            .collect(),
+                    )
+                    .map_err(Error::from)
+                })
+                .and_then(futures::future::ready)
+                .boxed()
+        };
         let files = storage::write_batches(&table, rows, budget).await?;
         let rows = files.iter().map(|file| file.record_count()).sum();
         let table = storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files).await?;
         Ok((
             storage::pin(dataset, &table, rows, budget, &[]).await?,
-            scanned,
+            if keys.is_empty() { 0 } else { scanned },
         ))
     }
 
@@ -385,6 +432,12 @@ impl Engine {
                 )?,
             )?;
         }
+        if let RefreshTransform::Aggregate(_) = &spec.transform {
+            return Box::pin(
+                self.aggregate_evidence(spec, directory, processing, before, &context),
+            )
+            .await;
+        }
         let columns = tuple_columns(None);
         let keys = TUPLE.map(str::to_owned);
         let applied = Box::pin(
@@ -414,7 +467,7 @@ impl Engine {
         })
     }
 }
-fn source(release: &ReleasePin) -> Result<&TablePin> {
+pub(super) fn source(release: &ReleasePin) -> Result<&TablePin> {
     release
         .dataset
         .groups
@@ -444,18 +497,19 @@ pub(super) async fn qualify(
         || base.eligibility != eligibility
         || spec.definition != base.definition
         || spec.definition != related.request.definition
-        || spec.join != related.request.join
-        || spec.left.dataset != related.request.left.dataset
-        || spec.right.dataset != related.request.right.dataset
+        || !spec.transform.same_definition(&related.request.transform)
     {
         return Err(full_refresh());
     }
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = 0;
-    for (old, new) in [
-        (&related.request.left, &spec.left),
-        (&related.request.right, &spec.right),
-    ] {
+    for (old, new) in related
+        .request
+        .transform
+        .versions()
+        .into_iter()
+        .zip(spec.transform.versions())
+    {
         let old = refresh::read_release(old, budget, &mut bytes, &memory).await?;
         let new = refresh::read_release(new, budget, &mut bytes, &memory).await?;
         let old = storage::open_pin(source(&old)?).await?;

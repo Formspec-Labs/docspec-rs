@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.08s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 9 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 29.21s
+

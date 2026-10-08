@@ -1,0 +1,22 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: this expression creates a reference which is immediately dereferenced by the compiler
+   --> src/engine/incremental.rs:195:58
+    |
+195 |             crate::query::table(storage::open_pin(source(&base)?).await?, budget.clone())?,
+    |                                                          ^^^^^ help: change this to: `base`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#needless_borrow
+    = note: `-D clippy::needless-borrow` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_borrow)]`
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+   --> src/engine/incremental.rs:222:29
+    |
+222 |         let before = source(&base)?;
+    |                             ^^^^^ help: change this to: `base`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#needless_borrow
+
+error: could not compile `docspec` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 2 previous errors

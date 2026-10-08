@@ -136,8 +136,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                         && dataset.eligibility == base.eligibility)
                     || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
                     || base.related.as_ref().is_some_and(|previous| {
-                        previous.request.left.dataset != spec.left.dataset
-                            || previous.request.right.dataset != spec.right.dataset
+                        !previous.request.transform.same_roles(&spec.transform)
                     })
                 {
                     return Err(invalid_group());

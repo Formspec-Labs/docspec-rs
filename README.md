@@ -93,7 +93,7 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 7 is the current greenfield
+remains unfinished. Release format 8 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group
@@ -228,11 +228,12 @@ These captured rules also govern native join refresh and its final selection.
 
 ## Refresh a native join
 
-A `RefreshSpec` names exact `left` and `right` version references, using the same
+A `RefreshSpec` uses `transform.kind: "join"` and exact `transform.left` and
+`transform.right` version references, using the same
 `dataset`, `version`, `manifest` shape as generation members. Set `dataset` to the
 output dataset, `operation` to a stable retry identity, `definition` to the active
 recipe version, and `base` to the selected output version. `base: null` requires
-an absent output. The `join` portion declares every key and output field:
+an absent output. The `transform.join` portion declares every key and output field:
 
 ```json
 {
@@ -256,8 +257,7 @@ target/debug/docspec read-evidence joined-release.json contributors.arrow
 
 Supported joins are `inner`, `left`, and `full`, with `never` or `equal` null-key
 matching. Keys require identical scalar types. Projection copies declared source
-fields without coercion; reading computed input groups and aggregate refresh are
-not yet implemented. Cardinality is `many_to_many`, `many_to_one`, or `one_to_one`.
+fields without coercion; reading computed input groups remains unfinished. Cardinality is `many_to_many`, `many_to_one`, or `one_to_one`.
 Matching duplicate keys that violate the declared partner limit refuse before
 writing the joined output. Unmatched duplicates remain valid occurrences.
 
@@ -301,9 +301,52 @@ IDs and retain actual removed/added rows, including remove-and-add of the same
 unchanged pair when its group is recomputed. Independent verification checks
 removed-row membership and reconstructs the new multiset from the old one.
 
-Computed input groups, aggregate contributors, general evidence-only changes and
+Computed input groups, general evidence-only changes and
 complete-path performance remain open. Deliberate many-to-many fanout can be large;
 there is no output-size upper bound or large-workload performance claim.
+
+## Summarize comments or joined results
+
+Use the same `RefreshSpec` and `refresh` command with `transform.kind: "aggregate"`.
+Set `transform.input` to one exact version reference and `transform.grouping` to:
+
+```json
+{
+  "keys": ["docket_id"],
+  "aggregates": [
+    {"name": "comment_rows", "function": {"kind": "count_rows"}},
+    {"name": "known_lengths", "function": {"kind": "count", "field": "length"}},
+    {"name": "total_length", "function": {"kind": "sum", "field": "length"}}
+  ]
+}
+```
+
+The input is its native source group, which may itself be a joined result.
+`count_rows` counts occurrences: join fanout can make this differ from distinct
+comments. `count` counts non-null values. `sum`, `min` and `max` accept signed
+Int32/Int64 fields. Sums return Decimal128(38,0), with operands widened before
+addition; verified input rows must not exceed `i64::MAX`. No floating-point
+aggregation is qualified. Keys support Boolean, Int32, Int64 and Utf8, with nulls
+forming one group. Field names and aliases must be distinct and outside the
+reserved `__docspec_` prefix.
+
+An empty key list produces one global result, including over empty input: counts
+are zero and sum/min/max are null. An empty grouped input produces no rows.
+Contributor evidence retains typed group keys and exact input file/row positions;
+it contains no rows for empty input. For joined inputs, those positions identify
+joined rows whose retained tuples identify the original contributors.
+
+`mode: "incremental"` replaces complete groups reached by old/new keys in changed
+native files. It handles moved keys, deleted final members and equal aggregate
+values with different contributors. Any file change affects a global summary.
+Unchanged native inputs adopt exact source/evidence pins while advancing coverage.
+Use a full refresh to change the recipe or native input schema. Both modes use
+the same recovery, eligibility, captured/latest selection and scalar-group refresh.
+Combined reads hide the global key; native reads expose it for evidence matching.
+
+Discovery, contributor processing and independent verification still scan retained
+relations. File sharing reduces demonstrated rewrites; complete-path speed and
+10M Comments performance remain unmeasured.
 
 ## HTTP access
 

@@ -27,7 +27,7 @@ pub(super) async fn verify_changes(
             (
                 &spec.dataset,
                 spec.base.as_ref().ok_or_else(invalid)?,
-                refresh::TUPLE.map(str::to_owned).to_vec(),
+                refresh::output_keys(&spec.transform),
                 changes,
             )
         }

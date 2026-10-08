@@ -13,10 +13,10 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source and join writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption | General evidence-only changes; computed input groups; aggregate contributors and incremental group refresh |
+| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, backfill and native join refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
@@ -271,8 +271,8 @@ identity assertion is retained in [the no-op log](reviews/refresh-noop-failed.lo
 
 An invalidated base source refuses before admission. Recomputing its scalar fields
 does not requalify the original shaping query. The later full-rebuild checkpoint
-adds that path. Related-input joins, aggregate refresh, nested computed values and complete cutover
-under continuous ingestion remain unfinished. Material-identical retries may supply
+adds that path; later related-refresh checkpoints add joins and summaries. Nested
+computed values and complete cutover under continuous ingestion remain unfinished. Material-identical retries may supply
 new input locators; release history preserves the original admitted request and
 reuses completed readback.
 
@@ -368,7 +368,7 @@ See [succession tests](../tests/succession.rs), the
 [consistency review](reviews/succession-consistency.md),
 [resource review](reviews/succession-resources.md), and
 [gate output](reviews/succession-check.log). Related-generation declarations are
-described below; joins, guarded output selection and aggregate refresh remain open.
+described below, followed by joins, guarded output selection and summaries.
 
 The first full gate stopped when a recovery fixture inherited the production
 32 GiB scratch profile while available disk approached that size. The
@@ -470,8 +470,9 @@ in [the input module](../src/engine/inputs.rs),
 [consistency review](reviews/input-generations-consistency.md),
 [resource review](reviews/input-generations-resources.md), and
 [gate output](reviews/input-generations-check.log). This implements an R5/Q5
-prerequisite. Native joins, contributor relations, captured/latest output guards,
-incremental discovery and full Q5 publication remain unfinished. Cleanup stays
+prerequisite. The following checkpoints add native joins, contributor relations,
+captured/latest output guards and incremental discovery. Full Q5 publication remains
+unfinished. Cleanup stays
 disabled; retention must account for seals and captured dependencies before it
 can retire their objects. No remote or Comments performance claim follows.
 
@@ -544,7 +545,8 @@ resume runs only missing work. The direct Rust matching oracle checks projected
 values and exact pairs independently of the generated SQL.
 
 This full-join reference also qualifies the incremental checkpoint below.
-Computed input groups, aggregates, general evidence-only changes,
+The summary checkpoint below adds aggregation. Computed input groups, general
+evidence-only changes,
 logical identity across compaction, full maintenance/restore and remote publication
 remain open. Deliberate many-to-many output can still exceed local storage; there is
 no output-size bound. Verification scans full inputs/results and may execute the
@@ -606,3 +608,51 @@ See the [consistency review](reviews/incremental-refresh-consistency.md),
 [resource review](reviews/incremental-refresh-resources.md) and
 [gate output](reviews/incremental-refresh-check.log). The full R1–R7 lifecycle,
 10M Comments gate, maintenance/restore, provider publication and Dagster remain open.
+
+
+## Grouped and global summary checkpoint
+
+`RefreshTransform` distinguishes equality joins from aggregation while retaining one
+refresh request, lifecycle and transport path. The manifest/processor format is now
+8; earlier greenfield artifacts require rebuilding. Summary inputs name one exact
+native source group, including a joined source. Group keys support Boolean, Int32,
+Int64 and Utf8. Null keys group together. Fixed-state functions provide occurrence
+count, non-null count, and signed Int32/Int64 sum/min/max.
+
+DataFusion 53.1 SUM uses wrapping addition even for Decimal128. This implementation
+casts signed operands to Decimal128(38,0) before summing and limits verified input
+rows to `i64::MAX`. Every partial sum is therefore below decimal precision 38 in
+magnitude. Global empty input has one zero-count/null-measure result; grouped empty
+input has no results. Floats and variable-width min/max remain unqualified.
+
+Incremental summaries reuse changed-file discovery and the existing replacement
+writer. They replace every complete affected group, even if its values remain
+equal, then replace contributor evidence using both sides of the applied change.
+The evidence table stores group keys and exact input occurrences, never growing
+arrays inside a row. For global summaries, file membership determines scope without
+payload key extraction; unchanged input does not fabricate an empty-group replacement.
+New coverage with unchanged files retains exact source/evidence pins. Selected
+scalar groups reuse unchanged source-file computations.
+
+Independent verification reconstructs complete typed values and the exact
+contributor multiset from pinned inputs. A summary over a join retains its ancestor
+join verification cost. The catalog-free fixture resolves summary contributors to
+joined occurrences and then original input tuples; there is no general lineage
+traversal API yet. Count over a join includes fanout, not distinct source comments.
+
+Contributor replacement streams once, but its removal/addition key view can be read
+again during the replacement semi join. These are summary-change rows. Input reads,
+independent verification, metadata and other relational scans still exceed the
+partial writer counters. No delta-proportional latency or complete-path performance
+claim follows from file reuse. The temporary discovery inventory is released before
+replacement to avoid retaining duplicate metadata reservations.
+
+See [summary fixtures](../tests/related_refresh/aggregation.rs),
+[consistency review](reviews/summary-consistency.md),
+[resource review](reviews/summary-resources.md), and
+[gate output](reviews/summary-check.log). The initial module-path failure and default
+stack overflow are retained with the qualification logs. Join-specific preparation now lives outside the shared incremental dispatcher,
+removing its stack cost from summaries. Transform futures use heap storage like
+existing native refresh boundaries; tests keep the default stack.
+The full lifecycle, maintenance/restore, real-provider publication, Dagster and
+10M Comments gate remain open.

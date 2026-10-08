@@ -100,7 +100,7 @@ impl Engine {
             .fields()
             .iter()
             .filter(|field| {
-                release.dataset.related.is_none() || !refresh::TUPLE.contains(&field.name.as_str())
+                release.dataset.related.is_none() || !refresh::hidden_field(&field.name)
             })
             .map(|field| format!("s.{}", quote(&field.name)))
             .collect::<Vec<_>>();
