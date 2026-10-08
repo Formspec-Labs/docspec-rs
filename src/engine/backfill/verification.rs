@@ -11,8 +11,26 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
     let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
     let mut checked_base: Option<(ObjectRef, DatasetPin)> = None;
     match &dataset.request {
-        OperationRequest::Build(_) => {
-            if !dataset.computed.is_empty() || dataset.parent_manifest.is_some() {
+        OperationRequest::Build(spec) => {
+            if dataset.inputs.len() != dataset.request.inputs().len() {
+                return Err(invalid_group());
+            }
+            if let Some(version) = &spec.base {
+                let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
+                let base = read_manifest(parent, budget).await?;
+                if base.dataset != dataset.dataset
+                    || &base.version != version
+                    || base.version == dataset.version
+                    || dataset.boundary <= base.boundary
+                    || dataset.eligibility < base.eligibility
+                    || (dataset.definition != base.definition
+                        && dataset.eligibility == base.eligibility)
+                {
+                    return Err(invalid_group());
+                }
+                check_refreshed_groups(dataset, &base, parent)?;
+                checked_base = Some((parent.clone(), base));
+            } else if !dataset.computed.is_empty() || dataset.parent_manifest.is_some() {
                 return Err(invalid_group());
             }
         }
@@ -24,7 +42,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             let base = read_manifest(&changes.base_manifest, budget).await?;
             let mut inherited_inputs = dataset.inputs.clone();
             for name in dataset.request.inputs().keys() {
-                let key = format!("{}/{name}", dataset.version);
+                let key = dataset.request.input_key(name);
                 if base.inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
                     return Err(invalid_group());
                 }
@@ -36,18 +54,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             {
                 return Err(invalid_group());
             }
-            if base.computed.len() != dataset.computed.len() {
-                return Err(invalid_group());
-            }
-            for (name, previous) in &base.computed {
-                let refreshed = dataset.computed.get(name).ok_or_else(invalid_group)?;
-                if refreshed.definition != previous.definition
-                    || refreshed.request != dataset.request
-                    || refreshed.base_manifest != changes.base_manifest
-                {
-                    return Err(invalid_group());
-                }
-            }
+            check_refreshed_groups(dataset, &base, &changes.base_manifest)?;
             checked_base = Some((changes.base_manifest.clone(), base));
         }
         OperationRequest::Backfill(spec) => {
@@ -102,7 +109,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             || binding.request.inputs().iter().any(|(name, input)| {
                 dataset
                     .inputs
-                    .get(&format!("{}/{name}", binding.request.operation()))
+                    .get(&binding.request.input_key(name))
                     .is_none_or(|object| object.digest != input.digest)
             })
         {
@@ -127,6 +134,26 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             budget,
         )
         .await?;
+    }
+    Ok(())
+}
+
+fn check_refreshed_groups(
+    dataset: &DatasetPin,
+    base: &DatasetPin,
+    parent: &ObjectRef,
+) -> Result<()> {
+    if base.computed.len() != dataset.computed.len() {
+        return Err(invalid_group());
+    }
+    for (name, previous) in &base.computed {
+        let refreshed = dataset.computed.get(name).ok_or_else(invalid_group)?;
+        if refreshed.definition != previous.definition
+            || refreshed.request != dataset.request
+            || &refreshed.base_manifest != parent
+        {
+            return Err(invalid_group());
+        }
     }
     Ok(())
 }
@@ -175,7 +202,7 @@ async fn verify_group(
                 return Err(invalid_group());
             }
         }
-        OperationRequest::Update(_) => {
+        OperationRequest::Update(_) | OperationRequest::Build(_) => {
             if base
                 .computed
                 .get(binding.definition.group.as_str())
@@ -185,7 +212,6 @@ async fn verify_group(
                 return Err(invalid_group());
             }
         }
-        OperationRequest::Build(_) => return Err(invalid_group()),
     }
     verify_group_data(
         source,

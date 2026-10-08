@@ -83,6 +83,7 @@ async fn fixture(root: &Path) -> (Engine, RunSpec, docspec::model::ReleasePin, V
     let rows = original_rows();
     let source = input(&root.join("input.parquet"), &rows, false);
     let spec = RunSpec {
+        base: None,
         dataset: id("comments"),
         operation: id("initial"),
         input: source.path,
@@ -487,6 +488,7 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
         .await
         .unwrap();
     let initial = RunSpec {
+        base: None,
         dataset: id("comments"),
         operation: id("initial"),
         input: original.path,
@@ -616,6 +618,7 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
         .await
         .unwrap();
     let initial = RunSpec {
+        base: None,
         dataset: id("comments"),
         operation: id("initial"),
         input: original.path,

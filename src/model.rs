@@ -145,6 +145,9 @@ pub struct Comparison {
 pub struct RunSpec {
     pub dataset: Id,
     pub operation: OperationId,
+    /// Exact selected version to rebuild, preserving its computed group definitions.
+    #[serde(default)]
+    pub base: Option<Id>,
     pub input: String,
     pub expected_digest: String,
     pub sql: String,
@@ -256,10 +259,10 @@ impl OperationRequest {
             Self::Backfill(spec) => &spec.definition,
         }
     }
-    /// Returns the version that an update is allowed to replace.
+    /// Returns the selected version whose composition this operation captures.
     pub fn base(&self) -> Option<&Id> {
         match self {
-            Self::Build(_) => None,
+            Self::Build(spec) => spec.base.as_ref(),
             Self::Update(spec) => Some(&spec.base),
             Self::Backfill(spec) => Some(&spec.base),
         }
@@ -283,6 +286,14 @@ impl OperationRequest {
                 inputs
             }
             Self::Backfill(_) => BTreeMap::new(),
+        }
+    }
+
+    /// Returns the retained input name for this operation's provenance.
+    pub(crate) fn input_key(&self, name: &str) -> String {
+        match self {
+            Self::Build(_) => name.to_owned(),
+            Self::Update(_) | Self::Backfill(_) => format!("{}/{name}", self.operation()),
         }
     }
 }

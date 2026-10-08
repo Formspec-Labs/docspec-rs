@@ -154,12 +154,24 @@ target/debug/docspec --workspace workspaces/comments serve
 `compare` performs a full, duplicate-aware value comparison, not a write journal.
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement
-definition explicitly. A new operation is required after invalidation. Requalifying
-an already enriched selection also requires requalifying its original source
-transformation, which is not implemented yet. Incremental updates refuse an
-invalidated source; refreshing scalar groups alone cannot requalify it. Historical
-releases remain readable. Full-query builds after selecting groups also refuse
-until coordinated source rebuild is implemented.
+definition explicitly. A new operation is required after invalidation. Incremental
+updates refuse an invalidated source; a full rebuild requalifies its source query
+and every selected scalar group. Historical releases remain readable.
+
+To rebuild an enriched selection, use the normal run request with `"base"` set to
+the exact selected version, a new `"operation"`, and the complete replacement
+input/query. Keep the active definition, or activate a changed definition first.
+The engine preserves every selected group definition and computes it over the
+new source. Missing fields or incompatible expressions leave the prior release
+selected. The replacement input supplies this version's evidence; the exact parent
+manifest retains its relationship to history.
+
+`plan`, `run`, `resume` and the corresponding HTTP routes handle rebuilds directly.
+A changed selected base or a later source admission fences a rebuild's cutover;
+submit a new request against the current selection. Completed source and group
+work remains retained. Rebase with the same input, query, definition and eligibility
+reuses qualified source work. Changing dependency eligibility recomputes it.
+Builds without an explicit base still refuse to replace selected computed groups.
 
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
 `POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `GET /datasets/{dataset}`,

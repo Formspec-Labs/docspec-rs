@@ -52,6 +52,8 @@ struct Operation {
     boundary: u64,
     definition: String,
     base: Option<Id>,
+    /// Explicit rebuilds fence later source admissions before replacing the selection.
+    require_current_boundary: bool,
 }
 
 /// A bounded explanation of reuse and work remaining before selection.
@@ -183,6 +185,7 @@ impl Engine {
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
+            check_group_rebuild(&authority, spec)?;
         }
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
@@ -190,12 +193,12 @@ impl Engine {
         let mut reusable_phases = Vec::new();
         let mut required_phases = Vec::new();
         let mut phases = PHASES.to_vec();
-        if let OperationRequest::Update(update) = spec {
+        if let Some(version) = spec.base() {
             let base: ReleasePin = lifecycle
-                .get(&view, &format!("result/{}", update.base))
+                .get(&view, &format!("result/{version}"))
                 .await?
                 .ok_or_else(|| {
-                    Error::refusal("no_release", "update source version is unavailable")
+                    Error::refusal("no_release", "captured source version is unavailable")
                 })?;
             if !base.dataset.computed.is_empty() {
                 phases.insert(3, "groups");
@@ -544,17 +547,7 @@ impl Engine {
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
-            if matches!(spec, OperationRequest::Build(_))
-                && authority
-                    .selected
-                    .as_ref()
-                    .is_some_and(|selected| !selected.computed.is_empty())
-            {
-                return Err(Error::refusal(
-                    "dependent_groups",
-                    "source admission requires refreshing selected computed groups",
-                ));
-            }
+            check_group_rebuild(&authority, spec)?;
             if let Some(old) = old {
                 check_authority(&authority, &old)?;
                 old
@@ -569,6 +562,7 @@ impl Engine {
                     boundary: authority.boundary,
                     definition: authority.definition.clone(),
                     base: spec.base().cloned(),
+                    require_current_boundary: matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
                 };
                 lifecycle
                     .commit(
@@ -714,23 +708,22 @@ impl Engine {
         } else {
             None
         };
+        // A full rebuild declares a complete new input. Updates retain the prior
+        // source evidence because they only replace a subset of its rows.
         let mut inputs = base
             .as_ref()
+            .filter(|_| matches!(spec, OperationRequest::Update(_)))
             .map(|base| base.dataset.inputs.clone())
             .unwrap_or_default();
         for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
-            let name = match spec {
-                OperationRequest::Build(_) => name.clone(),
-                OperationRequest::Update(_) | OperationRequest::Backfill(_) => {
-                    format!("{}/{name}", spec.operation())
-                }
-            };
-            inputs.insert(name, input.clone());
+            inputs.insert(spec.input_key(name), input.clone());
         }
         let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
         let mut computed = BTreeMap::new();
         if let Some(base) = &base {
             for (name, previous) in &base.dataset.computed {
+                self.check(&lifecycle.open(spec.dataset()).await?, &operation)
+                    .await?;
                 let (prepared, native_field_ids) = Box::pin(self.prepare_group(
                     &captured_request,
                     &operation,
@@ -755,7 +748,7 @@ impl Engine {
             if !computed.is_empty() {
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(spec.dataset()).await?;
-                self.check(&view, &operation).await?;
+                self.check_completion(&view, &operation).await?;
                 let key = format!("groups/{}", spec.operation());
                 if lifecycle
                     .get::<BTreeMap<String, ObjectRef>>(&view, &key)
@@ -835,7 +828,7 @@ impl Engine {
             verify_release_with_budget(&release, &lifecycle.budget).await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(spec.dataset()).await?;
-            self.check(&view, &operation).await?;
+            self.check_completion(&view, &operation).await?;
             if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
                 completed
             } else {
@@ -866,17 +859,7 @@ impl Engine {
                     "a newer captured input boundary is already selected",
                 ));
             }
-            if matches!(spec, OperationRequest::Build(_))
-                && authority
-                    .selected
-                    .as_ref()
-                    .is_some_and(|selected| !selected.computed.is_empty())
-            {
-                return Err(Error::refusal(
-                    "dependent_groups",
-                    "source selection requires refreshing selected computed groups",
-                ));
-            }
+            check_group_rebuild(&authority, spec)?;
             authority.selected = Some(release.dataset.clone());
             authority.release = Some(release.clone());
             lifecycle
@@ -902,6 +885,22 @@ impl Engine {
             .unwrap_or_default();
         check_authority(&authority, operation)?;
         Ok(authority)
+    }
+
+    async fn check_completion(
+        &self,
+        view: &crate::catalog::View,
+        operation: &Operation,
+    ) -> Result<()> {
+        let authority: Authority = self
+            .inner
+            .lifecycle
+            .get(view, "authority")
+            .await?
+            .unwrap_or_default();
+        // Finished work retains its original qualification. Changing the selected
+        // source or eligibility fences reuse and promotion, not its acknowledgment.
+        check_preparation(&authority, operation)
     }
 
     async fn phase(
@@ -983,7 +982,7 @@ impl Engine {
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
-        self.check(&view, operation).await?;
+        self.check_completion(&view, operation).await?;
         let key = phase_key(
             spec,
             &operation.request_digest,
@@ -1014,6 +1013,24 @@ fn phase_key(spec: &OperationRequest, request: &str, eligibility: u64, phase: &s
         }
         return format!("phase/input/{}/{phase}", hash.finalize().to_hex());
     }
+    if let OperationRequest::Build(build) = spec {
+        // The selected composition determines admission and promotion, but does
+        // not change source SQL results. A rebased rebuild reuses this exact work.
+        let mut hash = blake3::Hasher::new();
+        for value in [
+            PROCESSOR,
+            &build.expected_digest,
+            &build.sql,
+            &build.definition,
+        ] {
+            hash.update(&(value.len() as u64).to_le_bytes());
+            hash.update(value.as_bytes());
+        }
+        return format!(
+            "phase/build/{}/{eligibility}/{phase}",
+            hash.finalize().to_hex()
+        );
+    }
     format!("phase/{request}/{eligibility}/{phase}")
 }
 fn conflicting_operation() -> Error {
@@ -1032,7 +1049,38 @@ fn check_authority(authority: &Authority, operation: &Operation) -> Result<()> {
             "definition, dependency qualification or authority changed; start a new operation",
         ));
     }
-    check_base(authority, operation.base.as_ref())
+    check_base(authority, operation.base.as_ref())?;
+    if operation.require_current_boundary && authority.boundary != operation.boundary {
+        return Err(Error::refusal(
+            "stale_source_boundary",
+            "source admission advanced after this rebuild; start a new operation",
+        ));
+    }
+    Ok(())
+}
+fn check_preparation(authority: &Authority, operation: &Operation) -> Result<()> {
+    if authority.epoch != operation.epoch {
+        return Err(Error::refusal(
+            "stale_eligibility",
+            "execution authority changed",
+        ));
+    }
+    Ok(())
+}
+
+fn check_group_rebuild(authority: &Authority, request: &OperationRequest) -> Result<()> {
+    if matches!(request, OperationRequest::Build(build) if build.base.is_none())
+        && authority
+            .selected
+            .as_ref()
+            .is_some_and(|selected| !selected.computed.is_empty())
+    {
+        return Err(Error::refusal(
+            "dependent_groups",
+            "provide the selected base to rebuild its computed groups together",
+        ));
+    }
+    Ok(())
 }
 fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()> {
     if !authority.definition.is_empty() && authority.definition != spec.definition() {
@@ -1067,7 +1115,7 @@ fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
     {
         return Err(Error::refusal(
             "stale_base",
-            "the selected version changed; submit a new update against its exact base",
+            "the selected version changed; submit a new operation against its exact base",
         ));
     }
     Ok(())
@@ -1075,7 +1123,7 @@ fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
 fn fingerprint(spec: &OperationRequest) -> Result<String> {
     let material = match spec {
         OperationRequest::Build(spec) => {
-            serde_json::json!({"build": [&spec.expected_digest, &spec.sql, &spec.definition]})
+            serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base}})
         }
         OperationRequest::Update(spec) => {
             serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
@@ -1120,6 +1168,12 @@ fn validate_request(spec: &OperationRequest) -> Result<()> {
     Ok(())
 }
 fn validate_spec(spec: &RunSpec) -> Result<()> {
+    if spec.base.as_ref() == Some(&spec.operation) {
+        return Err(Error::refusal(
+            "invalid_request",
+            "a rebuild requires a different base operation",
+        ));
+    }
     if spec.expected_digest.len() != 64
         || !spec.expected_digest.bytes().all(|c| c.is_ascii_hexdigit())
         || spec.definition.is_empty()
@@ -1345,12 +1399,7 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
         || decoded.request.operation() != &decoded.version
         || decoded.request.definition() != decoded.definition
         || decoded.request.inputs().iter().any(|(name, input)| {
-            let key = match &decoded.request {
-                OperationRequest::Build(_) => name.clone(),
-                OperationRequest::Update(_) | OperationRequest::Backfill(_) => {
-                    format!("{}/{name}", decoded.version)
-                }
-            };
+            let key = decoded.request.input_key(name);
             decoded
                 .inputs
                 .get(&key)

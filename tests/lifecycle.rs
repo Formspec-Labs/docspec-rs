@@ -60,6 +60,7 @@ fn fixture(root: &std::path::Path) -> RunSpec {
     writer.write(&batch).unwrap();
     writer.close().unwrap();
     RunSpec {
+        base: None,
         dataset: Id::new("comments").unwrap(),
         operation: Id::new("initial").unwrap(),
         input: path.to_string_lossy().into_owned(),

@@ -158,6 +158,7 @@ mod tests {
         .await
         .unwrap();
         let spec = RunSpec {
+            base: None,
             dataset: Id::new("query").unwrap(),
             operation: Id::new("initial").unwrap(),
             input: input.to_string_lossy().into_owned(),

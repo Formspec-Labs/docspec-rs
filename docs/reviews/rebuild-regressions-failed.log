@@ -1,0 +1,120 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 5.51s
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test native_malformed_group_coverage_and_field_mapping_refuse ... FAILED
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... FAILED
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... FAILED
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... FAILED
+test competing_independent_backfills_both_survive_selection ... FAILED
+test identical_concurrent_attempts_reconcile_one_recorded_result ... FAILED
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... FAILED
+test missing_cached_objects_cannot_be_selected_after_readback ... FAILED
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... FAILED
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+
+failures:
+
+---- native_malformed_group_coverage_and_field_mapping_refuse stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'native_malformed_group_coverage_and_field_mapping_refuse' (8045852) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict' (8045844) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse' (8045854) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- retained_file_handoffs_resume_after_reopen_and_external_input_loss stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'retained_file_handoffs_resume_after_reopen_and_external_input_loss' (8045855) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- competing_independent_backfills_both_survive_selection stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'competing_independent_backfills_both_survive_selection' (8045843) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- identical_concurrent_attempts_reconcile_one_recorded_result stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'identical_concurrent_attempts_reconcile_one_recorded_result' (8045848) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- combined_values_preserve_duplicate_null_empty_and_unicode_occurrences stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'combined_values_preserve_duplicate_null_empty_and_unicode_occurrences' (8045842) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- missing_cached_objects_cannot_be_selected_after_readback stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'missing_cached_objects_cannot_be_selected_after_readback' (8045851) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+---- failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive' (8045846) panicked at tests/support/scalar.rs:107:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+
+
+failures:
+    combined_values_preserve_duplicate_null_empty_and_unicode_occurrences
+    competing_independent_backfills_both_survive_selection
+    concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict
+    failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive
+    identical_concurrent_attempts_reconcile_one_recorded_result
+    missing_cached_objects_cannot_be_selected_after_readback
+    native_malformed_group_coverage_and_field_mapping_refuse
+    refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse
+    retained_file_handoffs_resume_after_reopen_and_external_input_loss
+
+test result: FAILED. 6 passed; 9 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.55s
+
+error: test failed, to rerun pass `--test backfill`

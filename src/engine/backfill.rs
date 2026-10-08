@@ -180,6 +180,7 @@ impl Engine {
                 boundary: base.dataset.boundary,
                 definition: spec.definition.clone(),
                 base: Some(spec.base.clone()),
+                require_current_boundary: false,
             });
             let capture = lifecycle
                 .get::<Capture>(&view, &format!("backfill/{}", spec.operation))
@@ -339,6 +340,7 @@ impl Engine {
                     boundary: base.dataset.boundary,
                     definition: spec.definition.clone(),
                     base: Some(spec.base.clone()),
+                    require_current_boundary: false,
                 };
                 let capture = Capture {
                     admission_fence: authority.boundary,
@@ -493,16 +495,6 @@ impl Engine {
             return Ok(release);
         }
     }
-}
-
-fn check_preparation(authority: &Authority, operation: &Operation) -> Result<()> {
-    if authority.epoch != operation.epoch {
-        return Err(Error::refusal(
-            "stale_eligibility",
-            "execution authority changed",
-        ));
-    }
-    Ok(())
 }
 
 fn promotion(
