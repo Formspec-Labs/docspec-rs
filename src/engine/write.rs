@@ -41,18 +41,45 @@ impl Engine {
     ) -> Result<Table> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(dataset).await?;
-        Ok(lifecycle
-            .catalog
-            .create_table(
-                view.table.identifier().namespace(),
-                TableCreation::builder()
-                    .name(format!("data_{}", uuid::Uuid::new_v4().simple()))
-                    .location(directory.to_string_lossy().into_owned())
-                    .schema(schema)
-                    .properties(storage::table_properties())
-                    .build(),
-            )
-            .await?)
+        let directory = directory.to_owned();
+        self.register_output(view.table.identifier().namespace(), move || {
+            storage::fresh_metadata(schema, &directory)
+        })
+        .await
+    }
+
+    async fn replacement_output(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        source: &Table,
+    ) -> Result<Table> {
+        let view = self.inner.lifecycle.open(dataset).await?;
+        let source = source.clone();
+        let directory = directory.to_owned();
+        self.register_output(view.table.identifier().namespace(), move || {
+            storage::replacement_metadata(source.metadata(), &directory)
+        })
+        .await
+    }
+
+    async fn register_output(
+        &self,
+        namespace: &iceberg::NamespaceIdent,
+        prepare: impl FnOnce() -> Result<iceberg::spec::TableMetadata> + Send + 'static,
+    ) -> Result<Table> {
+        let lifecycle = &self.inner.lifecycle;
+        let identifier = iceberg::TableIdent::new(
+            namespace.clone(),
+            format!("data_{}", uuid::Uuid::new_v4().simple()),
+        );
+        storage::register_candidate(
+            lifecycle.catalog.as_ref(),
+            &identifier,
+            prepare,
+            &lifecycle.budget,
+        )
+        .await
     }
 
     pub(super) async fn process_build(
@@ -311,18 +338,21 @@ impl Engine {
                 .await?;
             context.register_table("affected_keys", prepared_keys.into_view())?;
         }
+        let scan = Arc::new(storage::OccurrenceScan::values(&native, budget, inventory).await?);
         let mut shared = Vec::new();
         let mut changed = Vec::new();
         let mut rewrite_bytes = 0_u64;
-        for (index, file) in inventory.data.iter().enumerate() {
+        for (index, file) in scan.files().enumerate() {
             let name = format!("chunk_{index}");
-            context
-                .register_parquet(
-                    name.as_str(),
-                    file.file_path(),
-                    ParquetReadOptions::default(),
-                )
-                .await?;
+            context.register_table(
+                name.as_str(),
+                crate::query::file(
+                    scan.clone(),
+                    file.file_path().to_owned(),
+                    Some(keys),
+                    budget.clone(),
+                )?,
+            )?;
             if any_rows(
                 &context,
                 &format!(
@@ -333,11 +363,25 @@ impl Engine {
             .await?
             {
                 rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
+                // Replace the key-only probe with the complete selected native schema.
+                context.deregister_table(&name)?;
+                context.register_table(
+                    name.as_str(),
+                    crate::query::file(
+                        scan.clone(),
+                        file.file_path().to_owned(),
+                        None,
+                        budget.clone(),
+                    )?,
+                )?;
                 // One joined decode supplies both kept rows and actual removed rows.
                 changed.push(context.sql(&format!("SELECT l.*, r.{marker} IS NOT NULL AS {marker} FROM {name} l LEFT JOIN affected_keys r ON {}", key_match(keys, "l", "r"))).await?);
             } else {
                 shared.push(file.clone());
             }
+            // Retained changed-file plans own their provider; idle catalog entries
+            // need not accumulate across the file population.
+            context.deregister_table(&name)?;
         }
         let required = rewrite_bytes
             .saturating_mul(2)
@@ -350,28 +394,16 @@ impl Engine {
             ));
         }
         let candidate = self
-            .create_output(
-                dataset,
-                &directory.join("data"),
-                native.metadata().current_schema().as_ref().clone(),
-            )
+            .replacement_output(dataset, &directory.join("data"), &native)
             .await?;
         let removed = self
-            .create_output(
-                dataset,
-                &directory.join("removed"),
-                native.metadata().current_schema().as_ref().clone(),
-            )
+            .replacement_output(dataset, &directory.join("removed"), &native)
             .await?;
         let added = self
-            .create_output(
-                dataset,
-                &directory.join("added"),
-                native.metadata().current_schema().as_ref().clone(),
-            )
+            .replacement_output(dataset, &directory.join("added"), &native)
             .await?;
         let mut metrics = WriteMetrics {
-            files_scanned: (inventory.data.len() + changed.len()) as u64,
+            files_scanned: (scan.files().count() + changed.len()) as u64,
             files_reused: shared.len() as u64,
             bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
             ..WriteMetrics::default()
@@ -526,3 +558,6 @@ async fn execute(
         .map(|batch| batch.map_err(Error::from))
         .boxed())
 }
+
+#[cfg(test)]
+mod tests;

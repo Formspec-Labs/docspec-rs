@@ -1,0 +1,65 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 5.41s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.88s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 42 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::aggregation::tests::qualified_row_limit_bounds_every_signed_partial_sum ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test http::ipc::tests::encoded_chunks_refuse_before_growing_beyond_their_admission ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test http::ipc::tests::dictionaries_and_changing_batch_schemas_refuse ... ok
+test http::ipc::tests::demand_controls_batch_reads_and_chunks_keep_admission_until_last_clone_drops ... ok
+test http::ipc::tests::failures_abort_the_body_without_emitting_a_successful_end ... ok
+test engine::inputs::tests::canceled_manifest_read_keeps_admission_until_its_blocking_work_exits ... ok
+test http::ipc::tests::encoding_preserves_strings_nulls_duplicates_and_complete_empty_streams ... ok
+test engine::inputs::tests::canceled_partial_input_lock_acquisition_releases_prior_locks ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+test engine::write::tests::oversized_candidate_metadata_refuses_before_writing_any_object ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test engine::write::tests::value_only_key_probes_skip_wide_fields_and_keep_reader_admission ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test engine::write::tests::empty_candidate_clears_snapshot_state_but_preserves_native_schema_history ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::tables::tests::metadata_serialization_stops_at_exact_byte_limit ... ok
+test storage::tests::canceled_inventory_checks_keep_worker_owned_metadata_admission ... ok
+test storage::occurrences::tests::schema::all_fields_hidden_and_a_user_file_name_preserve_values_and_occurrences ... ok
+test storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes ... FAILED
+test storage::occurrences::tests::schema::transient_native_column_is_validated_and_charged_before_removal ... ok
+test storage::occurrences::tests::schema::unqualified_schema_interpretations_refuse_before_reading_payload ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test engine::write::tests::renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_files ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test engine::write::tests::reused_key_name_with_new_id_matches_absence_and_empty_noop_results ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+
+failures:
+
+---- storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes stdout ----
+
+thread 'storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes' (9390421) panicked at src/storage/tables.rs:253:14:
+called `Result::unwrap()` on an `Err` value: RecvError(())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes
+
+test result: FAILED. 41 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
+
+error: test failed, to rerun pass `--lib`

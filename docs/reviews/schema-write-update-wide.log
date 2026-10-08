@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 2.71s
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 1.27s
+

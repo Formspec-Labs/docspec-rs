@@ -1,0 +1,19 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: unused import: `datatypes::Schema as ArrowSchema`
+ --> src/engine/write/tests.rs:6:5
+  |
+6 |     datatypes::Schema as ArrowSchema,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (lib test) generated 1 warning (run `cargo fix --lib -p docspec --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 10.26s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 2 tests
+test engine::write::tests::empty_candidate_clears_snapshot_state_but_preserves_native_schema_history ... ok
+test engine::write::tests::renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_files ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 0.35s
+

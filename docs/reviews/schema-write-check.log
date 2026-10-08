@@ -1,0 +1,44 @@
+Verification chronology:
+The full scripts/check run in schema-write-check-update-failed.log passed formatting,
+all-target Clippy, library/CLI tests, and every integration suite before updates.
+Updates failed only because its paired-writer fixture reached a later readback limit.
+No production source changed afterward. The fixture was corrected to use a 64 KiB
+source value under the unchanged 16 KiB update allowance. This final run repeats
+formatting, all-target Clippy, the complete changed updates suite, and doc tests.
+Together these runs complete the repository checks; a second full-suite run was not performed.
+
+Commands after correcting only tests/updates.rs:
+  cargo fmt --all -- --check
+  cargo clippy --locked --all-targets --all-features -- -D warnings
+  cargo test --locked --all-features --test updates
+  cargo test --locked --all-features --doc
+
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 0.99s
+    Finished `test` profile [unoptimized] target(s) in 0.29s
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 12 tests
+test affected_base_corruption_is_refused_before_rewriting ... ok
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.01s
+
+    Finished `test` profile [unoptimized] target(s) in 0.22s
+   Doc-tests docspec
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Exit status: 0

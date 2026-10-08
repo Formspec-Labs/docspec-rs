@@ -683,8 +683,49 @@ decodes all physical columns before producing the new values. The output check
 does not bound that temporary decoding memory or establish column pruning.
 No performance or whole-process memory result is claimed.
 
-This is a reader prerequisite for R3. Public schema operations, ID-preserving
-replacement candidates, ID-bound computed dependencies, durable absence semantics
-and guarded schema cutover remain unfinished. Native metadata changes alone do
-not establish that lifecycle behavior. See the implementation reviews and raw
-qualification logs under [reviews](reviews/).
+This is a reader prerequisite for R3. The following checkpoint adds ID-preserving
+replacement candidates. Public schema operations, ID-bound computed dependencies,
+durable absence semantics and guarded schema cutover remain unfinished. Native
+metadata changes alone do not establish that lifecycle behavior. See the
+implementation reviews and raw qualification logs under [reviews](reviews/).
+
+## Schema-preserving writer checkpoint
+
+Replacement candidates and their removed/added change tables now retain the exact
+native schema, including sparse and nested field IDs, schema history and the highest
+allocated field ID. Dropping a field cannot make its ID available again. Candidates
+receive new table identities and protected output directories; inherited snapshots,
+references and statistics are cleared. Native metadata-log entries remain because
+the maintained builder has no removal operation. They do not select candidate
+results or add snapshots to its read dependencies.
+
+The replacement writer consumes one checked file inventory. Discovery reads only
+the requested key columns; affected files then use the same native adapter to read
+complete values. Unchanged file descriptors and bytes are shared. These value-only
+reads avoid occurrence-locator allocation and accept ordinary source fields named
+like internal locator columns. The native all-requested-fields-absent fallback
+described above still applies. Verification and hashing remain broader than the
+changed rows, so this is not a claim of update-size-proportional latency.
+The selected-file provider does not preserve the previous raw Parquet provider's
+predicate/statistics pushdown. Column skipping is verified; the complete-path
+performance tradeoff has not been measured. Additional provider machinery should
+follow a measured need.
+
+Candidate metadata encoding stops at the declared byte limit before creating a
+metadata object. Admission spans preparation, durable writing and native catalog
+registration; a canceled blocking worker retains its allowance until it exits.
+These checks bound application admission and encoded output, not every allocation
+inside native metadata cloning or parsing.
+
+Fixtures compare exact values and change membership against independent Rust
+expectations after rename/reorder, same-name replacement with a new ID, null keys,
+empty results and no-op updates. They check stable nested IDs, allocation beyond
+retired IDs, unchanged file bytes and modification times, key-only reads with a
+corrupted unselected payload, reader cancellation and metadata capacity refusal.
+The writer remains an R3 prerequisite; public schema evolution and its lifecycle
+cutover are still open. See the [consistency review](reviews/schema-write-consistency.md),
+[resource review](reviews/schema-write-resources.md) and
+[qualification output](reviews/schema-write-check.log). The full check exposed a
+paired-writer fixture reaching a later readback limit; its replacement uses an
+oversized affected value under the same allowance. All earlier suites passed, and
+the corrected updates suite, formatting, Clippy and doc tests passed afterward.

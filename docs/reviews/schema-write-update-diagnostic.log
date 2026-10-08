@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 3.44s
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'paired_writer_refusal_retains_admission_and_can_resume' (9434829) panicked at tests/updates.rs:459:5:
+oversized_batch: decoded batch uses 29608 bytes, exceeding the 16384 byte allowance; reduce batch rows or split oversized values
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test paired_writer_refusal_retains_admission_and_can_resume ... FAILED
+
+failures:
+
+failures:
+    paired_writer_refusal_retains_admission_and_can_resume
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 1.84s
+
+error: test failed, to rerun pass `--test updates`

@@ -434,7 +434,30 @@ async fn affected_base_corruption_is_refused_before_rewriting() {
 #[tokio::test]
 async fn paired_writer_refusal_retains_admission_and_can_resume() {
     let root = TempDir::new().unwrap();
-    let (engine, _, before, rows) = fixture(root.path()).await;
+    // A value larger than the update allowance deterministically refuses in the
+    // full affected-file reader. Key-only discovery still fits that allowance.
+    let rows = vec![
+        (Some(1), Some("a".repeat(64 << 10))),
+        (Some(1), Some("duplicate".into())),
+        (None, None),
+    ];
+    let source = input(&root.path().join("input.parquet"), &rows, false);
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let before = engine
+        .run(&RunSpec {
+            dataset: id("comments"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
     drop(engine);
     let engine = Engine::open(
         root.path().join("workspace"),
@@ -454,7 +477,12 @@ async fn paired_writer_refusal_retains_admission_and_can_resume() {
             .unwrap()
             .unwrap_err();
     assert_eq!(failure.code(), "oversized_batch");
-    assert!(failure.to_string().contains("joined update batch"));
+    // Key-only discovery fits; the full old-file read now enforces admission
+    // inside the paired writers before the joined-batch check can run.
+    assert!(
+        failure.to_string().contains("native reader exceeded"),
+        "{failure}"
+    );
     assert_eq!(engine.latest(&mutation.dataset).await.unwrap(), before);
     let plan = engine.plan_update(&mutation).await.unwrap();
     assert!(plan.reusable_phases.contains(&"admission".into()));

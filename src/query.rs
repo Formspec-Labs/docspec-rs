@@ -32,10 +32,12 @@ fn provider(native: Table, budget: Budget, located: bool) -> Result<Arc<dyn Tabl
         )?)
     };
     let partition = NativePartition {
-        table: native,
+        source: NativeSource::Table {
+            table: native,
+            located,
+        },
         schema: schema.clone(),
         budget,
-        located,
     };
     Ok(Arc::new(StreamingTable::try_new(
         schema,
@@ -43,12 +45,58 @@ fn provider(native: Table, budget: Budget, located: bool) -> Result<Arc<dyn Tabl
     )?))
 }
 
+/// Replays one captured file, optionally reading only selected root columns.
+pub(crate) fn file(
+    scan: Arc<storage::OccurrenceScan>,
+    path: String,
+    columns: Option<&[String]>,
+    budget: Budget,
+) -> Result<Arc<dyn TableProvider>> {
+    let projection = columns
+        .map(|columns| {
+            columns
+                .iter()
+                .map(|name| scan.schema().index_of(name))
+                .collect::<std::result::Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let schema = match &projection {
+        Some(indices) => Arc::new(scan.schema().project(indices)?),
+        None => scan.schema().clone(),
+    };
+    let partition = NativePartition {
+        source: NativeSource::File {
+            scan,
+            path,
+            projection,
+        },
+        schema: schema.clone(),
+        budget,
+    };
+    Ok(Arc::new(StreamingTable::try_new(
+        schema,
+        vec![Arc::new(partition)],
+    )?))
+}
+
+#[derive(Debug, Clone)]
+enum NativeSource {
+    Table {
+        table: Table,
+        located: bool,
+    },
+    File {
+        scan: Arc<storage::OccurrenceScan>,
+        path: String,
+        projection: Option<Vec<usize>>,
+    },
+}
+
 #[derive(Debug)]
 struct NativePartition {
-    table: Table,
+    source: NativeSource,
     schema: SchemaRef,
     budget: Budget,
-    located: bool,
 }
 
 impl PartitionStream for NativePartition {
@@ -57,14 +105,25 @@ impl PartitionStream for NativePartition {
     }
 
     fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
-        let table = self.table.clone();
+        let source = self.source.clone();
         let budget = self.budget.clone();
-        let located = self.located;
         let prepare = async move {
-            let stream = if located {
-                storage::read_occurrences(&table, &budget).await?.boxed()
-            } else {
-                storage::read_batches(&table, &budget).await?.boxed()
+            let stream = match source {
+                NativeSource::Table {
+                    table,
+                    located: true,
+                } => storage::read_occurrences(&table, &budget).await?.boxed(),
+                NativeSource::Table {
+                    table,
+                    located: false,
+                } => storage::read_batches(&table, &budget).await?.boxed(),
+                NativeSource::File {
+                    scan,
+                    path,
+                    projection,
+                } => scan
+                    .read_projected_file(&path, &budget, projection.as_deref())?
+                    .boxed(),
             };
             Ok::<_, crate::Error>(stream)
         };
@@ -192,10 +251,12 @@ mod tests {
             iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema()).unwrap(),
         );
         let partition = NativePartition {
-            table: native,
+            source: NativeSource::Table {
+                table: native,
+                located: false,
+            },
             schema,
             budget: budget.clone(),
-            located: false,
         };
         let context = SessionContext::new();
         let mut stream = partition.execute(context.task_ctx());

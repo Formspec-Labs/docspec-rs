@@ -88,7 +88,7 @@ impl Expressions {
                 "nested computed results require separate field-identity qualification",
             ));
         }
-        // New Iceberg tables assign their own sequential IDs. Keep logical field
+        // Inferred outputs use sequential native IDs. Keep logical field
         // identities explicit, mapped to the exact native schema in each result.
         let native_field_ids = spec
             .fields

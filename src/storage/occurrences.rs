@@ -79,6 +79,7 @@ struct Occurrences {
     expected: BTreeMap<String, DataFile>,
     current: Option<FileRows>,
     schema: SchemaRef,
+    located: bool,
     limit: usize,
     _batches: OwnedSemaphorePermit,
     _metadata: Arc<OwnedSemaphorePermit>,
@@ -86,9 +87,22 @@ struct Occurrences {
 
 impl Occurrences {
     async fn open(table: &Table, budget: &Budget) -> Result<Self> {
-        let schema = occurrence_schema(table)?;
-        let batches = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
         let inventory = super::snapshot_files(table, budget).await?;
+        Self::capture(table, budget, inventory, true).await
+    }
+
+    async fn capture(
+        table: &Table,
+        budget: &Budget,
+        inventory: super::SnapshotFiles,
+        located: bool,
+    ) -> Result<Self> {
+        let schema = if located {
+            occurrence_schema(table)?
+        } else {
+            super::schema::read_schema(table)?
+        };
+        let batches = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
         // Retain the existing inventory reservation while its live descriptors are used.
         let expected = inventory
             .data
@@ -109,6 +123,7 @@ impl Occurrences {
             expected,
             current: None,
             schema,
+            located,
             limit: budget.limits.max_batch_bytes,
             _batches: batches,
             _metadata: Arc::new(inventory._reservation),
@@ -130,14 +145,18 @@ impl Occurrences {
                                 "decoded rows exceed the captured native count",
                             )
                         })?;
-                    let batch = append_locations(
-                        batch,
-                        &file.path,
-                        file.next,
-                        end,
-                        &self.schema,
-                        self.limit,
-                    )?;
+                    let batch = if self.located {
+                        append_locations(
+                            batch,
+                            &file.path,
+                            file.next,
+                            end,
+                            &self.schema,
+                            self.limit,
+                        )?
+                    } else {
+                        batch
+                    };
                     file.next = end;
                     return Ok(Some(batch));
                 }
@@ -189,12 +208,46 @@ pub(crate) struct OccurrenceScan {
     tasks: BTreeMap<String, (FileScanTask, DataFile)>,
     reader: ArrowReader,
     schema: SchemaRef,
+    located: bool,
     _metadata: Arc<OwnedSemaphorePermit>,
+}
+
+impl std::fmt::Debug for OccurrenceScan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OccurrenceScan")
+            .field("files", &self.tasks.len())
+            .field("schema", &self.schema)
+            .finish_non_exhaustive()
+    }
 }
 
 impl OccurrenceScan {
     pub async fn open(table: &Table, budget: &Budget) -> Result<Self> {
-        let mut state = Occurrences::open(table, budget).await?;
+        Self::capture(
+            Occurrences::open(table, budget).await?,
+            budget.limits.max_metadata_bytes,
+        )
+        .await
+    }
+
+    /// Transfers an admitted inventory into a values-only selected-file reader.
+    pub async fn values(
+        table: &Table,
+        budget: &Budget,
+        inventory: super::SnapshotFiles,
+    ) -> Result<Self> {
+        Self::capture(
+            Occurrences::capture(table, budget, inventory, false).await?,
+            budget.limits.max_metadata_bytes,
+        )
+        .await
+    }
+
+    pub fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    async fn capture(mut state: Occurrences, metadata_limit: usize) -> Result<Self> {
         let mut tasks = BTreeMap::new();
         let mut bytes = 0usize;
         while let Some(task) = state.tasks.try_next().await? {
@@ -215,7 +268,7 @@ impl OccurrenceScan {
                         .saturating_mul(size_of::<i32>()),
                 )
                 .saturating_add(512);
-            if bytes > budget.limits.max_metadata_bytes {
+            if bytes > metadata_limit {
                 return Err(Error::refusal(
                     "metadata_capacity",
                     "captured file tasks exceed metadata allowance",
@@ -233,6 +286,7 @@ impl OccurrenceScan {
             tasks,
             reader: state.reader,
             schema: state.schema,
+            located: state.located,
             _metadata: state._metadata,
         })
     }
@@ -246,13 +300,54 @@ impl OccurrenceScan {
         path: &str,
         budget: &Budget,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+        self.read_projected_file(path, budget, None)
+    }
+
+    pub fn read_projected_file(
+        &self,
+        path: &str,
+        budget: &Budget,
+        projection: Option<&[usize]>,
+    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
         let (task, file) = self.tasks.get(path).ok_or_else(|| {
             Error::refusal("occurrence_tasks", "file is outside the captured source")
         })?;
+        let mut task = task.clone();
+        let schema = if let Some(indices) = projection {
+            if self.located {
+                return Err(Error::refusal(
+                    "invalid_projection",
+                    "value projection cannot change occurrence columns",
+                ));
+            }
+            let schema = Arc::new(self.schema.project(indices)?);
+            task.project_field_ids = indices
+                .iter()
+                .map(|index| {
+                    task.schema
+                        .as_struct()
+                        .fields()
+                        .get(*index)
+                        .map(|field| field.id)
+                        .ok_or_else(|| {
+                            Error::refusal(
+                                "invalid_projection",
+                                "field is outside the captured schema",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            task.project_field_ids
+                .push(iceberg::metadata_columns::RESERVED_FIELD_ID_FILE);
+            schema
+        } else {
+            self.schema.clone()
+        };
         let state = Occurrences {
-            tasks: futures::stream::iter([Ok(task.clone())]).boxed(),
+            tasks: futures::stream::iter([Ok(task)]).boxed(),
             reader: self.reader.clone(),
-            schema: self.schema.clone(),
+            schema,
+            located: self.located,
             expected: BTreeMap::from([(path.to_owned(), file.clone())]),
             current: None,
             limit: budget.limits.max_batch_bytes,

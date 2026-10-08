@@ -1,0 +1,119 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0560]: struct `query::NativePartition` has no field named `table`
+   --> src/query.rs:254:13
+    |
+254 |             table: native,
+    |             ^^^^^ `query::NativePartition` does not have this field
+    |
+    = note: available fields are: `source`
+
+error[E0560]: struct `query::NativePartition` has no field named `located`
+   --> src/query.rs:257:13
+    |
+257 |             located: false,
+    |             ^^^^^^^ `query::NativePartition` does not have this field
+    |
+    = note: available fields are: `source`
+
+warning: function `file` is never used
+  --> src/query.rs:49:15
+   |
+49 | pub(crate) fn file(
+   |               ^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `File` is never constructed
+  --> src/query.rs:88:5
+   |
+83 | enum NativeSource {
+   |      ------------ variant in this enum
+...
+88 |     File {
+   |     ^^^^
+   |
+   = note: `NativeSource` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated items `values` and `schema` are never used
+   --> src/storage/occurrences.rs:234:18
+    |
+224 | impl OccurrenceScan {
+    | ------------------- associated items in this implementation
+...
+234 |     pub async fn values(
+    |                  ^^^^^^
+...
+246 |     pub fn schema(&self) -> &SchemaRef {
+    |            ^^^^^^
+
+warning: `docspec` (lib) generated 3 warnings
+warning: unused imports: `Engine`, `PhaseResult`, and `TablePin`
+  --> tests/rebuild.rs:11:5
+   |
+11 |     Engine,
+   |     ^^^^^^
+12 |     engine::verify_release,
+13 |     model::{OperationRequest, PhaseResult, ReleasePin, RunSpec, TablePin, UpdateSpec},
+   |                               ^^^^^^^^^^^                       ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "rebuild") generated 1 warning (run `cargo fix --test "rebuild" -p docspec` to apply 1 suggestion)
+For more information about this error, try `rustc --explain E0560`.
+error: could not compile `docspec` (lib test) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+warning: unused import: `check_values`
+ --> tests/refresh.rs:9:16
+  |
+9 | use enriched::{check_values, enriched, forged};
+  |                ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `fixture` and `spec`
+  --> tests/refresh.rs:10:19
+   |
+10 | use scalar::{Row, fixture, id, input, limits, spec};
+   |                   ^^^^^^^                     ^^^^
+
+warning: unused imports: `Engine` and `PhaseResult`
+  --> tests/refresh.rs:18:5
+   |
+18 |     Engine,
+   |     ^^^^^^
+19 |     engine::verify_release,
+20 |     model::{InputSpec, OperationRequest, PhaseResult, ReleasePin, TablePin, UpdateSpec},
+   |                                          ^^^^^^^^^^^
+
+warning: unused import: `SuccessionProof`
+  --> tests/related_refresh.rs:15:61
+   |
+15 |         RefreshSpec, RefreshTransform, ReleasePin, RunSpec, SuccessionProof,
+   |                                                             ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `data_paths` is never used
+  --> tests/refresh.rs:64:4
+   |
+64 | fn data_paths(pin: &TablePin) -> BTreeSet<String> {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `check_values` is never used
+  --> tests/support/enriched.rs:34:21
+   |
+34 | pub(super) async fn check_values(engine: &Engine, release: &ReleasePin, rows: &[Row]) {
+   |                     ^^^^^^^^^^^^
+
+warning: `docspec` (test "refresh") generated 5 warnings (run `cargo fix --test "refresh" -p docspec` to apply 3 suggestions)
+warning: function `nested_recipe` is never used
+   --> tests/related_refresh.rs:794:4
+    |
+794 | fn nested_recipe(joined: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
+    |    ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "related_refresh") generated 2 warnings (run `cargo fix --test "related_refresh" -p docspec` to apply 1 suggestion)

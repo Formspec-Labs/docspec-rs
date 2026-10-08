@@ -1,0 +1,34 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0282]: type annotations needed for `Vec<_>`
+   --> src/engine/write/tests.rs:584:9
+    |
+584 |     let mut keys = Vec::new();
+    |         ^^^^^^^^   ---------- type must be known at this point
+    |
+help: consider giving `keys` an explicit type, where the type for type parameter `T` is specified
+    |
+584 |     let mut keys: Vec<T> = Vec::new();
+    |                 ++++++++
+
+error[E0283]: type annotations needed for `Vec<_>`
+   --> src/engine/write/tests.rs:584:9
+    |
+584 |     let mut keys = Vec::new();
+    |         ^^^^^^^^
+...
+595 |     assert_eq!(keys, vec![1, 2]);
+    |     ---------------------------- type must be known at this point
+    |
+    = note: multiple `impl`s satisfying `_: PartialEq<i32>` found in the following crates: `bigdecimal`, `core`, `serde_json`:
+            - impl PartialEq for i32;
+            - impl PartialEq<i32> for bigdecimal::BigDecimal;
+            - impl PartialEq<i32> for serde_json::Value;
+    = note: required for `Vec<_>` to implement `PartialEq<Vec<i32>>`
+help: consider giving `keys` an explicit type, where the placeholders `_` are specified
+    |
+584 |     let mut keys: Vec<T> = Vec::new();
+    |                 ++++++++
+
+Some errors have detailed explanations: E0282, E0283.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `docspec` (lib test) due to 2 previous errors

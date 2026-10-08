@@ -12,7 +12,7 @@ use crate::{
 };
 use datafusion::prelude::*;
 use futures::{StreamExt, TryStreamExt};
-use iceberg::{Catalog, TableCreation};
+use iceberg::Catalog;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
