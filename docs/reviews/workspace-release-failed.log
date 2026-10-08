@@ -1,0 +1,22 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.22s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... FAILED
+
+failures:
+
+---- budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors stdout ----
+
+thread 'budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors' (8072781) panicked at src/budget.rs:157:56:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--lib`

@@ -141,9 +141,42 @@ impl WorkspaceLock {
     }
 }
 
+impl Drop for WorkspaceLock {
+    fn drop(&mut self) {
+        // A fork may temporarily inherit this open file description before exec.
+        // Closing only our descriptor leaves its lock alive in that child.
+        if let Err(error) = FileExt::unlock(&self._file) {
+            tracing::warn!(error = %error, "workspace lock release failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn releasing_workspace_ownership_unlocks_inherited_descriptors() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = WorkspaceLock::acquire(root.path()).unwrap();
+        // Unix process creation can briefly duplicate the open file description
+        // before close-on-exec takes effect. Keep such a descriptor alive here.
+        let inherited = owner._file.try_clone().unwrap();
+        assert_eq!(
+            WorkspaceLock::acquire(root.path()).unwrap_err().code(),
+            "workspace_busy"
+        );
+        drop(owner);
+        let next = WorkspaceLock::acquire(root.path()).unwrap();
+        drop(inherited);
+        assert_eq!(
+            WorkspaceLock::acquire(root.path()).unwrap_err().code(),
+            "workspace_busy"
+        );
+        drop(next);
+        WorkspaceLock::acquire(root.path()).unwrap();
+    }
 
     #[test]
     fn unrepresentable_worker_limit_refuses_without_panicking() {
