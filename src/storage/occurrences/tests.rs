@@ -188,10 +188,15 @@ async fn reservations_survive_partial_reads_and_release_on_drop_eof_and_error() 
 async fn locator_columns_participate_in_batch_admission() {
     let (_root, _catalog, table, _) = fixture().await;
     let mut budget = budget(2);
-    let mut plain = storage::read_batches(&table, &budget)
-        .await
+    let tasks = storage::schema::plan_files(&table).await.unwrap();
+    let mut plain = table
+        .reader_builder()
+        .with_batch_size(2)
+        .with_data_file_concurrency_limit(1)
+        .build()
+        .read(tasks)
         .unwrap()
-        .boxed();
+        .stream();
     let mut largest = 0;
     while let Some(batch) = plain.try_next().await.unwrap() {
         largest = largest.max(batch.get_array_memory_size());
@@ -235,11 +240,7 @@ async fn selective_scan_skips_unrequested_payloads_and_keeps_stream_admission() 
 #[tokio::test]
 async fn malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage() {
     let (_root, _catalog, table, _) = fixture().await;
-    let tasks: Vec<_> = table
-        .scan()
-        .build()
-        .unwrap()
-        .plan_files()
+    let tasks: Vec<_> = storage::schema::plan_files(&table)
         .await
         .unwrap()
         .try_collect()
@@ -305,9 +306,8 @@ async fn malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverag
 
 #[tokio::test]
 async fn reserved_names_and_unqualified_schema_changes_refuse() {
-    let (_root, _catalog, table, empty) = fixture().await;
+    let (_root, _catalog, _table, empty) = fixture().await;
     for (base, name, code) in [
-        (&table, "renamed", "unsupported_schema_evolution"),
         (&empty, "__docspec_file", "reserved_field"),
         (&empty, "__DOCSPEC_ROW", "reserved_field"),
     ] {
@@ -335,3 +335,5 @@ async fn reserved_names_and_unqualified_schema_changes_refuse() {
         assert_eq!(occurrence_schema(&changed).unwrap_err().code(), code);
     }
 }
+
+mod schema;

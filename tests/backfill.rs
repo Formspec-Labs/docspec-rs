@@ -574,7 +574,26 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
     let budget = docspec::budget::Budget::new(limits()).unwrap();
     for pin in b.dataset.groups.values() {
         let native = storage::open_pin(pin).await.unwrap();
-        let stream = storage::read_batches(&native, &budget).await.unwrap();
+        // Measure the maintained reader's transient file column as well as values.
+        let names = native
+            .metadata()
+            .current_schema()
+            .as_struct()
+            .fields()
+            .iter()
+            .map(|field| field.name.clone())
+            .chain(std::iter::once("_file".to_owned()))
+            .collect::<Vec<_>>();
+        let stream = native
+            .scan()
+            .select(names)
+            .with_concurrency_limit(1)
+            .with_batch_size(Some(budget.limits.batch_rows))
+            .build()
+            .unwrap()
+            .to_arrow()
+            .await
+            .unwrap();
         futures::pin_mut!(stream);
         while let Some(batch) = stream.try_next().await.unwrap() {
             limit = limit.max(batch.get_array_memory_size());

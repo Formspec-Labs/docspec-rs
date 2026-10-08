@@ -69,6 +69,8 @@ impl Budget {
             || limits.memory_bytes == 0
             || limits.memory_bytes > Semaphore::MAX_PERMITS
             || limits.batch_rows == 0
+            // The native virtual file column uses signed 32-bit run ends.
+            || limits.batch_rows > i32::MAX as usize
             || limits.max_metadata_bytes == 0
             || limits.max_batch_bytes == 0
             || limits.max_batch_bytes > u32::MAX as usize / 4
@@ -305,6 +307,24 @@ mod tests {
             .code(),
             "invalid_budget"
         );
+    }
+
+    #[test]
+    fn native_virtual_run_end_limit_refuses_oversized_batches() {
+        assert_eq!(
+            Budget::new(Limits {
+                batch_rows: i32::MAX as usize + 1,
+                ..Limits::default()
+            })
+            .unwrap_err()
+            .code(),
+            "invalid_budget"
+        );
+        Budget::new(Limits {
+            batch_rows: i32::MAX as usize,
+            ..Limits::default()
+        })
+        .unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

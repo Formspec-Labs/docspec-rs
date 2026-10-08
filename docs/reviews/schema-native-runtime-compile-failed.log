@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0624]: method `runtime` is private
+   --> src/storage/occurrences/tests/schema.rs:251:76
+    |
+251 |         .metadata(metadata).file_io(table.file_io().clone()).runtime(table.runtime().clone()).build().unwrap();
+    |                                                                            ^^^^^^^ private method
+    |
+   ::: /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/iceberg-0.10.1/src/table.rs:290:5
+    |
+290 |     pub(crate) fn runtime(&self) -> &Runtime {
+    |     ---------------------------------------- private method defined here
+
+For more information about this error, try `rustc --explain E0624`.
+error: could not compile `docspec` (lib test) due to 1 previous error

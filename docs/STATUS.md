@@ -129,8 +129,8 @@ filters and empty schemas. See the [consistency review](reviews/query-reader-con
 [resource review](reviews/query-reader-resources.md) and [gate output](reviews/query-reader-check.log).
 This closes a reader-control gap. It establishes neither a throughput improvement
 nor a whole-process memory ceiling. Query filters and column selection are applied
-above the native stream. Metadata-only schema evolution still needs its own
-qualification; it is not established by these same-schema reader tests.
+above the native stream. The later pinned-schema reader checkpoint qualifies a limited set of native
+schema changes; public lifecycle schema evolution remains unfinished.
 
 ## Source occurrence checkpoint
 
@@ -144,8 +144,8 @@ The pinned native reader declares `_pos` but fails to read it; the original
 [capability failure](reviews/native-position-probe.log) is retained. The adapter
 uses the maintained native whole-file reader, visits every live file exactly
 once, and checks every decoded row count. Partial, filtered, delete-bearing,
-missing and repeated tasks refuse. Reserved names and a difference between the
-snapshot schema and current schema also refuse pending separate qualification.
+missing and repeated tasks refuse. Reserved names refuse. The later pinned-schema reader checkpoint qualifies
+limited top-level schema differences while retaining occurrence correspondence.
 
 An independent Parquet reader confirms file-relative correspondence across row
 groups and batch sizes, including duplicate/null values and byte-identical files
@@ -656,3 +656,35 @@ removing its stack cost from summaries. Transform futures use heap storage like
 existing native refresh boundaries; tests keep the default stack.
 The full lifecycle, maintenance/restore, real-provider publication, Dagster and
 10M Comments gate remain open.
+
+## Pinned-schema reader checkpoint
+
+All shared native reads now select the current schema from the exact retained
+metadata, including ordinary batches, occurrence reads and selected-file reads.
+A native regression demonstrated that Iceberg 0.10.1's name-only transformation
+can relabel equal-typed columns after a reorder without moving their values.
+The adapter requests Iceberg's transient `_file` column, which forces its
+field-ID-aware transformation, validates that column's ID and type, and removes
+it before application processing. It uses the maintained reader and shares the
+original value buffers; there is no custom decoder or durable schema index.
+
+The adapter qualifies top-level rename, reorder, removal and nullable primitive
+addition. Type, requiredness, default interpretation and nested structural
+changes refuse. The native metadata-fork probe preserves original file bytes,
+field IDs and old reads, then appends new rows with explicit null, zero and empty
+values. Other probes cover same-name replacement with a new ID, all selected
+fields absent, equal-typed reorder through DataFusion, occurrence correspondence,
+selected-file reads, malformed virtual columns and transient batch accounting.
+
+The transient native column participates in the existing byte check. Native
+batch rows are limited to `i32::MAX`, matching its run-end representation. When
+all selected fields are absent from a physical file, the maintained reader still
+decodes all physical columns before producing the new values. The output check
+does not bound that temporary decoding memory or establish column pruning.
+No performance or whole-process memory result is claimed.
+
+This is a reader prerequisite for R3. Public schema operations, ID-preserving
+replacement candidates, ID-bound computed dependencies, durable absence semantics
+and guarded schema cutover remain unfinished. Native metadata changes alone do
+not establish that lifecycle behavior. See the implementation reviews and raw
+qualification logs under [reviews](reviews/).

@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.20s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 9 tests
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+
+thread 'storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values' (9215640) panicked at src/storage/occurrences/tests/schema.rs:341:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "iceberg", message: "DataInvalid => Metadata location does not exist for table: occurrences.source", source: Some(DataInvalid => Metadata location does not exist for table: occurrences.source
+), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... FAILED
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+
+failures:
+
+failures:
+    storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `--lib`

@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.11s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 9 tests
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.33s
+

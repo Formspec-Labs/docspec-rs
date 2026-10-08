@@ -26,18 +26,9 @@ pub const OCCURRENCE_ROW: &str = "__docspec_row";
 /// These are source-pinned locations, not logical IDs stable across rewrites.
 ///
 /// # Errors
-/// Refuses reserved names or an unqualified snapshot/current-schema difference.
+/// Refuses reserved names or unqualified changes in native value interpretation.
 pub fn occurrence_schema(table: &Table) -> Result<SchemaRef> {
-    let metadata = table.metadata();
-    if let Some(snapshot) = metadata.current_snapshot()
-        && snapshot.schema(metadata)? != *metadata.current_schema()
-    {
-        return Err(Error::refusal(
-            "unsupported_schema_evolution",
-            "occurrence reads require the selected snapshot and current schema to agree",
-        ));
-    }
-    let schema = iceberg::arrow::schema_to_arrow_schema(metadata.current_schema())?;
+    let schema = super::schema::read_schema(table)?;
     if schema.fields().iter().any(|field| {
         field.name().eq_ignore_ascii_case(OCCURRENCE_FILE)
             || field.name().eq_ignore_ascii_case(OCCURRENCE_ROW)
@@ -104,12 +95,7 @@ impl Occurrences {
             .into_iter()
             .map(|file| (file.file_path().to_owned(), file))
             .collect();
-        let tasks = table
-            .scan()
-            .with_concurrency_limit(1)
-            .build()?
-            .plan_files()
-            .await?;
+        let tasks = super::schema::plan_files(table).await?;
         let reader = table
             .reader_builder()
             .with_data_file_concurrency_limit(1)
@@ -133,6 +119,7 @@ impl Occurrences {
         loop {
             if let Some(file) = &mut self.current {
                 if let Some(batch) = file.stream.try_next().await? {
+                    let batch = super::schema::strip_file_column(batch, self.limit)?;
                     let end = file
                         .next
                         .checked_add(batch.num_rows() as u64)

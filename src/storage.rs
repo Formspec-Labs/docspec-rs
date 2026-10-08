@@ -1,6 +1,7 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
 mod occurrences;
+mod schema;
 pub(crate) use occurrences::OccurrenceScan;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
@@ -76,25 +77,21 @@ pub async fn read_batches(
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
     let limit = budget.limits.max_batch_bytes;
+    let tasks = schema::plan_files(table).await?;
     let stream = table
-        .scan()
-        .with_concurrency_limit(1)
-        .with_batch_size(Some(budget.limits.batch_rows))
-        .build()?
-        .to_arrow()
-        .await?;
+        .reader_builder()
+        .with_data_file_concurrency_limit(1)
+        .with_batch_size(budget.limits.batch_rows)
+        .build()
+        .read(tasks)?
+        .stream();
     Ok(futures::stream::try_unfold(
         (stream, reservation),
         move |(mut stream, reservation)| async move {
             let Some(batch) = stream.try_next().await? else {
                 return Ok(None);
             };
-            if batch.get_array_memory_size() > limit {
-                return Err(Error::refusal(
-                    "oversized_batch",
-                    "native reader exceeded its byte allowance",
-                ));
-            }
+            let batch = schema::strip_file_column(batch, limit)?;
             Ok(Some((batch, (stream, reservation))))
         },
     ))

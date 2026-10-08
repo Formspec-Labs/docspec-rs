@@ -1,0 +1,79 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0308]: mismatched types
+  --> src/storage/occurrences/tests/schema.rs:34:15
+   |
+22 |         .map_ok(move |mut task| {
+   |                 --------------- the found closure
+...
+34 |         .read(tasks)
+   |          ---- ^^^^^ expected `Pin<Box<dyn Stream<Item = ...> + Send>>`, found `MapOk<Pin<Box<...>>, ...>`
+   |          |
+   |          arguments to this method are incorrect
+   |
+   = note: expected struct `Pin<Box<(dyn futures::Stream<Item = std::result::Result<FileScanTask, iceberg::Error>> + std::marker::Send + 'static)>>`
+              found struct `MapOk<Pin<Box<dyn Stream<Item = Result<..., ...>> + Send>>, ...>`
+note: method defined here
+  --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/iceberg-0.10.1/src/arrow/reader/pipeline.rs:48:12
+   |
+48 |     pub fn read(self, tasks: FileScanTaskStream) -> Result<ScanResult> {
+   |            ^^^^
+   = note: the full name for the type has been written to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-d9039bc58e38c22e.long-type-6917235283472738094.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+help: you need to pin and box this expression
+   |
+34 |         .read(Box::pin(tasks))
+   |               +++++++++     +
+
+error[E0599]: the method `try_collect` exists for struct `iceberg::scan::ScanResult`, but its trait bounds were not satisfied
+  --> src/storage/occurrences/tests/schema.rs:36:10
+   |
+27 | /     table
+28 | |         .reader_builder()
+29 | |         .with_batch_size(budget.limits.batch_rows)
+30 | |         .with_data_file_concurrency_limit(1)
+...  |
+35 | |         .unwrap()
+36 | |         .try_collect()
+   | |         -^^^^^^^^^^^ method cannot be called on `iceberg::scan::ScanResult` due to unsatisfied trait bounds
+   | |_________|
+   |
+   |
+  ::: /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/iceberg-0.10.1/src/arrow/scan_metrics.rs:77:1
+   |
+77 |   pub struct ScanResult {
+   |   --------------------- doesn't satisfy `iceberg::scan::ScanResult: TryStream` or `iceberg::scan::ScanResult: futures::TryStreamExt`
+   |
+   = note: the following trait bounds were not satisfied:
+           `iceberg::scan::ScanResult: TryStream`
+           which is required by `iceberg::scan::ScanResult: futures::TryStreamExt`
+           `&iceberg::scan::ScanResult: TryStream`
+           which is required by `&iceberg::scan::ScanResult: futures::TryStreamExt`
+           `&mut iceberg::scan::ScanResult: TryStream`
+           which is required by `&mut iceberg::scan::ScanResult: futures::TryStreamExt`
+
+error[E0282]: type annotations needed
+  --> src/storage/occurrences/tests/schema.rs:27:5
+   |
+27 | /     table
+28 | |         .reader_builder()
+29 | |         .with_batch_size(budget.limits.batch_rows)
+30 | |         .with_data_file_concurrency_limit(1)
+...  |
+36 | |         .try_collect()
+37 | |         .await
+   | |______________^ cannot infer type
+
+error[E0277]: the trait bound `Vec<std::option::Option<i64>>: std::marker::Copy` is not satisfied
+   --> src/storage/occurrences/tests/schema.rs:146:10
+    |
+146 |         [vec![Some(1), Some(1), None, Some(7), Some(8), Some(9), Some(10)]; 2].concat();
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `std::marker::Copy` is not implemented for `Vec<std::option::Option<i64>>`
+    |
+    = note: the `Copy` trait is required because this value will be copied for each element of the array
+    = help: consider using `core::array::from_fn` to initialize the array
+    = help: see https://doc.rust-lang.org/stable/std/array/fn.from_fn.html for more information
+    = note: this error originates in the macro `vec` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0277, E0282, E0308, E0599.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `docspec` (lib test) due to 4 previous errors

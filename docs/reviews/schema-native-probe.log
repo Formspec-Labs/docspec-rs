@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.00s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 2 tests
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.17s
+

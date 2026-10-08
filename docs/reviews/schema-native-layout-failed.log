@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.63s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 1 test
+
+thread 'storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_defaults_and_historical_files' (9201970) panicked at src/storage/occurrences/tests/schema.rs:169:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "iceberg", message: "Unexpected => Metadata location not under \"/metadata\" subdirectory: /var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpiTKtac/evolved", source: Some(Unexpected => Metadata location not under "/metadata" subdirectory: /var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpiTKtac/evolved
+), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_defaults_and_historical_files ... FAILED
+
+failures:
+
+failures:
+    storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_defaults_and_historical_files
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--lib`
