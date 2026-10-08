@@ -6,7 +6,7 @@ mod tables;
 pub(crate) use occurrences::OccurrenceScan;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
-pub(crate) use tables::{fresh_metadata, register_candidate, replacement_metadata};
+pub(crate) use tables::{bounded_json, fresh_metadata, register_candidate, replacement_metadata};
 
 use crate::{
     Error, Result,

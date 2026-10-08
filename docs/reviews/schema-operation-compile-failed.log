@@ -1,0 +1,17 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0614]: type `TableMetadata` cannot be dereferenced
+   --> src/engine/schema.rs:281:28
+    |
+281 |             if expected != *second {
+    |                            ^^^^^^^ can't be dereferenced
+
+error[E0614]: type `iceberg::spec::TableMetadata` cannot be dereferenced
+   --> src/engine/schema.rs:281:28
+    |
+281 |             if expected != *second {
+    |                            ^^^^^^^ can't be dereferenced
+
+For more information about this error, try `rustc --explain E0614`.
+error: could not compile `docspec` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 1 previous error

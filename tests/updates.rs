@@ -511,7 +511,7 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
         (None, None),
         (Some(2), Some("b".into())),
     ];
-    let names = ["CaSe", "quo\"ted"];
+    let names = ["Ca.Se", "quo\"ted"];
     let original = named_input(&root.path().join("source.parquet"), &rows, false, names);
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await

@@ -63,7 +63,7 @@ impl Engine {
         .await
     }
 
-    async fn register_output(
+    pub(super) async fn register_output(
         &self,
         namespace: &iceberg::NamespaceIdent,
         prepare: impl FnOnce() -> Result<iceberg::spec::TableMetadata> + Send + 'static,
@@ -218,13 +218,12 @@ impl Engine {
                     "deletion rows must contain exactly the typed key fields",
                 ));
             }
-            if any_rows(
-                &context,
-                &format!(
-                    "SELECT 1 FROM replacements l INNER JOIN deletions r ON {} LIMIT 1",
-                    key_match(&spec.keys, "l", "r")
-                ),
-            )
+            if any_rows(key_join(
+                context.table("replacements").await?,
+                context.table("deletions").await?,
+                &spec.keys,
+                datafusion::logical_expr::JoinType::Inner,
+            )?)
             .await?
             {
                 return Err(Error::refusal(
@@ -353,13 +352,12 @@ impl Engine {
                     budget.clone(),
                 )?,
             )?;
-            if any_rows(
-                &context,
-                &format!(
-                    "SELECT 1 FROM {name} l INNER JOIN affected_keys r ON {} LIMIT 1",
-                    key_match(keys, "l", "r")
-                ),
-            )
+            if any_rows(key_join(
+                context.table(&name).await?,
+                context.table("affected_keys").await?,
+                keys,
+                datafusion::logical_expr::JoinType::Inner,
+            )?)
             .await?
             {
                 rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
@@ -375,7 +373,21 @@ impl Engine {
                     )?,
                 )?;
                 // One joined decode supplies both kept rows and actual removed rows.
-                changed.push(context.sql(&format!("SELECT l.*, r.{marker} IS NOT NULL AS {marker} FROM {name} l LEFT JOIN affected_keys r ON {}", key_match(keys, "l", "r"))).await?);
+                let mut columns = schema
+                    .fields()
+                    .iter()
+                    .map(|field| qualified("l", field.name()))
+                    .collect::<Vec<_>>();
+                columns.push(qualified("r", &marker).is_not_null().alias(&marker));
+                changed.push(
+                    key_join(
+                        context.table(&name).await?,
+                        context.table("affected_keys").await?,
+                        keys,
+                        datafusion::logical_expr::JoinType::Left,
+                    )?
+                    .select(columns)?,
+                );
             } else {
                 shared.push(file.clone());
             }
@@ -513,14 +525,28 @@ impl Engine {
 pub(super) fn identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
-fn key_match(keys: &[String], left: &str, right: &str) -> String {
-    keys.iter()
-        .map(|key| {
-            let key = identifier(key);
-            format!("({left}.{key} IS NOT DISTINCT FROM {right}.{key})")
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ")
+pub(super) fn qualified(relation: &str, field: &str) -> Expr {
+    Expr::Column(datafusion::common::Column::new(Some(relation), field))
+}
+fn key_join(
+    left: DataFrame,
+    right: DataFrame,
+    keys: &[String],
+    kind: datafusion::logical_expr::JoinType,
+) -> Result<DataFrame> {
+    use datafusion::logical_expr::{BinaryExpr, Operator};
+    // Typed expressions avoid recursive SQL parsing on deeply nested refresh
+    // calls and preserve literal field names, including dots and quotes.
+    let conditions = keys.iter().map(|key| {
+        Expr::BinaryExpr(BinaryExpr::new(
+            Box::new(qualified("l", key)),
+            Operator::IsNotDistinctFrom,
+            Box::new(qualified("r", key)),
+        ))
+    });
+    Ok(left
+        .alias("l")?
+        .join_on(right.alias("r")?, kind, conditions)?)
 }
 fn same_fields(left: &arrow::datatypes::Schema, right: &arrow::datatypes::Schema) -> Result<bool> {
     // The maintained converter assigns comparison-only IDs consistently and
@@ -530,8 +556,12 @@ fn same_fields(left: &arrow::datatypes::Schema, right: &arrow::datatypes::Schema
             == iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(right)?,
     )
 }
-async fn any_rows(context: &SessionContext, sql: &str) -> Result<bool> {
-    let batches = context.sql(sql).await?.collect().await?;
+async fn any_rows(frame: DataFrame) -> Result<bool> {
+    let batches = frame
+        .select(vec![lit(1)])?
+        .limit(0, Some(1))?
+        .collect()
+        .await?;
     Ok(batches.iter().any(|batch| batch.num_rows() != 0))
 }
 fn split_rows(batch: RecordBatch) -> Result<(RecordBatch, RecordBatch)> {

@@ -12,11 +12,11 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Public metadata-only evolution; global source IDs across full rebuilds; durable absence/default semantics; nested computed values; broader selective dependencies; full concurrent-ingestion cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide with atomic writer-definition cutover; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Optional/default and nested schema evolution; related-output schema edits; global source IDs across full rebuilds; durable absence/default semantics; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
@@ -777,5 +777,76 @@ Clippy and the library suite. See the [consistency review](reviews/scalar-bindin
 [full gate](reviews/scalar-binding-check.log) and
 [final library gate](reviews/scalar-binding-final-check.log).
 
-Public schema operations, durable absence/default interpretation, continuous
-ingestion cutover and the full Comments performance gate remain open.
+The following checkpoint adds public root schema edits. Durable absence/default
+interpretation, continuous-ingestion catch-up and the full Comments performance
+gate remain open.
+
+## Public schema-operation checkpoint
+
+`SchemaSpec` selects existing source root IDs and their names in the desired order.
+Omitted fields disappear from the new view and remain in retained old versions.
+The operation refuses missing IDs, consumed-field removal, computed-name collisions,
+reserved occurrence names and invalid writer-definition changes before admission.
+New schema admission also refuses while accepted source work remains beyond the
+selected boundary; completing that input permits a fresh schema request.
+It currently supports source datasets, including their selected scalar groups;
+related join/summary outputs need additional contributor/schema mapping.
+
+The existing run service handles admission, protected preparation, validation,
+group catch-up, readback and selection. CLI `plan-schema`/`schema` and HTTP
+`/schemas/plan`/`schemas/run` call those same services. The exact base manifest,
+active writer definition and source admission boundary guard promotion. One native
+lifecycle commit selects the new schema, result and writer definition. Old workers
+refuse after cutover. Later input admission prevents stale cutover; that input and
+completed schema phases remain retained for explicit recovery. This does not yet
+implement continuous-ingestion catch-up or a bounded write fence.
+
+Native metadata retains snapshots, field IDs, historical schemas and the allocation
+high-water mark. A fresh candidate UUID/location isolates its metadata; source and
+computed Parquet files keep their exact references, owners, bytes and modification
+times. Retained SQL keeps its original input IDs; new Backfill and Update operations
+use the selected names and writer definition. No separate schema registry, operation
+journal or query framework was added.
+The typed schema request and exact parent manifest describe this change; it does
+not fabricate removed/added value rows for a presentation-only edit.
+
+Independent verification reconstructs the permitted native metadata edit and uses
+native equality to include private snapshot references and other native state.
+Only the generated UUID/location and update timestamp may differ. The maintained
+builder has no timestamp setter, so one bounded serialization roundtrip normalizes
+that clock for comparison. Metadata comparison is admitted before allocating its
+borrowed inventory maps; the blocking worker retains its reservation after caller
+cancellation. This admission does not bound every allocation in native metadata
+opening. Cached related readback also checks the schema input's original metadata,
+even when that input has no computed groups.
+
+The source writes are metadata-only. Pinning still hashes inherited objects;
+validation and independent readback still decode values, and computed groups retain
+their full verification work. Rename latency independent of population, total I/O
+savings and whole-process memory bounds have not been measured. Native metadata
+handles now share the maintained `Arc<TableMetadata>` before creating the one
+candidate copy, avoiding redundant owned clones. A diagnostic debug-build probe
+measured smaller schema-transition futures; it is not a process-memory result.
+
+Full gates exposed stack overflows while parsing generated compound-key join SQL
+in summary replacement and generated scalar comparison SQL in refresh. These
+operations now use maintained DataFusion expressions with literal column names,
+explicit source column order and the same null-safe comparisons. This removes
+recursive parsing from file matching and scalar-value comparison, using one shared
+qualified-column helper. The tests retain normal stack limits. Earlier unsuccessful
+debugging attempts and both extracted failure stacks remain in the review evidence.
+
+Fixtures cover exact old/new values, duplicates/nulls/empty sources, file sharing,
+renamed computed inputs, hidden fields followed by new writes, unchanged allocation
+history, CLI/HTTP retry identity, forged native properties/references/high-water,
+definition and admission races (including earlier unresolved source input),
+missing schema history and SIGKILL at durable handoffs. The full repository gate
+passed with normal stack limits, including the final cutover guards, scalar-value
+forgery cases and shared replacement paths. See the
+[full gate](reviews/schema-operation-check.log),
+[consistency review](reviews/schema-operation-consistency.md) and
+[resource and recovery review](reviews/schema-operation-resources.md).
+
+Format 10 adds schema requests and distinguishes expected from selected definitions.
+Optional/default additions, durable absence interpretation, nested evolution,
+global IDs across full rebuilds and the broader R3/R7 performance gates remain open.

@@ -7,7 +7,7 @@ use crate::{
     Engine, Error,
     model::{
         BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
-        SuccessionProof, UpdateSpec, VersionRef,
+        SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
     },
 };
 use axum::{
@@ -29,6 +29,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/run", post(run))
         .route("/updates/plan", post(plan_update))
         .route("/updates/run", post(update))
+        .route("/schemas/plan", post(plan_schema))
+        .route("/schemas/run", post(evolve_schema))
         .route("/backfills/plan", post(plan_backfill))
         .route("/backfills/run", post(backfill))
         .route("/refreshes/plan", post(plan_refresh))
@@ -70,6 +72,7 @@ impl IntoResponse for HttpError {
             | "stale_definition"
             | "stale_eligibility"
             | "stale_input"
+            | "pending_source"
             | "coverage_regression" => StatusCode::CONFLICT,
             "stale_base" | "stale_source_boundary" | "stale_group" | "unproven_succession" => {
                 StatusCode::CONFLICT
@@ -121,6 +124,18 @@ async fn update(
     Json(spec): Json<UpdateSpec>,
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.update(&spec).await?))
+}
+async fn plan_schema(
+    State(engine): State<Engine>,
+    Json(spec): Json<SchemaSpec>,
+) -> Result<Json<crate::engine::RunPlan>, HttpError> {
+    Ok(Json(engine.plan_schema(&spec).await?))
+}
+async fn evolve_schema(
+    State(engine): State<Engine>,
+    Json(spec): Json<SchemaSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.evolve_schema(&spec).await?))
 }
 async fn inspect(
     State(engine): State<Engine>,

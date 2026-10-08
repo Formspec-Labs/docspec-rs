@@ -1,0 +1,37 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.17s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 28 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 120.15s
+

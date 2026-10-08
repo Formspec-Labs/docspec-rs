@@ -7,7 +7,7 @@ use docspec::{
     engine::{read_evidence, read_group, verify_input_coverage, verify_release},
     model::{
         BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
-        UpdateSpec, VersionRef,
+        SchemaSpec, UpdateSpec, VersionRef,
     },
     storage,
 };
@@ -80,6 +80,10 @@ enum Command {
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
     Update { spec: PathBuf },
+    /// Plan a schema edit against an exact selected source.
+    PlanSchema { spec: PathBuf },
+    /// Rename, reorder or hide existing root fields and select the new definition.
+    Schema { spec: PathBuf },
     /// Explain completed and pending computed field-group files.
     PlanBackfill { spec: PathBuf },
     /// Compute or resume an independent scalar field group.
@@ -125,6 +129,7 @@ enum PausedOperation {
     Update,
     Backfill,
     Refresh,
+    Schema,
 }
 
 #[tokio::main(worker_threads = 12)]
@@ -194,6 +199,11 @@ async fn main() -> anyhow::Result<()> {
                                 .update_until(&read_json::<UpdateSpec>(spec)?, &phase)
                                 .await
                         }
+                        PausedOperation::Schema => {
+                            engine
+                                .schema_until(&read_json::<SchemaSpec>(spec)?, &phase)
+                                .await
+                        }
                         PausedOperation::Backfill => {
                             engine
                                 .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
@@ -240,6 +250,14 @@ async fn main() -> anyhow::Result<()> {
                 Command::Update { spec } => {
                     print_json(&engine.update(&read_json::<UpdateSpec>(spec)?).await?)?
                 }
+                Command::PlanSchema { spec } => {
+                    print_json(&engine.plan_schema(&read_json::<SchemaSpec>(spec)?).await?)?
+                }
+                Command::Schema { spec } => print_json(
+                    &engine
+                        .evolve_schema(&read_json::<SchemaSpec>(spec)?)
+                        .await?,
+                )?,
                 Command::PlanBackfill { spec } => print_json(
                     &engine
                         .plan_backfill(&read_json::<BackfillSpec>(spec)?)

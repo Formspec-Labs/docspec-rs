@@ -93,8 +93,49 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 9 is the current greenfield
+remains unfinished. Release format 10 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
+
+## Change a source schema
+
+Use `plan-schema` and `schema` to rename, reorder or hide existing root fields.
+The request lists native field IDs from the selected source's Iceberg schema;
+these IDs are independent of column position and computed groups' logical IDs.
+For a source with native fields `id` (1) and `text` (2), save `schema.json`:
+
+```json
+{
+  "dataset": "comments",
+  "operation": "rename-001",
+  "base": "update-001",
+  "definition": "comments-v1",
+  "next_definition": "comments-v2",
+  "fields": [
+    {"id": 2, "name": "body"},
+    {"id": 1, "name": "comment_id"}
+  ]
+}
+```
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-schema schema.json
+target/debug/docspec --workspace workspaces/comments schema schema.json > renamed-release.json
+```
+
+The field list defines the complete new order and must retain at least one field.
+Omitted fields stay available in retained historical versions. Removing a field
+consumed by a selected computed group refuses. Computed expressions keep their
+original input IDs after a rename;
+new expressions use the current names. Repeat the same request to resume or recover
+its selected result. HTTP exposes `/schemas/plan` and `/schemas/run`.
+
+Finish pending source admission before starting a schema change. Selection
+atomically installs the schema and `next_definition`. New writes use
+that definition; pending old-definition writes refuse. A changed selected base or
+later source admission also refuses cutover and preserves completed work. The
+operation shares existing value files, while verification still reads their values.
+Optional/default additions, type or nested edits, and schema edits of related
+join/summary outputs are not yet supported.
 
 ## Add a computed field group
 

@@ -16,7 +16,12 @@ pub(super) async fn verify_changes(
         )
     };
     let (dataset, base, keys, changes) = match (request, changes) {
-        (OperationRequest::Build(_) | OperationRequest::Backfill(_), None) => return Ok(()),
+        (
+            OperationRequest::Build(_)
+            | OperationRequest::Backfill(_)
+            | OperationRequest::Schema(_),
+            None,
+        ) => return Ok(()),
         (OperationRequest::Refresh(spec), None) if spec.mode == RefreshMode::Full => return Ok(()),
         (OperationRequest::Update(spec), Some(changes)) => {
             (&spec.dataset, &spec.base, spec.keys.clone(), changes)

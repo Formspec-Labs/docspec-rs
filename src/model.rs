@@ -456,6 +456,31 @@ pub struct UpdateSpec {
     pub deletions: Option<InputSpec>,
 }
 
+/// Selects an existing root field's identity and current display name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaField {
+    pub id: i32,
+    pub name: String,
+}
+
+/// Renames, reorders or hides existing source fields without rewriting values.
+///
+/// `fields` lists the complete new root order; omitted fields remain in retained
+/// old versions. New fields, type changes and nested edits require other operations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaSpec {
+    pub dataset: Id,
+    pub operation: OperationId,
+    pub base: Id,
+    /// Expected active writer definition while preparing this change.
+    pub definition: String,
+    /// Writer definition selected atomically with the new schema.
+    pub next_definition: String,
+    pub fields: Vec<SchemaField>,
+}
+
 /// A stable field identity and a row-local SQL expression over source values.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedField {
@@ -518,6 +543,7 @@ pub enum OperationRequest {
     Update(UpdateSpec),
     Backfill(BackfillSpec),
     Refresh(Box<RefreshSpec>),
+    Schema(SchemaSpec),
 }
 
 impl OperationRequest {
@@ -528,6 +554,7 @@ impl OperationRequest {
             Self::Update(spec) => &spec.dataset,
             Self::Backfill(spec) => &spec.dataset,
             Self::Refresh(spec) => &spec.dataset,
+            Self::Schema(spec) => &spec.dataset,
         }
     }
     /// Returns the stable retry identity.
@@ -537,6 +564,7 @@ impl OperationRequest {
             Self::Update(spec) => &spec.operation,
             Self::Backfill(spec) => &spec.operation,
             Self::Refresh(spec) => &spec.operation,
+            Self::Schema(spec) => &spec.operation,
         }
     }
     /// Returns the required active definition.
@@ -546,6 +574,14 @@ impl OperationRequest {
             Self::Update(spec) => &spec.definition,
             Self::Backfill(spec) => &spec.definition,
             Self::Refresh(spec) => &spec.definition,
+            Self::Schema(spec) => &spec.definition,
+        }
+    }
+    /// Returns the writer definition selected with this operation's result.
+    pub fn result_definition(&self) -> &str {
+        match self {
+            Self::Schema(spec) => &spec.next_definition,
+            _ => self.definition(),
         }
     }
     /// Returns the selected version whose composition this operation captures.
@@ -555,6 +591,7 @@ impl OperationRequest {
             Self::Update(spec) => Some(&spec.base),
             Self::Backfill(spec) => Some(&spec.base),
             Self::Refresh(spec) => spec.base.as_ref(),
+            Self::Schema(spec) => Some(&spec.base),
         }
     }
     /// Lists bounded input declarations, excluding their payloads.
@@ -575,7 +612,7 @@ impl OperationRequest {
                 }
                 inputs
             }
-            Self::Backfill(_) | Self::Refresh(_) => BTreeMap::new(),
+            Self::Backfill(_) | Self::Refresh(_) | Self::Schema(_) => BTreeMap::new(),
         }
     }
 
@@ -583,7 +620,7 @@ impl OperationRequest {
     pub(crate) fn input_key(&self, name: &str) -> String {
         match self {
             Self::Build(_) => name.to_owned(),
-            Self::Update(_) | Self::Backfill(_) | Self::Refresh(_) => {
+            Self::Update(_) | Self::Backfill(_) | Self::Refresh(_) | Self::Schema(_) => {
                 format!("{}/{name}", self.operation())
             }
         }

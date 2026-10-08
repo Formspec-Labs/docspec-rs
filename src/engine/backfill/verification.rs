@@ -173,11 +173,17 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 return Err(invalid_group());
             }
         }
+        OperationRequest::Schema(spec) => {
+            let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
+            let base = history.read(parent).await?;
+            super::super::schema::verify_transition(spec, &base, dataset, budget).await?;
+            check_refreshed_groups(dataset, &base, parent)?;
+        }
     }
     for (name, binding) in &dataset.computed {
         if name != binding.definition.group.as_str()
             || binding.request.dataset() != &dataset.dataset
-            || binding.request.definition() != dataset.definition
+            || binding.request.result_definition() != dataset.definition
             || binding.request.inputs().iter().any(|(name, input)| {
                 dataset
                     .inputs
@@ -346,6 +352,10 @@ async fn verify_binding_history(
                     return Err(invalid_group());
                 }
             }
+            if let OperationRequest::Schema(spec) = &owner.request {
+                super::super::schema::verify_transition(spec, &parent, owner, history.budget)
+                    .await?;
+            }
             retained = Some(parent);
         }
         tokio::task::consume_budget().await;
@@ -470,20 +480,37 @@ pub(super) async fn verify_group_data(
         "expected",
         context.table("source").await?.select(columns)?.into_view(),
     )?;
+    use super::super::write::qualified;
+    use datafusion::logical_expr::{BinaryExpr, JoinType, Operator};
     let different = definition
         .fields
         .iter()
         .map(|field| {
-            let name = quote(&field.name);
-            format!("(e.{name} IS DISTINCT FROM a.{name})")
+            Expr::BinaryExpr(BinaryExpr::new(
+                Box::new(qualified("e", &field.name)),
+                Operator::IsDistinctFrom,
+                Box::new(qualified("a", &field.name)),
+            ))
         })
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let file = quote(storage::OCCURRENCE_FILE);
-    let row = quote(storage::OCCURRENCE_ROW);
-    let batches = context.sql(&format!(
-        "SELECT 1 FROM expected e JOIN actual a ON e.{file} = a.{file} AND e.{row} = a.{row} WHERE {different} LIMIT 1"
-    )).await?.collect().await?;
+        .reduce(Expr::or)
+        .ok_or_else(invalid_group)?;
+    let locations = [storage::OCCURRENCE_FILE, storage::OCCURRENCE_ROW]
+        .into_iter()
+        .map(|field| qualified("e", field).eq(qualified("a", field)));
+    let batches = context
+        .table("expected")
+        .await?
+        .alias("e")?
+        .join_on(
+            context.table("actual").await?.alias("a")?,
+            JoinType::Inner,
+            locations,
+        )?
+        .filter(different)?
+        .select(vec![lit(1)])?
+        .limit(0, Some(1))?
+        .collect()
+        .await?;
     if batches.iter().any(|batch| batch.num_rows() != 0) {
         return Err(Error::refusal(
             "invalid_group_values",

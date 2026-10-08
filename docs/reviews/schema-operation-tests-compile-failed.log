@@ -1,0 +1,60 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: unused import: `Engine`
+  --> tests/schema.rs:10:5
+   |
+10 |     Engine,
+   |     ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0599]: no method named `boxed` found for opaque type `impl Stream<Item = Result<arrow::array::RecordBatch, docspec::Error>> + std::marker::Send` in the current scope
+    --> tests/schema.rs:64:10
+     |
+  61 |       let mut stream = storage::read_batches(&table, &budget)
+     |  ______________________-
+  62 | |         .await
+  63 | |         .unwrap()
+  64 | |         .boxed();
+     | |         -^^^^^ method not found in `impl Stream<Item = Result<arrow::array::RecordBatch, docspec::Error>> + std::marker::Send`
+     | |_________|
+     |
+     |
+    ::: /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/mod.rs:1334:8
+     |
+1334 |       fn boxed<'a>(self) -> BoxStream<'a, Self::Item>
+     |          ----- the method is available for `impl Stream<Item = Result<arrow::array::RecordBatch, docspec::Error>> + std::marker::Send` here
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: trait `StreamExt` which provides `boxed` is implemented but not in scope; perhaps you want to import it
+     |
+   3 + use futures::StreamExt;
+     |
+
+error[E0282]: type annotations needed
+  --> tests/schema.rs:66:29
+   |
+66 |     while let Some(batch) = stream.try_next().await.unwrap() {
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^ cannot infer type
+
+error[E0282]: type annotations needed
+  --> tests/schema.rs:67:19
+   |
+67 |         let ids = batch
+   |                   ^^^^^ cannot infer type
+
+error[E0282]: type annotations needed for `(_, _)`
+  --> tests/schema.rs:82:23
+   |
+82 |                 .map(|(id, text)| (id, text.map(str::to_owned))),
+   |                       ^^^^^^^^^^       ---- type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type, where the placeholders `_` are specified
+   |
+82 |                 .map(|(id, text): (_, _)| (id, text.map(str::to_owned))),
+   |                                 ++++++++
+
+Some errors have detailed explanations: E0282, E0599.
+For more information about an error, try `rustc --explain E0282`.
+warning: `docspec` (test "schema") generated 1 warning
+error: could not compile `docspec` (test "schema") due to 4 previous errors; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...

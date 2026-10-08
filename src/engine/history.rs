@@ -184,6 +184,16 @@ impl Engine {
             boundary: release.dataset.boundary,
             eligibility: release.dataset.eligibility,
         };
+        if let OperationRequest::Schema(spec) = &release.dataset.request {
+            if authority.definition != spec.definition
+                || release.dataset.definition != spec.next_definition
+            {
+                return Err(invalid(
+                    "schema selection differs from its writer definitions",
+                ));
+            }
+            authority.definition = spec.next_definition.clone();
+        }
         authority.selected = Some(release.dataset.clone());
         authority.release = Some(release.clone());
         authority.selection_revision = Some(

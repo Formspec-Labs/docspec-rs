@@ -1,0 +1,77 @@
+// Diagnostic only: append inside src/engine/schema.rs, then run
+// cargo test --locked --all-features --lib schema_future_sizes -- --nocapture
+#[cfg(test)]
+#[tokio::test]
+async fn schema_future_sizes() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), Limits::default()).await.unwrap();
+    let spec = SchemaSpec {
+        dataset: Id::new("source").unwrap(),
+        operation: Id::new("schema").unwrap(),
+        base: Id::new("base").unwrap(),
+        definition: "v1".into(),
+        next_definition: "v2".into(),
+        fields: vec![SchemaField {
+            id: 1,
+            name: "value".into(),
+        }],
+    };
+    let request = OperationRequest::Schema(spec.clone());
+    let dataset = DatasetPin {
+        format: FORMAT,
+        dataset: spec.dataset.clone(),
+        version: spec.operation.clone(),
+        groups: BTreeMap::new(),
+        computed: BTreeMap::new(),
+        inputs: BTreeMap::new(),
+        relationship: SourceRelationship::Independent,
+        related: None,
+        definition: spec.next_definition.clone(),
+        eligibility: 0,
+        boundary: 1,
+        request: request.clone(),
+        parent_manifest: None,
+        changes: None,
+        processor: PROCESSOR.into(),
+    };
+    let release = ReleasePin {
+        id: spec.operation.clone(),
+        dataset: dataset.clone(),
+        manifest: ObjectRef {
+            owner: spec.dataset.clone(),
+            path: "unused".into(),
+            digest: "unused".into(),
+            bytes: 0,
+        },
+        verified: true,
+    };
+    let budget = &engine.inner.lifecycle.budget;
+    for (name, size) in [
+        (
+            "schema_transition",
+            std::mem::size_of_val(&verify_transition(&spec, &dataset, &dataset, budget)),
+        ),
+        (
+            "schema_availability",
+            std::mem::size_of_val(&check_available(&dataset, budget)),
+        ),
+        (
+            "local_release",
+            std::mem::size_of_val(&verify_local_release(&release, budget)),
+        ),
+        (
+            "groups",
+            std::mem::size_of_val(&backfill::verify_groups(&dataset, budget)),
+        ),
+        (
+            "prepare_and_select",
+            std::mem::size_of_val(&engine.prepare_and_select(&request, None)),
+        ),
+        (
+            "run_internal",
+            std::mem::size_of_val(&engine.run_internal(&request, None)),
+        ),
+    ] {
+        println!("{name}: {size} bytes");
+    }
+}

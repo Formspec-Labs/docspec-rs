@@ -142,6 +142,7 @@ async fn walk(roots: &[&ReleasePin], budget: &Budget, full: bool) -> Result<Depe
                     .ok_or_else(|| invalid("missing verification node"))?;
                 if !full {
                     storage::check_available(release_objects(&node.release), budget).await?;
+                    schema::check_available(&node.release.dataset, budget).await?;
                     backfill::verify_binding_dependencies(&node.release.dataset, budget).await?;
                     nodes
                         .get_mut(&key)

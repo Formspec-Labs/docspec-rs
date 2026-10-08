@@ -5,20 +5,6 @@ use arrow::{datatypes::Schema, record_batch::RecordBatch};
 use refresh::{TUPLE, tuple_columns};
 use write::identifier as quote;
 
-pub(super) fn manifest_ref<'a>(
-    authority: &'a Authority,
-    request: &OperationRequest,
-) -> Option<&'a ObjectRef> {
-    matches!(request, OperationRequest::Refresh(spec) if spec.mode == RefreshMode::Incremental)
-        .then(|| authority.release.as_ref().map(|release| &release.manifest))
-        .flatten()
-}
-pub(super) fn base_manifest(
-    authority: &Authority,
-    request: &OperationRequest,
-) -> Option<ObjectRef> {
-    manifest_ref(authority, request).cloned()
-}
 fn full_refresh() -> Error {
     Error::refusal(
         "full_refresh_required",

@@ -357,7 +357,7 @@ pub(super) fn check_rebuild(authority: &Authority, request: &OperationRequest) -
         .is_some_and(|selected| selected.related.is_some())
         && matches!(
             request,
-            OperationRequest::Build(_) | OperationRequest::Update(_)
+            OperationRequest::Build(_) | OperationRequest::Update(_) | OperationRequest::Schema(_)
         )
     {
         return Err(Error::refusal(

@@ -36,6 +36,7 @@ pub use read::{read_evidence, read_group};
 mod aggregation;
 mod incremental;
 mod refresh;
+mod schema;
 mod verification;
 mod write;
 
@@ -78,8 +79,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v9";
-pub(crate) const FORMAT: u32 = 9;
+const PROCESSOR: &str = "docspec.dataset.v10";
+pub(crate) const FORMAT: u32 = 10;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -182,6 +183,8 @@ impl Engine {
             check_update_eligibility(&authority, spec)?;
             check_group_rebuild(&authority, spec)?;
             self.check_incremental(&authority, spec).await?;
+            self.check_schema(&authority, spec, operation.is_none())
+                .await?;
         }
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
@@ -232,7 +235,7 @@ impl Engine {
                             operation
                                 .as_ref()
                                 .and_then(|o| o.base_manifest.as_ref())
-                                .or_else(|| incremental::manifest_ref(&authority, spec)),
+                                .or_else(|| captured_manifest(&authority, spec)),
                         )?,
                     )
                     .await?
@@ -600,6 +603,7 @@ impl Engine {
             check_update_eligibility(&authority, spec)?;
             check_group_rebuild(&authority, spec)?;
             self.check_incremental(&authority, spec).await?;
+            self.check_schema(&authority, spec, old.is_none()).await?;
             if let Some(old) = old {
                 check_authority(&authority, &old)?;
                 old
@@ -614,8 +618,9 @@ impl Engine {
                     boundary: authority.boundary,
                     definition: authority.definition.clone(),
                     base: spec.base().cloned(),
-                    base_manifest: incremental::base_manifest(&authority, spec),
-                    require_current_boundary: matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
+                    base_manifest: captured_manifest(&authority, spec).cloned(),
+                    require_current_boundary: matches!(spec, OperationRequest::Schema(_))
+                        || matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
                 };
                 lifecycle
                     .commit(
@@ -650,6 +655,8 @@ impl Engine {
             phase
         } else if let OperationRequest::Refresh(refresh) = spec {
             Box::pin(self.admit_refresh(refresh, &operation)).await?
+        } else if let OperationRequest::Schema(schema) = spec {
+            self.admit_schema(schema, &operation).await?
         } else {
             #[cfg(feature = "test-util")]
             work_started("admission");
@@ -712,6 +719,9 @@ impl Engine {
                 }
                 OperationRequest::Update(update) => {
                     self.process_update(update, &directory, &admission).await?
+                }
+                OperationRequest::Schema(schema) => {
+                    self.process_schema(schema, &directory, &operation).await?
                 }
                 OperationRequest::Refresh(refresh) => {
                     Box::pin(self.process_refresh(refresh, &directory, &admission, &operation))
@@ -783,7 +793,12 @@ impl Engine {
         // source evidence because they only replace a subset of its rows.
         let mut inputs = base
             .as_ref()
-            .filter(|_| matches!(spec, OperationRequest::Update(_)))
+            .filter(|_| {
+                matches!(
+                    spec,
+                    OperationRequest::Update(_) | OperationRequest::Schema(_)
+                )
+            })
             .map(|base| base.dataset.inputs.clone())
             .unwrap_or_default();
         for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
@@ -857,7 +872,7 @@ impl Engine {
             relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
             related,
             changes: processing.changes.clone(),
-            definition: operation.definition.clone(),
+            definition: captured_request.result_definition().to_owned(),
             eligibility: operation.eligibility,
             boundary: operation.boundary,
             request: captured_request.clone(),
@@ -1083,6 +1098,16 @@ impl Engine {
     }
 }
 
+// These operations reuse the exact selected native combination as a material input.
+fn captured_manifest<'a>(
+    authority: &'a Authority,
+    request: &OperationRequest,
+) -> Option<&'a ObjectRef> {
+    (matches!(request, OperationRequest::Schema(_))
+        || matches!(request, OperationRequest::Refresh(spec) if spec.mode == RefreshMode::Incremental))
+        .then(|| authority.release.as_ref().map(|release| &release.manifest)).flatten()
+}
+
 fn phase_key(
     spec: &OperationRequest,
     request: &str,
@@ -1093,7 +1118,7 @@ fn phase_key(
     if let OperationRequest::Refresh(refresh) = spec {
         return refresh::phase_key(refresh, eligibility, phase, base_manifest);
     }
-    if phase == "admission" {
+    if phase == "admission" && !matches!(spec, OperationRequest::Schema(_)) {
         let mut hash = blake3::Hasher::new();
         for (name, input) in spec.inputs() {
             hash.update(&(name.len() as u64).to_le_bytes());
@@ -1191,11 +1216,13 @@ fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()
     Ok(())
 }
 fn check_update_eligibility(authority: &Authority, request: &OperationRequest) -> Result<()> {
-    if matches!(request, OperationRequest::Update(_))
-        && authority
-            .selected
-            .as_ref()
-            .is_some_and(|base| base.eligibility != authority.eligibility)
+    if matches!(
+        request,
+        OperationRequest::Update(_) | OperationRequest::Schema(_)
+    ) && authority
+        .selected
+        .as_ref()
+        .is_some_and(|base| base.eligibility != authority.eligibility)
     {
         return Err(Error::refusal(
             "stale_eligibility",
@@ -1233,12 +1260,19 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
         OperationRequest::Refresh(spec) => {
             serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "transform": spec.transform, "policy": spec.policy, "mode": spec.mode, "relationship": spec.relationship}})
         }
+        OperationRequest::Schema(spec) => {
+            serde_json::json!({"schema": {"base": spec.base, "definition": spec.definition,
+                "next_definition": spec.next_definition, "fields": spec.fields}})
+        }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
         .to_hex()
         .to_string())
 }
 fn validate_request(spec: &OperationRequest) -> Result<()> {
+    if let OperationRequest::Schema(spec) = spec {
+        return schema::validate(spec);
+    }
     if let OperationRequest::Refresh(spec) = spec {
         return refresh::validate(spec);
     }
@@ -1496,6 +1530,7 @@ async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Resul
         verification::check_available(release, budget).await
     } else {
         storage::check_available(release_objects(release), budget).await?;
+        schema::check_available(&release.dataset, budget).await?;
         backfill::verify_binding_dependencies(&release.dataset, budget).await
     }
 }
@@ -1510,7 +1545,7 @@ async fn verify_local_release(release: &ReleasePin, budget: &Budget) -> Result<(
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
         || decoded.request.operation() != &decoded.version
-        || decoded.request.definition() != decoded.definition
+        || decoded.request.result_definition() != decoded.definition
         || decoded.request.inputs().iter().any(|(name, input)| {
             let key = decoded.request.input_key(name);
             decoded

@@ -1,0 +1,25 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: unused import: `Engine`
+  --> tests/schema.rs:10:5
+   |
+10 |     Engine,
+   |     ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "schema") generated 1 warning (run `cargo fix --test "schema" -p docspec` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 3.04s
+     Running tests/schema.rs (target/debug/deps/schema-8c6a4c5f9c33822e)
+
+running 8 tests
+test rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test schema_cutover_fences_old_workers_and_later_admissions ... ok
+test invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... ok
+test rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+test killed_schema_workers_resume_only_missing_phases ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.92s
+

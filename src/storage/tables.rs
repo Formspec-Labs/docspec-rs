@@ -104,7 +104,7 @@ pub(crate) async fn register_candidate(
     Ok(catalog.register_table(identifier, path).await?)
 }
 
-fn bounded_json(value: &impl serde::Serialize, limit: usize) -> Result<Vec<u8>> {
+pub(crate) fn bounded_json(value: &impl serde::Serialize, limit: usize) -> Result<Vec<u8>> {
     let mut output = BoundedJson {
         bytes: Vec::new(),
         limit,
