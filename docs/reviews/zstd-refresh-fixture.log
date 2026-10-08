@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 6.66s
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2Bl96R/workspace/objects/comments/9447b1a6461b46d3a73966ef89433560/data/d9f757c4-4332-4774-802e-4a414f22ae30-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2Bl96R/workspace/objects/comments/9447b1a6461b46d3a73966ef89433560/data/d9f757c4-4332-4774-802e-4a414f22ae30-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2Bl96R/workspace/objects/comments/9447b1a6461b46d3a73966ef89433560/data/d9f757c4-4332-4774-802e-4a414f22ae30-00002.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'refresh_reuses_unchanged_file_computation_and_selects_all_groups_together' (11416803) panicked at tests/support/scalar.rs:106:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "oversized_batch", message: "decoded batch uses 14120 bytes, exceeding the 8192 byte allowance; reduce batch rows or split oversized values", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... FAILED
+
+failures:
+
+failures:
+    refresh_reuses_unchanged_file_computation_and_selects_all_groups_together
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.42s
+
+error: test failed, to rerun pass `--test refresh`

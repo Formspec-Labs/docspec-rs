@@ -68,7 +68,13 @@ pub(super) async fn fixture(root: &Path, empty: bool) -> (Engine, ReleasePin, Ve
             .map(|i| {
                 (
                     Some(i),
-                    Some(blake3::hash(&i.to_le_bytes()).to_hex().to_string()),
+                    // Distinct hash blocks keep enough compressed bytes for a
+                    // middle file untouched by the first/tail-key update fixture.
+                    Some(format!(
+                        "{}{}",
+                        blake3::hash(&i.to_le_bytes()).to_hex(),
+                        blake3::hash(&(i + 512).to_le_bytes()).to_hex()
+                    )),
                 )
             })
             .chain([

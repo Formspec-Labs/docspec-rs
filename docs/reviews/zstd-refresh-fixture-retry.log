@@ -1,0 +1,41 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 6.51s
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/a818f07b6a674bce9e1cd98717e4af7a/data/1e84e1c6-3a65-41d0-bd56-0ce8bca82f70-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/a818f07b6a674bce9e1cd98717e4af7a/data/1e84e1c6-3a65-41d0-bd56-0ce8bca82f70-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/a818f07b6a674bce9e1cd98717e4af7a/data/1e84e1c6-3a65-41d0-bd56-0ce8bca82f70-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/434847fac03e43789d05cd53ce002cb7/data/83a32e41-b6c0-4998-a38b-bb80ec017993-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/434847fac03e43789d05cd53ce002cb7/data/ca3fe834-8a37-4b55-9973-fd2fef02560a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/434847fac03e43789d05cd53ce002cb7/data/f37c23da-a5fc-4992-9d50-ab5608b6f897-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/8058a6e9702349a08fee279a9f6fff0b/data/40872bc5-e665-4a8f-9f00-2aae8466d26a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/8058a6e9702349a08fee279a9f6fff0b/data/4b3b125f-5451-400b-97ff-8106fdb18f4d-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsQBC43/workspace/objects/comments/8058a6e9702349a08fee279a9f6fff0b/data/b72da85c-ae4f-419e-8e7b-5faa4e587db9-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+killed update worker after processing; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 9.23s
+

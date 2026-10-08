@@ -74,6 +74,10 @@ fn data_paths(pin: &TablePin) -> BTreeSet<String> {
 async fn refresh_reuses_unchanged_file_computation_and_selects_all_groups_together() {
     let root = TempDir::new().unwrap();
     let (engine, base, original) = enriched(root.path()).await;
+    assert!(
+        data_paths(&base.dataset.groups["source"]).len() >= 3,
+        "fixture needs a file outside the first/tail-key replacement scope"
+    );
     let additions = [
         (Some(1), Some("one".into())),
         (Some(1), None),

@@ -214,9 +214,11 @@ def command(directory, workspace, label, argv, disk_bound):
     return json.loads((directory / f"{label}.stdout.json").read_text()), metrics
 
 
-def independent_readback(release_path, source):
+def independent_readback(release_path, source, limits=None):
     import pyarrow.parquet as pq
     from pyiceberg.table import StaticTable
+
+    limits = LIMITS if limits is None else limits
 
     release = json.loads(release_path.read_text())
     assert release["verified"]
@@ -249,7 +251,7 @@ def independent_readback(release_path, source):
                     batch.validate(full=True)
                     sample_rows += batch.num_rows
                     sample_bytes += batch.nbytes
-                    assert batch.nbytes <= LIMITS["max_batch_bytes"]
+                    assert batch.nbytes <= limits["max_batch_bytes"]
             file_count += 1
     assert live == {name for name in objects if name.endswith(".parquet")}
     assert row_count == pin["rows"] == 10_000_000
@@ -321,6 +323,7 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "readback":
-        independent_readback(Path(sys.argv[2]), Path(sys.argv[3]))
+        read_limits = json.loads(Path(sys.argv[4]).read_text()) if len(sys.argv) > 4 else None
+        independent_readback(Path(sys.argv[2]), Path(sys.argv[3]), read_limits)
     else:
         raise SystemExit(main())

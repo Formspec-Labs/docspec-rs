@@ -32,7 +32,10 @@ use iceberg::{
     table::{StaticTable, Table},
 };
 use iceberg_catalog_sql::{SqlBindStyle, SqlCatalogBuilder};
-use parquet::file::properties::WriterProperties;
+use parquet::{
+    basic::{Compression, ZstdLevel},
+    file::properties::WriterProperties,
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs::{File, OpenOptions},
@@ -174,6 +177,9 @@ where
     let _reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(4))?;
     let props = WriterProperties::builder()
         .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+        // The retained Comments probe found large avoidable uncompressed output.
+        // Keep the maintained default Zstandard level; see the codec experiment.
+        .set_compression(Compression::ZSTD(ZstdLevel::default()))
         .build();
     let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
         .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
