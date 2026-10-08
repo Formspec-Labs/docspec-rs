@@ -1,5 +1,8 @@
 //! Native integration tests against the maintained SQLite-backed Iceberg catalog.
 
+#[cfg(feature = "test-util")]
+mod support;
+
 use arrow::{
     array::{Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},
@@ -656,12 +659,6 @@ async fn oversized_output_refuses_then_resumes_from_admitted_input() {
 #[cfg(feature = "test-util")]
 #[test]
 fn killed_cli_worker_resumes_every_completed_handoff() {
-    use std::{
-        io::{BufRead, BufReader},
-        process::{Command, Stdio},
-        sync::mpsc,
-        time::Duration,
-    };
     for phase in [
         "admission",
         "processing",
@@ -671,55 +668,17 @@ fn killed_cli_worker_resumes_every_completed_handoff() {
     ] {
         let directory = TempDir::new().unwrap();
         let spec = fixture(directory.path());
-        let request = directory.path().join("request.json");
-        std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
-        let workspace = directory.path().join("workspace");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_docspec"))
-            .args([
-                "--workspace",
-                workspace.to_str().unwrap(),
-                "pause-after",
-                request.to_str().unwrap(),
-                phase,
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let stderr = child.stderr.take().unwrap();
-        let (send, receive) = mpsc::channel();
-        let reader = std::thread::spawn(move || {
-            for line in BufReader::new(stderr)
-                .lines()
-                .map_while(std::result::Result::ok)
-            {
-                if line == "DOCSPEC_TEST_PAUSED" {
-                    let _ = send.send(());
-                    break;
-                }
-            }
-        });
-        let reached = receive.recv_timeout(Duration::from_secs(30));
-        let _ = child.kill();
-        child.wait().unwrap();
-        reader.join().unwrap();
-        reached.expect("worker must reach the requested durable handoff before being killed");
+        support::kill_after(directory.path(), &spec, "build", phase);
         std::fs::remove_file(&spec.input).unwrap();
-        let resumed = Command::new(env!("CARGO_BIN_EXE_docspec"))
-            .args([
-                "--workspace",
-                workspace.to_str().unwrap(),
-                "resume",
-                request.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            resumed.status.success(),
-            "{phase}: {}",
-            String::from_utf8_lossy(&resumed.stderr)
-        );
-        let release: docspec::model::ReleasePin = serde_json::from_slice(&resumed.stdout).unwrap();
+        let (release, work) = support::resume(directory.path(), "resume");
+        let expected = match phase {
+            "admission" => vec!["processing", "validation", "readback"],
+            "processing" => vec!["validation", "readback"],
+            "validation" => vec!["readback"],
+            "readback" | "selection" => vec![],
+            _ => unreachable!(),
+        };
+        assert_eq!(work, expected, "{phase}: only missing phases may execute");
         assert_eq!(release.dataset.groups["source"].rows, 4);
     }
 }

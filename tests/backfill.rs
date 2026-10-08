@@ -1,5 +1,8 @@
 //! Field groups checked against direct Rust reconstruction and retained recovery state.
 
+#[cfg(feature = "test-util")]
+mod support;
+
 use arrow::{
     array::{Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},
@@ -274,6 +277,108 @@ async fn retained_file_handoffs_resume_after_reopen_and_external_input_loss() {
         for (key, value) in completed {
             assert_eq!(after[&key], value);
         }
+    }
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn killed_backfill_workers_resume_retained_files_validation_and_readback() {
+    for phase in ["files", "processing", "validation", "readback", "selection"] {
+        let root = TempDir::new().unwrap();
+        let (engine, base, rows) = fixture(root.path(), false).await;
+        let request = spec(&base, "recovered", "length", "text_length", "length(text)");
+        drop(engine);
+        support::kill_after(root.path(), &request, "backfill", phase);
+        std::fs::remove_file(root.path().join("input.parquet")).unwrap();
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        let before = engine.inspect(&request.dataset).await.unwrap();
+        assert_eq!(
+            engine.plan_backfill(&request).await.unwrap().files_pending,
+            0
+        );
+        let completed: Vec<_> = before
+            .iter()
+            .filter(|(key, _)| {
+                key.starts_with("phase/backfill/")
+                    || key.starts_with("backfill-prepared/")
+                    || key.starts_with("backfill-validation/")
+                    || key.starts_with("backfill-readback/")
+            })
+            .collect();
+        assert!(!completed.is_empty());
+        if ["processing", "validation", "readback", "selection"].contains(&phase) {
+            assert!(
+                completed
+                    .iter()
+                    .any(|(key, _)| key.starts_with("backfill-prepared/"))
+            );
+        }
+        if ["validation", "readback", "selection"].contains(&phase) {
+            assert!(
+                completed
+                    .iter()
+                    .any(|(key, _)| key.starts_with("backfill-validation/"))
+            );
+        }
+        if ["readback", "selection"].contains(&phase) {
+            assert!(
+                completed
+                    .iter()
+                    .any(|(key, _)| key.starts_with("backfill-readback/"))
+            );
+        }
+        if phase == "selection" {
+            assert_eq!(
+                engine.latest(&request.dataset).await.unwrap().id,
+                request.operation
+            );
+        } else {
+            assert_eq!(engine.latest(&request.dataset).await.unwrap(), base);
+        }
+        drop(engine);
+        let (release, work) = support::resume(root.path(), "backfill");
+        let expected = match phase {
+            "files" => vec![
+                "backfill-assembly",
+                "backfill-validation",
+                "backfill-readback",
+            ],
+            "processing" => vec!["backfill-validation", "backfill-readback"],
+            "validation" => vec!["backfill-readback"],
+            "readback" | "selection" => vec![],
+            _ => unreachable!(),
+        };
+        assert_eq!(work, expected, "{phase}: only missing phases may execute");
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        let mut expected: Vec<_> = rows
+            .into_iter()
+            .map(|row| {
+                let length = row.1.as_ref().map(|text| text.chars().count() as i64);
+                (row, length)
+            })
+            .collect();
+        expected.sort();
+        assert_eq!(combined(&engine, &release).await, expected);
+        assert_eq!(
+            release.dataset.groups["source"],
+            base.dataset.groups["source"]
+        );
+        let after = engine.inspect(&request.dataset).await.unwrap();
+        for (key, value) in completed {
+            assert_eq!(
+                &after[key], value,
+                "{phase}: retained completion must be reused"
+            );
+            if key.starts_with("backfill-readback/") {
+                assert_eq!(value, &serde_json::to_value(&release).unwrap());
+            }
+        }
+        assert_eq!(engine.backfill(&request).await.unwrap(), release);
+        verify_release(&base, limits()).await.unwrap();
     }
 }
 

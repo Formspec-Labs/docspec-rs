@@ -569,6 +569,8 @@ impl Engine {
         let admission = if let Some(phase) = self.phase(spec, &operation, "admission").await? {
             phase
         } else {
+            #[cfg(feature = "test-util")]
+            work_started("admission");
             let directory = self.reserve_attempt(spec, &operation, "admission").await?;
             let inputs = spec.inputs();
             let size = inputs
@@ -618,6 +620,8 @@ impl Engine {
         let processing = if let Some(phase) = self.phase(spec, &operation, "processing").await? {
             phase
         } else {
+            #[cfg(feature = "test-util")]
+            work_started("processing");
             let directory = self.reserve_attempt(spec, &operation, "processing").await?;
             let prepared = match spec {
                 OperationRequest::Build(build) => {
@@ -660,6 +664,8 @@ impl Engine {
             Error::refusal("corrupt_phase", "processing completion has no table pin")
         })?;
         if self.phase(spec, &operation, "validation").await?.is_none() {
+            #[cfg(feature = "test-util")]
+            work_started("validation");
             verify_table(&table, &lifecycle.budget).await?;
             verify_changes(spec, &table, processing.changes.as_ref(), &lifecycle.budget).await?;
             let phase = PhaseResult {
@@ -707,6 +713,8 @@ impl Engine {
         {
             release
         } else {
+            #[cfg(feature = "test-util")]
+            work_started("readback");
             let directory = self.reserve_attempt(spec, &operation, "release").await?;
             let path = directory.join("release.json");
             storage::write_new(&path, &serde_json::to_vec_pretty(&dataset)?)?;
@@ -1126,6 +1134,13 @@ fn stop_after(stop: Option<&str>, phase: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+// Test-only observations prove actual work entry, independently of retained
+// records that deliberately preserve the first successful completion on retry.
+#[cfg(feature = "test-util")]
+fn work_started(phase: &str) {
+    eprintln!("DOCSPEC_TEST_WORK {phase}");
 }
 
 /// Verifies exact retained objects and decodes a native result without its catalog.

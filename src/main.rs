@@ -39,7 +39,12 @@ enum Command {
     /// Wait after a durable handoff so the qualification harness can kill this process.
     #[cfg(feature = "test-util")]
     #[command(hide = true)]
-    PauseAfter { spec: PathBuf, phase: String },
+    PauseAfter {
+        spec: PathBuf,
+        phase: String,
+        #[arg(long, value_enum, default_value = "build")]
+        kind: PausedOperation,
+    },
     /// Initialize and validate the local catalog.
     Init,
     /// Hash a retained input before selecting it in a run specification.
@@ -94,6 +99,14 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:7391")]
         bind: SocketAddr,
     },
+}
+
+#[cfg(feature = "test-util")]
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum PausedOperation {
+    Build,
+    Update,
+    Backfill,
 }
 
 #[tokio::main(worker_threads = 12)]
@@ -151,8 +164,22 @@ async fn main() -> anyhow::Result<()> {
             let engine = Engine::open(&cli.workspace, limits).await?;
             match command {
                 #[cfg(feature = "test-util")]
-                Command::PauseAfter { spec, phase } => {
-                    let result = engine.run_until(&read_json::<RunSpec>(spec)?, &phase).await;
+                Command::PauseAfter { spec, phase, kind } => {
+                    let result = match kind {
+                        PausedOperation::Build => {
+                            engine.run_until(&read_json::<RunSpec>(spec)?, &phase).await
+                        }
+                        PausedOperation::Update => {
+                            engine
+                                .update_until(&read_json::<UpdateSpec>(spec)?, &phase)
+                                .await
+                        }
+                        PausedOperation::Backfill => {
+                            engine
+                                .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
+                                .await
+                        }
+                    };
                     match result {
                         Err(error) if error.code() == "injected_failure" => {
                             eprintln!("DOCSPEC_TEST_PAUSED");

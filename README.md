@@ -249,6 +249,12 @@ reuse, concurrent group selection, stale source and target refusal, malformed
 coverage, missing cached objects, failure versus successful nulls, combined-reader
 capacity and HTTP behavior.
 
+Build, update and backfill recovery tests also terminate real CLI workers after
+acknowledged handoffs and resume in fresh processes without the external inputs.
+Test-only work-entry observations assert that only missing phases execute.
+These cases cover the named completed boundaries; machine power loss and arbitrary
+mid-write failures remain unqualified.
+
 The [retained-data experiment](experiments/local-reuse/protocol.md) uses a separate
 PyArrow reader and preserves raw commands, outputs, timing and memory measurements.
 The [history probe](experiments/local-reuse/history-protocol.md) measures the cost

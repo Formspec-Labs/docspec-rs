@@ -1,5 +1,8 @@
 //! Applied-write changes are checked against an independent in-memory reconstruction.
 
+#[cfg(feature = "test-util")]
+mod support;
+
 use arrow::{
     array::{Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},
@@ -747,4 +750,91 @@ async fn http_update_routes_share_recovery_and_stale_base_refusals() {
     let body: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
     assert_eq!(body["code"], "stale_base");
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn killed_update_workers_resume_retained_handoffs_and_exact_changes() {
+    for phase in [
+        "admission",
+        "processing",
+        "validation",
+        "readback",
+        "selection",
+    ] {
+        let root = TempDir::new().unwrap();
+        let (engine, source, base, rows) = fixture(root.path()).await;
+        let replacements = [(Some(1), Some("replacement".into())), (None, None)];
+        let deletions = [(Some(2), None)];
+        let request = update(root.path(), "initial", "changed", &replacements, &deletions);
+        drop(engine);
+        support::kill_after(root.path(), &request, "update", phase);
+        std::fs::remove_file(source.input).unwrap();
+        std::fs::remove_file(&request.replacements.path).unwrap();
+        std::fs::remove_file(&request.deletions.as_ref().unwrap().path).unwrap();
+
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        let before = engine.inspect(&request.dataset).await.unwrap();
+        let completed: Vec<_> = before
+            .iter()
+            .filter(|(key, value)| {
+                key.starts_with("phase/") && value["operation"] == request.operation.as_str()
+            })
+            .collect();
+        assert!(!completed.is_empty());
+        if phase == "selection" {
+            assert_eq!(
+                engine.latest(&request.dataset).await.unwrap().id,
+                request.operation
+            );
+        } else {
+            assert_eq!(engine.latest(&request.dataset).await.unwrap(), base);
+        }
+        drop(engine);
+        let (release, work) = support::resume(root.path(), "update");
+        let expected = match phase {
+            "admission" => vec!["processing", "validation", "readback"],
+            "processing" => vec!["validation", "readback"],
+            "validation" => vec!["readback"],
+            "readback" | "selection" => vec![],
+            _ => unreachable!(),
+        };
+        assert_eq!(work, expected, "{phase}: only missing phases may execute");
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        assert_eq!(
+            read(&release.dataset.groups["source"]).await,
+            reconstruction(&rows, &replacements, &deletions)
+        );
+        let changes = release.dataset.changes.as_ref().unwrap();
+        let mut removed: Vec<_> = rows
+            .iter()
+            .filter(|row| {
+                replacements
+                    .iter()
+                    .chain(&deletions)
+                    .any(|change| row.0 == change.0)
+            })
+            .cloned()
+            .collect();
+        removed.sort();
+        assert_eq!(read(&changes.removed).await, removed);
+        let mut added = replacements.to_vec();
+        added.sort();
+        assert_eq!(read(&changes.added).await, added);
+        verify_release(&release, limits()).await.unwrap();
+        verify_release(&base, limits()).await.unwrap();
+        let after = engine.inspect(&request.dataset).await.unwrap();
+        for (key, value) in completed {
+            assert_eq!(&after[key], value, "{phase}: retained phase must be reused");
+        }
+        if let Some(readback) = before.get("readback/changed") {
+            assert_eq!(after["readback/changed"], *readback);
+            assert_eq!(readback, &serde_json::to_value(&release).unwrap());
+        }
+        assert_eq!(engine.update(&request).await.unwrap(), release);
+    }
 }

@@ -10,7 +10,7 @@ or compatibility layer for legacy DocSpec.
 
 | Requirement | Implemented locally | Required work remaining |
 | --- | --- | --- |
-| R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery for builds | Broader durability failures; source-update process-kill qualification; complete occurrence/value identity and evidence semantics |
+| R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; coordinated source/group refresh and requalification; full concurrent-ingestion cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs | Evidence-only changes; history composition, lineage certificates and explicit unavailable-history fallback |
@@ -101,8 +101,8 @@ See [update tests](../tests/updates.rs), the independent
 [consistency review](reviews/updates-consistency.md) and
 [resource review](reviews/updates-resources.md). The tests include failure while
 paired writers are active and resume without the original input files. Source
-updates have not yet been subjected to actual process termination or the full
-Q1–Q8 matrix. Build process-kill qualification remains separate evidence.
+updates now have actual process-termination cases at acknowledged handoffs, as
+described below. The full Q1–Q8 matrix remains open.
 
 Physical file reuse is asserted, but end-to-end update performance is unqualified.
 Discovery still reads source files to find affected keys. Native pin creation,
@@ -208,5 +208,28 @@ targets, missing retained objects, file failures and combined-read capacity.
 
 This is an R3 implementation slice, not completion of R3 or Q2. Complete release
 verification still reads whole retained inputs and inventories. Native allocations,
-process-kill backfill recovery and complete-path scaling remain unqualified; no
+arbitrary in-flight crash behavior and complete-path scaling remain unqualified; no
 throughput improvement or whole-process memory ceiling is claimed.
+
+## Process recovery checkpoint
+
+The shared test harness terminates the actual CLI with `SIGKILL` after an
+acknowledged handoff, removes external input files and resumes through a new CLI
+process. Source builds and updates cover admission, processing, validation,
+readback and selection. Scalar backfills cover completed file work, assembled
+groups, validation, readback and selection. Tests verify values against independent
+Rust reconstruction, retained source/change/group identities, historical reads,
+and original-result reconciliation after a lost selection response.
+
+Test-only work-entry observations check that resume executes exactly the missing
+phases. They do not infer reuse merely from unchanged completion records. The
+file-completion fixture explicitly proves all source files were acknowledged
+before termination. Both handoff and resume waits are bounded; timeout terminates
+and reaps the fixture worker. A shared harness replaces the build-only subprocess
+code without adding a production scheduler or recovery store.
+
+See [the semi-formal review](reviews/process-recovery-review.md) and
+[gate output](reviews/process-recovery-check.log). These tests establish recovery
+from worker loss at the named acknowledged boundaries. They do not establish
+power-loss durability, arbitrary mid-write or catalog-commit failures, remote
+recovery, or the full Q1–Q8 acceptance matrix.

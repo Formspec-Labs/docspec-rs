@@ -373,6 +373,8 @@ impl Engine {
             storage::check_available(prepared.objects.clone(), &lifecycle.budget).await?;
             prepared
         } else {
+            #[cfg(feature = "test-util")]
+            work_started("backfill-assembly");
             let directory = self
                 .reserve_backfill(spec, &operation, "processing")
                 .await?;
@@ -500,6 +502,8 @@ impl Engine {
             .get(&lifecycle.open(&spec.dataset).await?, &validation_key)
             .await?;
         if validated.as_ref() != Some(&prepared.metadata) {
+            #[cfg(feature = "test-util")]
+            work_started("backfill-validation");
             verification::verify_group(source, &prepared, &binding, &lifecycle.budget).await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
@@ -577,6 +581,8 @@ impl Engine {
                 storage::check_available(objects, &lifecycle.budget).await?;
                 recorded
             } else {
+                #[cfg(feature = "test-util")]
+                work_started("backfill-readback");
                 let directory = self.reserve_backfill(spec, &operation, "release").await?;
                 let manifest_path = directory.join("release.json");
                 storage::write_new(&manifest_path, &serialized)?;
@@ -707,6 +713,8 @@ impl Engine {
         output: &iceberg::table::Table,
         expressions: Arc<Expressions>,
     ) -> Result<FileCompletion> {
+        #[cfg(feature = "test-util")]
+        work_started("backfill-file");
         let budget = &self.inner.lifecycle.budget;
         if fs2::available_space(&self.inner.root)?
             < source
