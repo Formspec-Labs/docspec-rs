@@ -1,0 +1,223 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: unused import: `combined`
+ --> tests/refresh.rs:7:19
+  |
+7 | use scalar::{Row, combined, fixture, id, input, limits, spec};
+  |                   ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `BTreeMap`
+  --> tests/refresh.rs:25:19
+   |
+25 |     collections::{BTreeMap, BTreeSet},
+   |                   ^^^^^^^^
+
+warning: function `combined` is never used
+   --> tests/support/scalar.rs:131:21
+    |
+131 | pub(super) async fn combined(engine: &Engine, release: &ReleasePin) -> Vec<(Row, Option<i64>)> {
+    |                     ^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "refresh") generated 3 warnings (run `cargo fix --test "refresh" -p docspec` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 10.17s
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 6 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+test relocated_retry_preserves_original_request_and_readback ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+killed update worker after processing; status=signal: 9 (SIGKILL)
+killed update worker after processing; status=signal: 9 (SIGKILL)
+killed update worker after group/a; status=signal: 9 (SIGKILL)
+
+thread 'noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files' (7916061) panicked at tests/refresh.rs:273:5:
+assertion `left == right` failed
+  left: {"a": TablePin { table: "data_33dc7c5f03af41139927beef2477a63d", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/5c7417c312474519a7702e9c5f2fac64/metadata/00001-58fcbf31-bae2-4865-96af-f54b93ec4163.metadata.json", digest: "7a72dd5eeccae3bf4e4d9dd8227cd144d2608ec1448c0e7a2c270b363152a412", bytes: 1881 }, snapshot: Some(5932183201605839073), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/03282278-002f-46f2-b065-4cae6c7f703d-00000.parquet", digest: "1d8eaea17bf2746db88e2d73f3cd3fb70b5c5507a7da79f4762fd58f6ad16a0f", bytes: 8533 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/84eef3d7-22f6-439e-b726-3d05e1cc7112-00000.parquet", digest: "25726ff06e6d33a1b833ed22368267c3d5591de1817b69e5a4a5d33980e34421", bytes: 15406 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/bb9ee872-2672-4d55-80c6-5de5c92f92b9-00000.parquet", digest: "5bcc4e0b96f08df99e0bbd5dee1bec358cf0df06a7ba9f526e459d93aeb4b87f", bytes: 15406 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/5c7417c312474519a7702e9c5f2fac64/metadata/00001-58fcbf31-bae2-4865-96af-f54b93ec4163.metadata.json", digest: "7a72dd5eeccae3bf4e4d9dd8227cd144d2608ec1448c0e7a2c270b363152a412", bytes: 1881 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/5c7417c312474519a7702e9c5f2fac64/metadata/01a11a1c-3bd2-7249-84c4-8aeb10482fe3-m0.avro", digest: "b3b792c79f8e68798ff3a008d81039ed3d66c28e652d52d27c0a714e35020426", bytes: 4362 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/5c7417c312474519a7702e9c5f2fac64/metadata/snap-5932183201605839073-0-01a11a1c-3bd2-7249-84c4-8aeb10482fe3.avro", digest: "5e2ff83c83097bb2f2445799c245549c47a4913f0dfa6b543b35b00c86a24452", bytes: 1686 }], rows: 516 }, "b": TablePin { table: "data_34a01a3673744e3588d7601f0ec6d294", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/0c7169e906df4ccfa08de647be22a72a/metadata/00001-9b481669-f26d-4efa-813b-57efb46e12a3.metadata.json", digest: "8e8cc089fcaefdd513e24f55b268e6adebae77dbc9ddeff6b681e8ff53cdb9bf", bytes: 1878 }, snapshot: Some(7257834986728767189), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/0c7169e906df4ccfa08de647be22a72a/metadata/00001-9b481669-f26d-4efa-813b-57efb46e12a3.metadata.json", digest: "8e8cc089fcaefdd513e24f55b268e6adebae77dbc9ddeff6b681e8ff53cdb9bf", bytes: 1878 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/0c7169e906df4ccfa08de647be22a72a/metadata/01a11a1c-3ca8-72f6-9bea-68d17bbd3190-m0.avro", digest: "321190838fc49ac61073c38b41d1ed7881e0f780a52481375acc2211b6158a20", bytes: 4383 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/0c7169e906df4ccfa08de647be22a72a/metadata/snap-7257834986728767189-0-01a11a1c-3ca8-72f6-9bea-68d17bbd3190.avro", digest: "e5973686987a7c38487a27cc1f81138a8cf2f569579323c4aa1f8ae40e71f8e4", bytes: 1686 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/0c799bb0-e189-4896-9621-a7f986280998-00000.parquet", digest: "2b20f30a54a948049d313e0b415c3b20e5f8a44747e5d43836bba2b72a056065", bytes: 17448 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/e481ea17-8541-4980-a45f-6c4aaf041718-00000.parquet", digest: "e6e720bd353366200380b8c317efa899f34c1d1a1d1c8282d531496a6962cdcf", bytes: 9480 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/f6d6c042-9cc8-46b4-9153-00eb8aa7b593-00000.parquet", digest: "26738a7a6b970888419f7300a5a8da0ffe68ea1e4d002872bfc8bff476b5e5c2", bytes: 17448 }], rows: 516 }, "source": TablePin { table: "data_bd65a30418de4cdf965e93ce54e5e4ed", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/88d94cb0d3894a0a9ab0da5908d15574/data/metadata/00001-7fb34877-ccd0-42f7-aaad-d1e7e58f7f80.metadata.json", digest: "82913193bf28365d38752d7177fe493cd20559e352d6abe1c8bd9bd54af860ae", bytes: 1817 }, snapshot: Some(5679585644548317760), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/88d94cb0d3894a0a9ab0da5908d15574/data/metadata/00001-7fb34877-ccd0-42f7-aaad-d1e7e58f7f80.metadata.json", digest: "82913193bf28365d38752d7177fe493cd20559e352d6abe1c8bd9bd54af860ae", bytes: 1817 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/88d94cb0d3894a0a9ab0da5908d15574/data/metadata/01a11a1c-3a9b-71ac-bea3-358bf622002c-m0.avro", digest: "188aad2cc159607372ab83b25d22cbbb793770a9c448608b3d30de5a2b9074bc", bytes: 4515 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/88d94cb0d3894a0a9ab0da5908d15574/data/metadata/snap-5679585644548317760-0-01a11a1c-3a9b-71ac-bea3-358bf622002c.avro", digest: "5d76b7d7efe44b7b6ed66b931796b5277530e1d6b81b25833169318412edc8c0", bytes: 1691 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00000.parquet", digest: "037e0f412453f69c7744aec17fc0148be0ea7f5cdd6ac5ce536b8f9250cd0e75", bytes: 24768 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00001.parquet", digest: "31f63b56469fe096e47c5db89e2672b736c22244a4f91c1f11372542c6408e13", bytes: 24768 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00002.parquet", digest: "00c01730f5d809dd57ac6f9d5269c47404e31b92f252c88eb8afb6d970110963", bytes: 12111 }], rows: 516 }}
+ right: {"a": TablePin { table: "data_a590e86cae8640d6aab2709ac802d862", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/metadata/00001-19dff513-9b59-4b38-a0d2-f8a09679b313.metadata.json", digest: "6084b059a5f4ae888c80d108bf1ea205c19bd674a07b797df86a3a8dc7f8a078", bytes: 1881 }, snapshot: Some(8072617071620908236), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/03282278-002f-46f2-b065-4cae6c7f703d-00000.parquet", digest: "1d8eaea17bf2746db88e2d73f3cd3fb70b5c5507a7da79f4762fd58f6ad16a0f", bytes: 8533 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/84eef3d7-22f6-439e-b726-3d05e1cc7112-00000.parquet", digest: "25726ff06e6d33a1b833ed22368267c3d5591de1817b69e5a4a5d33980e34421", bytes: 15406 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/data/bb9ee872-2672-4d55-80c6-5de5c92f92b9-00000.parquet", digest: "5bcc4e0b96f08df99e0bbd5dee1bec358cf0df06a7ba9f526e459d93aeb4b87f", bytes: 15406 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/metadata/00001-19dff513-9b59-4b38-a0d2-f8a09679b313.metadata.json", digest: "6084b059a5f4ae888c80d108bf1ea205c19bd674a07b797df86a3a8dc7f8a078", bytes: 1881 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/metadata/01a11a1c-219e-7411-91aa-f236c4d8d179-m0.avro", digest: "a3311417c194af5ebfa904baf97c4c014db721d516633b5364c1218463f23a15", bytes: 4362 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/16bab0233138468a9bce2743f5115236/metadata/snap-8072617071620908236-0-01a11a1c-219e-7411-91aa-f236c4d8d179.avro", digest: "81b2d03fa0b7622a61c1fbb6c853466d1ed41f5c60fd4f1a1403639037b1b699", bytes: 1686 }], rows: 516 }, "b": TablePin { table: "data_b5d5f6d0663b45619fa8c4aaedfe6d16", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/metadata/00001-4fb5014d-a1e8-41e6-9872-1a953488befb.metadata.json", digest: "56d6d7bbdea2b0e1a0ae0aa1ba384e9daceafbb3db8fdb573847c0cbcd0cb53d", bytes: 1878 }, snapshot: Some(3324230443596879222), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/0c799bb0-e189-4896-9621-a7f986280998-00000.parquet", digest: "2b20f30a54a948049d313e0b415c3b20e5f8a44747e5d43836bba2b72a056065", bytes: 17448 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/e481ea17-8541-4980-a45f-6c4aaf041718-00000.parquet", digest: "e6e720bd353366200380b8c317efa899f34c1d1a1d1c8282d531496a6962cdcf", bytes: 9480 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/data/f6d6c042-9cc8-46b4-9153-00eb8aa7b593-00000.parquet", digest: "26738a7a6b970888419f7300a5a8da0ffe68ea1e4d002872bfc8bff476b5e5c2", bytes: 17448 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/metadata/00001-4fb5014d-a1e8-41e6-9872-1a953488befb.metadata.json", digest: "56d6d7bbdea2b0e1a0ae0aa1ba384e9daceafbb3db8fdb573847c0cbcd0cb53d", bytes: 1878 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/metadata/01a11a1c-251d-74ad-acb4-01f3deeaa5f7-m0.avro", digest: "477b30d751f079cb87a5528689906ffa0b3dfbaefc77549088520c047226b2d3", bytes: 4380 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/1ced916d73514d8e860ca65971f3ab4b/metadata/snap-3324230443596879222-0-01a11a1c-251d-74ad-acb4-01f3deeaa5f7.avro", digest: "228943d5743650daece4a969558c7a3f189d4867433c25db7b3976aa0e16dbf6", bytes: 1685 }], rows: 516 }, "source": TablePin { table: "data_19ddcef45eb84c49839b58b5928cf37e", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/metadata/00001-e2fe05f7-6e2a-4e80-9c6f-79d73083771b.metadata.json", digest: "f4f1e6512898e74a23e50647ef679e05d0b7b3165967080bfc7a261010d9fc25", bytes: 1802 }, snapshot: Some(5237558649502806943), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00000.parquet", digest: "037e0f412453f69c7744aec17fc0148be0ea7f5cdd6ac5ce536b8f9250cd0e75", bytes: 24768 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00001.parquet", digest: "31f63b56469fe096e47c5db89e2672b736c22244a4f91c1f11372542c6408e13", bytes: 24768 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/data/8599c4b0-3afa-4bcd-b5f7-d69708fd8601-00002.parquet", digest: "00c01730f5d809dd57ac6f9d5269c47404e31b92f252c88eb8afb6d970110963", bytes: 12111 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/metadata/00001-e2fe05f7-6e2a-4e80-9c6f-79d73083771b.metadata.json", digest: "f4f1e6512898e74a23e50647ef679e05d0b7b3165967080bfc7a261010d9fc25", bytes: 1802 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/metadata/01a11a1c-1de2-77a4-9641-c16e743505cd-m0.avro", digest: "9edd9ac3f93b0a6ee17cf8d5d8b387e88cc6fb35f3fcb544d05b614f149059be", bytes: 4515 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpxUa3ff/workspace/objects/comments/c3d9eaa3ecd94251bc9ab5397d1ad908/metadata/snap-5237558649502806943-0-01a11a1c-1de2-77a4-9641-c16e743505cd.avro", digest: "533fe55daeea8b0bb652bf582b1e406cb4f6f8c9dec6c62bac7ab1bdf6a11448", bytes: 1686 }], rows: 516 }}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... FAILED
+DOCSPEC_TEST_WORK admission
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+killed update worker after groups; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+killed update worker after readback; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+killed update worker after selection; status=signal: 9 (SIGKILL)
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+
+failures:
+
+failures:
+    noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.77s
+
+error: test failed, to rerun pass `--test refresh`

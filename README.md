@@ -90,9 +90,10 @@ Updates retain typed removed and added rows with exact before/after native
 metadata, the base release and stable native key field IDs. Unaffected source files
 are shared; affected files supply both kept and removed rows in one joined read.
 The independently verified release and old versions remain readable without the
-catalog. Source updates currently require a selection without computed field
-groups; coordinated group refresh and general incremental SQL remain unfinished.
-Release format 3 is the current greenfield
+catalog. An update automatically refreshes every selected scalar field group,
+reusing computations for unchanged source files. It selects the new source and
+all groups together after independent verification. General incremental SQL
+remains unfinished. Release format 4 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group
@@ -134,9 +135,11 @@ new source can reuse unchanged file computations. Independent groups merge into
 the latest selection; competing replacements of one group reject a stale target.
 Combined reads join group values to exact source-file row positions.
 
-Coordinated source/group refresh, metadata-only schema changes and logical row
-identity across compaction remain unfinished. Once a group is selected, source
-updates refuse before changing the source admission boundary. Full independent
+The same `update` request works after group selection; `plan-update` includes group
+preparation. A no-op update preserves the exact source and group table pins while
+recording its new input coverage and empty source changes. Metadata-only schema
+changes, related-input joins and logical row identity across compaction remain
+unfinished. Full independent
 release verification still reads retained inputs and data; file reuse does not
 establish population-independent backfill latency.
 
@@ -152,8 +155,11 @@ target/debug/docspec --workspace workspaces/comments serve
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement
 definition explicitly. A new operation is required after invalidation. Requalifying
-an already enriched selection also requires coordinated source/group refresh,
-which is not implemented yet; historical releases remain readable.
+an already enriched selection also requires requalifying its original source
+transformation, which is not implemented yet. Incremental updates refuse an
+invalidated source; refreshing scalar groups alone cannot requalify it. Historical
+releases remain readable. Full-query builds after selecting groups also refuse
+until coordinated source rebuild is implemented.
 
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
 `POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `GET /datasets/{dataset}`,
@@ -248,6 +254,12 @@ duplicate and null occurrences, empty schemas, interrupted handoffs, unchanged-f
 reuse, concurrent group selection, stale source and target refusal, malformed
 coverage, missing cached objects, failure versus successful nulls, combined-reader
 capacity and HTTP behavior.
+
+[Refresh tests](tests/refresh.rs) check complete source/group selection, every
+computed column, unchanged-file evaluation counts, no-op and delete-all outcomes,
+exact inherited siblings, stale definitions and source boundaries, and retained
+work after partial group completion. This reuses the scalar preparation path;
+there is no separate refresh store or scheduler.
 
 Build, update and backfill recovery tests also terminate real CLI workers after
 acknowledged handoffs and resume in fresh processes without the external inputs.

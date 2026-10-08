@@ -5,136 +5,26 @@ mod support;
 
 use arrow::{
     array::{Int64Array, StringArray},
-    datatypes::{DataType, Field, Schema},
+    datatypes::{DataType, Schema},
     record_batch::RecordBatch,
 };
 use docspec::{
     Engine,
     budget::Limits,
     engine::verify_release,
-    model::{BackfillSpec, ComputedField, Id, InputSpec, ReleasePin, RunSpec, UpdateSpec},
+    model::{ReleasePin, RunSpec, UpdateSpec},
     storage,
 };
 use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::ArrowWriter;
-use std::{fs::File, path::Path, sync::Arc};
+use std::{fs::File, sync::Arc};
 use tempfile::TempDir;
 
-type Row = (Option<i64>, Option<String>);
-fn id(value: &str) -> Id {
-    Id::new(value).unwrap()
-}
-fn limits() -> Limits {
-    Limits {
-        compute_threads: 2,
-        batch_rows: 16,
-        scratch_bytes: 16 << 20,
-        max_batch_bytes: 4 << 20,
-        ..Limits::default()
-    }
-}
-fn input(path: &Path, rows: &[Row]) -> InputSpec {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, true),
-        Field::new("text", DataType::Utf8, true),
-    ]));
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![
-            Arc::new(Int64Array::from(
-                rows.iter().map(|row| row.0).collect::<Vec<_>>(),
-            )),
-            Arc::new(StringArray::from(
-                rows.iter().map(|row| row.1.as_deref()).collect::<Vec<_>>(),
-            )),
-        ],
-    )
-    .unwrap();
-    let mut writer = ArrowWriter::try_new(
-        File::create(path).unwrap(),
-        schema,
-        Some(
-            parquet::file::properties::WriterProperties::builder()
-                .set_max_row_group_row_count(Some(16))
-                .build(),
-        ),
-    )
-    .unwrap();
-    writer.write(&batch).unwrap();
-    writer.close().unwrap();
-    InputSpec {
-        path: path.to_string_lossy().into_owned(),
-        digest: storage::digest(path).unwrap().0,
-    }
-}
-async fn fixture(root: &Path, empty: bool) -> (Engine, ReleasePin, Vec<Row>) {
-    let rows = if empty {
-        vec![]
-    } else {
-        (0_i64..512)
-            .map(|i| {
-                (
-                    Some(i),
-                    Some(blake3::hash(&i.to_le_bytes()).to_hex().to_string()),
-                )
-            })
-            .chain([
-                (Some(1), Some("duplicate".into())),
-                (None, None),
-                (None, Some(String::new())),
-                (Some(9), Some("é🎉".into())),
-            ])
-            .collect()
-    };
-    let source = input(&root.join("input.parquet"), &rows);
-    let engine = Engine::open(
-        root.join("workspace"),
-        Limits {
-            max_batch_bytes: 16 << 10,
-            ..limits()
-        },
-    )
-    .await
-    .unwrap();
-    let base = engine
-        .run(&RunSpec {
-            dataset: id("comments"),
-            operation: id("initial"),
-            input: source.path,
-            expected_digest: source.digest,
-            sql: "SELECT * FROM input".into(),
-            definition: "v1".into(),
-        })
-        .await
-        .unwrap();
-    drop(engine);
-    let engine = Engine::open(root.join("workspace"), limits())
-        .await
-        .unwrap();
-    (engine, base, rows)
-}
-fn spec(
-    base: &ReleasePin,
-    operation: &str,
-    group: &str,
-    name: &str,
-    expression: &str,
-) -> BackfillSpec {
-    BackfillSpec {
-        dataset: base.dataset.dataset.clone(),
-        operation: id(operation),
-        base: base.id.clone(),
-        definition: "v1".into(),
-        group: id(group),
-        group_definition: "expression-v1".into(),
-        fields: vec![ComputedField {
-            id: 10,
-            name: name.into(),
-            expression: expression.into(),
-        }],
-    }
-}
-async fn combined(engine: &Engine, release: &ReleasePin) -> Vec<(Row, Option<i64>)> {
+#[path = "support/scalar.rs"]
+mod scalar;
+use scalar::{fixture, id, input, limits, spec};
+
+async fn combined(engine: &Engine, release: &ReleasePin) -> Vec<(scalar::Row, Option<i64>)> {
     let mut stream = engine.read_combined(release).await.unwrap();
     let mut result = vec![];
     while let Some(batch) = stream.try_next().await.unwrap() {
@@ -524,7 +414,7 @@ async fn concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict
 }
 
 #[tokio::test]
-async fn refused_source_admission_leaves_groups_usable_and_invalidation_refuses_stale_reuse() {
+async fn refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse() {
     let root = TempDir::new().unwrap();
     let (engine, base, _) = fixture(root.path(), false).await;
     let first = engine
@@ -535,19 +425,6 @@ async fn refused_source_admission_leaves_groups_usable_and_invalidation_refuses_
     let replacement = input(
         &root.path().join("replacement.parquet"),
         &[(Some(0), Some("new".into()))],
-    );
-    let update = UpdateSpec {
-        dataset: base.dataset.dataset.clone(),
-        operation: id("unsupported-update"),
-        definition: "v1".into(),
-        base: first.id.clone(),
-        keys: vec!["id".into()],
-        replacements: replacement.clone(),
-        deletions: None,
-    };
-    assert_eq!(
-        engine.update(&update).await.unwrap_err().code(),
-        "dependent_groups"
     );
     let build = RunSpec {
         dataset: base.dataset.dataset.clone(),

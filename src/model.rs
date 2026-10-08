@@ -81,6 +81,8 @@ pub struct DatasetPin {
     pub eligibility: u64,
     pub boundary: u64,
     pub request: OperationRequest,
+    /// Exact selected combination replaced or extended, including concurrent sibling groups.
+    pub parent_manifest: Option<ObjectRef>,
     pub changes: Option<ChangePin>,
     pub processor: String,
 }
@@ -190,10 +192,31 @@ pub struct BackfillSpec {
     pub fields: Vec<ComputedField>,
 }
 
+/// Material scalar computation, independent of its adoption operation and captured source.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupDefinition {
+    pub group: Id,
+    pub definition: String,
+    pub fields: Vec<ComputedField>,
+}
+
+impl BackfillSpec {
+    /// Returns the material definition reused across source refreshes.
+    pub fn group_definition(&self) -> GroupDefinition {
+        GroupDefinition {
+            group: self.group.clone(),
+            definition: self.group_definition.clone(),
+            fields: self.fields.clone(),
+        }
+    }
+}
+
 /// Exact source and expression binding for a completely covered field group.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedGroup {
-    pub request: BackfillSpec,
+    pub definition: GroupDefinition,
+    /// Operation establishing complete coverage; reused files retain their original identities.
+    pub request: OperationRequest,
     pub native_field_ids: BTreeMap<i32, i32>,
     pub source_metadata: ObjectRef,
     pub base_manifest: ObjectRef,

@@ -89,12 +89,6 @@ impl Engine {
         admission: &PhaseResult,
     ) -> Result<Prepared> {
         let base = self.release(&spec.dataset, &spec.base).await?;
-        if base.dataset.groups.len() != 1 {
-            return Err(Error::refusal(
-                "dependent_groups",
-                "source updates require dependent field-group refresh before selection",
-            ));
-        }
         let before = base
             .dataset
             .groups
@@ -373,10 +367,16 @@ impl Engine {
         shared.extend(kept_files);
         shared.extend(added_files.clone());
         let catalog = self.inner.lifecycle.catalog.as_ref();
-        let candidate = storage::append(&candidate, catalog, shared).await?;
+        // No applied rows means membership, values and schema are unchanged. Keep
+        // the exact source pin so completed groups also reuse their prepared tables.
+        let table = if metrics.rows_removed == 0 && metrics.rows_added == 0 {
+            before.clone()
+        } else {
+            let candidate = storage::append(&candidate, catalog, shared).await?;
+            storage::pin(&spec.dataset, &candidate, rows, budget, &before.objects).await?
+        };
         let removed = storage::append(&removed, catalog, removed_files).await?;
         let added = storage::append(&added, catalog, added_files).await?;
-        let table = storage::pin(&spec.dataset, &candidate, rows, budget, &before.objects).await?;
         let removed =
             storage::pin(&spec.dataset, &removed, metrics.rows_removed, budget, &[]).await?;
         let added = storage::pin(

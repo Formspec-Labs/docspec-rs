@@ -66,7 +66,7 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v3";
+const PROCESSOR: &str = "docspec.dataset.v4";
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -182,14 +182,35 @@ impl Engine {
         if !completed {
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
+            check_update_eligibility(&authority, spec)?;
         }
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
         }
         let mut reusable_phases = Vec::new();
         let mut required_phases = Vec::new();
-        for phase in PHASES {
-            let exists = if phase == "readback" {
+        let mut phases = PHASES.to_vec();
+        if let OperationRequest::Update(update) = spec {
+            let base: ReleasePin = lifecycle
+                .get(&view, &format!("result/{}", update.base))
+                .await?
+                .ok_or_else(|| {
+                    Error::refusal("no_release", "update source version is unavailable")
+                })?;
+            if !base.dataset.computed.is_empty() {
+                phases.insert(3, "groups");
+            }
+        }
+        for phase in phases {
+            let exists = if phase == "groups" {
+                lifecycle
+                    .get::<BTreeMap<String, ObjectRef>>(
+                        &view,
+                        &format!("groups/{}", spec.operation()),
+                    )
+                    .await?
+                    .is_some()
+            } else if phase == "readback" {
                 lifecycle
                     .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
                     .await?
@@ -466,7 +487,7 @@ impl Engine {
     ) -> Result<ReleasePin> {
         validate_request(spec)?;
         let request = fingerprint(spec)?;
-        let result = self.prepare_and_select(spec, stop).await;
+        let result = Box::pin(self.prepare_and_select(spec, stop)).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -522,10 +543,12 @@ impl Engine {
             }
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
-            if authority
-                .selected
-                .as_ref()
-                .is_some_and(|selected| !selected.computed.is_empty())
+            check_update_eligibility(&authority, spec)?;
+            if matches!(spec, OperationRequest::Build(_))
+                && authority
+                    .selected
+                    .as_ref()
+                    .is_some_and(|selected| !selected.computed.is_empty())
             {
                 return Err(Error::refusal(
                     "dependent_groups",
@@ -565,6 +588,16 @@ impl Engine {
                 operation
             }
         };
+
+        // Locators can change on a material-identical retry. Preserve the admitted
+        // request as execution provenance while using caller locators for missing copies.
+        let captured_request: OperationRequest = lifecycle
+            .get(
+                &lifecycle.open(spec.dataset()).await?,
+                &format!("request/{}", spec.operation()),
+            )
+            .await?
+            .ok_or_else(|| Error::refusal("corrupt_phase", "operation has no admitted request"))?;
 
         let admission = if let Some(phase) = self.phase(spec, &operation, "admission").await? {
             phase
@@ -676,11 +709,15 @@ impl Engine {
         }
         stop_after(stop, "validation")?;
 
-        let mut inputs = if let Some(base) = spec.base() {
-            self.release(spec.dataset(), base).await?.dataset.inputs
+        let base = if let Some(base) = spec.base() {
+            Some(self.release(spec.dataset(), base).await?)
         } else {
-            BTreeMap::new()
+            None
         };
+        let mut inputs = base
+            .as_ref()
+            .map(|base| base.dataset.inputs.clone())
+            .unwrap_or_default();
         for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
             let name = match spec {
                 OperationRequest::Build(_) => name.clone(),
@@ -690,18 +727,66 @@ impl Engine {
             };
             inputs.insert(name, input.clone());
         }
+        let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
+        let mut computed = BTreeMap::new();
+        if let Some(base) = &base {
+            for (name, previous) in &base.dataset.computed {
+                let (prepared, native_field_ids) = Box::pin(self.prepare_group(
+                    &captured_request,
+                    &operation,
+                    &table,
+                    &previous.definition,
+                    None,
+                ))
+                .await?;
+                groups.insert(name.clone(), prepared);
+                computed.insert(
+                    name.clone(),
+                    ComputedGroup {
+                        definition: previous.definition.clone(),
+                        request: captured_request.clone(),
+                        native_field_ids,
+                        source_metadata: table.metadata.clone(),
+                        base_manifest: base.manifest.clone(),
+                    },
+                );
+                stop_after(stop, &format!("group/{name}"))?;
+            }
+            if !computed.is_empty() {
+                let _guard = lock.lock().await;
+                let view = lifecycle.open(spec.dataset()).await?;
+                self.check(&view, &operation).await?;
+                let key = format!("groups/{}", spec.operation());
+                if lifecycle
+                    .get::<BTreeMap<String, ObjectRef>>(&view, &key)
+                    .await?
+                    .is_none()
+                {
+                    let completed: BTreeMap<_, _> = groups
+                        .iter()
+                        .filter(|(name, _)| name.as_str() != "source")
+                        .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
+                        .collect();
+                    lifecycle
+                        .commit(&view, vec![record(key, completed)?])
+                        .await?;
+                }
+            }
+        }
+        stop_after(stop, "groups")?;
         let dataset = DatasetPin {
-            format: 3,
+            format: 4,
             dataset: spec.dataset().clone(),
             version: spec.operation().clone(),
-            groups: BTreeMap::from([("source".into(), table)]),
-            computed: BTreeMap::new(),
+            groups,
+            computed,
             inputs,
             changes: processing.changes.clone(),
             definition: operation.definition.clone(),
             eligibility: operation.eligibility,
             boundary: operation.boundary,
-            request: spec.clone(),
+            request: captured_request.clone(),
+            parent_manifest: base.as_ref().map(|base| base.manifest.clone()),
             processor: PROCESSOR.into(),
         };
         // Readback has an operation-specific manifest because coverage can advance
@@ -711,13 +796,27 @@ impl Engine {
             .get::<ReleasePin>(&lifecycle.open(spec.dataset()).await?, &readback_key)
             .await?
         {
+            if release.dataset != dataset {
+                return Err(Error::refusal(
+                    "corrupt_phase",
+                    "retained readback differs from the prepared result",
+                ));
+            }
+            storage::check_available(release_objects(&release), &lifecycle.budget).await?;
             release
         } else {
             #[cfg(feature = "test-util")]
             work_started("readback");
             let directory = self.reserve_attempt(spec, &operation, "release").await?;
             let path = directory.join("release.json");
-            storage::write_new(&path, &serde_json::to_vec_pretty(&dataset)?)?;
+            let serialized = serde_json::to_vec_pretty(&dataset)?;
+            if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "combined release exceeds metadata allowance",
+                ));
+            }
+            storage::write_new(&path, &serialized)?;
             let manifest = storage::object(spec.dataset(), &path)?;
             // Decode the serialized release independently of the producing context.
             let decoded: DatasetPin = serde_json::from_reader(std::fs::File::open(&path)?)?;
@@ -767,10 +866,11 @@ impl Engine {
                     "a newer captured input boundary is already selected",
                 ));
             }
-            if authority
-                .selected
-                .as_ref()
-                .is_some_and(|selected| !selected.computed.is_empty())
+            if matches!(spec, OperationRequest::Build(_))
+                && authority
+                    .selected
+                    .as_ref()
+                    .is_some_and(|selected| !selected.computed.is_empty())
             {
                 return Err(Error::refusal(
                     "dependent_groups",
@@ -943,6 +1043,21 @@ fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()
     }
     Ok(())
 }
+fn check_update_eligibility(authority: &Authority, request: &OperationRequest) -> Result<()> {
+    if matches!(request, OperationRequest::Update(_))
+        && authority
+            .selected
+            .as_ref()
+            .is_some_and(|base| base.eligibility != authority.eligibility)
+    {
+        return Err(Error::refusal(
+            "stale_eligibility",
+            "the selected source transformation requires requalification before incremental update",
+        ));
+    }
+    Ok(())
+}
+
 fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
     if let Some(expected) = expected
         && authority
@@ -1177,6 +1292,36 @@ pub async fn verify_release(release: &ReleasePin, limits: Limits) -> Result<()> 
     verify_release_with_budget(release, &budget).await
 }
 
+fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
+    let dataset = &release.dataset;
+    let mut objects = vec![release.manifest.clone()];
+    objects.extend(dataset.parent_manifest.iter().cloned());
+    objects.extend(dataset.inputs.values().cloned());
+    objects.extend(
+        dataset
+            .groups
+            .values()
+            .flat_map(|pin| pin.objects.iter().cloned()),
+    );
+    objects.extend(
+        dataset
+            .computed
+            .values()
+            .map(|group| group.base_manifest.clone()),
+    );
+    if let Some(changes) = &dataset.changes {
+        objects.extend([
+            changes.base_manifest.clone(),
+            changes.before_metadata.clone(),
+        ]);
+        objects.extend(changes.added.objects.iter().cloned());
+        objects.extend(changes.removed.objects.iter().cloned());
+    }
+    objects.sort_by(|left, right| left.path.cmp(&right.path));
+    objects.dedup();
+    objects
+}
+
 async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Result<()> {
     let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
     if release.manifest.bytes > budget.limits.max_metadata_bytes as u64 {
@@ -1194,7 +1339,7 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
             "release manifest does not match its pin",
         ));
     }
-    if decoded.format != 3
+    if decoded.format != 4
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
         || decoded.request.operation() != &decoded.version
@@ -1263,7 +1408,7 @@ async fn verify_changes(
     let before: DatasetPin =
         serde_json::from_reader(std::fs::File::open(&changes.base_manifest.path)?)?;
     let before_source = before.groups.get("source").ok_or_else(invalid)?;
-    if before.format != 3
+    if before.format != 4
         || before.dataset != spec.dataset
         || before.version != spec.base
         || changes.base_version != spec.base

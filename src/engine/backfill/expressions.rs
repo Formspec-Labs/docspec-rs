@@ -26,9 +26,9 @@ impl Expressions {
     pub fn compile(
         context: &SessionContext,
         source: &iceberg::spec::Schema,
-        spec: &BackfillSpec,
+        spec: &GroupDefinition,
     ) -> Result<Self> {
-        validate(spec)?;
+        validate_definition(spec)?;
         let source = iceberg::arrow::schema_to_arrow_schema(source)?;
         let df_schema = DFSchema::try_from(source.clone())?;
         let mut expressions = Vec::new();

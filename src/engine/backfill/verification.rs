@@ -9,32 +9,121 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
     }
     check_names(dataset)?;
     let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
-    if let OperationRequest::Backfill(spec) = &dataset.request {
-        let selected = dataset
-            .computed
-            .get(spec.group.as_str())
-            .ok_or_else(invalid_group)?;
-        if &selected.request != spec {
-            return Err(invalid_group());
+    let mut checked_base: Option<(ObjectRef, DatasetPin)> = None;
+    match &dataset.request {
+        OperationRequest::Build(_) => {
+            if !dataset.computed.is_empty() || dataset.parent_manifest.is_some() {
+                return Err(invalid_group());
+            }
         }
-        let base = read_base(selected, budget).await?;
-        if dataset.inputs != base.inputs || dataset.boundary != base.boundary {
-            return Err(invalid_group());
+        OperationRequest::Update(_) => {
+            let changes = dataset.changes.as_ref().ok_or_else(invalid_group)?;
+            if dataset.parent_manifest.as_ref() != Some(&changes.base_manifest) {
+                return Err(invalid_group());
+            }
+            let base = read_manifest(&changes.base_manifest, budget).await?;
+            let mut inherited_inputs = dataset.inputs.clone();
+            for name in dataset.request.inputs().keys() {
+                let key = format!("{}/{name}", dataset.version);
+                if base.inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
+                    return Err(invalid_group());
+                }
+            }
+            if inherited_inputs != base.inputs
+                || base.eligibility != dataset.eligibility
+                || dataset.boundary <= base.boundary
+                || dataset.definition != base.definition
+            {
+                return Err(invalid_group());
+            }
+            if base.computed.len() != dataset.computed.len() {
+                return Err(invalid_group());
+            }
+            for (name, previous) in &base.computed {
+                let refreshed = dataset.computed.get(name).ok_or_else(invalid_group)?;
+                if refreshed.definition != previous.definition
+                    || refreshed.request != dataset.request
+                    || refreshed.base_manifest != changes.base_manifest
+                {
+                    return Err(invalid_group());
+                }
+            }
+            checked_base = Some((changes.base_manifest.clone(), base));
         }
-    } else if !dataset.computed.is_empty() {
-        return Err(invalid_group());
+        OperationRequest::Backfill(spec) => {
+            let selected = dataset
+                .computed
+                .get(spec.group.as_str())
+                .ok_or_else(invalid_group)?;
+            if selected.request != dataset.request || selected.definition != spec.group_definition()
+            {
+                return Err(invalid_group());
+            }
+            let base = read_base(selected, budget).await?;
+            let parent = read_manifest(
+                dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?,
+                budget,
+            )
+            .await?;
+            if parent.dataset != dataset.dataset
+                || parent.version == dataset.version
+                || parent.groups.get("source") != Some(source)
+                || parent.inputs != dataset.inputs
+                || parent.boundary != dataset.boundary
+                || parent.definition != dataset.definition
+                || parent.eligibility != dataset.eligibility
+                || base.inputs != dataset.inputs
+                || base.boundary != dataset.boundary
+                || base.eligibility != dataset.eligibility
+                || parent.groups.get(spec.group.as_str()) != base.groups.get(spec.group.as_str())
+                || parent.computed.get(spec.group.as_str())
+                    != base.computed.get(spec.group.as_str())
+            {
+                return Err(invalid_group());
+            }
+            let mut inherited = dataset.computed.clone();
+            inherited.remove(spec.group.as_str());
+            let mut expected = parent.computed.clone();
+            expected.remove(spec.group.as_str());
+            if inherited != expected {
+                return Err(invalid_group());
+            }
+            for name in inherited.keys() {
+                if dataset.groups.get(name) != parent.groups.get(name) {
+                    return Err(invalid_group());
+                }
+            }
+        }
     }
     for (name, binding) in &dataset.computed {
-        if name != binding.request.group.as_str()
-            || binding.request.dataset != dataset.dataset
-            || binding.request.definition != dataset.definition
+        if name != binding.definition.group.as_str()
+            || binding.request.dataset() != &dataset.dataset
+            || binding.request.definition() != dataset.definition
+            || binding.request.inputs().iter().any(|(name, input)| {
+                dataset
+                    .inputs
+                    .get(&format!("{}/{name}", binding.request.operation()))
+                    .is_none_or(|object| object.digest != input.digest)
+            })
         {
             return Err(invalid_group());
         }
+        if checked_base
+            .as_ref()
+            .is_none_or(|(object, _)| object != &binding.base_manifest)
+        {
+            drop(checked_base.take());
+            checked_base = Some((
+                binding.base_manifest.clone(),
+                read_base(binding, budget).await?,
+            ));
+        }
+        let (_, base) = checked_base.as_ref().ok_or_else(invalid_group)?;
         verify_group(
             source,
             dataset.groups.get(name).ok_or_else(invalid_group)?,
             binding,
+            base,
             budget,
         )
         .await?;
@@ -42,37 +131,81 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
     Ok(())
 }
 
-async fn read_base(binding: &ComputedGroup, budget: &Budget) -> Result<DatasetPin> {
-    if binding.base_manifest.bytes > budget.limits.max_metadata_bytes as u64 {
+async fn read_manifest(object: &ObjectRef, budget: &Budget) -> Result<DatasetPin> {
+    if object.bytes > budget.limits.max_metadata_bytes as u64 {
         return Err(Error::refusal(
             "metadata_capacity",
             "group source binding exceeds metadata allowance",
         ));
     }
-    storage::verify_objects(vec![binding.base_manifest.clone()], budget).await?;
-    let base: DatasetPin =
-        serde_json::from_reader(std::fs::File::open(&binding.base_manifest.path)?)?;
-    if base.format != 3
-        || base.dataset != binding.request.dataset
-        || base.version != binding.request.base
-    {
+    storage::verify_objects(vec![object.clone()], budget).await?;
+    let base: DatasetPin = serde_json::from_reader(std::fs::File::open(&object.path)?)?;
+    if base.format != 4 {
         return Err(invalid_group());
     }
     Ok(base)
 }
 
-pub(super) async fn verify_group(
+async fn read_base(binding: &ComputedGroup, budget: &Budget) -> Result<DatasetPin> {
+    let base = read_manifest(&binding.base_manifest, budget).await?;
+    if &base.dataset != binding.request.dataset() || Some(&base.version) != binding.request.base() {
+        return Err(invalid_group());
+    }
+    Ok(base)
+}
+
+async fn verify_group(
     source: &TablePin,
     group: &TablePin,
     binding: &ComputedGroup,
+    base: &DatasetPin,
+    budget: &Budget,
+) -> Result<()> {
+    if &base.dataset != binding.request.dataset() || Some(&base.version) != binding.request.base() {
+        return Err(invalid_group());
+    }
+    if binding.source_metadata != source.metadata {
+        return Err(invalid_group());
+    }
+    match &binding.request {
+        OperationRequest::Backfill(spec) => {
+            if binding.definition != spec.group_definition()
+                || base.groups.get("source") != Some(source)
+            {
+                return Err(invalid_group());
+            }
+        }
+        OperationRequest::Update(_) => {
+            if base
+                .computed
+                .get(binding.definition.group.as_str())
+                .map(|group| &group.definition)
+                != Some(&binding.definition)
+            {
+                return Err(invalid_group());
+            }
+        }
+        OperationRequest::Build(_) => return Err(invalid_group()),
+    }
+    verify_group_data(
+        source,
+        group,
+        &binding.definition,
+        &binding.native_field_ids,
+        budget,
+    )
+    .await
+}
+
+pub(super) async fn verify_group_data(
+    source: &TablePin,
+    group: &TablePin,
+    definition: &GroupDefinition,
+    native_field_ids: &BTreeMap<i32, i32>,
     budget: &Budget,
 ) -> Result<()> {
     let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
-    let base = read_base(binding, budget).await?;
-    if binding.source_metadata != source.metadata
-        || base.groups.get("source") != Some(source)
-        || group.rows != source.rows
-    {
+    if group.rows != source.rows {
         return Err(invalid_group());
     }
     storage::verify_objects(group.objects.clone(), budget).await?;
@@ -82,10 +215,10 @@ pub(super) async fn verify_group(
     let expressions = Expressions::compile(
         &SessionContext::new(),
         source_native.metadata().current_schema(),
-        &binding.request,
+        definition,
     )?;
     if expressions.native != **group_native.metadata().current_schema()
-        || expressions.native_field_ids != binding.native_field_ids
+        || &expressions.native_field_ids != native_field_ids
     {
         return Err(Error::refusal(
             "invalid_group",

@@ -682,3 +682,32 @@ fn killed_cli_worker_resumes_every_completed_handoff() {
         assert_eq!(release.dataset.groups["source"].rows, 4);
     }
 }
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn relocated_build_retry_keeps_the_original_readback_request() {
+    let directory = TempDir::new().unwrap();
+    let mut spec = fixture(directory.path());
+    let engine = Engine::open(directory.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    assert_eq!(
+        engine
+            .run_until(&spec, "readback")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let original = engine.inspect(&spec.dataset).await.unwrap()
+        [&format!("readback/{}", spec.operation)]
+        .clone();
+    std::fs::remove_file(&spec.input).unwrap();
+    spec.input = directory
+        .path()
+        .join("moved.parquet")
+        .to_string_lossy()
+        .into_owned();
+    let resumed = engine.run(&spec).await.unwrap();
+    assert_eq!(serde_json::to_value(resumed).unwrap(), original);
+}

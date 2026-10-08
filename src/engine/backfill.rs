@@ -5,6 +5,7 @@ use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
 mod expressions;
+mod preparation;
 mod verification;
 use expressions::Expressions;
 pub(super) use verification::verify_groups;
@@ -18,6 +19,7 @@ const PROCESSOR: &str = "docspec.scalar-backfill.v1";
 struct Capture {
     admission_fence: u64,
     target: Option<ObjectRef>,
+    target_binding: Option<ComputedGroup>,
     base_manifest: ObjectRef,
 }
 
@@ -41,17 +43,25 @@ pub struct BackfillPlan {
 }
 
 pub(super) fn validate(spec: &BackfillSpec) -> Result<()> {
+    if spec.operation == spec.base || spec.definition.trim().is_empty() {
+        return Err(Error::refusal(
+            "invalid_backfill",
+            "backfill needs a distinct operation and active source definition",
+        ));
+    }
+    validate_definition(&spec.group_definition())
+}
+
+fn validate_definition(spec: &GroupDefinition) -> Result<()> {
     let ids: BTreeSet<_> = spec.fields.iter().map(|field| field.id).collect();
     let names: BTreeSet<_> = spec
         .fields
         .iter()
         .map(|field| field.name.to_ascii_lowercase())
         .collect();
-    if spec.operation == spec.base
-        || spec.group.as_str() == "source"
+    if spec.group.as_str() == "source"
         || spec.fields.is_empty()
         || spec.definition.trim().is_empty()
-        || spec.group_definition.trim().is_empty()
         || ids.len() != spec.fields.len()
         || names.len() != spec.fields.len()
         || spec.fields.iter().any(|field| {
@@ -63,7 +73,7 @@ pub(super) fn validate(spec: &BackfillSpec) -> Result<()> {
     {
         return Err(Error::refusal(
             "invalid_backfill",
-            "backfill needs a distinct operation, named group/definition, and distinct fields with positive IDs",
+            "computed groups need a definition and distinct fields with positive IDs",
         ));
     }
     Ok(())
@@ -105,7 +115,7 @@ impl Engine {
             ));
             columns.extend(
                 binding
-                    .request
+                    .definition
                     .fields
                     .iter()
                     .map(|field| format!("{alias}.{}", quote(&field.name))),
@@ -130,7 +140,11 @@ impl Engine {
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let base = self.release(&spec.dataset, &spec.base).await?;
         let native = storage::open_pin(&base.dataset.groups["source"]).await?;
-        Expressions::compile(&self.context(), native.metadata().current_schema(), spec)?;
+        Expressions::compile(
+            &self.context(),
+            native.metadata().current_schema(),
+            &spec.group_definition(),
+        )?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
         let old: Option<Operation> = lifecycle
@@ -177,6 +191,7 @@ impl Engine {
                         .groups
                         .get(spec.group.as_str())
                         .map(|pin| pin.metadata.clone()),
+                    target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
                     base_manifest: base.manifest.clone(),
                 });
             plan.promotion_refusal =
@@ -197,7 +212,7 @@ impl Engine {
         for file in scan.files() {
             let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
             let key = file_key(
-                spec,
+                &spec.group_definition(),
                 object,
                 native.metadata().current_schema(),
                 eligibility,
@@ -332,6 +347,7 @@ impl Engine {
                         .groups
                         .get(spec.group.as_str())
                         .map(|pin| pin.metadata.clone()),
+                    target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
                     base_manifest: base.manifest.clone(),
                 };
                 lifecycle.commit(&view, vec![record(format!("operation/{}", spec.operation), &operation)?,
@@ -359,161 +375,16 @@ impl Engine {
         if decoded != base.dataset {
             return Err(invalid_group());
         }
-        let native = storage::open_pin(source).await?;
-        let expressions = Arc::new(Expressions::compile(
-            &self.context(),
-            native.metadata().current_schema(),
-            spec,
-        )?);
-        let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
-        let prepared: Option<TablePin> = lifecycle
-            .get(&lifecycle.open(&spec.dataset).await?, &prepared_key)
-            .await?;
-        let prepared = if let Some(prepared) = prepared {
-            storage::check_available(prepared.objects.clone(), &lifecycle.budget).await?;
-            prepared
-        } else {
-            #[cfg(feature = "test-util")]
-            work_started("backfill-assembly");
-            let directory = self
-                .reserve_backfill(spec, &operation, "processing")
-                .await?;
-            let output = self
-                .create_output(&spec.dataset, &directory, expressions.native.clone())
-                .await?;
-            let scan = storage::OccurrenceScan::open(&native, &lifecycle.budget).await?;
-            let objects = source_objects(source);
-            let mut completions = BTreeMap::new();
-            let mut files = Vec::new();
-            let mut inherited = Vec::new();
-            let _assembly = lifecycle
-                .budget
-                .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
-            let mut assembly_bytes = 0usize;
-            let mut completion_view = lifecycle.open(&spec.dataset).await?;
-            for file in scan.files() {
-                let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
-                let key = file_key(
-                    spec,
-                    object,
-                    native.metadata().current_schema(),
-                    operation.eligibility,
-                )?;
-                let existing: Option<FileCompletion> =
-                    lifecycle.get(&completion_view, &key).await?;
-                let completion = if let Some(existing) = existing {
-                    existing
-                } else {
-                    let result = self
-                        .compute_file(
-                            spec,
-                            &scan,
-                            object,
-                            file.record_count(),
-                            &output,
-                            expressions.clone(),
-                        )
-                        .await;
-                    let completion = match result {
-                        Ok(completion) => completion,
-                        Err(error) => {
-                            self.acknowledge_files(spec, &operation, &mut completions)
-                                .await?;
-                            let _guard = lock.lock().await;
-                            let view = lifecycle.open(&spec.dataset).await?;
-                            lifecycle
-                                .commit(
-                                    &view,
-                                    vec![record(
-                                        format!("failure/{}/{key}", spec.operation),
-                                        error.to_string(),
-                                    )?],
-                                )
-                                .await?;
-                            return Err(error);
-                        }
-                    };
-                    completions.insert(key, completion.clone());
-                    completion
-                };
-                if completion.source != **object || completion.rows != file.record_count() {
-                    return Err(invalid_group());
-                }
-                match charge_assembly(
-                    assembly_bytes,
-                    &completion,
-                    lifecycle.budget.limits.max_metadata_bytes,
-                ) {
-                    Ok(bytes) => assembly_bytes = bytes,
-                    Err(error) => {
-                        self.acknowledge_files(spec, &operation, &mut completions)
-                            .await?;
-                        return Err(error);
-                    }
-                }
-                files.extend(
-                    read_completion(&completion, &expressions.native, &lifecycle.budget).await?,
-                );
-                inherited.extend(completion.outputs.clone());
-                let bytes = serde_json::to_vec(&completions)?.len();
-                if completions.len() >= COMPLETION_BUNDLE
-                    || bytes >= lifecycle.budget.limits.max_metadata_bytes / 8
-                {
-                    self.acknowledge_files(spec, &operation, &mut completions)
-                        .await?;
-                    stop_after(stop, "files")?;
-                    completion_view = lifecycle.open(&spec.dataset).await?;
-                }
-            }
-            self.acknowledge_files(spec, &operation, &mut completions)
-                .await?;
-            stop_after(stop, "files")?;
-            let output = storage::append(&output, lifecycle.catalog.as_ref(), files).await?;
-            let prepared = storage::pin(
-                &spec.dataset,
-                &output,
-                source.rows,
-                &lifecycle.budget,
-                &inherited,
-            )
-            .await?;
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
-            let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            check_preparation(&authority, &operation)?;
-            if let Some(existing) = lifecycle.get::<TablePin>(&view, &prepared_key).await? {
-                existing
-            } else {
-                lifecycle
-                    .commit(&view, vec![record(&prepared_key, &prepared)?])
-                    .await?;
-                prepared
-            }
-        };
-        stop_after(stop, "processing")?;
+        let definition = spec.group_definition();
+        let (prepared, native_field_ids) =
+            Box::pin(self.prepare_group(&request, &operation, source, &definition, stop)).await?;
         let binding = ComputedGroup {
-            request: spec.clone(),
-            native_field_ids: expressions.native_field_ids.clone(),
+            definition,
+            request: request.clone(),
+            native_field_ids,
             source_metadata: source.metadata.clone(),
             base_manifest: capture.base_manifest.clone(),
         };
-        let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
-        let validated: Option<ObjectRef> = lifecycle
-            .get(&lifecycle.open(&spec.dataset).await?, &validation_key)
-            .await?;
-        if validated.as_ref() != Some(&prepared.metadata) {
-            #[cfg(feature = "test-util")]
-            work_started("backfill-validation");
-            verification::verify_group(source, &prepared, &binding, &lifecycle.budget).await?;
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
-            let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            check_preparation(&authority, &operation)?;
-            lifecycle
-                .commit(&view, vec![record(&validation_key, &prepared.metadata)?])
-                .await?;
-        }
-        stop_after(stop, "validation")?;
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
         loop {
@@ -529,9 +400,10 @@ impl Engine {
                 let authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
                 promotion(&authority, &operation, &capture, source, spec)?;
-                authority.selected.ok_or_else(invalid_group)?
+                authority.release.ok_or_else(invalid_group)?
             };
-            let mut dataset = current.clone();
+            let mut dataset = current.dataset.clone();
+            dataset.parent_manifest = Some(current.manifest.clone());
             dataset.version = spec.operation.clone();
             dataset.request = request.clone();
             dataset.changes = None;
@@ -562,28 +434,12 @@ impl Engine {
                 if recorded.dataset != dataset {
                     return Err(invalid_group());
                 }
-                let mut objects = vec![recorded.manifest.clone()];
-                objects.extend(recorded.dataset.inputs.values().cloned());
-                objects.extend(
-                    recorded
-                        .dataset
-                        .groups
-                        .values()
-                        .flat_map(|pin| pin.objects.iter().cloned()),
-                );
-                objects.extend(
-                    recorded
-                        .dataset
-                        .computed
-                        .values()
-                        .map(|group| group.base_manifest.clone()),
-                );
-                storage::check_available(objects, &lifecycle.budget).await?;
+                storage::check_available(release_objects(&recorded), &lifecycle.budget).await?;
                 recorded
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");
-                let directory = self.reserve_backfill(spec, &operation, "release").await?;
+                let directory = self.reserve_group(&request, &operation, "release").await?;
                 let manifest_path = directory.join("release.json");
                 storage::write_new(&manifest_path, &serialized)?;
                 let release = ReleasePin {
@@ -619,7 +475,7 @@ impl Engine {
             let mut authority: Authority =
                 lifecycle.get(&view, "authority").await?.unwrap_or_default();
             promotion(&authority, &operation, &capture, source, spec)?;
-            if authority.selected.as_ref() != Some(&current) {
+            if authority.release.as_ref() != Some(&current) {
                 continue;
             }
             authority.selected = Some(release.dataset.clone());
@@ -636,138 +492,6 @@ impl Engine {
             stop_after(stop, "selection")?;
             return Ok(release);
         }
-    }
-
-    async fn reserve_backfill(
-        &self,
-        spec: &BackfillSpec,
-        operation: &Operation,
-        purpose: &str,
-    ) -> Result<PathBuf> {
-        let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
-        let directory = self
-            .inner
-            .root
-            .join("objects")
-            .join(spec.dataset.as_str())
-            .join(id.as_str());
-        let lock = self.lock(&spec.dataset).await;
-        let _guard = lock.lock().await;
-        let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
-        let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        check_preparation(&authority, operation)?;
-        lifecycle
-            .commit(
-                &view,
-                vec![record(
-                    format!("protection/{id}"),
-                    Protection {
-                        id,
-                        consumer: spec.dataset.clone(),
-                        purpose: format!("{}/{purpose}", spec.operation),
-                        paths: vec![format!("{}/", directory.display())],
-                        retired: false,
-                    },
-                )?],
-            )
-            .await?;
-        std::fs::create_dir_all(&directory)?;
-        Ok(directory)
-    }
-
-    async fn acknowledge_files(
-        &self,
-        spec: &BackfillSpec,
-        operation: &Operation,
-        pending: &mut BTreeMap<String, FileCompletion>,
-    ) -> Result<()> {
-        if pending.is_empty() {
-            return Ok(());
-        }
-        let lock = self.lock(&spec.dataset).await;
-        let _guard = lock.lock().await;
-        let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
-        let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        check_preparation(&authority, operation)?;
-        let mut changes = Vec::new();
-        for (key, completion) in pending.iter() {
-            if lifecycle.get::<FileCompletion>(&view, key).await?.is_none() {
-                changes.push(record(key, completion)?);
-            }
-        }
-        if !changes.is_empty() {
-            lifecycle.commit(&view, changes).await?;
-        }
-        pending.clear();
-        Ok(())
-    }
-
-    async fn compute_file(
-        &self,
-        spec: &BackfillSpec,
-        scan: &storage::OccurrenceScan,
-        source: &ObjectRef,
-        rows: u64,
-        output: &iceberg::table::Table,
-        expressions: Arc<Expressions>,
-    ) -> Result<FileCompletion> {
-        #[cfg(feature = "test-util")]
-        work_started("backfill-file");
-        let budget = &self.inner.lifecycle.budget;
-        if fs2::available_space(&self.inner.root)?
-            < source
-                .bytes
-                .saturating_mul(2)
-                .saturating_add(budget.limits.scratch_bytes)
-        {
-            return Err(Error::refusal(
-                "disk_capacity",
-                "computed output and scratch do not fit available disk",
-            ));
-        }
-        storage::verify_objects(vec![source.clone()], budget).await?;
-        let _execution = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
-        let limit = budget.limits.max_batch_bytes;
-        let stream = scan
-            .read_file(&source.path, budget)?
-            .map(move |batch| expressions.evaluate(batch?, limit));
-        let files = storage::write_batches(output, stream, budget).await?;
-        if files.iter().map(DataFile::record_count).sum::<u64>() != rows {
-            return Err(invalid_group());
-        }
-        let descriptor_path = Path::new(output.metadata().location())
-            .join(format!("{}.avro", uuid::Uuid::new_v4().simple()));
-        let mut bytes = Vec::new();
-        iceberg::spec::write_data_files_to_avro(
-            &mut bytes,
-            files.clone(),
-            &StructType::new(vec![]),
-            FormatVersion::V2,
-        )?;
-        if bytes.len() > budget.limits.max_metadata_bytes {
-            return Err(Error::refusal(
-                "metadata_capacity",
-                "file completion descriptor exceeds metadata allowance",
-            ));
-        }
-        storage::write_new(&descriptor_path, &bytes)?;
-        let owner = spec.dataset.clone();
-        let outputs = budget
-            .blocking(move || {
-                files
-                    .iter()
-                    .map(|file| storage::object(&owner, Path::new(file.file_path())))
-                    .collect()
-            })
-            .await?;
-        Ok(FileCompletion {
-            source: source.clone(),
-            rows,
-            descriptor: storage::object(&spec.dataset, &descriptor_path)?,
-            outputs,
-        })
     }
 }
 
@@ -819,6 +543,7 @@ fn promotion(
         .get(spec.group.as_str())
         .map(|pin| &pin.metadata)
         != capture.target.as_ref()
+        || current.computed.get(spec.group.as_str()) != capture.target_binding.as_ref()
     {
         return Err(Error::refusal(
             "stale_group",
@@ -837,7 +562,7 @@ fn source_objects(source: &TablePin) -> BTreeMap<&str, &ObjectRef> {
 }
 
 fn file_key(
-    spec: &BackfillSpec,
+    spec: &GroupDefinition,
     source: &ObjectRef,
     schema: &iceberg::spec::Schema,
     eligibility: u64,
@@ -847,7 +572,7 @@ fn file_key(
         source,
         schema,
         &spec.group,
-        &spec.group_definition,
+        &spec.definition,
         &spec.fields,
     ))?;
     Ok(format!(
@@ -910,7 +635,7 @@ fn quote(name: &str) -> String {
 fn check_names(dataset: &DatasetPin) -> Result<()> {
     let mut names = BTreeSet::new();
     for group in dataset.computed.values() {
-        for field in &group.request.fields {
+        for field in &group.definition.fields {
             if !names.insert(field.name.to_ascii_lowercase()) {
                 return Err(Error::refusal(
                     "field_conflict",

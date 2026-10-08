@@ -1,0 +1,119 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 0.60s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.27s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 15 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b4733b2016bf5a7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test competing_independent_backfills_both_survive_selection ... ok
+test missing_cached_objects_cannot_be_selected_after_readback ... ok
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.60s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 20 tests
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+test dependency_correction_fences_adoption_without_output_change ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test independent_reader_rejects_same_size_corruption ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test empty_output_keeps_schema_and_readable_history ... ok
+test comparison_preserves_duplicates_and_historical_release ... ok
+test plan_and_run_apply_the_same_definition_fence ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+test relocated_build_retry_keeps_the_original_readback_request ... ok
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.66s
+
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 9 tests
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test relocated_retry_preserves_original_request_and_readback ... ok
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.32s
+
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 12 tests
+test affected_base_corruption_is_refused_before_rewriting ... ok
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.47s
+
+   Doc-tests docspec
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 1.98s
