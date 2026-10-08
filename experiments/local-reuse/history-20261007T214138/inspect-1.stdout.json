@@ -1,0 +1,559 @@
+{
+  "authority": {
+    "boundary": 1,
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "epoch": 0,
+    "release": {
+      "dataset": {
+        "boundary": 1,
+        "dataset": "history",
+        "definition": "probe-v1",
+        "eligibility": 0,
+        "format": 1,
+        "groups": {
+          "source": {
+            "metadata": {
+              "bytes": 2476,
+              "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+            },
+            "objects": [
+              {
+                "bytes": 796434,
+                "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+                "owner": "history",
+                "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+              },
+              {
+                "bytes": 1383,
+                "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+                "owner": "history",
+                "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+              },
+              {
+                "bytes": 2476,
+                "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+                "owner": "history",
+                "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+              },
+              {
+                "bytes": 4604,
+                "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+                "owner": "history",
+                "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+              },
+              {
+                "bytes": 1710,
+                "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+                "owner": "history",
+                "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+              }
+            ],
+            "rows": 20000,
+            "schema_id": 0,
+            "snapshot": 1557554688533651793,
+            "table": "data_0e57d524cf0442e09b596033b23557be"
+          }
+        },
+        "inputs": {
+          "input": {
+            "bytes": 221362,
+            "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/source.parquet"
+          }
+        },
+        "processor": "docspec.sql-parquet.v1",
+        "request": {
+          "dataset": "history",
+          "definition": "probe-v1",
+          "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+          "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+          "operation": "operation-1",
+          "sql": "SELECT * FROM input"
+        },
+        "version": "operation-1"
+      },
+      "id": "operation-1",
+      "manifest": {
+        "bytes": 3514,
+        "digest": "b0ebe9c9c5ed31dc33fb2716d599934536950f0b21bca4c231fa86d5d2abc797",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/93bdf78eb720491cab875c07368f8288/release.json"
+      },
+      "verified": true
+    },
+    "selected": {
+      "boundary": 1,
+      "dataset": "history",
+      "definition": "probe-v1",
+      "eligibility": 0,
+      "format": 1,
+      "groups": {
+        "source": {
+          "metadata": {
+            "bytes": 2476,
+            "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+          },
+          "objects": [
+            {
+              "bytes": 796434,
+              "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+            },
+            {
+              "bytes": 1383,
+              "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+            },
+            {
+              "bytes": 2476,
+              "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+            },
+            {
+              "bytes": 4604,
+              "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+            },
+            {
+              "bytes": 1710,
+              "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+            }
+          ],
+          "rows": 20000,
+          "schema_id": 0,
+          "snapshot": 1557554688533651793,
+          "table": "data_0e57d524cf0442e09b596033b23557be"
+        }
+      },
+      "inputs": {
+        "input": {
+          "bytes": 221362,
+          "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/source.parquet"
+        }
+      },
+      "processor": "docspec.sql-parquet.v1",
+      "request": {
+        "dataset": "history",
+        "definition": "probe-v1",
+        "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+        "operation": "operation-1",
+        "sql": "SELECT * FROM input"
+      },
+      "version": "operation-1"
+    }
+  },
+  "operation/operation-1": {
+    "boundary": 1,
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "epoch": 0,
+    "request_digest": "2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596"
+  },
+  "phase/2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596/0/processing": {
+    "eligibility": 0,
+    "operation": "operation-1",
+    "outputs": [
+      {
+        "bytes": 796434,
+        "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+      },
+      {
+        "bytes": 1383,
+        "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+      },
+      {
+        "bytes": 2476,
+        "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+      },
+      {
+        "bytes": 4604,
+        "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+      },
+      {
+        "bytes": 1710,
+        "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+      }
+    ],
+    "phase": "processing",
+    "request_digest": "2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596",
+    "rows": 20000,
+    "table": {
+      "metadata": {
+        "bytes": 2476,
+        "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+      },
+      "objects": [
+        {
+          "bytes": 796434,
+          "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+        },
+        {
+          "bytes": 1383,
+          "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+        },
+        {
+          "bytes": 2476,
+          "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+        },
+        {
+          "bytes": 4604,
+          "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+        },
+        {
+          "bytes": 1710,
+          "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+        }
+      ],
+      "rows": 20000,
+      "schema_id": 0,
+      "snapshot": 1557554688533651793,
+      "table": "data_0e57d524cf0442e09b596033b23557be"
+    }
+  },
+  "phase/2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596/0/validation": {
+    "eligibility": 0,
+    "operation": "operation-1",
+    "outputs": [
+      {
+        "bytes": 796434,
+        "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+      },
+      {
+        "bytes": 1383,
+        "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+      },
+      {
+        "bytes": 2476,
+        "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+      },
+      {
+        "bytes": 4604,
+        "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+      },
+      {
+        "bytes": 1710,
+        "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+      }
+    ],
+    "phase": "validation",
+    "request_digest": "2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596",
+    "rows": 20000,
+    "table": {
+      "metadata": {
+        "bytes": 2476,
+        "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+      },
+      "objects": [
+        {
+          "bytes": 796434,
+          "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+        },
+        {
+          "bytes": 1383,
+          "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+        },
+        {
+          "bytes": 2476,
+          "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+        },
+        {
+          "bytes": 4604,
+          "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+        },
+        {
+          "bytes": 1710,
+          "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+        }
+      ],
+      "rows": 20000,
+      "schema_id": 0,
+      "snapshot": 1557554688533651793,
+      "table": "data_0e57d524cf0442e09b596033b23557be"
+    }
+  },
+  "phase/input/88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd/admission": {
+    "eligibility": 0,
+    "operation": "operation-1",
+    "outputs": [
+      {
+        "bytes": 221362,
+        "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/source.parquet"
+      }
+    ],
+    "phase": "admission",
+    "request_digest": "2273bf94aaf8f2834f4d7510c1568aa400114d64b0aa9ae04ad353857ff0d596",
+    "rows": 0,
+    "table": null
+  },
+  "protection/0c34bed6213f4251bb5cc2526dffcca2": {
+    "consumer": "history",
+    "id": "0c34bed6213f4251bb5cc2526dffcca2",
+    "paths": [
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/"
+    ],
+    "purpose": "operation-1/processing",
+    "retired": false
+  },
+  "protection/93bdf78eb720491cab875c07368f8288": {
+    "consumer": "history",
+    "id": "93bdf78eb720491cab875c07368f8288",
+    "paths": [
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/93bdf78eb720491cab875c07368f8288/"
+    ],
+    "purpose": "operation-1/release",
+    "retired": false
+  },
+  "protection/f77a018919c049b18c317f3775551960": {
+    "consumer": "history",
+    "id": "f77a018919c049b18c317f3775551960",
+    "paths": [
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/"
+    ],
+    "purpose": "operation-1/admission",
+    "retired": false
+  },
+  "readback/operation-1": {
+    "dataset": {
+      "boundary": 1,
+      "dataset": "history",
+      "definition": "probe-v1",
+      "eligibility": 0,
+      "format": 1,
+      "groups": {
+        "source": {
+          "metadata": {
+            "bytes": 2476,
+            "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+          },
+          "objects": [
+            {
+              "bytes": 796434,
+              "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+            },
+            {
+              "bytes": 1383,
+              "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+            },
+            {
+              "bytes": 2476,
+              "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+            },
+            {
+              "bytes": 4604,
+              "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+            },
+            {
+              "bytes": 1710,
+              "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+            }
+          ],
+          "rows": 20000,
+          "schema_id": 0,
+          "snapshot": 1557554688533651793,
+          "table": "data_0e57d524cf0442e09b596033b23557be"
+        }
+      },
+      "inputs": {
+        "input": {
+          "bytes": 221362,
+          "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/source.parquet"
+        }
+      },
+      "processor": "docspec.sql-parquet.v1",
+      "request": {
+        "dataset": "history",
+        "definition": "probe-v1",
+        "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+        "operation": "operation-1",
+        "sql": "SELECT * FROM input"
+      },
+      "version": "operation-1"
+    },
+    "id": "operation-1",
+    "manifest": {
+      "bytes": 3514,
+      "digest": "b0ebe9c9c5ed31dc33fb2716d599934536950f0b21bca4c231fa86d5d2abc797",
+      "owner": "history",
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/93bdf78eb720491cab875c07368f8288/release.json"
+    },
+    "verified": true
+  },
+  "request/operation-1": {
+    "dataset": "history",
+    "definition": "probe-v1",
+    "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+    "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+    "operation": "operation-1",
+    "sql": "SELECT * FROM input"
+  },
+  "result/operation-1": {
+    "dataset": {
+      "boundary": 1,
+      "dataset": "history",
+      "definition": "probe-v1",
+      "eligibility": 0,
+      "format": 1,
+      "groups": {
+        "source": {
+          "metadata": {
+            "bytes": 2476,
+            "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+          },
+          "objects": [
+            {
+              "bytes": 796434,
+              "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/data/2a5fdf65-c36d-442a-9bda-dc0e22257dbf-00000.parquet"
+            },
+            {
+              "bytes": 1383,
+              "digest": "19212e2ca41509b11d359dcb988e4ed9d3fd52662ce42d7f106b38fc478eead0",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00000-eacb7c5d-af86-43af-ba22-ce88cd3f9117.metadata.json"
+            },
+            {
+              "bytes": 2476,
+              "digest": "e4341bfc1776c3cf44293cb9021b8bb26afcc0431a8824467c811e9cf89d6069",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/00001-7fbb3e32-4dea-41bc-9521-a617e0b5c1e4.metadata.json"
+            },
+            {
+              "bytes": 4604,
+              "digest": "41ce3629f43be3f2f3b2a0629904b134269b69d8e5e8b05015f98dfcd9ebdd7c",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/01a1192c-5842-7634-8b91-1a34878b5b8a-m0.avro"
+            },
+            {
+              "bytes": 1710,
+              "digest": "46bca03732955ddbf57afee6014c8b532f01272cc3d9c8d8a2359b7a6ca7dafd",
+              "owner": "history",
+              "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/0c34bed6213f4251bb5cc2526dffcca2/metadata/snap-1557554688533651793-0-01a1192c-5842-7634-8b91-1a34878b5b8a.avro"
+            }
+          ],
+          "rows": 20000,
+          "schema_id": 0,
+          "snapshot": 1557554688533651793,
+          "table": "data_0e57d524cf0442e09b596033b23557be"
+        }
+      },
+      "inputs": {
+        "input": {
+          "bytes": 221362,
+          "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/f77a018919c049b18c317f3775551960/source.parquet"
+        }
+      },
+      "processor": "docspec.sql-parquet.v1",
+      "request": {
+        "dataset": "history",
+        "definition": "probe-v1",
+        "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+        "operation": "operation-1",
+        "sql": "SELECT * FROM input"
+      },
+      "version": "operation-1"
+    },
+    "id": "operation-1",
+    "manifest": {
+      "bytes": 3514,
+      "digest": "b0ebe9c9c5ed31dc33fb2716d599934536950f0b21bca4c231fa86d5d2abc797",
+      "owner": "history",
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T214138/workspace/objects/history/93bdf78eb720491cab875c07368f8288/release.json"
+    },
+    "verified": true
+  },
+  "runtime/operation-1": {
+    "dependency_lock_blake3": "af5abfa1b49e8e433b54341116c34771423ea98b6dcc6d226d18a0a445393984",
+    "limits": {
+      "batch_rows": 4096,
+      "compute_threads": 12,
+      "max_batch_bytes": 67108864,
+      "max_metadata_bytes": 33554432,
+      "memory_bytes": 25769803776,
+      "scratch_bytes": 34359738368
+    },
+    "package_version": "0.1.0",
+    "processor": "docspec.sql-parquet.v1"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "id": "unchanged",
+  "dataset": {
+    "format": 1,
+    "dataset": "bill_actions",
+    "version": "unchanged",
+    "groups": {
+      "source": {
+        "table": "data_f3a1d1d7d8384ae18d57d856485c0bfe",
+        "metadata": {
+          "owner": "bill_actions",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/metadata/00001-699ec651-69da-4d6a-a2ee-4ff221c71d6b.metadata.json",
+          "digest": "cf14e83c1bda07e2783fb58029aea16f433c535aaa23c4876250fa1e48c8e597",
+          "bytes": 2524
+        },
+        "snapshot": 5163030377115813388,
+        "schema_id": 0,
+        "objects": [
+          {
+            "owner": "bill_actions",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/data/cc18c895-8c3b-489e-898e-034eca761994-00000.parquet",
+            "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+            "bytes": 796434
+          },
+          {
+            "owner": "bill_actions",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/metadata/00000-82c83178-adaf-47e6-88eb-0dedb770d8bd.metadata.json",
+            "digest": "60cc623e808cc8bbf774e4aadbf57ff596e57b10cdf91bbf3b9ac752cf8ca2ed",
+            "bytes": 1399
+          },
+          {
+            "owner": "bill_actions",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/metadata/00001-699ec651-69da-4d6a-a2ee-4ff221c71d6b.metadata.json",
+            "digest": "cf14e83c1bda07e2783fb58029aea16f433c535aaa23c4876250fa1e48c8e597",
+            "bytes": 2524
+          },
+          {
+            "owner": "bill_actions",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/metadata/01a1192e-4e16-748f-8085-2eac62286a66-m0.avro",
+            "digest": "4001ed203d1d4eb4e2f8d9c0b59db4a884c15ffd246eb647ecc9f80571b95755",
+            "bytes": 4621
+          },
+          {
+            "owner": "bill_actions",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/6e817338835540b984cf0e2abb9026ec/metadata/snap-5163030377115813388-0-01a1192e-4e16-748f-8085-2eac62286a66.avro",
+            "digest": "12f5b2f3ea6674d1a563cc647443458c229086c89343f0863240d09f1ffaf209",
+            "bytes": 1727
+          }
+        ],
+        "rows": 20000
+      }
+    },
+    "inputs": {
+      "input": {
+        "owner": "bill_actions",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/66a3536e0cbe4c68b163f3cfd79dee62/source.parquet",
+        "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "bytes": 221362
+      }
+    },
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "boundary": 2,
+    "request": {
+      "dataset": "bill_actions",
+      "operation": "unchanged",
+      "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+      "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+      "sql": "SELECT * FROM input",
+      "definition": "probe-v1"
+    },
+    "processor": "docspec.sql-parquet.v1"
+  },
+  "manifest": {
+    "owner": "bill_actions",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/bill_actions-3/workspace/objects/bill_actions/8148593f2839430b9d1443c48e5036aa/release.json",
+    "digest": "8cce96d5d4c2246cc449aef5301bea44e6150d38f5f9ede649fa51ed50d4b37c",
+    "bytes": 3667
+  },
+  "verified": true
+}

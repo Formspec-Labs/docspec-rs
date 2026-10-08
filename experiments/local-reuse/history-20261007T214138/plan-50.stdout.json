@@ -1,0 +1,20 @@
+{
+  "dataset": "history",
+  "operation": "operation-50",
+  "completed": true,
+  "reusable_phases": [
+    "admission",
+    "processing",
+    "validation",
+    "readback"
+  ],
+  "required_phases": [],
+  "limits": {
+    "compute_threads": 12,
+    "memory_bytes": 25769803776,
+    "scratch_bytes": 34359738368,
+    "batch_rows": 4096,
+    "max_batch_bytes": 67108864,
+    "max_metadata_bytes": 33554432
+  }
+}

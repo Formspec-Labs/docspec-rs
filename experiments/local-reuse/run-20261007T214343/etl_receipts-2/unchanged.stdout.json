@@ -1,0 +1,81 @@
+{
+  "id": "unchanged",
+  "dataset": {
+    "format": 1,
+    "dataset": "etl_receipts",
+    "version": "unchanged",
+    "groups": {
+      "source": {
+        "table": "data_8ae03c58f26d4f918fc6b93e5790c0d8",
+        "metadata": {
+          "owner": "etl_receipts",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/metadata/00001-7230f2ec-191a-47e0-aedf-d417e779a0e7.metadata.json",
+          "digest": "f7ea410e6458888351c3c540526575a18d15038314cfb35aa12da755a577b019",
+          "bytes": 3047
+        },
+        "snapshot": 8371661054973704628,
+        "schema_id": 0,
+        "objects": [
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/data/a604071c-30e3-4b9f-ac30-0cbe754f044e-00000.parquet",
+            "digest": "1aa036468526268e25060f807c23bdefbfcccda1e5ac7bd9a19cd4956d7902fe",
+            "bytes": 21748995
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/metadata/00000-b428cd0d-4203-4d49-bf6d-cc3a063a57e6.metadata.json",
+            "digest": "aab7e3c770055ad18dd1d3729f6a40727ba73e8671aa96daa5c5e349ae593bbc",
+            "bytes": 1918
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/metadata/00001-7230f2ec-191a-47e0-aedf-d417e779a0e7.metadata.json",
+            "digest": "f7ea410e6458888351c3c540526575a18d15038314cfb35aa12da755a577b019",
+            "bytes": 3047
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/metadata/01a1192e-6b1f-71b8-a884-be4eeda63537-m0.avro",
+            "digest": "baf5ad0388bf4aa86f11cfbec575ecc24a35583bfb97ebb21cf3ae11bb2a9cb6",
+            "bytes": 5218
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/78738f55f6b24593a5d16d9540931f96/metadata/snap-8371661054973704628-0-01a1192e-6b1f-71b8-a884-be4eeda63537.avro",
+            "digest": "e598a71359f075a9e5f091ff29b0971257482d3950c8ec68f46f2a6c6333170e",
+            "bytes": 1727
+          }
+        ],
+        "rows": 20001
+      }
+    },
+    "inputs": {
+      "input": {
+        "owner": "etl_receipts",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/ae2d0bb0179844c589b0a0c28a684260/source.parquet",
+        "digest": "344efa761646b2887bcba9b407bff6f6e8351d708473c2e4a749ad37a0cbf106",
+        "bytes": 5554346
+      }
+    },
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "boundary": 2,
+    "request": {
+      "dataset": "etl_receipts",
+      "operation": "unchanged",
+      "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/etl_receipts.parquet",
+      "expected_digest": "344efa761646b2887bcba9b407bff6f6e8351d708473c2e4a749ad37a0cbf106",
+      "sql": "SELECT * FROM input",
+      "definition": "probe-v1"
+    },
+    "processor": "docspec.sql-parquet.v1"
+  },
+  "manifest": {
+    "owner": "etl_receipts",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace/objects/etl_receipts/dae37872040c419093e9923c1f0fde07/release.json",
+    "digest": "f5c6f5b9e011b4ce7bc714ed2701d9b73851ae0d77779b09d8ba49be43048b0f",
+    "bytes": 3670
+  },
+  "verified": true
+}

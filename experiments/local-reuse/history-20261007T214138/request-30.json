@@ -1,0 +1,8 @@
+{
+  "dataset": "history",
+  "operation": "operation-30",
+  "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+  "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+  "sql": "SELECT * FROM input",
+  "definition": "probe-v1"
+}

@@ -1,0 +1,8 @@
+[
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec",
+  "--workspace",
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/workspace",
+  "read",
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/unchanged.stdout.json",
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-2/read.arrow"
+]

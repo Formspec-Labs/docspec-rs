@@ -1,0 +1,495 @@
+[
+  {
+    "operations": 1,
+    "run": {
+      "elapsed_seconds": 0.7657404999990831,
+      "exit_code": 0,
+      "peak_rss_bytes": 88850432
+    },
+    "latest": [
+      {
+        "elapsed_seconds": 0.09447179199923994,
+        "exit_code": 0,
+        "peak_rss_bytes": 36388864
+      },
+      {
+        "elapsed_seconds": 0.11474054100108333,
+        "exit_code": 0,
+        "peak_rss_bytes": 36470784
+      },
+      {
+        "elapsed_seconds": 0.04841104200022528,
+        "exit_code": 0,
+        "peak_rss_bytes": 36487168
+      }
+    ],
+    "plan": {
+      "elapsed_seconds": 0.09055679100129055,
+      "exit_code": 0,
+      "peak_rss_bytes": 39600128
+    },
+    "inspect": {
+      "elapsed_seconds": 0.048575125001661945,
+      "exit_code": 0,
+      "peak_rss_bytes": 35307520
+    },
+    "retained_files": 46,
+    "retained_bytes": 1199766,
+    "metadata_json_bytes": 56534,
+    "budgets_pass": true
+  },
+  {
+    "operations": 2,
+    "run": {
+      "elapsed_seconds": 0.5300057080021361,
+      "exit_code": 0,
+      "peak_rss_bytes": 63307776
+    }
+  },
+  {
+    "operations": 3,
+    "run": {
+      "elapsed_seconds": 0.5961773750022985,
+      "exit_code": 0,
+      "peak_rss_bytes": 65126400
+    }
+  },
+  {
+    "operations": 4,
+    "run": {
+      "elapsed_seconds": 0.6619174580046092,
+      "exit_code": 0,
+      "peak_rss_bytes": 63913984
+    }
+  },
+  {
+    "operations": 5,
+    "run": {
+      "elapsed_seconds": 0.7744694579960196,
+      "exit_code": 0,
+      "peak_rss_bytes": 64389120
+    }
+  },
+  {
+    "operations": 6,
+    "run": {
+      "elapsed_seconds": 0.8739145829968038,
+      "exit_code": 0,
+      "peak_rss_bytes": 64602112
+    }
+  },
+  {
+    "operations": 7,
+    "run": {
+      "elapsed_seconds": 1.0124748340022052,
+      "exit_code": 0,
+      "peak_rss_bytes": 65732608
+    }
+  },
+  {
+    "operations": 8,
+    "run": {
+      "elapsed_seconds": 1.158699459003401,
+      "exit_code": 0,
+      "peak_rss_bytes": 64880640
+    }
+  },
+  {
+    "operations": 9,
+    "run": {
+      "elapsed_seconds": 1.1335807499999646,
+      "exit_code": 0,
+      "peak_rss_bytes": 66600960
+    }
+  },
+  {
+    "operations": 10,
+    "run": {
+      "elapsed_seconds": 1.2397411249985453,
+      "exit_code": 0,
+      "peak_rss_bytes": 65748992
+    },
+    "latest": [
+      {
+        "elapsed_seconds": 0.14825979200395523,
+        "exit_code": 0,
+        "peak_rss_bytes": 39124992
+      },
+      {
+        "elapsed_seconds": 0.20098233300086576,
+        "exit_code": 0,
+        "peak_rss_bytes": 39026688
+      },
+      {
+        "elapsed_seconds": 0.20031212500180118,
+        "exit_code": 0,
+        "peak_rss_bytes": 39190528
+      }
+    ],
+    "plan": {
+      "elapsed_seconds": 0.19833654199464945,
+      "exit_code": 0,
+      "peak_rss_bytes": 42205184
+    },
+    "inspect": {
+      "elapsed_seconds": 0.20654725000349572,
+      "exit_code": 0,
+      "peak_rss_bytes": 37978112
+    },
+    "retained_files": 199,
+    "retained_bytes": 2872023,
+    "metadata_json_bytes": 1046483,
+    "budgets_pass": true
+  },
+  {
+    "operations": 11,
+    "run": {
+      "elapsed_seconds": 1.398187541999505,
+      "exit_code": 0,
+      "peak_rss_bytes": 66387968
+    }
+  },
+  {
+    "operations": 12,
+    "run": {
+      "elapsed_seconds": 1.481613167001342,
+      "exit_code": 0,
+      "peak_rss_bytes": 66813952
+    }
+  },
+  {
+    "operations": 13,
+    "run": {
+      "elapsed_seconds": 1.6408392910016119,
+      "exit_code": 0,
+      "peak_rss_bytes": 66174976
+    }
+  },
+  {
+    "operations": 14,
+    "run": {
+      "elapsed_seconds": 1.626400332999765,
+      "exit_code": 0,
+      "peak_rss_bytes": 67239936
+    }
+  },
+  {
+    "operations": 15,
+    "run": {
+      "elapsed_seconds": 1.8229642920050537,
+      "exit_code": 0,
+      "peak_rss_bytes": 67436544
+    }
+  },
+  {
+    "operations": 16,
+    "run": {
+      "elapsed_seconds": 1.8211449999944307,
+      "exit_code": 0,
+      "peak_rss_bytes": 67551232
+    }
+  },
+  {
+    "operations": 17,
+    "run": {
+      "elapsed_seconds": 2.167058624996571,
+      "exit_code": 0,
+      "peak_rss_bytes": 66846720
+    }
+  },
+  {
+    "operations": 18,
+    "run": {
+      "elapsed_seconds": 2.1654711669980315,
+      "exit_code": 0,
+      "peak_rss_bytes": 68698112
+    }
+  },
+  {
+    "operations": 19,
+    "run": {
+      "elapsed_seconds": 2.8552927499986254,
+      "exit_code": 0,
+      "peak_rss_bytes": 68485120
+    }
+  },
+  {
+    "operations": 20,
+    "run": {
+      "elapsed_seconds": 2.654826417005097,
+      "exit_code": 0,
+      "peak_rss_bytes": 68878336
+    }
+  },
+  {
+    "operations": 21,
+    "run": {
+      "elapsed_seconds": 2.338672375000897,
+      "exit_code": 0,
+      "peak_rss_bytes": 68485120
+    }
+  },
+  {
+    "operations": 22,
+    "run": {
+      "elapsed_seconds": 2.624664082999516,
+      "exit_code": 0,
+      "peak_rss_bytes": 68648960
+    }
+  },
+  {
+    "operations": 23,
+    "run": {
+      "elapsed_seconds": 2.6603737920013373,
+      "exit_code": 0,
+      "peak_rss_bytes": 68780032
+    }
+  },
+  {
+    "operations": 24,
+    "run": {
+      "elapsed_seconds": 2.807853124999383,
+      "exit_code": 0,
+      "peak_rss_bytes": 68976640
+    }
+  },
+  {
+    "operations": 25,
+    "run": {
+      "elapsed_seconds": 2.766359458997613,
+      "exit_code": 0,
+      "peak_rss_bytes": 69779456
+    }
+  },
+  {
+    "operations": 26,
+    "run": {
+      "elapsed_seconds": 3.0349767500010785,
+      "exit_code": 0,
+      "peak_rss_bytes": 69058560
+    }
+  },
+  {
+    "operations": 27,
+    "run": {
+      "elapsed_seconds": 3.1327138749984442,
+      "exit_code": 0,
+      "peak_rss_bytes": 69795840
+    }
+  },
+  {
+    "operations": 28,
+    "run": {
+      "elapsed_seconds": 3.543931583997619,
+      "exit_code": 0,
+      "peak_rss_bytes": 61964288
+    }
+  },
+  {
+    "operations": 29,
+    "run": {
+      "elapsed_seconds": 4.11728266600403,
+      "exit_code": 0,
+      "peak_rss_bytes": 71204864
+    }
+  },
+  {
+    "operations": 30,
+    "run": {
+      "elapsed_seconds": 3.5436259580019396,
+      "exit_code": 0,
+      "peak_rss_bytes": 69713920
+    }
+  },
+  {
+    "operations": 31,
+    "run": {
+      "elapsed_seconds": 3.349112541996874,
+      "exit_code": 0,
+      "peak_rss_bytes": 69828608
+    }
+  },
+  {
+    "operations": 32,
+    "run": {
+      "elapsed_seconds": 3.510992791998433,
+      "exit_code": 0,
+      "peak_rss_bytes": 68763648
+    }
+  },
+  {
+    "operations": 33,
+    "run": {
+      "elapsed_seconds": 3.625847707997309,
+      "exit_code": 0,
+      "peak_rss_bytes": 68222976
+    }
+  },
+  {
+    "operations": 34,
+    "run": {
+      "elapsed_seconds": 3.6501438330014935,
+      "exit_code": 0,
+      "peak_rss_bytes": 68911104
+    }
+  },
+  {
+    "operations": 35,
+    "run": {
+      "elapsed_seconds": 3.721480041000177,
+      "exit_code": 0,
+      "peak_rss_bytes": 69812224
+    }
+  },
+  {
+    "operations": 36,
+    "run": {
+      "elapsed_seconds": 4.153190958997584,
+      "exit_code": 0,
+      "peak_rss_bytes": 70664192
+    }
+  },
+  {
+    "operations": 37,
+    "run": {
+      "elapsed_seconds": 4.093530625003041,
+      "exit_code": 0,
+      "peak_rss_bytes": 70713344
+    }
+  },
+  {
+    "operations": 38,
+    "run": {
+      "elapsed_seconds": 4.127088583998557,
+      "exit_code": 0,
+      "peak_rss_bytes": 70696960
+    }
+  },
+  {
+    "operations": 39,
+    "run": {
+      "elapsed_seconds": 4.113657665999199,
+      "exit_code": 0,
+      "peak_rss_bytes": 71892992
+    }
+  },
+  {
+    "operations": 40,
+    "run": {
+      "elapsed_seconds": 4.18968333399971,
+      "exit_code": 0,
+      "peak_rss_bytes": 70565888
+    }
+  },
+  {
+    "operations": 41,
+    "run": {
+      "elapsed_seconds": 4.263460207999742,
+      "exit_code": 0,
+      "peak_rss_bytes": 72302592
+    }
+  },
+  {
+    "operations": 42,
+    "run": {
+      "elapsed_seconds": 4.382009166001808,
+      "exit_code": 0,
+      "peak_rss_bytes": 71450624
+    }
+  },
+  {
+    "operations": 43,
+    "run": {
+      "elapsed_seconds": 4.492897082993295,
+      "exit_code": 0,
+      "peak_rss_bytes": 72581120
+    }
+  },
+  {
+    "operations": 44,
+    "run": {
+      "elapsed_seconds": 5.006789541999751,
+      "exit_code": 0,
+      "peak_rss_bytes": 71630848
+    }
+  },
+  {
+    "operations": 45,
+    "run": {
+      "elapsed_seconds": 5.196891499996127,
+      "exit_code": 0,
+      "peak_rss_bytes": 63225856
+    }
+  },
+  {
+    "operations": 46,
+    "run": {
+      "elapsed_seconds": 4.7224496669950895,
+      "exit_code": 0,
+      "peak_rss_bytes": 73940992
+    }
+  },
+  {
+    "operations": 47,
+    "run": {
+      "elapsed_seconds": 5.223397667003155,
+      "exit_code": 0,
+      "peak_rss_bytes": 72400896
+    }
+  },
+  {
+    "operations": 48,
+    "run": {
+      "elapsed_seconds": 4.973702583003615,
+      "exit_code": 0,
+      "peak_rss_bytes": 73220096
+    }
+  },
+  {
+    "operations": 49,
+    "run": {
+      "elapsed_seconds": 5.077171416996862,
+      "exit_code": 0,
+      "peak_rss_bytes": 73760768
+    }
+  },
+  {
+    "operations": 50,
+    "run": {
+      "elapsed_seconds": 5.502907791000325,
+      "exit_code": 0,
+      "peak_rss_bytes": 73334784
+    },
+    "latest": [
+      {
+        "elapsed_seconds": 0.5948244159953902,
+        "exit_code": 0,
+        "peak_rss_bytes": 45006848
+      },
+      {
+        "elapsed_seconds": 0.6950987499949406,
+        "exit_code": 0,
+        "peak_rss_bytes": 44269568
+      },
+      {
+        "elapsed_seconds": 0.594617416994879,
+        "exit_code": 0,
+        "peak_rss_bytes": 45875200
+      }
+    ],
+    "plan": {
+      "elapsed_seconds": 0.7055842499976279,
+      "exit_code": 0,
+      "peak_rss_bytes": 48676864
+    },
+    "inspect": {
+      "elapsed_seconds": 0.6078207499958808,
+      "exit_code": 0,
+      "peak_rss_bytes": 43646976
+    },
+    "retained_files": 879,
+    "retained_bytes": 27597106,
+    "metadata_json_bytes": 19177193,
+    "budgets_pass": false
+  }
+]

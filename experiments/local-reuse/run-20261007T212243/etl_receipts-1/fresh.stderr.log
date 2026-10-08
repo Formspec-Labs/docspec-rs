@@ -1,0 +1,3 @@
+2026-10-08T01:22:53.522627Z  INFO docspec::engine: phase durably complete phase="admission" rows=0 operation=fresh
+2026-10-08T01:22:54.658394Z  INFO docspec::engine: phase durably complete phase="processing" rows=20001 operation=fresh
+2026-10-08T01:22:55.224569Z  INFO docspec::engine: phase durably complete phase="validation" rows=20001 operation=fresh

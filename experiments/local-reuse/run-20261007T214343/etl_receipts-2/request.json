@@ -1,0 +1,8 @@
+{
+  "dataset": "etl_receipts",
+  "operation": "fresh",
+  "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/etl_receipts.parquet",
+  "expected_digest": "344efa761646b2887bcba9b407bff6f6e8351d708473c2e4a749ad37a0cbf106",
+  "sql": "SELECT * FROM input",
+  "definition": "probe-v1"
+}

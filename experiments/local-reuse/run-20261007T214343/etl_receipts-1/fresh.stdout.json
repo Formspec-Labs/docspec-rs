@@ -1,0 +1,81 @@
+{
+  "id": "fresh",
+  "dataset": {
+    "format": 1,
+    "dataset": "etl_receipts",
+    "version": "fresh",
+    "groups": {
+      "source": {
+        "table": "data_3b693d18847a4a009fe7ee81cc3e9ed2",
+        "metadata": {
+          "owner": "etl_receipts",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/metadata/00001-eb848103-5a6c-49ca-9421-d943ca134b04.metadata.json",
+          "digest": "871c20dea6acb62656be81cd5390645e8422c620d24da1429612e1e15508ac2e",
+          "bytes": 3047
+        },
+        "snapshot": 7578962345810025474,
+        "schema_id": 0,
+        "objects": [
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/data/ef0ae008-06cb-46c8-b3df-af3279418ebf-00000.parquet",
+            "digest": "1aa036468526268e25060f807c23bdefbfcccda1e5ac7bd9a19cd4956d7902fe",
+            "bytes": 21748995
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/metadata/00000-bdd3a8bc-5f60-4967-802a-6ebd7e8b5f80.metadata.json",
+            "digest": "82cec6e2e8ee50bef0f3b0f0ce4afba3db8680724c7283332d6920585fdd589d",
+            "bytes": 1918
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/metadata/00001-eb848103-5a6c-49ca-9421-d943ca134b04.metadata.json",
+            "digest": "871c20dea6acb62656be81cd5390645e8422c620d24da1429612e1e15508ac2e",
+            "bytes": 3047
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/metadata/01a1192e-56b5-7648-9cde-c2c1bb50a0d4-m0.avro",
+            "digest": "d45df16c9f3b6b84d93bc63350da56f27cb191cb839729d4812518c55f864fc3",
+            "bytes": 5218
+          },
+          {
+            "owner": "etl_receipts",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/9cd67eb9e51a4569b343955f5fcfcd65/metadata/snap-7578962345810025474-0-01a1192e-56b5-7648-9cde-c2c1bb50a0d4.avro",
+            "digest": "55dcb70479734e882286709c4ee4ae509e73d2895ef3674db6e5ea079a879db4",
+            "bytes": 1727
+          }
+        ],
+        "rows": 20001
+      }
+    },
+    "inputs": {
+      "input": {
+        "owner": "etl_receipts",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/efd7329e76b341539ed76f98a1eb91b2/source.parquet",
+        "digest": "344efa761646b2887bcba9b407bff6f6e8351d708473c2e4a749ad37a0cbf106",
+        "bytes": 5554346
+      }
+    },
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "boundary": 1,
+    "request": {
+      "dataset": "etl_receipts",
+      "operation": "fresh",
+      "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/etl_receipts.parquet",
+      "expected_digest": "344efa761646b2887bcba9b407bff6f6e8351d708473c2e4a749ad37a0cbf106",
+      "sql": "SELECT * FROM input",
+      "definition": "probe-v1"
+    },
+    "processor": "docspec.sql-parquet.v1"
+  },
+  "manifest": {
+    "owner": "etl_receipts",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/run-20261007T214343/etl_receipts-1/workspace/objects/etl_receipts/0edf76354b7e44beac48a94846dd0a1b/release.json",
+    "digest": "1d22a4cce689090b86cae25e7cc504dc53ca8fa679bf85c07e1ae544c7338812",
+    "bytes": 3662
+  },
+  "verified": true
+}

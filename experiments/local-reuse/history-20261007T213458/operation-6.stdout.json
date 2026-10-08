@@ -1,0 +1,81 @@
+{
+  "id": "operation-6",
+  "dataset": {
+    "format": 1,
+    "dataset": "history",
+    "version": "operation-6",
+    "groups": {
+      "source": {
+        "table": "data_340b99c677e24aee937ed958a145c8fe",
+        "metadata": {
+          "owner": "history",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/metadata/00001-3c91b8ba-1d26-46a3-8151-95eee6720275.metadata.json",
+          "digest": "00ba793b11f28499bc7b20b9e76f9df076424a2f170d2dad9ab57cb476b9fe4c",
+          "bytes": 2476
+        },
+        "snapshot": 7239652141020022871,
+        "schema_id": 0,
+        "objects": [
+          {
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/data/1d9c1876-42e5-4b16-a999-0c86007a011c-00000.parquet",
+            "digest": "775e6febf750f4692300f73c8ef57b99ee236b3bd4b6b6958ab2c6ace44b47f4",
+            "bytes": 796434
+          },
+          {
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/metadata/00000-7ec102e3-9a6b-4e9a-b042-7656ae9ec72b.metadata.json",
+            "digest": "e5e0cbf4f8556dcd4667d8b494f8bbe83594bfc9bc1efeacf88f2906bab206ec",
+            "bytes": 1383
+          },
+          {
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/metadata/00001-3c91b8ba-1d26-46a3-8151-95eee6720275.metadata.json",
+            "digest": "00ba793b11f28499bc7b20b9e76f9df076424a2f170d2dad9ab57cb476b9fe4c",
+            "bytes": 2476
+          },
+          {
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/metadata/01a11926-3c50-7429-aba5-22db1ae66569-m0.avro",
+            "digest": "daa9a2bbf63fca4d289bab9cadf2ffca4e13be56f7f22fbaac6bc252e2c762e9",
+            "bytes": 4605
+          },
+          {
+            "owner": "history",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/c1a9f18f3370493c85585a516e9221f2/metadata/snap-7239652141020022871-0-01a11926-3c50-7429-aba5-22db1ae66569.avro",
+            "digest": "1f8d348a976e8a42a1a17dd2dd859b04fa4e94630d74bb0b036f17cb7de1ed60",
+            "bytes": 1711
+          }
+        ],
+        "rows": 20000
+      }
+    },
+    "inputs": {
+      "input": {
+        "owner": "history",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/08ad378998b749c28e7e8939bca6e870/source.parquet",
+        "digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+        "bytes": 221362
+      }
+    },
+    "definition": "probe-v1",
+    "eligibility": 0,
+    "boundary": 6,
+    "request": {
+      "dataset": "history",
+      "operation": "operation-6",
+      "input": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+      "expected_digest": "88f4fe96120e65ccd576b48d0f2e9b0087cbe5adf7dd860f4e441687bfc9c9cd",
+      "sql": "SELECT * FROM input",
+      "definition": "probe-v1"
+    },
+    "processor": "docspec.sql-parquet.v1"
+  },
+  "manifest": {
+    "owner": "history",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace/objects/history/639eabe78d624c07b10b8bef1686f48c/release.json",
+    "digest": "4c4038468d7ebce0be0666bded771025e400f29b83e456bfbeffaea420edc0c5",
+    "bytes": 3514
+  },
+  "verified": true
+}

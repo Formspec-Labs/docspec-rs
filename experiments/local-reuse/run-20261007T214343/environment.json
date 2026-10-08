@@ -1,0 +1,14 @@
+{
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "python": "3.12.9 (main, Mar 17 2025, 21:36:21) [Clang 20.1.0 ]",
+  "pyarrow": "25.0.1",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "source_manifest_sha256": "e621f85592685de911e0c42abc34415373e294044d294019458bfb57be33d61c",
+  "cache": "not cleared; inputs may be cached; ordinary workstation background load",
+  "digests": {
+    "binary": "1efaf92c4f4e22c483ce6d7a9104311b25c4f73dc4452e5c377c28f6c8f26aff",
+    "lock": "94d93569ddf91109ebae131f8703e050986ba934e52d68e99fa1850d23926019",
+    "harness": "0c075360ad15aedbaee90cc8c62f4931de50c1f6f8870dae03928bfee437d808",
+    "protocol": "f198d66c9f6168757b8226db8562809fcc7520c04674d5726236cd69059a8e64"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "binary_sha256": "1efaf92c4f4e22c483ce6d7a9104311b25c4f73dc4452e5c377c28f6c8f26aff",
+  "lock_sha256": "94d93569ddf91109ebae131f8703e050986ba934e52d68e99fa1850d23926019",
+  "harness_sha256": "5e7c316e987a77294a86351014e4e75275b0900e69833eabf5a13964e7a79a5c",
+  "common_harness_sha256": "0c075360ad15aedbaee90cc8c62f4931de50c1f6f8870dae03928bfee437d808",
+  "protocol_sha256": "fe38ce324c1e3b43cb24ee43e3db32c3533ac5c412824ca4963762afddc19af6",
+  "source": {
+    "byteSize": 221362,
+    "mediaType": "application/vnd.apache.parquet",
+    "objectKey": "bill_actions.parquet",
+    "recordCount": 20000,
+    "role": "table",
+    "sha256": "sha256:cb16ba45a40cd826996bdeea6fea087594315f643fd35e60dd9748835df5d95c"
+  },
+  "cache": "not cleared; ordinary workstation background load"
+}

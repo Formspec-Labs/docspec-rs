@@ -1,0 +1,7 @@
+[
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec",
+  "--workspace",
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/workspace",
+  "run",
+  "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/local-reuse/history-20261007T213458/request-32.json"
+]

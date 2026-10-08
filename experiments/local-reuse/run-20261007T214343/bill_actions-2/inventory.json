@@ -1,0 +1,254 @@
+{
+  "catalog.sqlite": {
+    "size": 20480,
+    "mtime_ns": 1791423826728504577
+  },
+  "host.lock": {
+    "size": 0,
+    "mtime_ns": 1791423825913462125
+  },
+  "objects/bill_actions/2dc7d7d3681244ffa96c821aa88c36cd/data/a0398729-d6bf-4b8f-9172-b977293fc7fc-00000.parquet": {
+    "size": 796434,
+    "mtime_ns": 1791423826157082297
+  },
+  "objects/bill_actions/2dc7d7d3681244ffa96c821aa88c36cd/metadata/00000-ff9638c4-85b1-4afd-afdd-4ed5581c73a1.metadata.json": {
+    "size": 1399,
+    "mtime_ns": 1791423826045581245
+  },
+  "objects/bill_actions/2dc7d7d3681244ffa96c821aa88c36cd/metadata/00001-fff12f9c-9a85-4c09-8b2a-5fbd9cd7793f.metadata.json": {
+    "size": 2524,
+    "mtime_ns": 1791423826175319028
+  },
+  "objects/bill_actions/2dc7d7d3681244ffa96c821aa88c36cd/metadata/01a1192e-48f3-70c8-bc8a-f3fc7e5e3e3f-m0.avro": {
+    "size": 4621,
+    "mtime_ns": 1791423826165267766
+  },
+  "objects/bill_actions/2dc7d7d3681244ffa96c821aa88c36cd/metadata/snap-6986021908318693237-0-01a1192e-48f3-70c8-bc8a-f3fc7e5e3e3f.avro": {
+    "size": 1727,
+    "mtime_ns": 1791423826170204272
+  },
+  "objects/bill_actions/56d556d843084b1bb86fd74eec341f0c/source.parquet": {
+    "size": 221362,
+    "mtime_ns": 1791423825981502375
+  },
+  "objects/bill_actions/cf912c3ec4564578bd2ba6fde7b7b89e/release.json": {
+    "size": 3667,
+    "mtime_ns": 1791423826606897470
+  },
+  "objects/bill_actions/e4db67621b654dd083af92f0d25532ce/release.json": {
+    "size": 3659,
+    "mtime_ns": 1791423826316743574
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/22c3938e-f6f1-4e2e-b29d-1d7ac74e9bf3-00000.parquet": {
+    "size": 5997,
+    "mtime_ns": 1791423826193569133
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/4f6ecebb-614f-4caa-86ae-c2412284a469-00000.parquet": {
+    "size": 1945,
+    "mtime_ns": 1791423826017970711
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/6a6899ab-c14b-45b9-a808-5b2d8c2f1103-00000.parquet": {
+    "size": 1946,
+    "mtime_ns": 1791423826583030816
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/767dee36-61e3-4247-9af1-957268030204-00000.parquet": {
+    "size": 5997,
+    "mtime_ns": 1791423826267408682
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/7afa0997-c53f-4616-8538-a4fdb84e2435-00000.parquet": {
+    "size": 8986,
+    "mtime_ns": 1791423826551230694
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/845504bf-72e6-44dd-85ea-2cf047c307cf-00000.parquet": {
+    "size": 11627,
+    "mtime_ns": 1791423826702440003
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/9219e39e-ebbc-415d-a30f-d0b1fa2d1eca-00000.parquet": {
+    "size": 11581,
+    "mtime_ns": 1791423826413993526
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/ac1994d2-97d0-422f-8c1e-689f4d1376d4-00000.parquet": {
+    "size": 1944,
+    "mtime_ns": 1791423825953833675
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/ba563672-3260-48c9-bdb2-787fd90e051a-00000.parquet": {
+    "size": 4944,
+    "mtime_ns": 1791423826387482452
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/be9f8008-bcae-4460-ac61-3b55b210dcf3-00000.parquet": {
+    "size": 2440,
+    "mtime_ns": 1791423825923569638
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/c4c1f21e-745a-4272-86e5-5e24701f9cfd-00000.parquet": {
+    "size": 4976,
+    "mtime_ns": 1791423826674471886
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/cff69cc9-69ab-4162-9754-fbdc19bc3b91-00000.parquet": {
+    "size": 2266,
+    "mtime_ns": 1791423825993895890
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/data/f37126be-5951-4788-82e3-e90abf5ba2c3-00000.parquet": {
+    "size": 1942,
+    "mtime_ns": 1791423826293249713
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00000-aed4b40a-0850-4adf-bb82-9802e23ddc48.metadata.json": {
+    "size": 856,
+    "mtime_ns": 1791423825918856299
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00001-58b752bb-1348-415b-b21e-a87f46df0ca5.metadata.json": {
+    "size": 1957,
+    "mtime_ns": 1791423825950938963
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00002-7d29c6d2-f15c-4d31-9b04-e448f9f37c66.metadata.json": {
+    "size": 2951,
+    "mtime_ns": 1791423825976032493
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00003-4f1572f9-8751-48ef-91cb-b6cce800bdbe.metadata.json": {
+    "size": 3945,
+    "mtime_ns": 1791423826015068958
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00004-e6949cb8-776b-4d5b-a15a-3c8ce346564f.metadata.json": {
+    "size": 4939,
+    "mtime_ns": 1791423826039872446
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00005-ff4520fb-86a7-43fd-b09f-5a7b694928e4.metadata.json": {
+    "size": 5934,
+    "mtime_ns": 1791423826215936869
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00006-84ff1528-0eec-463e-9751-83453dd8f99c.metadata.json": {
+    "size": 6929,
+    "mtime_ns": 1791423826289648376
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00007-46303f6c-cb0b-4140-8b85-9301f992e0d2.metadata.json": {
+    "size": 7925,
+    "mtime_ns": 1791423826315555114
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00008-bad46900-c141-45a1-9330-849e2f0889be.metadata.json": {
+    "size": 8921,
+    "mtime_ns": 1791423826410708647
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00009-9d3f8f32-bc32-4c6f-a3f1-76783223b66c.metadata.json": {
+    "size": 9918,
+    "mtime_ns": 1791423826436814221
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00010-787c32cd-398f-4b6b-b459-d5dc29f1988f.metadata.json": {
+    "size": 10917,
+    "mtime_ns": 1791423826575571057
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00011-d3133725-bd06-49e2-ab94-6ed016d5a5ff.metadata.json": {
+    "size": 11915,
+    "mtime_ns": 1791423826605608677
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00012-d0f2fbe7-673e-45be-b932-582cdbdc6e09.metadata.json": {
+    "size": 12913,
+    "mtime_ns": 1791423826698763540
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/00013-155a7f1f-7801-48cc-8ba6-42e1346d59f1.metadata.json": {
+    "size": 13912,
+    "mtime_ns": 1791423826727959076
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-480e-72e5-8fde-a7e86aeaf05c-m0.avro": {
+    "size": 3729,
+    "mtime_ns": 1791423825936354903
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4827-7136-97b2-c3095b485f47-m0.avro": {
+    "size": 3794,
+    "mtime_ns": 1791423825964920271
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-484f-77bd-b3a3-785852826c0b-m0.avro": {
+    "size": 3703,
+    "mtime_ns": 1791423826004072861
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4867-74e8-bc26-d23e9b7e697a-m0.avro": {
+    "size": 3794,
+    "mtime_ns": 1791423826028969558
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4917-75fd-8368-85d17382e57c-m0.avro": {
+    "size": 3704,
+    "mtime_ns": 1791423826204756564
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4961-75c6-aeb3-0b0d86bbe89b-m0.avro": {
+    "size": 3704,
+    "mtime_ns": 1791423826278371945
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-497a-73e4-8042-9bf555a0fa34-m0.avro": {
+    "size": 3794,
+    "mtime_ns": 1791423826303389225
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-49d9-729a-9c92-568ae0a449f2-m0.avro": {
+    "size": 3734,
+    "mtime_ns": 1791423826398664049
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-49f3-72b4-9dd5-be88780d2853-m0.avro": {
+    "size": 3729,
+    "mtime_ns": 1791423826424748164
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4a7d-73ae-a505-9bd019ce83b8-m0.avro": {
+    "size": 3735,
+    "mtime_ns": 1791423826564178501
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4a9c-77d3-b733-cfc71f278667-m0.avro": {
+    "size": 3793,
+    "mtime_ns": 1791423826594895164
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4af8-7069-baee-4a355b5befdf-m0.avro": {
+    "size": 3742,
+    "mtime_ns": 1791423826686931859
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/01a1192e-4b14-754f-bdf2-da8ab2583700-m0.avro": {
+    "size": 3734,
+    "mtime_ns": 1791423826715420936
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-1337401792315127214-0-01a1192e-4b14-754f-bdf2-da8ab2583700.avro": {
+    "size": 4632,
+    "mtime_ns": 1791423826720826442
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-2218244593460874590-0-01a1192e-49d9-729a-9c92-568ae0a449f2.avro": {
+    "size": 3425,
+    "mtime_ns": 1791423826403845722
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-2498462811677937375-0-01a1192e-484f-77bd-b3a3-785852826c0b.avro": {
+    "size": 2216,
+    "mtime_ns": 1791423826008764158
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-2553113775396751632-0-01a1192e-4af8-7069-baee-4a355b5befdf.avro": {
+    "size": 4391,
+    "mtime_ns": 1791423826692146699
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-2839654317343131494-0-01a1192e-4a9c-77d3-b733-cfc71f278667.avro": {
+    "size": 4150,
+    "mtime_ns": 1791423826599677919
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-3369224145332188512-0-01a1192e-480e-72e5-8fde-a7e86aeaf05c.avro": {
+    "size": 1718,
+    "mtime_ns": 1791423825942873411
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-4511708886597440173-0-01a1192e-49f3-72b4-9dd5-be88780d2853.avro": {
+    "size": 3666,
+    "mtime_ns": 1791423826429944087
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-4788567429337910787-0-01a1192e-4867-74e8-bc26-d23e9b7e697a.avro": {
+    "size": 2458,
+    "mtime_ns": 1791423826033791022
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-6146568808413986239-0-01a1192e-4917-75fd-8368-85d17382e57c.avro": {
+    "size": 2700,
+    "mtime_ns": 1791423826209804237
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-7904197491598339430-0-01a1192e-4827-7136-97b2-c3095b485f47.avro": {
+    "size": 1975,
+    "mtime_ns": 1791423825969705611
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-8236682926982025446-0-01a1192e-4961-75c6-aeb3-0b0d86bbe89b.avro": {
+    "size": 2942,
+    "mtime_ns": 1791423826282897492
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-8728178643976692743-0-01a1192e-497a-73e4-8042-9bf555a0fa34.avro": {
+    "size": 3184,
+    "mtime_ns": 1791423826308973523
+  },
+  "warehouse/d_bill_actions_895e0f34875f/lifecycle/metadata/snap-9034421575793441176-0-01a1192e-4a7d-73ae-a505-9bd019ce83b8.avro": {
+    "size": 3909,
+    "mtime_ns": 1791423826569096382
+  }
+}
