@@ -163,6 +163,13 @@ impl Engine {
         &self,
         inputs: &BTreeMap<Id, VersionRef>,
     ) -> Result<InputCoverage> {
+        Ok(self.capture_inputs_with_memory(inputs).await?.0)
+    }
+
+    pub(super) async fn capture_inputs_with_memory(
+        &self,
+        inputs: &BTreeMap<Id, VersionRef>,
+    ) -> Result<(InputCoverage, tokio::sync::OwnedSemaphorePermit)> {
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
@@ -218,8 +225,18 @@ impl Engine {
             generations,
         };
         check_relationships(&coverage, &relationships)?;
-        metadata_size(&coverage, budget.limits.max_metadata_bytes)?;
-        Ok(coverage)
+        let bytes = metadata_size(&coverage, budget.limits.max_metadata_bytes)?
+            .saturating_mul(4)
+            .saturating_add(4096);
+        // Transfer the capture's existing allowance instead of making the
+        // caller reserve another maximum while capture is still decoding.
+        let mut memory = Arc::try_unwrap(memory).map_err(|_| capacity())?;
+        if bytes > memory.num_permits() {
+            memory.merge(budget.reserve(bytes - memory.num_permits())?);
+        } else {
+            drop(memory.split(memory.num_permits() - bytes));
+        }
+        Ok((coverage, memory))
     }
 
     pub(super) async fn lock_inputs(&self, datasets: BTreeSet<Id>) -> Vec<OwnedMutexGuard<()>> {

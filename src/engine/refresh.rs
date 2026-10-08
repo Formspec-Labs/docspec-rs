@@ -58,8 +58,17 @@ impl Engine {
     ) -> Result<PhaseResult> {
         #[cfg(feature = "test-util")]
         work_started("admission");
-        let coverage = self.capture_inputs_admitted(&spec.inputs()).await?;
         let budget = &self.inner.lifecycle.budget;
+        let view = self.inner.lifecycle.open(&spec.dataset).await?;
+        let _memory = self.admission_memory(&view, &spec.operation).await?;
+        let coverage =
+            if let Some(captured) = self.admitted_dependencies(&view, &spec.operation).await? {
+                captured.coverage.ok_or_else(invalid)?
+            } else {
+                // Earlier requests predate protected admission and retain their
+                // existing capture behavior while physical cleanup stays disabled.
+                self.capture_inputs_admitted(&spec.inputs()).await?
+            };
         let loaded = load_inputs(&coverage, budget).await?;
         if let RefreshTransform::Aggregate(aggregate) = &spec.transform {
             aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)

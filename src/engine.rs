@@ -22,6 +22,7 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock};
 
+mod admission;
 mod backfill;
 #[doc(inline)]
 pub use backfill::BackfillPlan;
@@ -791,29 +792,49 @@ impl Engine {
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("admission");
-                let directory = self.reserve_attempt(spec, operation, "admission").await?;
+                let view = lifecycle.open(spec.dataset()).await?;
+                let _memory = self.admission_memory(&view, spec.operation()).await?;
+                let captured = self
+                    .admitted_dependencies(&view, spec.operation())
+                    .await?
+                    .unwrap_or_default();
                 let inputs = spec.inputs();
                 let size = inputs
-                    .values()
-                    .try_fold(0u64, |sum, input| -> Result<u64> {
-                        Ok(sum.saturating_add(std::fs::metadata(&input.path)?.len()))
+                    .iter()
+                    .try_fold(0u64, |sum, (name, input)| -> Result<u64> {
+                        // Reused managed inputs consume no new input-copy space;
+                        // retain the existing estimate for output/intermediate work.
+                        let bytes = if let Some(object) = captured.inputs.get(name) {
+                            object.bytes.saturating_mul(2)
+                        } else {
+                            std::fs::metadata(&input.path)?.len().saturating_mul(3)
+                        };
+                        Ok(sum.saturating_add(bytes))
                     })?;
                 let available = fs2::available_space(&self.inner.root)?;
-                if available
-                    < size
-                        .saturating_mul(3)
-                        .saturating_add(lifecycle.budget.limits.scratch_bytes)
-                {
+                if available < size.saturating_add(lifecycle.budget.limits.scratch_bytes) {
                     return Err(Error::refusal(
                         "disk_capacity",
                         "input, output and declared scratch do not fit available disk",
                     ));
                 }
+                let directory = if captured.inputs.len() == inputs.len() {
+                    None
+                } else {
+                    Some(self.reserve_attempt(spec, operation, "admission").await?)
+                };
                 let mut outputs = Vec::new();
                 for (name, input) in inputs {
+                    if let Some(retained) = captured.inputs.get(&name) {
+                        outputs.push(retained.clone());
+                        continue;
+                    }
                     let owner = spec.dataset().clone();
                     let source = PathBuf::from(input.path);
-                    let destination = directory.join(format!("{name}.parquet"));
+                    let destination = directory
+                        .as_ref()
+                        .expect("unretained input reserved a copy directory")
+                        .join(format!("{name}.parquet"));
                     let retained = lifecycle
                         .budget
                         .blocking(move || {
@@ -917,8 +938,13 @@ impl Engine {
             let request = fingerprint(spec)?;
             let lock = self.lock(spec.dataset()).await;
             let lifecycle = &self.inner.lifecycle;
-            let operation = {
-                let _guard = lock.lock().await;
+            let mut prepared: Option<admission::PreparedAdmission> = None;
+            let operation = loop {
+                let datasets = prepared.as_ref().map_or_else(
+                    || std::collections::BTreeSet::from([spec.dataset().clone()]),
+                    |prepared| prepared.datasets(spec.dataset()),
+                );
+                let guards = self.lock_inputs(datasets).await;
                 let view = lifecycle.open(spec.dataset()).await?;
                 let old: Option<Operation> = lifecycle
                     .get(&view, &format!("operation/{}", spec.operation()))
@@ -933,6 +959,16 @@ impl Engine {
                     return Ok(result);
                 }
                 self.check_not_abandoned(&view, spec.operation()).await?;
+                let decoding = if old.is_none() {
+                    Some(
+                        lifecycle
+                            .rows(&view)
+                            .await?
+                            .reserve_decoded(&lifecycle.budget, &["authority"])?,
+                    )
+                } else {
+                    None
+                };
                 let mut authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
                 if authority.definition.is_empty() {
@@ -947,8 +983,36 @@ impl Engine {
                     .await?;
                 if let Some(old) = old {
                     check_authority(&authority, &old)?;
-                    old
+                    break old;
                 } else {
+                    let Some(protected) = &prepared else {
+                        // Protect the currently selected predecessor even for an
+                        // unbased rebuild: selection retains that history edge.
+                        let base = authority.release.take();
+                        let boundary = view.table.metadata_location_result()?.to_owned();
+                        drop(guards);
+                        prepared = Some(
+                            self.protect_admission(
+                                spec,
+                                boundary,
+                                base,
+                                decoding.expect("new admission reserved decoding"),
+                            )
+                            .await?,
+                        );
+                        continue;
+                    };
+                    if !protected.is_current(&view)? {
+                        // Repeat capture and eligibility against fresh state;
+                        // committed owner grants remain reusable. A compatible
+                        // concurrent operation must not force a caller retry.
+                        prepared = None;
+                        continue;
+                    }
+                    if let Some(coverage) = &protected.dependencies.coverage {
+                        self.guard_inputs(coverage, None, RefreshPolicy::Captured)
+                            .await?;
+                    }
                     let composition = matches!(spec, OperationRequest::Schema(_));
                     let boundary = if composition {
                         authority
@@ -997,10 +1061,12 @@ impl Engine {
                     if !composition {
                         records.push(record("authority", &authority)?);
                     }
+                    protected.records(&view, spec, &mut records)?;
                     lifecycle.commit(&view, records).await?;
-                    operation
+                    break operation;
                 }
             };
+            drop(prepared);
 
             // Locators can change on a material-identical retry. Preserve the admitted
             // request as execution provenance while using caller locators for missing copies.

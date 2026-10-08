@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 #[derive(Debug)]
 pub(in crate::engine) struct ReferenceObjects {
     pub(in crate::engine) objects: Vec<ObjectRef>,
-    _memory: Arc<tokio::sync::OwnedSemaphorePermit>,
+    _memory: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Engine {
@@ -33,7 +33,7 @@ impl Engine {
         if releases.is_empty() {
             return Ok(ReferenceObjects {
                 objects: Vec::new(),
-                _memory: Arc::new(budget.reserve(0)?),
+                _memory: budget.reserve(0)?,
             });
         }
         // Bound even a collection of tiny roots before traversal or external
@@ -43,10 +43,10 @@ impl Engine {
             return Err(capacity());
         }
         inputs::metadata_size(&releases, limit)?;
-        // Same admission as inspection: identities/queue, one decoded release,
-        // and one decoded native object. Keep only the returned objects' charge
-        // afterward, so separate small collections can coexist under this limit.
-        let memory = Arc::new(budget.reserve(limit.saturating_mul(8))?);
+        // Bound identities and queue here; each external metadata decode admits
+        // its known serialized size separately. Tiny roots must not reserve the
+        // configured maximum for several decoders that are never used together.
+        let mut memory = budget.reserve(limit)?;
         let mut inventory = Inventory::collecting(limit)?;
         for release in releases {
             tokio::task::consume_budget().await;
@@ -58,18 +58,17 @@ impl Engine {
             };
             inventory.release_pin(release, &origin)?;
         }
-        inventory.expand(budget, &memory).await?;
+        inventory.expand(budget).await?;
         let objects = inventory.into_references()?;
         let bytes = objects.iter().fold(0usize, |bytes, object| {
             bytes.saturating_add(reference_bytes(object))
         });
-        // Awaited decoders have released their clones. Split the existing permit
-        // instead of briefly admitting a second allocation for the same objects.
-        let mut memory = Arc::try_unwrap(memory).map_err(|_| capacity())?;
+        // Split the existing permit instead of briefly admitting another
+        // allocation for the same returned objects.
         let retained = memory.split(bytes).ok_or_else(capacity)?;
         Ok(ReferenceObjects {
             objects,
-            _memory: Arc::new(retained),
+            _memory: retained,
         })
     }
 
@@ -105,9 +104,10 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
         let limit = budget.limits.max_metadata_bytes;
-        // Candidate/visited state, one decoded row and one decoded external
-        // metadata object are admitted together. Native readers admit separately.
-        let memory = Arc::new(budget.reserve(limit.saturating_mul(8))?);
+        // One bounded graph allowance plus decoded lifecycle-row copies.
+        // External metadata and native readers now admit separately in expand;
+        // do not reserve that decoder's old maximum here as well.
+        let _memory = budget.reserve(limit.saturating_mul(5))?;
         let mut inventory = Inventory::new(objects, limit)?;
         // Engine::open owns a flat embedded catalog. The maintained SQL adapter
         // scans all namespace rows per listing; recurse here and cost becomes
@@ -178,8 +178,9 @@ impl Engine {
                 }
                 if key.starts_with("reference-binding/") {
                     let binding: super::owners::ReferenceBinding = decode(json)?;
-                    let required =
-                        super::owners::validate_binding(&rows, &view, key, revision, &binding)?;
+                    let required = super::owners::validate_binding(
+                        &rows, &view, key, revision, &binding, limit,
+                    )?;
                     inventory.binding(binding, required)?;
                     continue;
                 }
@@ -216,7 +217,7 @@ impl Engine {
                     continue;
                 }
                 inventory.record(key, json, &rows, &origin)?;
-                inventory.expand(budget, &memory).await?;
+                inventory.expand(budget).await?;
             }
         }
         boundaries.sort_by(|left, right| left.table.cmp(&right.table));
@@ -253,6 +254,27 @@ fn charge_namespaces(inventory: &mut Inventory, namespaces: &[NamespaceIdent]) -
     Ok(())
 }
 
+/// Collects only references declared directly by one retained typed claim.
+///
+/// The caller admits decoding/returned storage. Paths without exact identities
+/// are intentionally excluded: request admission supplies qualified managed inputs
+/// in its separate typed dependency record. No external metadata is opened here.
+pub(super) fn reference_roots(
+    rows: &crate::catalog::SnapshotRows,
+    key: &str,
+    json: &str,
+    origin: &RetentionBlocker,
+    limit: usize,
+) -> Result<Vec<ObjectRef>> {
+    if json.len() > limit {
+        return Err(capacity());
+    }
+    let mut inventory = Inventory::collecting(limit)?;
+    inventory.shallow = true;
+    inventory.record(key, json, rows, origin)?;
+    inventory.into_references()
+}
+
 enum Expansion {
     Release,
     Native(Option<(Option<i64>, i32)>),
@@ -280,7 +302,11 @@ struct VisitedMetadata {
 struct GrantClaim {
     reference: super::owners::OwnerProtectionRef,
     consumer: Id,
-    required: BTreeMap<String, ObjectRef>,
+    bindings: Vec<usize>,
+}
+
+struct BindingClaim {
+    required: BTreeMap<String, (ObjectRef, bool)>,
 }
 
 struct Inventory {
@@ -289,6 +315,7 @@ struct Inventory {
     // these must resolve to retained exact identities after the whole closure is
     // visited, independent of expansion order. None preserves candidate inspection.
     required_paths: Option<BTreeSet<String>>,
+    shallow: bool,
     // Metadata identity and interpretation are retained; payload inventories are
     // consumed one at a time. A second use still checks its exact declaration.
     visited: BTreeMap<String, VisitedMetadata>,
@@ -299,6 +326,10 @@ struct Inventory {
     // Group small consumer requirements by owner/token. A second owner pass
     // checks each grant once without retaining every owner's full grant payloads.
     claims: BTreeMap<Id, BTreeMap<String, GrantClaim>>,
+    bindings: Vec<BindingClaim>,
+    // Only the exact same consumer/token set may share coverage obligations.
+    // Claim key/revision/digest have already been checked against their own rows.
+    binding_scopes: BTreeMap<Id, BTreeMap<Vec<super::owners::OwnerProtectionRef>, usize>>,
     bytes: usize,
     limit: usize,
     metadata_bytes: usize,
@@ -310,10 +341,13 @@ impl Inventory {
         let mut result = Self {
             candidates: BTreeMap::new(),
             required_paths: None,
+            shallow: false,
             visited: BTreeMap::new(),
             pending: Vec::new(),
             pending_native: Vec::new(),
             claims: BTreeMap::new(),
+            bindings: Vec::new(),
+            binding_scopes: BTreeMap::new(),
             bytes: 0,
             limit,
             metadata_bytes: 0,
@@ -352,6 +386,42 @@ impl Inventory {
         binding: super::owners::ReferenceBinding,
         required: Vec<ObjectRef>,
     ) -> Result<()> {
+        let existing = self
+            .binding_scopes
+            .get(&binding.consumer)
+            .and_then(|scopes| scopes.get(&binding.protections))
+            .copied();
+        let index = if let Some(index) = existing {
+            index
+        } else {
+            let bytes =
+                inputs::metadata_size(&(&binding.consumer, &binding.protections), self.limit)?;
+            self.charge(bytes.saturating_mul(4).saturating_add(512))?;
+            let index = self.bindings.len();
+            self.bindings.push(BindingClaim {
+                required: BTreeMap::new(),
+            });
+            self.binding_scopes
+                .entry(binding.consumer.clone())
+                .or_default()
+                .insert(binding.protections.clone(), index);
+            index
+        };
+        for object in required {
+            if let Some((previous, _)) = self.bindings[index].required.get(&object.path) {
+                if previous != &object {
+                    return Err(invalid_inventory("owner claim identity differs"));
+                }
+            } else {
+                self.charge(reference_bytes(&object).saturating_add(object.path.len()))?;
+                self.bindings[index]
+                    .required
+                    .insert(object.path.clone(), (object, false));
+            }
+        }
+        if existing.is_some() {
+            return Ok(());
+        }
         for reference in binding.protections {
             if self
                 .claims
@@ -361,25 +431,9 @@ impl Inventory {
                 let bytes = inputs::metadata_size(&(&reference, &binding.consumer), self.limit)?;
                 self.charge(bytes.saturating_mul(4).saturating_add(512))?;
             }
-            let mut added = Vec::new();
-            for object in required
-                .iter()
-                .filter(|object| object.owner == reference.owner)
-            {
-                let old = self
-                    .claims
-                    .get(&reference.owner)
-                    .and_then(|claims| claims.get(&reference.token))
-                    .and_then(|claim| claim.required.get(&object.path));
-                if let Some(old) = old {
-                    if old != object {
-                        return Err(invalid_inventory("owner claim identity differs"));
-                    }
-                } else {
-                    self.charge(reference_bytes(object).saturating_add(object.path.len()))?;
-                    added.push(object.clone());
-                }
-            }
+            // Decode each token once. Only scopes actually naming that token
+            // can use it; grants may jointly cover a scope's required objects.
+            self.charge(32)?;
             let claim = self
                 .claims
                 .entry(reference.owner.clone())
@@ -388,22 +442,20 @@ impl Inventory {
                 .or_insert_with(|| GrantClaim {
                     reference: reference.clone(),
                     consumer: binding.consumer.clone(),
-                    required: BTreeMap::new(),
+                    bindings: Vec::new(),
                 });
             if claim.reference != reference || claim.consumer != binding.consumer {
                 return Err(invalid_inventory(
                     "owner token has conflicting consumer bindings",
                 ));
             }
-            for object in added {
-                claim.required.insert(object.path.clone(), object);
-            }
+            claim.bindings.push(index);
         }
         Ok(())
     }
 
     async fn check_bindings(
-        &self,
+        &mut self,
         lifecycle: &crate::catalog::Lifecycle,
         boundaries: &[RetentionBoundary],
     ) -> Result<()> {
@@ -427,17 +479,22 @@ impl Inventory {
             let rows = lifecycle.rows(&view).await?;
             for (token, claim) in claims {
                 tokio::task::consume_budget().await;
-                let (revision, _, grant) = rows
-                    .get_record::<super::owners::OwnerProtection>(token)?
-                    .ok_or_else(|| invalid_inventory("consumer refers to a missing owner token"))?;
+                let (revision, grant) = super::owners::read_retained::<
+                    super::owners::OwnerProtection,
+                >(&rows, token, self.limit)?
+                .ok_or_else(|| invalid_inventory("consumer refers to a missing owner token"))?;
                 super::owners::validate_grant(&view, token, revision, &grant)?;
-                super::owners::validate_reference(
-                    &claim.reference,
-                    &grant,
-                    &claim.consumer,
-                    claim.required.values(),
-                )?;
+                super::owners::validate_reference(&claim.reference, &grant, &claim.consumer)?;
+                for index in &claim.bindings {
+                    super::owners::cover_required(
+                        self.bindings[*index].required.values_mut(),
+                        &grant,
+                    )?;
+                }
             }
+        }
+        for binding in &self.bindings {
+            super::owners::check_covered(binding.required.values())?;
         }
         Ok(())
     }
@@ -469,6 +526,9 @@ impl Inventory {
     }
 
     fn path(&mut self, path: &str, origin: &RetentionBlocker) -> Result<()> {
+        if self.shallow {
+            return Ok(());
+        }
         if let Some(paths) = &self.required_paths {
             if !self.candidates.contains_key(path) && !paths.contains(path) {
                 self.charge(path.len().saturating_add(128))?;
@@ -556,6 +616,9 @@ impl Inventory {
                 complete: false,
             },
         );
+        if self.shallow {
+            return Ok(());
+        }
         let pending = Pending {
             object: object.clone(),
             kind,
@@ -799,10 +862,22 @@ impl Inventory {
                     .ok_or_else(unknown_dependencies)?;
                 self.release_pin(&release, origin)?;
             }
+        } else if key.starts_with("request-dependencies/") {
+            let dependencies: crate::engine::admission::AdmissionDependencies = decode(json)?;
+            if let Some(base) = &dependencies.base {
+                self.release(&base.manifest, origin)?;
+            }
+            if let Some(coverage) = &dependencies.coverage {
+                self.coverage(coverage, origin)?;
+            }
+            for object in dependencies.inputs.values() {
+                self.object(object, origin)?;
+            }
         } else if key.starts_with("request/") {
             let request: OperationRequest = decode(json)?;
-            if !rows.contains_key(&format!("result/{}", request.operation()))
-                && !rows.contains_key(&format!("abandoned/{}", request.operation()))
+            if self.shallow
+                || (!rows.contains_key(&format!("result/{}", request.operation()))
+                    && !rows.contains_key(&format!("abandoned/{}", request.operation())))
             {
                 for input in request.inputs().values() {
                     self.path(&input.path, origin)?;
@@ -823,7 +898,18 @@ impl Inventory {
                 self.native(object, origin)?;
             }
         } else if key.starts_with("generation/") {
-            self.seal(&decode(json)?, origin)?;
+            let seal: GenerationSeal = decode(json)?;
+            if self.shallow
+                && (key != format!("generation/{}", seal.generation)
+                    || origin.table != crate::catalog::lifecycle_ident(&seal.family).to_string()
+                    || seal.members.is_empty()
+                    || seal.members.iter().any(|(dataset, version)| {
+                        dataset != &version.dataset || dataset != &version.manifest.owner
+                    }))
+            {
+                return Err(invalid_inventory("generation seal identity differs"));
+            }
+            self.seal(&seal, origin)?;
         } else if key == "family-members" {
             let _: BTreeSet<Id> = decode(json)?;
         } else if key.starts_with("succession/") {
@@ -872,11 +958,7 @@ impl Inventory {
         Ok(())
     }
 
-    async fn expand(
-        &mut self,
-        budget: &Budget,
-        memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
-    ) -> Result<()> {
+    async fn expand(&mut self, budget: &Budget) -> Result<()> {
         while let Some(Pending {
             object,
             kind,
@@ -891,10 +973,17 @@ impl Inventory {
             {
                 continue;
             }
+            // The immutable descriptor supplies its size before decoding. The
+            // worker retains this allowance if its waiting caller is canceled.
+            let bytes = usize::try_from(object.bytes).map_err(|_| capacity())?;
+            if bytes > budget.limits.max_metadata_bytes {
+                return Err(capacity());
+            }
+            let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
             match kind {
                 Expansion::Release => {
                     let Strict(dataset): Strict<DatasetPin> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, memory)
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
                             .await?;
                     if dataset.dataset != object.owner {
                         return Err(invalid_inventory("release owner differs"));
@@ -903,7 +992,7 @@ impl Inventory {
                 }
                 Expansion::Native(_) => {
                     let Strict(metadata): Strict<TableMetadata> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, memory)
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
                             .await?;
                     let actual = (metadata.current_snapshot_id(), metadata.current_schema_id());
                     let binding = self
@@ -1024,7 +1113,7 @@ fn reference_bytes(object: &ObjectRef) -> usize {
         .saturating_add(256)
 }
 
-fn validate_object(object: &ObjectRef) -> Result<()> {
+pub(super) fn validate_object(object: &ObjectRef) -> Result<()> {
     let normalized: PathBuf = Path::new(&object.path).components().collect();
     if !Path::new(&object.path).is_absolute()
         || normalized.to_str() != Some(object.path.as_str())

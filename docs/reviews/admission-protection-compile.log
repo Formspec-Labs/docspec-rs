@@ -1,0 +1,14 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: associated function `empty` is never used
+  --> src/engine/retention/owners.rs:58:30
+   |
+57 | impl ReferenceProtections {
+   | ------------------------- associated function in this implementation
+58 |     pub(in crate::engine) fn empty(consumer: &Id, budget: &Budget) -> Result<Self> {
+   |                              ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (lib) generated 1 warning
+warning: `docspec` (lib test) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized] target(s) in 25.56s

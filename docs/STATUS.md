@@ -1,5 +1,61 @@
 # Implementation and qualification status
 
+## Protected request admission and managed input reuse
+
+New Build, Update, Refresh, Schema and Backfill requests acquire protection for
+their exact dependencies before acknowledging the request. This includes the
+selected predecessor, exact backfill base, captured refresh inputs and every
+member of a captured producer seal. Owner acquisition runs outside consumer
+locks. The consumer then rechecks its metadata boundary and eligibility before
+committing the request, dependency capture and protection bindings together.
+Interrupted handoffs retain the owner grants; retries reuse their exact identities.
+If another compatible operation changes the consumer during preparation, admission
+restarts from fresh state and rechecks its guards. Independent backfills can still
+proceed; incompatible source or definition changes continue to refuse.
+
+Inputs already retained by this workspace resolve through the owner's recorded
+creation evidence. Admission preserves the original owner and file reference,
+without another input copy or digest pass. Provisional files refuse before request
+acknowledgment. External files retain the existing copy-and-hash path when that
+work is actually missing. Refresh reuses its admitted producer coverage. The disk
+preflight excludes the input-copy allowance for reused managed files; retained
+source bytes still exist and count toward total storage.
+
+Bindings can combine distinct grants from the same owner. Inspection shares work
+only for identical consumer/token sets and requires exact object coverage from
+that set. Later local propagation can reuse immutable committed references without
+reopening owners. Acquiring a new scope still requires an owner commit first.
+
+Review and the existing small-memory fixture caught duplicate maximum metadata
+reservations. Cached rows now supply decoded-record charges from their serialized
+sizes; explicit-root traversal reserves graph state separately from each known-size
+external decode. Capture transfers its existing allowance to admission. This keeps
+the existing 256 MiB fixture usable for based reuse and Refresh without raising its
+limits. These are admission-accounting and tested code-path improvements, not
+measured whole-process memory or throughput results.
+
+The [focused admission checks](reviews/admission-protection-focused.log) and
+[final engine checks](reviews/admission-protection-unit-final.log) passed. They
+cover native atomic bindings, lost request responses, restart/reuse, Backfill,
+complete producer seals, same-owner grant unions and missing-scope refusal. The
+earlier [failed resource check](reviews/admission-protection-unit-focused.log)
+and [initial gate failure](reviews/admission-protection-check.log) remain retained.
+The latter caught concurrent backfills rejecting one another at admission; the
+[targeted concurrency suite](reviews/admission-protection-concurrency.log) passed
+after the fresh-decision correction. The [independent review](reviews/admission-protection-review.md)
+approves this increment with all findings closed. The
+[final repository gate](reviews/admission-protection-check-final.log) passed,
+including formatting, strict all-target linting and the complete test suite.
+The [resource snapshot](reviews/admission-protection-resources.json) separates
+development-cache allocation from shared-volume free space; it is not a peak.
+
+This checkpoint covers initial request admission. Independently retained phases,
+readbacks, later sibling composition, actual selection predecessors and observed
+input heads still need binding integration. Grants remain permanently active;
+legacy histories still require conservative inventory. Physical cleanup, token
+retirement, compaction, fenced restore, hosted qualification and the remaining
+R1–R7 work remain unfinished. No corpus benchmark or cleanup was performed here.
+
 ## Durable owner protection and generation seals
 
 Generation sealing now acquires immutable protection from each actual file owner
@@ -38,9 +94,9 @@ last review-requested assertions without repeating the full integration suite. T
 development cache from shared-volume availability; it is not a peak measurement.
 Original failed compilation and capacity-test logs remain beside the passing logs.
 
-This is the acquisition primitive and its generation-seal integration. Refresh
-request/admission, independently retained phases/readbacks, selection progress,
-backfill and managed input locators still need protection integration. Tokens
+This was the acquisition primitive and its generation-seal integration. The
+request-admission follow-up is described above. Independently retained
+phases/readbacks and selection progress still need protection integration. Tokens
 remain permanently active here. Retry checks validate tokens and direct member
 manifests, without reconstructing the complete transitive closure each time.
 Token retirement needs separate complete claim-lifetime rules. Legacy histories

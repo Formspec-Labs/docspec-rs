@@ -235,7 +235,7 @@ fn native_paths_require_exact_identities_discovered_anywhere_in_the_closure() {
 async fn native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar() {
     let root = tempfile::tempdir().unwrap();
     let budget = Budget::new(limits()).unwrap();
-    let memory = Arc::new(budget.reserve(limits().max_metadata_bytes * 8).unwrap());
+    let _memory = budget.reserve(limits().max_metadata_bytes).unwrap();
     let sidecar = object(root.path(), "sidecar_owner", "statistics.puffin");
     let schema = iceberg::spec::Schema::builder().build().unwrap();
     let metadata = storage::fresh_metadata(schema, root.path())
@@ -259,7 +259,7 @@ async fn native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar
     native.digest = blake3::hash(&bytes).to_hex().to_string();
     let mut inventory = Inventory::collecting(limits().max_metadata_bytes).unwrap();
     inventory.native(&native, &origin()).unwrap();
-    inventory.expand(&budget, &memory).await.unwrap();
+    inventory.expand(&budget).await.unwrap();
     assert_eq!(inventory.metadata_objects_read, 1);
     assert!(
         inventory
@@ -275,7 +275,7 @@ async fn native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar
     );
     let mut inventory = Inventory::collecting(limits().max_metadata_bytes).unwrap();
     inventory.native(&native, &origin()).unwrap();
-    inventory.expand(&budget, &memory).await.unwrap();
+    inventory.expand(&budget).await.unwrap();
     inventory.object(&sidecar, &origin()).unwrap();
     let references = inventory.into_references().unwrap();
     assert!(references.contains(&native));

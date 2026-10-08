@@ -1,0 +1,7 @@
+{
+  "observed_at": "2026-10-08T22:10:52.310308+00:00",
+  "debug_cache_allocated_bytes": 8591007744,
+  "shared_volume_available_bytes": 17628872704,
+  "scope": "Development cache and shared-volume snapshot during small correctness checks; not peak disk or corpus throughput.",
+  "corpus": "No corpus run or data cleanup; retained inputs, outputs and failed attempts unchanged by this increment."
+}

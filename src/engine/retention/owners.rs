@@ -18,7 +18,7 @@ pub(super) struct OwnerProtection {
     pub objects: Vec<ObjectRef>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OwnerProtectionRef {
     pub owner: Id,
@@ -48,11 +48,65 @@ pub(super) struct UnavailableObject {
 }
 
 pub(in crate::engine) struct ReferenceProtections {
+    consumer: Id,
     references: Vec<OwnerProtectionRef>,
+    limit: usize,
     _memory: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl ReferenceProtections {
+    pub(in crate::engine) fn empty(consumer: &Id, budget: &Budget) -> Result<Self> {
+        Ok(Self {
+            consumer: consumer.clone(),
+            references: Vec::new(),
+            limit: budget.limits.max_metadata_bytes,
+            _memory: budget.reserve(consumer.as_str().len().saturating_add(4096))?,
+        })
+    }
+
+    /// Combines already acquired scopes without writing grants or reopening metadata.
+    pub(in crate::engine) fn merge(&mut self, other: Self) -> Result<()> {
+        if self.consumer != other.consumer
+            || self.limit != other.limit
+            || !Arc::ptr_eq(self._memory.semaphore(), other._memory.semaphore())
+        {
+            return Err(invalid());
+        }
+        let mut bytes = inputs::metadata_size(&(&self.consumer, &self.references), self.limit)?;
+        for reference in &other.references {
+            match self
+                .references
+                .binary_search_by(|candidate| reference_order(candidate, reference))
+            {
+                Ok(index) if self.references[index] != *reference => return Err(invalid()),
+                Ok(_) => {}
+                Err(_) => {
+                    bytes = bytes.saturating_add(inputs::metadata_size(reference, self.limit)? + 1);
+                    if bytes > self.limit {
+                        return Err(capacity());
+                    }
+                }
+            }
+        }
+        self._memory.merge(other._memory);
+        self.references.extend(other.references);
+        self.references.sort_unstable_by(reference_order);
+        self.references.dedup();
+        // Release duplicate/transient state charges after the in-place merge.
+        self.retain_memory()?;
+        Ok(())
+    }
+
+    fn retain_memory(&mut self) -> Result<()> {
+        let bytes = inputs::metadata_size(&(&self.consumer, &self.references), self.limit)?
+            .saturating_mul(4)
+            .saturating_add(4096);
+        if self._memory.num_permits() > bytes {
+            drop(self._memory.split(self._memory.num_permits() - bytes));
+        }
+        Ok(())
+    }
+
     pub(in crate::engine) fn binding(
         &self,
         consumer: &Id,
@@ -60,6 +114,12 @@ impl ReferenceProtections {
         key: &str,
         value: &serde_json::Value,
     ) -> Result<(String, serde_json::Value)> {
+        if consumer != &self.consumer
+            || &crate::catalog::lifecycle_ident(consumer) != view.table.identifier()
+        {
+            return Err(invalid());
+        }
+        inputs::metadata_size(value, self.limit)?;
         record(
             binding_key(key),
             ReferenceBinding {
@@ -71,6 +131,10 @@ impl ReferenceProtections {
             },
         )
     }
+}
+
+fn reference_order(left: &OwnerProtectionRef, right: &OwnerProtectionRef) -> std::cmp::Ordering {
+    (&left.owner, &left.token).cmp(&(&right.owner, &right.token))
 }
 
 pub(super) fn binding_key(key: &str) -> String {
@@ -136,10 +200,17 @@ pub(super) fn validate_binding(
     key: &str,
     revision: i64,
     binding: &ReferenceBinding,
+    limit: usize,
 ) -> Result<Vec<ObjectRef>> {
-    let (claim_revision, _, claim) = rows
-        .get_record::<serde_json::Value>(&binding.key)?
+    let (claim_revision, claim_json) = rows
+        .prefix(&binding.key)
+        .find(|(key, _, _)| *key == binding.key)
+        .map(|(_, revision, json)| (revision, json))
         .ok_or_else(invalid)?;
+    if claim_json.len() > limit {
+        return Err(capacity());
+    }
+    let claim: serde_json::Value = serde_json::from_str(claim_json)?;
     if key != binding_key(&binding.key)
         || binding.revision != revision
         || revision != claim_revision
@@ -150,7 +221,7 @@ pub(super) fn validate_binding(
         || binding
             .protections
             .windows(2)
-            .any(|pair| pair[0].owner >= pair[1].owner)
+            .any(|pair| reference_order(&pair[0], &pair[1]) != std::cmp::Ordering::Less)
         || binding
             .protections
             .iter()
@@ -158,24 +229,18 @@ pub(super) fn validate_binding(
     {
         return Err(invalid());
     }
-    // Seals are the first supported consumer. Derive their required roots from
-    // the committed claim, never from the supplied protection list itself.
-    let seal: GenerationSeal = serde_json::from_value(claim)?;
-    if binding.key != format!("generation/{}", seal.generation)
-        || binding.consumer != seal.family
-        || seal.members.is_empty()
-        || seal.members.iter().any(|(dataset, version)| {
-            dataset != &version.dataset || dataset != &version.manifest.owner
-        })
-    {
-        return Err(invalid());
-    }
-    let required = seal
-        .members
-        .into_values()
-        .map(|version| version.manifest)
-        .filter(|object| object.owner != binding.consumer)
-        .collect::<Vec<_>>();
+    let origin = RetentionBlocker {
+        table: view.table.identifier().to_string(),
+        key: binding.key.clone(),
+        revision: claim_revision,
+    };
+    // One typed root walker serves inspection and local propagation. This mode
+    // collects direct declarations only; creation already qualified the closure.
+    let required =
+        super::inventory::reference_roots(rows, &binding.key, claim_json, &origin, limit)?
+            .into_iter()
+            .filter(|object| object.owner != binding.consumer)
+            .collect::<Vec<_>>();
     if required.iter().any(|object| {
         binding
             .protections
@@ -187,27 +252,47 @@ pub(super) fn validate_binding(
     Ok(required)
 }
 
-pub(super) fn validate_reference<'a>(
+pub(super) fn validate_reference(
     reference: &OwnerProtectionRef,
     grant: &OwnerProtection,
     consumer: &Id,
-    required: impl IntoIterator<Item = &'a ObjectRef>,
 ) -> Result<()> {
     if grant.owner != reference.owner
         || &grant.consumer != consumer
         || grant.table_uuid != reference.table_uuid
         || grant.revision != reference.revision
-        || required
-            .into_iter()
-            .filter(|object| object.owner == reference.owner)
-            .any(|object| {
-                grant
-                    .objects
-                    .binary_search_by(|candidate| candidate.path.cmp(&object.path))
-                    .ok()
-                    .is_none_or(|index| grant.objects[index] != *object)
-            })
     {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// Marks the portion of one claim covered by this grant; other grants may add more.
+pub(super) fn cover_required<'a>(
+    required: impl IntoIterator<Item = &'a mut (ObjectRef, bool)>,
+    grant: &OwnerProtection,
+) -> Result<()> {
+    for (object, covered) in required
+        .into_iter()
+        .filter(|(object, _)| object.owner == grant.owner)
+    {
+        if let Ok(index) = grant
+            .objects
+            .binary_search_by(|candidate| candidate.path.cmp(&object.path))
+        {
+            if grant.objects[index] != *object {
+                return Err(invalid());
+            }
+            *covered = true;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn check_covered<'a>(
+    required: impl IntoIterator<Item = &'a (ObjectRef, bool)>,
+) -> Result<()> {
+    if required.into_iter().any(|(_, covered)| !covered) {
         return Err(invalid());
     }
     Ok(())
@@ -234,19 +319,76 @@ pub(super) fn available(rows: &SnapshotRows, view: &View, object: &ObjectRef) ->
 }
 
 impl Engine {
+    /// Loads immutable references after checking the exact local claim identity.
+    ///
+    /// No owner is reopened: tokens cannot retire in this checkpoint. Callers may
+    /// propagate these references only from the generations actually consumed;
+    /// newly introduced object scope still requires owner acquisition first.
+    pub(in crate::engine) async fn retained_protections(
+        &self,
+        view: &View,
+        claim: &str,
+    ) -> Result<Option<ReferenceProtections>> {
+        let Some((binding, _, memory)) = self.local_binding(view, claim).await? else {
+            return Ok(None);
+        };
+        let mut protections = ReferenceProtections {
+            consumer: binding.consumer,
+            references: binding.protections,
+            limit: self.inner.lifecycle.budget.limits.max_metadata_bytes,
+            _memory: memory,
+        };
+        protections.retain_memory()?;
+        Ok(Some(protections))
+    }
+
+    async fn local_binding(
+        &self,
+        view: &View,
+        claim: &str,
+    ) -> Result<
+        Option<(
+            ReferenceBinding,
+            Vec<ObjectRef>,
+            tokio::sync::OwnedSemaphorePermit,
+        )>,
+    > {
+        let lifecycle = &self.inner.lifecycle;
+        let limit = lifecycle.budget.limits.max_metadata_bytes;
+        let rows = lifecycle.rows(view).await?;
+        let key = binding_key(claim);
+        if !rows.contains_key(&key) {
+            // Missing legacy bindings do not claim an earlier acquisition.
+            return Ok(None);
+        }
+        let mut memory = rows.reserve_decoded(&lifecycle.budget, &[claim, &key])?;
+        // Operation roots also expand their retained base from these same
+        // cached rows. Its decoded inventory outlives the small operation row.
+        if claim.starts_with("operation/") {
+            let (_, operation): (_, Operation) =
+                read_retained(&rows, claim, limit)?.ok_or_else(invalid)?;
+            if let Some(base) = operation.base {
+                memory
+                    .merge(rows.reserve_decoded(&lifecycle.budget, &[&format!("result/{base}")])?);
+            }
+        }
+        let (revision, binding): (_, ReferenceBinding) =
+            read_retained(&rows, &key, limit)?.ok_or_else(invalid)?;
+        if binding.key != claim {
+            return Err(invalid());
+        }
+        let required = validate_binding(&rows, view, &key, revision, &binding, limit)?;
+        Ok(Some((binding, required, memory)))
+    }
+
     pub(in crate::engine) async fn check_reference_binding(
         &self,
         view: &View,
         claim: &str,
     ) -> Result<()> {
-        let rows = self.inner.lifecycle.rows(view).await?;
-        let key = binding_key(claim);
-        let Some((revision, _, binding)) = rows.get_record::<ReferenceBinding>(&key)? else {
-            // Older immutable promises remain protected by complete inventory;
-            // their histories are not rewritten to claim an earlier acquisition.
+        let Some((binding, required, _memory)) = self.local_binding(view, claim).await? else {
             return Ok(());
         };
-        let required = validate_binding(&rows, view, &key, revision, &binding)?;
         self.check_protection_references(&binding, &required).await
     }
 
@@ -256,22 +398,32 @@ impl Engine {
         required: &[ObjectRef],
     ) -> Result<()> {
         let lifecycle = &self.inner.lifecycle;
-        let _memory = lifecycle
-            .budget
-            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
-        for reference in &binding.protections {
-            let view = lifecycle.open(&reference.owner).await?;
+        let limit = lifecycle.budget.limits.max_metadata_bytes;
+        let _memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
+        let mut required = required
+            .iter()
+            .cloned()
+            .map(|object| (object, false))
+            .collect::<Vec<_>>();
+        for references in binding
+            .protections
+            .chunk_by(|left, right| left.owner == right.owner)
+        {
+            let view = lifecycle.open(&references[0].owner).await?;
             let rows = lifecycle.rows(&view).await?;
-            let (revision, _, grant) = rows
-                .get_record::<OwnerProtection>(&reference.token)?
-                .ok_or_else(invalid)?;
-            validate_grant(&view, &reference.token, revision, &grant)?;
-            validate_reference(reference, &grant, &binding.consumer, required)?;
-            for object in &grant.objects {
-                available(&rows, &view, object)?;
+            for reference in references {
+                tokio::task::consume_budget().await;
+                let (revision, grant): (_, OwnerProtection) =
+                    read_retained(&rows, &reference.token, limit)?.ok_or_else(invalid)?;
+                validate_grant(&view, &reference.token, revision, &grant)?;
+                validate_reference(reference, &grant, &binding.consumer)?;
+                cover_required(&mut required, &grant)?;
+                for object in &grant.objects {
+                    available(&rows, &view, object)?;
+                }
             }
         }
-        Ok(())
+        check_covered(&required)
     }
 
     // Call before consumer locks. Owner commits precede consumer acknowledgment;
@@ -281,30 +433,97 @@ impl Engine {
         consumer: &Id,
         releases: &[ReleasePin],
     ) -> Result<ReferenceProtections> {
+        if releases.is_empty() {
+            return ReferenceProtections::empty(consumer, &self.inner.lifecycle.budget);
+        }
         let inventory = self.reference_objects(releases).await?;
+        self.protect_objects(consumer, &inventory.objects).await
+    }
+
+    /// Protects already qualified exact objects without walking release metadata.
+    pub(in crate::engine) async fn protect_objects(
+        &self,
+        consumer: &Id,
+        objects: &[ObjectRef],
+    ) -> Result<ReferenceProtections> {
         let budget = &self.inner.lifecycle.budget;
-        let bytes = inputs::metadata_size(&inventory.objects, budget.limits.max_metadata_bytes)?;
+        let limit = budget.limits.max_metadata_bytes;
+        let bytes = inputs::metadata_size(&objects, limit)?;
         let memory = budget.reserve(bytes.saturating_mul(4).saturating_add(4096))?;
-        let mut owners: BTreeMap<Id, Vec<ObjectRef>> = BTreeMap::new();
-        for object in &inventory.objects {
-            if &object.owner != consumer {
-                owners
-                    .entry(object.owner.clone())
-                    .or_default()
-                    .push(object.clone());
+        // Deduplication covers own objects too: filtering ownership first would
+        // hide a conflicting declaration for the same immutable path.
+        let mut exact = BTreeMap::new();
+        for object in objects {
+            super::inventory::validate_object(object)?;
+            if let Some(previous) = exact.insert(object.path.as_str(), object)
+                && previous != object
+            {
+                return Err(invalid());
             }
         }
+        let mut owners: BTreeMap<Id, Vec<ObjectRef>> = BTreeMap::new();
+        for object in exact
+            .into_values()
+            .filter(|object| &object.owner != consumer)
+        {
+            owners
+                .entry(object.owner.clone())
+                .or_default()
+                .push(object.clone());
+        }
         let mut references = Vec::with_capacity(owners.len());
-        for (owner, mut objects) in owners {
-            objects.sort_by(|left, right| left.path.cmp(&right.path));
+        for (owner, objects) in owners {
             let lock = self.lock(&owner).await;
             let _guard = lock.lock().await;
             references.push(self.acquire_owner(&owner, consumer, objects).await?);
         }
-        Ok(ReferenceProtections {
+        let mut protections = ReferenceProtections {
+            consumer: consumer.clone(),
             references,
+            limit,
             _memory: memory,
+        };
+        protections.retain_memory()?;
+        Ok(protections)
+    }
+
+    /// Resolves an exact managed object from retained creation evidence only.
+    ///
+    /// Resolution is provisional. Foreign acquisition rechecks under the owner
+    /// lock; own-object admission must retain and recheck its consumer boundary.
+    pub(in crate::engine) async fn qualified_object(
+        &self,
+        owner: &Id,
+        path: &str,
+        digest: &str,
+    ) -> Result<ObjectRef> {
+        let lifecycle = &self.inner.lifecycle;
+        let limit = lifecycle.budget.limits.max_metadata_bytes;
+        inputs::metadata_size(&(owner, path, digest), limit)?;
+        let _memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
+        let view = lifecycle.open(owner).await?;
+        let rows = lifecycle.rows(&view).await?;
+        let mut found: Option<ObjectRef> = None;
+        visit_creation(&rows, &view, limit, |object| {
+            if object.path == path {
+                if object.owner != *owner
+                    || object.digest != digest
+                    || found.as_ref().is_some_and(|previous| previous != object)
+                {
+                    return Err(invalid());
+                }
+                if found.is_none() {
+                    found = Some(object.clone());
+                }
+            }
+            Ok(())
         })
+        .await?;
+        let object = found.ok_or_else(unqualified)?;
+        super::inventory::validate_object(&object)?;
+        self.check_object_owner(&rows, owner, &object)?;
+        available(&rows, &view, &object)?;
+        Ok(object)
     }
 
     async fn acquire_owner(
@@ -345,7 +564,14 @@ impl Engine {
         let _decoding = lifecycle
             .budget
             .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
-        confirm_creation(&rows, &view, &grant.objects).await?;
+        confirm_creation(
+            &rows,
+            &view,
+            &grant.objects,
+            lifecycle.budget.limits.max_metadata_bytes,
+        )
+        .await?;
+        drop(_decoding);
         if let Err(error) = lifecycle.commit(&view, vec![record(&key, &grant)?]).await {
             let after = lifecycle.open(owner).await?;
             let rows = lifecycle.rows(&after).await?;
@@ -414,13 +640,18 @@ fn reference(key: &str, grant: &OwnerProtection) -> OwnerProtectionRef {
 
 // Only retained typed creation evidence or a prior owner grant qualifies a new
 // reference. This scans one owner's cached rows, not every catalog namespace.
-async fn confirm_creation(rows: &SnapshotRows, view: &View, objects: &[ObjectRef]) -> Result<()> {
+async fn confirm_creation(
+    rows: &SnapshotRows,
+    view: &View,
+    objects: &[ObjectRef],
+    limit: usize,
+) -> Result<()> {
     let expected: BTreeMap<_, _> = objects
         .iter()
         .map(|object| (object.path.as_str(), object))
         .collect();
     let mut missing: BTreeSet<_> = expected.keys().copied().collect();
-    let mut observe = |object: &ObjectRef| -> Result<()> {
+    visit_creation(rows, view, limit, |object: &ObjectRef| -> Result<()> {
         if let Some(expected) = expected.get(object.path.as_str()) {
             if **expected != *object {
                 return Err(invalid());
@@ -428,9 +659,28 @@ async fn confirm_creation(rows: &SnapshotRows, view: &View, objects: &[ObjectRef
             missing.remove(object.path.as_str());
         }
         Ok(())
-    };
+    })
+    .await?;
+    if !missing.is_empty() {
+        return Err(unqualified());
+    }
+    Ok(())
+}
+
+async fn visit_creation(
+    rows: &SnapshotRows,
+    view: &View,
+    limit: usize,
+    mut observe: impl FnMut(&ObjectRef) -> Result<()>,
+) -> Result<()> {
     for (key, revision, json) in rows.prefix("") {
         tokio::task::consume_budget().await;
+        if json.len() > limit {
+            return Err(capacity());
+        }
+        if revision <= 0 || revision > view.revision {
+            return Err(invalid());
+        }
         if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = serde_json::from_str(json)?;
             observe(&phase.descriptor)?;
@@ -469,13 +719,37 @@ async fn confirm_creation(rows: &SnapshotRows, view: &View, objects: &[ObjectRef
             }
         }
     }
-    if !missing.is_empty() {
-        return Err(Error::refusal(
-            "unqualified_owner_reference",
-            "object lacks retained typed creation evidence at its owner",
-        ));
-    }
     Ok(())
+}
+
+pub(super) fn read_retained<T: serde::de::DeserializeOwned>(
+    rows: &SnapshotRows,
+    key: &str,
+    limit: usize,
+) -> Result<Option<(i64, T)>> {
+    rows.prefix(key)
+        .find(|(candidate, _, _)| *candidate == key)
+        .map(|(_, revision, json)| {
+            if json.len() > limit {
+                return Err(capacity());
+            }
+            Ok((revision, serde_json::from_str(json)?))
+        })
+        .transpose()
+}
+
+fn unqualified() -> Error {
+    Error::refusal(
+        "unqualified_owner_reference",
+        "object lacks retained typed creation evidence at its owner",
+    )
+}
+
+fn capacity() -> Error {
+    Error::refusal(
+        "metadata_capacity",
+        "owner references exceed the metadata allowance",
+    )
 }
 
 fn invalid() -> Error {

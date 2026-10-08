@@ -385,8 +385,9 @@ impl Engine {
         let digest = fingerprint(&request)?;
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&spec.dataset).await;
-        let (operation, capture, base) = {
-            let _guard = lock.lock().await;
+        let mut admission: Option<super::admission::PreparedAdmission> = None;
+        let (operation, capture, base) = loop {
+            let guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
             let old: Option<Operation> = lifecycle
                 .get(&view, &format!("operation/{}", spec.operation))
@@ -401,6 +402,14 @@ impl Engine {
                 return Ok(result);
             }
             self.check_not_abandoned(&view, &spec.operation).await?;
+            let decoding = if old.is_none() {
+                Some(lifecycle.rows(&view).await?.reserve_decoded(
+                    &lifecycle.budget,
+                    &["authority", &format!("result/{}", spec.base)],
+                )?)
+            } else {
+                None
+            };
             let base: ReleasePin = lifecycle
                 .get(&view, &format!("result/{}", spec.base))
                 .await?
@@ -421,8 +430,28 @@ impl Engine {
                     .get(&view, &format!("backfill/{}", spec.operation))
                     .await?
                     .ok_or_else(invalid_group)?;
-                (operation, capture, base)
+                break (operation, capture, base);
             } else {
+                let Some(protected) = &admission else {
+                    let boundary = view.table.metadata_location_result()?.to_owned();
+                    drop(guard);
+                    admission = Some(
+                        self.protect_admission(
+                            &request,
+                            boundary,
+                            Some(base),
+                            decoding.expect("new backfill admission reserved decoding"),
+                        )
+                        .await?,
+                    );
+                    continue;
+                };
+                if !protected.is_current(&view)? {
+                    // Another independent group may have advanced the catalog.
+                    // Re-evaluate admission; do not replay the stale decision.
+                    admission = None;
+                    continue;
+                }
                 let operation = Operation {
                     request_digest: digest.clone(),
                     eligibility: authority.eligibility,
@@ -447,12 +476,21 @@ impl Engine {
                     base_manifest: base.manifest.clone(),
                     related: base.dataset.related.clone(),
                 };
-                lifecycle.commit(&view, vec![record(format!("operation/{}", spec.operation), &operation)?,
-                    record(format!("request/{}", spec.operation), &request)?, record(format!("backfill/{}", spec.operation), &capture)?,
-                    record(format!("runtime/{}", spec.operation), serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}))?]).await?;
-                (operation, capture, base)
+                let mut records = vec![
+                    record(format!("operation/{}", spec.operation), &operation)?,
+                    record(format!("request/{}", spec.operation), &request)?,
+                    record(format!("backfill/{}", spec.operation), &capture)?,
+                    record(
+                        format!("runtime/{}", spec.operation),
+                        serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}),
+                    )?,
+                ];
+                protected.records(&view, &request, &mut records)?;
+                lifecycle.commit(&view, records).await?;
+                break (operation, capture, base);
             }
         };
+        drop(admission);
         let source = base
             .dataset
             .groups

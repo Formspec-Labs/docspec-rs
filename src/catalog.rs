@@ -59,6 +59,29 @@ impl SnapshotRows {
         self.values.contains_key(key)
     }
 
+    /// Charges decoded copies of cached records before allocating them.
+    pub(crate) fn reserve_decoded(
+        &self,
+        budget: &Budget,
+        keys: &[&str],
+    ) -> Result<tokio::sync::OwnedSemaphorePermit> {
+        let mut bytes = 4096_usize;
+        for key in keys {
+            if let Some((_, json)) = self.values.get(*key) {
+                if json.len() > budget.limits.max_metadata_bytes {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "retained record exceeds metadata allowance",
+                    ));
+                }
+                // Allow decoded strings, collection nodes, and temporary copies.
+                // This is admission accounting, not a measured heap size.
+                bytes = bytes.saturating_add(json.len().saturating_mul(8));
+            }
+        }
+        budget.reserve(bytes)
+    }
+
     /// Reads a value with its native commit revision and serialized byte charge.
     pub(crate) fn get_record<T: DeserializeOwned>(
         &self,

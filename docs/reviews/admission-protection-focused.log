@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.31s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 7 tests
+test engine::admission::tests::provisional_managed_file_refuses_before_request_acknowledgment ... ok
+test engine::admission::tests::missing_external_locator_reuses_material_work_and_captures_selected_history ... ok
+test engine::admission::tests::lost_initial_request_reply_retains_exact_dependencies_without_reacquiring_owners ... ok
+test engine::admission::tests::managed_input_admission_reuses_its_recorded_owner_without_copying_or_hashing ... ok
+test engine::admission::tests::backfill_admission_binds_its_capture_and_foreign_base_in_one_native_commit ... ok
+test engine::admission::tests::based_managed_rebuild_keeps_distinct_scopes_from_the_same_owner ... ok
+test engine::admission::tests::refresh_request_captures_and_protects_unused_members_of_its_producer_seal ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out; finished in 6.61s
+
