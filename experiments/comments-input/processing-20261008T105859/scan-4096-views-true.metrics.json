@@ -1,0 +1,15 @@
+{
+  "sampled_peak_tree_rss_bytes": 2730541056,
+  "min_volume_free_bytes": 17721274368,
+  "sampled_peak_workspace_bytes": 0,
+  "sampled_peak_allocated_bytes": 0,
+  "sampled_peak_scratch_bytes": 0,
+  "inventory_sampling_seconds": 0.0001745409972500056,
+  "before": {},
+  "stop_reason": null,
+  "elapsed_seconds": 4.840233750001062,
+  "exit_code": 0,
+  "after": {},
+  "volume_free_after_bytes": 18031190016,
+  "time_max_rss_bytes": 2731343872
+}

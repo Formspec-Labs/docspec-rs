@@ -1,0 +1,37 @@
+{
+  "sampled_peak_tree_rss_bytes": 1310720,
+  "min_volume_free_bytes": 18311094272,
+  "sampled_peak_workspace_bytes": 67884310,
+  "sampled_peak_allocated_bytes": 67887104,
+  "sampled_peak_scratch_bytes": 0,
+  "inventory_sampling_seconds": 0.00024079201102722436,
+  "before": {
+    "catalog_and_other": {
+      "files": 1,
+      "bytes": 67884310,
+      "allocated_bytes": 67887104
+    },
+    "total": {
+      "files": 1,
+      "bytes": 67884310,
+      "allocated_bytes": 67887104
+    }
+  },
+  "stop_reason": null,
+  "elapsed_seconds": 0.4418575419986155,
+  "exit_code": 0,
+  "after": {
+    "catalog_and_other": {
+      "files": 1,
+      "bytes": 67884310,
+      "allocated_bytes": 67887104
+    },
+    "total": {
+      "files": 1,
+      "bytes": 67884310,
+      "allocated_bytes": 67887104
+    }
+  },
+  "volume_free_after_bytes": 18309369856,
+  "time_max_rss_bytes": 294273024
+}

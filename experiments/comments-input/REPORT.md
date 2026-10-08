@@ -51,12 +51,12 @@ this cached local run do not prove that payloads were not read.
 
 A [footer-only follow-up](row-group-diagnosis-20261008.json) found input row groups
 up to 325,203,265 uncompressed bytes despite the 4,096-row layout. Row count alone
-therefore does not bound decoded batch memory. This observation does not yet
-distinguish a large individual value from retained backing buffers or shared
-buffer accounting. Keep the refused attempt and test that distinction before
-changing the default limit or adding buffer-copy machinery.
+therefore does not bound decoded batch memory. That footer observation alone did
+not distinguish a large individual value from retained backing buffers or shared
+buffer accounting. The following scans resolve the batch-setting decision without
+adding buffer-copy code.
 
-The existing native writer configures row-group size but leaves Parquet
+The original native writer configured row-group size but left Parquet
 compression at its default. A [partial-output footer inspection](run-20261008T103609/partial-output-diagnosis.json)
 confirmed `UNCOMPRESSED` encoding in the completed physical output file. The next
 file was unfinished and lacked its final footer; neither file belonged to a
@@ -72,3 +72,50 @@ reuse the frozen input and completed admission when appropriate, preserve this
 failure, and include old/new coexistence in capacity planning. Raising limits or
 discarding the failure cannot turn this pilot into a pass. The complete local and
 remote lifecycle gates remain open.
+
+## Measured batch and codec follow-up
+
+The [frozen diagnostic protocol](processing-protocol.md) and
+[retained results](processing-20261008T105859/results.json) cover the same immutable
+input already qualified by completed admission. Every scan consumed all 10 million
+rows. Each oversized batch was inspected for row/value lengths; no literal text
+was logged. These are streaming read diagnostics, not completed lifecycle runs.
+
+| Batch rows | Forced string views | Oversized batches | Maximum batch allocation, bytes | Maximum observed row string bytes in oversized batches |
+| ---: | --- | ---: | ---: | ---: |
+| 4,096 | Enabled | 25 | 326,634,835 | 92,992,878 |
+| 512 | Enabled | 36 | 238,716,254 | 92,992,878 |
+| 4,096 | Disabled | 32 | 606,894,640 | 92,992,878 |
+| 512 | Disabled | 16 | 243,052,095 | 92,992,878 |
+
+One row's string values alone exceed the original 64 MiB allowance. Changing row
+count or view representation cannot make that allowance sufficient. Keep the
+maintained reader configuration and use a **768 MiB per-batch workload profile**
+for the next Comments run, covering both observed view and plain-string allocation.
+The 24 GiB process ceiling stays unchanged. This profile also raises existing
+writer/read reservations and the rolling-file target; the next run must measure
+their effect. Generic defaults remain unchanged.
+
+The codec probe re-encoded the completed physical output from the failed attempt:
+
+| Codec | Output bytes | Read/decode/write/sync seconds | Exact ordered values and schema |
+| --- | ---: | ---: | --- |
+| Uncompressed | 67,884,310 | 0.152 | Equal |
+| Snappy | 19,918,409 | 0.201 | Equal |
+| Zstandard, maintained default level 1 | 10,759,625 | 0.196 | Equal |
+
+Zstandard used **84.2% less disk than uncompressed output** in this bounded fixture.
+It also used less disk than Snappy, with similar observed re-encoding time. These
+single, potentially cached observations do not establish a stable speed difference
+or complete-path improvement. Exact comparison retained field metadata, types,
+null/empty values, ordering and multiplicity. All arms and their readbacks remain
+in the diagnostic directory; they added 98,562,344 logical output bytes.
+
+The production candidate selects the maintained default Zstandard level in the
+existing shared writer. It adds no codec framework, buffer-copy layer, new public
+option or format change. Already completed objects remain reusable. The next
+[resume protocol](resume-protocol.md) preserves original failed time/storage and
+checks the changed profile through processing, selection, independent readback,
+unchanged work and exact retry. The independent
+[diagnostic review](../../docs/reviews/comments-processing-diagnostics.md) and
+[writer review](../../docs/reviews/zstd-writer-review.md) retain findings and scope.

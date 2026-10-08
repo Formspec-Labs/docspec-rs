@@ -1,0 +1,27 @@
+{
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "python": "3.12.9 (main, Mar 17 2025, 21:36:21) [Clang 20.1.0 ]",
+  "source_commit": "14b83f1e85be27d30c90a55ef7eaee715acb7c32",
+  "status": "?? experiments/comments-input/processing-20261008.log\n",
+  "input": {
+    "bytes": 2670490619,
+    "digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+    "owner": "comments",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/cc29f7036d774e619da3b625d8aee07e/input.parquet"
+  },
+  "identity_basis": "Retained immutable object qualified by completed admission",
+  "input_mtime_ns": 1791470176670644529,
+  "codec_input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00000.parquet",
+  "codec_input_sha256": "5145d365b51a3230de8c57b46d5417ecc0cd27e23bedbc1b38bacd02d9c73a2c",
+  "codec_input_bytes": 67884310,
+  "cache": "not cleared; retained inputs may be warm; one diagnostic per arm",
+  "digests": {
+    "scan": "51ed0267d82b242497d77f565fd75482e451a6a36280d138c3edc874fdca6649",
+    "codec": "24c748d654fd207efa129a6ae0cccc7706cd5e285d228fb6afca14bca1ccce13",
+    "driver": "dc459942d1665d86af00e42a06daf6032db42eb217bad439b498cd8008bea5ff",
+    "monitor": "23ae53a0c855aa55541bbd1090ec257ca6999b3462b2936695b5041d6fdaba23",
+    "lock": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+    "admitted_inspection": "59285f94cfb6015fb43f03d91ffb9b090c22c8ac4108cb08eaafa71b7cc281dd",
+    "protocol": "6308a3d277c106be6a2372a3fdbe6197d019c44180243a382632abaa0dd71be4"
+  }
+}

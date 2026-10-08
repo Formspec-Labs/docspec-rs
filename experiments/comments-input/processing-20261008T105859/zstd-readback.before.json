@@ -1,0 +1,17 @@
+{
+  "snappy.parquet": {
+    "bytes": 19918409,
+    "allocated_bytes": 19918848,
+    "mtime_ns": 1791471554475739306
+  },
+  "zstd.parquet": {
+    "bytes": 10759625,
+    "allocated_bytes": 10760192,
+    "mtime_ns": 1791471554966681408
+  },
+  "none.parquet": {
+    "bytes": 67884310,
+    "allocated_bytes": 67887104,
+    "mtime_ns": 1791471553752296585
+  }
+}
