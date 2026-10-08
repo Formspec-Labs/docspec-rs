@@ -37,6 +37,17 @@ pub(crate) struct SnapshotRows {
 }
 
 impl SnapshotRows {
+    /// Iterates matching current records without allocating another record map.
+    pub(crate) fn prefix<'a>(
+        &'a self,
+        prefix: &'a str,
+    ) -> impl Iterator<Item = (&'a str, i64, &'a str)> + 'a {
+        self.values
+            .range(prefix.to_owned()..)
+            .take_while(move |(key, _)| key.starts_with(prefix))
+            .map(|(key, (revision, value))| (key.as_str(), *revision, value.as_str()))
+    }
+
     /// Checks a retained key without decoding a potentially large result or reason.
     pub(crate) fn contains_key(&self, key: &str) -> bool {
         self.values.contains_key(key)

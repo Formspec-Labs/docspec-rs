@@ -18,11 +18,9 @@ operation ID. Readback releases, historical results and attempt protections all
 remain retained. Already-started native or blocking I/O may finish; abandonment
 is a logical fence, not worker termination or deletion authority.
 
-Source admission boundaries remain monotonic. A withdrawn admission does not
-become consumed input, so a fresh selected source still reconciles that gap before
-schema/backfill cutover. Direct cutover over abandoned gaps remains open. The
-architecture review recommends separating source coverage from the captured
-admission fence; schema changes should preserve their exact source boundary.
+Source admission counters remain monotonic. A withdrawn admission does not become
+consumed input. The following cutover change separates selected source coverage
+from the guard against newly admitted work.
 
 The focused tests and full repository gate passed. The fixtures cover reopen/retry, shared
 phase and file-completion reuse, unchanged protections, late native source/group
@@ -41,6 +39,55 @@ The [development resource record](reviews/operation-abandonment-resources.json)
 separates regenerated debug-cache storage from volume-wide free space, which also
 reflects other workstation activity. The cache remains available for continued
 implementation; retained experiment data and failure evidence were not removed.
+
+## Cutover after abandoned input
+
+New schema operations preserve the selected source boundary and capture the
+current admission counter separately. Admission proves that every entry between
+those boundaries was explicitly abandoned, checking its original request,
+revision and abandonment identity. Missing, duplicate or inconsistent entries
+refuse cutover. The schema admission does not rewrite the unchanged authority row.
+
+Backfills can prepare while source work is pending. Final selection checks the
+exact source, target group, writer definition and captured admission counter,
+then proves abandonment of any captured source gap from the same locked catalog
+view. This lets a completed backfill select after pending input is withdrawn.
+Any later admission invalidates that capture even if subsequently abandoned;
+a fresh operation may reuse completed computation.
+
+New releases use format 11. Readers also accept format 10; its schema changes
+retain their original incremented boundary rule. An interrupted operation keeps
+its admitted result format, including serialized readback identity and the older
+strict backfill rule. Material processing identities remain unchanged, preserving
+reuse across this metadata correction.
+
+The gap check visits retained operation metadata only when a gap exists and keeps
+a bounded set of qualified admission numbers. It adds no payload scan or ordinary
+read validation. Work scales with retained operation records and gap size; large
+history performance remains unqualified. No gap index or stored certificate was
+added. The [public cases](../tests/abandonment.rs),
+[retained-format cases](../tests/admission_formats.rs) and malformed-history unit
+tests passed in the [focused](reviews/admission-fence-focused.log) and
+[history](reviews/admission-fence-history.log) runs. Format compatibility fixtures
+reconstruct retained serialized state; they do not run a historical binary.
+
+The first full gate exposed a debug-stack overflow during native update metadata
+reading. Moving construction of the existing boxed `prepare_and_select` future
+into a regular function reduced its caller's measured poll frame from 69,952 to
+41,888 bytes, including saved registers. The work and allocation count stay the
+same; the inner frame remains 629,808 bytes. This is a debug stack measurement,
+not a throughput or whole-process memory result. The
+[failed gate](reviews/admission-fence-check-stack-failed.log),
+[crash trace](reviews/admission-fence-stack-failed.json),
+[before](reviews/admission-fence-frame-before.log) and
+[after](reviews/admission-fence-frame-after.log) prologues remain retained.
+The [defaults retry](reviews/admission-fence-defaults-retry.log) and complete
+[repository gate](reviews/admission-fence-check-retry.log) passed with normal stack
+limits. The [independent review](reviews/admission-fence-review.md) records the
+correction and qualification. The complete R1–R7 scope remains unfinished.
+The [resource snapshot](reviews/admission-fence-resources.json) records development
+cache storage separately; this checkpoint ran small fixtures and retained the
+existing large-data experiment evidence.
 
 ## Comments performance and disk checkpoint
 
@@ -961,8 +1008,9 @@ gate remain open.
 Omitted fields disappear from the new view and remain in retained old versions.
 The operation refuses missing IDs, consumed-field removal, computed-name collisions,
 reserved occurrence names and invalid writer-definition changes before admission.
-New schema admission also refuses while accepted source work remains beyond the
-selected boundary; completing that input permits a fresh schema request.
+New schema admission also refuses while unresolved source work remains beyond the
+selected boundary. Completing that input or explicitly abandoning every pending
+admission permits a fresh schema request.
 It currently supports source datasets, including their selected scalar groups;
 related join/summary outputs need additional contributor/schema mapping.
 

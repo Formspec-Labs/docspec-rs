@@ -1,0 +1,13 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.03s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 5 tests
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.99s
+

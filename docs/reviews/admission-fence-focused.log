@@ -1,0 +1,59 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 16.42s
+     Running tests/abandonment.rs (target/debug/deps/abandonment-9e0aa3c34f260c86)
+
+running 7 tests
+test abandoned_backfill_preserves_file_reuse_and_refuses_every_retry ... ok
+test schema_requires_every_uncaptured_source_to_be_abandoned ... ok
+test backfill_prepares_during_pending_input_and_selects_after_its_abandonment ... ok
+test abandonment_fences_updates_and_schema_without_rewinding_source_admission ... ok
+test abandoning_a_later_admission_does_not_revive_an_old_cutover_capture ... ok
+test abandonment_survives_reopen_and_preserves_shared_phases_and_readback ... ok
+test http_and_cli_share_the_durable_decision ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.97s
+
+     Running tests/admission_formats.rs (target/debug/deps/admission_formats-762af29fde728515)
+
+running 2 tests
+test original_backfill_does_not_silently_adopt_new_gap_rules ... ok
+test original_admissions_resume_and_mixed_history_stays_readable ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.07s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test competing_independent_backfills_both_survive_selection ... ok
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test missing_cached_objects_cannot_be_selected_after_readback ... ok
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.34s
+
+     Running tests/schema.rs (target/debug/deps/schema-8c6a4c5f9c33822e)
+
+running 9 tests
+test rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test cached_related_result_checks_schema_input_history ... ok
+test invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... ok
+test rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test schema_cutover_fences_old_workers_and_later_admissions ... ok
+test killed_schema_workers_resume_only_missing_phases ... ok
+test schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.16s
+

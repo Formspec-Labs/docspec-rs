@@ -84,11 +84,11 @@ result. Already-started I/O may finish; its protection stays retained. Another
 operation ID can reuse phases completed before abandonment. Selected results
 cannot be abandoned, and this action removes no files or recovery phases.
 
-Abandonment preserves the admitted source boundary. If a withdrawn source
-admission leaves a gap after the selected boundary, schema/backfill cutover still
-needs an explicit new selected source to reconcile it. Direct cutover across
-abandoned gaps remains unfinished. This does not affect abandoning an independent
-backfill.
+Abandonment preserves the admission counter. A schema change can proceed once
+every unselected source admission has been explicitly abandoned, preserving the
+selected source coverage. Backfills can prepare while source work is pending and
+select once those captured admissions are abandoned. An admission after capture
+still requires a fresh operation; abandoning it does not revive the old capture.
 
 For changes against a selected version, save an update request:
 
@@ -130,8 +130,10 @@ The selected release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after creation checks. General incremental SQL
-remains unfinished. Release format 10 is the current greenfield
-format; there is no reader migration for earlier experiment outputs.
+remains unfinished. New releases use format 11, which separates source coverage
+from the source-admission guard for schema changes. Retained format-10 releases
+and interrupted operations keep their original interpretation. Earlier experiment
+formats remain unsupported.
 
 ## Change a source schema
 

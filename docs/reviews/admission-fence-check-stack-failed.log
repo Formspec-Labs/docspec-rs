@@ -1,0 +1,122 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 6.50s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 26.82s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 53 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::aggregation::tests::qualified_row_limit_bounds_every_signed_partial_sum ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test engine::inputs::tests::canceled_manifest_read_keeps_admission_until_its_blocking_work_exits ... ok
+test engine::backfill::verification::tests::history_reuses_exact_manifests_and_bounds_combined_admission ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+test engine::schema::tests::material_schema_identity_ignores_set_order_but_keeps_allocation_state ... ok
+test engine::inputs::tests::canceled_partial_input_lock_acquisition_releases_prior_locks ... ok
+test engine::backfill::expressions::tests::rename_reorder_and_name_reuse_preserve_bound_values_and_material_identity ... ok
+test http::ipc::tests::demand_controls_batch_reads_and_chunks_keep_admission_until_last_clone_drops ... ok
+test http::ipc::tests::dictionaries_and_changing_batch_schemas_refuse ... ok
+test http::ipc::tests::encoded_chunks_refuse_before_growing_beyond_their_admission ... ok
+test http::ipc::tests::encoding_preserves_strings_nulls_duplicates_and_complete_empty_streams ... ok
+test http::ipc::tests::failures_abort_the_body_without_emitting_a_successful_end ... ok
+test engine::backfill::expressions::tests::constants_ignore_schema_but_consumed_types_and_metadata_observers_invalidate ... ok
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::write::tests::oversized_candidate_metadata_refuses_before_writing_any_object ... ok
+test engine::write::tests::value_only_key_probes_skip_wide_fields_and_keep_reader_admission ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::write::tests::empty_candidate_clears_snapshot_state_but_preserves_native_schema_history ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test engine::write::tests::renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_files ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen ... ok
+test storage::occurrences::tests::schema::all_fields_hidden_and_a_user_file_name_preserve_values_and_occurrences ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+test storage::tables::tests::metadata_serialization_stops_at_exact_byte_limit ... ok
+test storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes ... ok
+test storage::tests::canceled_inventory_checks_keep_worker_owned_metadata_admission ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test storage::occurrences::tests::schema::transient_native_column_is_validated_and_charged_before_removal ... ok
+test storage::occurrences::tests::schema::unqualified_schema_interpretations_refuse_before_reading_payload ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test engine::backfill::tests::native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test engine::write::tests::reused_key_name_with_new_id_matches_absence_and_empty_noop_results ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.98s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b4733b2016bf5a7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/abandonment.rs (target/debug/deps/abandonment-9e0aa3c34f260c86)
+
+running 7 tests
+test abandoned_backfill_preserves_file_reuse_and_refuses_every_retry ... ok
+test schema_requires_every_uncaptured_source_to_be_abandoned ... ok
+test backfill_prepares_during_pending_input_and_selects_after_its_abandonment ... ok
+test abandoning_a_later_admission_does_not_revive_an_old_cutover_capture ... ok
+test abandonment_fences_updates_and_schema_without_rewinding_source_admission ... ok
+test http_and_cli_share_the_durable_decision ... ok
+test abandonment_survives_reopen_and_preserves_shared_phases_and_readback ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.79s
+
+     Running tests/admission_formats.rs (target/debug/deps/admission_formats-762af29fde728515)
+
+running 2 tests
+test original_backfill_does_not_silently_adopt_new_gap_rules ... ok
+test original_admissions_resume_and_mixed_history_stays_readable ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.19s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test competing_independent_backfills_both_survive_selection ... ok
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test missing_cached_objects_cannot_be_selected_after_readback ... ok
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.82s
+
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 3 tests
+test update_scope_refuses_omitted_keys_without_changing_selection ... ok
+
+thread 'additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history' (12841217) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test defaults`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/defaults-4c89bebbe8001542` (signal: 6, SIGABRT: process abort signal)

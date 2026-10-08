@@ -191,6 +191,8 @@ impl Engine {
                 eligibility,
                 epoch: authority.epoch,
                 boundary: base.dataset.boundary,
+                admission_fence: None,
+                result_format: FORMAT,
                 definition: spec.definition.clone(),
                 base: Some(spec.base.clone()),
                 base_manifest: None,
@@ -224,6 +226,18 @@ impl Engine {
                     })
                     .err()
                     .map(|error| error.code().to_owned());
+            if plan.promotion_refusal.is_none() && operation.result_format == FORMAT {
+                plan.promotion_refusal = self
+                    .check_abandoned_gap(
+                        &view,
+                        &spec.dataset,
+                        operation.boundary,
+                        capture.admission_fence,
+                    )
+                    .await
+                    .err()
+                    .map(|error| error.code().to_owned());
+            }
         }
         let objects = source_objects(&base.dataset.groups["source"]);
         for file in scan.files() {
@@ -350,6 +364,8 @@ impl Engine {
                     eligibility: authority.eligibility,
                     epoch: authority.epoch,
                     boundary: base.dataset.boundary,
+                    admission_fence: None,
+                    result_format: FORMAT,
                     definition: spec.definition.clone(),
                     base: Some(spec.base.clone()),
                     base_manifest: None,
@@ -432,6 +448,7 @@ impl Engine {
                 authority.release.ok_or_else(invalid_group)?
             };
             let mut dataset = current.dataset.clone();
+            dataset.format = operation.result_format;
             dataset.parent_manifest = Some(current.manifest.clone());
             dataset.version = spec.operation.clone();
             dataset.request = request.clone();
@@ -535,6 +552,15 @@ impl Engine {
             if authority.release.as_ref() != Some(&current) {
                 continue;
             }
+            if operation.result_format == FORMAT {
+                self.check_abandoned_gap(
+                    &view,
+                    &spec.dataset,
+                    operation.boundary,
+                    capture.admission_fence,
+                )
+                .await?;
+            }
             if let Some(dependencies) = &dependencies {
                 Box::pin(self.guard_ancestors(dependencies, &release)).await?;
             }
@@ -572,7 +598,7 @@ fn promotion(
         || current.related != capture.related
         || current.boundary != operation.boundary
         || authority.boundary != capture.admission_fence
-        || authority.boundary != current.boundary
+        || (operation.result_format == PREVIOUS_FORMAT && authority.boundary != current.boundary)
     {
         return Err(Error::refusal(
             "stale_source_boundary",
@@ -783,6 +809,8 @@ mod tests {
             eligibility: 0,
             epoch: 0,
             boundary: 0,
+            admission_fence: None,
+            result_format: FORMAT,
             definition: "v1".into(),
             base: Some(spec.base.clone()),
             base_manifest: None,

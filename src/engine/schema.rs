@@ -59,6 +59,7 @@ impl Engine {
 
     pub(super) async fn check_schema(
         &self,
+        view: &crate::catalog::View,
         authority: &Authority,
         request: &OperationRequest,
         new_admission: bool,
@@ -79,11 +80,9 @@ impl Engine {
             return Ok(());
         };
         let base = authority.selected.as_ref().ok_or_else(invalid)?;
-        if new_admission && authority.boundary != base.boundary {
-            return Err(Error::refusal(
-                "pending_source",
-                "resolve pending source admission before changing the selected schema",
-            ));
+        if new_admission {
+            self.check_abandoned_gap(view, &spec.dataset, base.boundary, authority.boundary)
+                .await?;
         }
         let source = base.groups.get("source").ok_or_else(invalid)?;
         let native = storage::open_pin(source).await?;
@@ -514,8 +513,8 @@ pub(super) async fn verify_transition(
     budget: &Budget,
 ) -> Result<()> {
     validate(spec)?;
-    if before.format != FORMAT
-        || after.format != FORMAT
+    if !supported_format(before.format)
+        || !supported_format(after.format)
         || before.dataset != spec.dataset
         || after.dataset != spec.dataset
         || after.version != spec.operation
@@ -528,7 +527,11 @@ pub(super) async fn verify_transition(
         || before.inputs != after.inputs
         || before.relationship != after.relationship
         || before.eligibility != after.eligibility
-        || before.boundary.checked_add(1) != Some(after.boundary)
+        || if after.format == PREVIOUS_FORMAT {
+            before.boundary.checked_add(1) != Some(after.boundary)
+        } else {
+            before.boundary != after.boundary
+        }
     {
         return Err(invalid());
     }

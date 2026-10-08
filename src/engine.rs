@@ -61,6 +61,12 @@ struct Operation {
     eligibility: u64,
     epoch: u64,
     boundary: u64,
+    /// Schema composition keeps source coverage separate from later admissions.
+    #[serde(default)]
+    admission_fence: Option<u64>,
+    /// An interrupted admission retains its original release interpretation.
+    #[serde(default = "previous_format")]
+    result_format: u32,
     definition: String,
     base: Option<Id>,
     base_manifest: Option<ObjectRef>,
@@ -84,7 +90,17 @@ pub struct RunPlan {
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
 const PROCESSOR: &str = "docspec.dataset.v10";
-pub(crate) const FORMAT: u32 = 10;
+// Format 11 changes schema coverage metadata, not material processing/reuse keys.
+pub(crate) const FORMAT: u32 = 11;
+const PREVIOUS_FORMAT: u32 = 10;
+
+fn previous_format() -> u32 {
+    PREVIOUS_FORMAT
+}
+
+fn supported_format(format: u32) -> bool {
+    matches!(format, PREVIOUS_FORMAT | FORMAT)
+}
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -188,7 +204,7 @@ impl Engine {
             check_update_eligibility(&authority, spec)?;
             check_group_rebuild(&authority, spec)?;
             self.check_incremental(&authority, spec).await?;
-            self.check_schema(&authority, spec, operation.is_none())
+            self.check_schema(&view, &authority, spec, operation.is_none())
                 .await?;
         }
         if !completed && let Some(operation) = &operation {
@@ -554,7 +570,7 @@ impl Engine {
     ) -> Result<ReleasePin> {
         validate_request(spec)?;
         let request = fingerprint(spec)?;
-        let result = Box::pin(self.prepare_and_select(spec, stop)).await;
+        let result = self.prepare_and_select(spec, stop).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -701,346 +717,372 @@ impl Engine {
         })
     }
 
-    async fn prepare_and_select(
-        &self,
-        spec: &OperationRequest,
-        stop: Option<&str>,
-    ) -> Result<ReleasePin> {
-        validate_request(spec)?;
-        let request = fingerprint(spec)?;
-        let lock = self.lock(spec.dataset()).await;
-        let lifecycle = &self.inner.lifecycle;
-        let operation = {
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(spec.dataset()).await?;
-            let old: Option<Operation> = lifecycle
-                .get(&view, &format!("operation/{}", spec.operation()))
-                .await?;
-            if old.as_ref().is_some_and(|o| o.request_digest != request) {
-                return Err(conflicting_operation());
-            }
-            if let Some(result) = lifecycle
-                .get(&view, &format!("result/{}", spec.operation()))
-                .await?
-            {
-                return Ok(result);
-            }
-            self.check_not_abandoned(&view, spec.operation()).await?;
-            let mut authority: Authority =
-                lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            if authority.definition.is_empty() {
-                authority.definition = spec.definition().to_owned();
-            }
-            check_definition(&authority, spec)?;
-            check_base(&authority, spec.base())?;
-            check_update_eligibility(&authority, spec)?;
-            check_group_rebuild(&authority, spec)?;
-            self.check_incremental(&authority, spec).await?;
-            self.check_schema(&authority, spec, old.is_none()).await?;
-            if let Some(old) = old {
-                check_authority(&authority, &old)?;
-                old
-            } else {
-                authority.boundary = authority.boundary.checked_add(1).ok_or_else(|| {
-                    Error::refusal("revision_exhausted", "source boundary overflow")
-                })?;
-                let operation = Operation {
-                    request_digest: request.clone(),
-                    eligibility: authority.eligibility,
-                    epoch: authority.epoch,
-                    boundary: authority.boundary,
-                    definition: authority.definition.clone(),
-                    base: spec.base().cloned(),
-                    base_manifest: captured_manifest(&authority, spec).cloned(),
-                    schema_key: self.schema_key(&authority, spec).await?,
-                    require_current_boundary: matches!(spec, OperationRequest::Schema(_))
-                        || matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
-                };
-                lifecycle
-                    .commit(
-                        &view,
-                        vec![
-                            record("authority", &authority)?,
-                            record(format!("operation/{}", spec.operation()), &operation)?,
-                        record(format!("request/{}", spec.operation()), spec)?,
-                        record(format!("runtime/{}", spec.operation()), serde_json::json!({
-                            "processor": PROCESSOR, "package_version": env!("CARGO_PKG_VERSION"),
-                            "dependency_lock_blake3": blake3::hash(include_bytes!("../Cargo.lock")).to_hex().as_str(),
-                            "limits": lifecycle.budget.limits,
-                        }))?,
-                        ],
-                    )
+    // Construct the large future outside run_internal's poll frame, so its
+    // temporary construction storage does not remain on every nested poll.
+    fn prepare_and_select<'a>(
+        &'a self,
+        spec: &'a OperationRequest,
+        stop: Option<&'a str>,
+    ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
+        Box::pin(async move {
+            validate_request(spec)?;
+            let request = fingerprint(spec)?;
+            let lock = self.lock(spec.dataset()).await;
+            let lifecycle = &self.inner.lifecycle;
+            let operation = {
+                let _guard = lock.lock().await;
+                let view = lifecycle.open(spec.dataset()).await?;
+                let old: Option<Operation> = lifecycle
+                    .get(&view, &format!("operation/{}", spec.operation()))
                     .await?;
-                operation
+                if old.as_ref().is_some_and(|o| o.request_digest != request) {
+                    return Err(conflicting_operation());
+                }
+                if let Some(result) = lifecycle
+                    .get(&view, &format!("result/{}", spec.operation()))
+                    .await?
+                {
+                    return Ok(result);
+                }
+                self.check_not_abandoned(&view, spec.operation()).await?;
+                let mut authority: Authority =
+                    lifecycle.get(&view, "authority").await?.unwrap_or_default();
+                if authority.definition.is_empty() {
+                    authority.definition = spec.definition().to_owned();
+                }
+                check_definition(&authority, spec)?;
+                check_base(&authority, spec.base())?;
+                check_update_eligibility(&authority, spec)?;
+                check_group_rebuild(&authority, spec)?;
+                self.check_incremental(&authority, spec).await?;
+                self.check_schema(&view, &authority, spec, old.is_none())
+                    .await?;
+                if let Some(old) = old {
+                    check_authority(&authority, &old)?;
+                    old
+                } else {
+                    let composition = matches!(spec, OperationRequest::Schema(_));
+                    let boundary = if composition {
+                        authority
+                            .selected
+                            .as_ref()
+                            .ok_or_else(|| {
+                                Error::refusal(
+                                    "no_release",
+                                    "schema operation needs selected source",
+                                )
+                            })?
+                            .boundary
+                    } else {
+                        authority.boundary =
+                            authority.boundary.checked_add(1).ok_or_else(|| {
+                                Error::refusal("revision_exhausted", "source boundary overflow")
+                            })?;
+                        authority.boundary
+                    };
+                    let operation = Operation {
+                        request_digest: request.clone(),
+                        eligibility: authority.eligibility,
+                        epoch: authority.epoch,
+                        boundary,
+                        admission_fence: composition.then_some(authority.boundary),
+                        result_format: FORMAT,
+                        definition: authority.definition.clone(),
+                        base: spec.base().cloned(),
+                        base_manifest: captured_manifest(&authority, spec).cloned(),
+                        schema_key: self.schema_key(&authority, spec).await?,
+                        require_current_boundary: matches!(spec, OperationRequest::Schema(_))
+                            || matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
+                    };
+                    let mut records = vec![
+                        record(format!("operation/{}", spec.operation()), &operation)?,
+                        record(format!("request/{}", spec.operation()), spec)?,
+                        record(
+                            format!("runtime/{}", spec.operation()),
+                            serde_json::json!({
+                                "processor": PROCESSOR, "package_version": env!("CARGO_PKG_VERSION"),
+                                "dependency_lock_blake3": blake3::hash(include_bytes!("../Cargo.lock")).to_hex().as_str(),
+                                "limits": lifecycle.budget.limits,
+                            }),
+                        )?,
+                    ];
+                    if !composition {
+                        records.push(record("authority", &authority)?);
+                    }
+                    lifecycle.commit(&view, records).await?;
+                    operation
+                }
+            };
+
+            // Locators can change on a material-identical retry. Preserve the admitted
+            // request as execution provenance while using caller locators for missing copies.
+            let captured_request: OperationRequest = lifecycle
+                .get(
+                    &lifecycle.open(spec.dataset()).await?,
+                    &format!("request/{}", spec.operation()),
+                )
+                .await?
+                .ok_or_else(|| {
+                    Error::refusal("corrupt_phase", "operation has no admitted request")
+                })?;
+
+            let (admission, processing) = self
+                .prepare_source(spec, &operation, &request, stop)
+                .await?;
+
+            let table = processing.table.clone().ok_or_else(|| {
+                Error::refusal("corrupt_phase", "processing completion has no table pin")
+            })?;
+            let related = if let OperationRequest::Refresh(refresh) = spec {
+                Some(Box::new(
+                    Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?,
+                ))
+            } else {
+                None
+            };
+            let base = if let Some(base) = spec.base() {
+                Some(self.release(spec.dataset(), base).await?)
+            } else {
+                None
+            };
+            let mut checks = verification::Checks::new(VerificationLevel::Routine);
+            if let Some(base) = &base {
+                checks.trust(base, &lifecycle.budget).await?;
             }
-        };
-
-        // Locators can change on a material-identical retry. Preserve the admitted
-        // request as execution provenance while using caller locators for missing copies.
-        let captured_request: OperationRequest = lifecycle
-            .get(
-                &lifecycle.open(spec.dataset()).await?,
-                &format!("request/{}", spec.operation()),
-            )
-            .await?
-            .ok_or_else(|| Error::refusal("corrupt_phase", "operation has no admitted request"))?;
-
-        let (admission, processing) = self
-            .prepare_source(spec, &operation, &request, stop)
-            .await?;
-
-        let table = processing.table.clone().ok_or_else(|| {
-            Error::refusal("corrupt_phase", "processing completion has no table pin")
-        })?;
-        let related = if let OperationRequest::Refresh(refresh) = spec {
-            Some(Box::new(
-                Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?,
-            ))
-        } else {
-            None
-        };
-        let base = if let Some(base) = spec.base() {
-            Some(self.release(spec.dataset(), base).await?)
-        } else {
-            None
-        };
-        let mut checks = verification::Checks::new(VerificationLevel::Routine);
-        if let Some(base) = &base {
-            checks.trust(base, &lifecycle.budget).await?;
-        }
-        if self.phase(spec, &operation, "validation").await?.is_none() {
-            #[cfg(feature = "test-util")]
-            work_started("validation");
-            checks.table(&table, &lifecycle.budget).await?;
-            verify_changes(
-                spec,
-                &table,
-                processing.changes.as_ref(),
-                &lifecycle.budget,
-                &mut checks,
-            )
-            .await?;
-            if let Some(related) = &related {
-                Box::pin(refresh::verify_related(
+            if self.phase(spec, &operation, "validation").await?.is_none() {
+                #[cfg(feature = "test-util")]
+                work_started("validation");
+                checks.table(&table, &lifecycle.budget).await?;
+                verify_changes(
+                    spec,
                     &table,
-                    related,
+                    processing.changes.as_ref(),
                     &lifecycle.budget,
                     &mut checks,
-                ))
+                )
                 .await?;
+                if let Some(related) = &related {
+                    Box::pin(refresh::verify_related(
+                        &table,
+                        related,
+                        &lifecycle.budget,
+                        &mut checks,
+                    ))
+                    .await?;
+                }
+                let phase = PhaseResult {
+                    phase: "validation".into(),
+                    ..processing.clone()
+                };
+                self.complete(spec, &operation, &phase).await?;
             }
-            let phase = PhaseResult {
-                phase: "validation".into(),
-                ..processing.clone()
-            };
-            self.complete(spec, &operation, &phase).await?;
-        }
-        stop_after(stop, "validation")?;
+            stop_after(stop, "validation")?;
 
-        // A full rebuild declares a complete new input. Updates retain the prior
-        // source evidence because they only replace a subset of its rows.
-        let mut inputs = base
-            .as_ref()
-            .filter(|_| {
-                matches!(
-                    spec,
-                    OperationRequest::Update(_) | OperationRequest::Schema(_)
-                )
-            })
-            .map(|base| base.dataset.inputs.clone())
-            .unwrap_or_default();
-        for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
-            inputs.insert(spec.input_key(name), input.clone());
-        }
-        let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
-        let mut computed = BTreeMap::new();
-        if let Some(base) = &base {
-            for (name, previous) in &base.dataset.computed {
-                self.check(
-                    &lifecycle.open(spec.dataset()).await?,
-                    &operation,
-                    spec.operation(),
-                )
-                .await?;
-                let input_fields = backfill::inherited_inputs(
-                    spec,
-                    previous,
-                    &base.dataset.groups["source"],
-                    &table,
-                )
-                .await?;
-                let prepared = Box::pin(self.prepare_group(
-                    &captured_request,
-                    &operation,
-                    &table,
-                    &previous.definition,
-                    Some(&input_fields),
-                    None,
-                    &mut checks,
-                ))
-                .await?;
-                groups.insert(name.clone(), prepared.table);
-                computed.insert(
-                    name.clone(),
-                    ComputedGroup {
-                        definition: previous.definition.clone(),
-                        input_fields: prepared.input_fields,
-                        request: captured_request.clone(),
-                        native_field_ids: prepared.native_field_ids,
-                        source_metadata: table.metadata.clone(),
-                        base_manifest: base.manifest.clone(),
-                    },
-                );
-                stop_after(stop, &format!("group/{name}"))?;
+            // A full rebuild declares a complete new input. Updates retain the prior
+            // source evidence because they only replace a subset of its rows.
+            let mut inputs = base
+                .as_ref()
+                .filter(|_| {
+                    matches!(
+                        spec,
+                        OperationRequest::Update(_) | OperationRequest::Schema(_)
+                    )
+                })
+                .map(|base| base.dataset.inputs.clone())
+                .unwrap_or_default();
+            for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
+                inputs.insert(spec.input_key(name), input.clone());
             }
-            if !computed.is_empty() {
+            let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
+            let mut computed = BTreeMap::new();
+            if let Some(base) = &base {
+                for (name, previous) in &base.dataset.computed {
+                    self.check(
+                        &lifecycle.open(spec.dataset()).await?,
+                        &operation,
+                        spec.operation(),
+                    )
+                    .await?;
+                    let input_fields = backfill::inherited_inputs(
+                        spec,
+                        previous,
+                        &base.dataset.groups["source"],
+                        &table,
+                    )
+                    .await?;
+                    let prepared = Box::pin(self.prepare_group(
+                        &captured_request,
+                        &operation,
+                        &table,
+                        &previous.definition,
+                        Some(&input_fields),
+                        None,
+                        &mut checks,
+                    ))
+                    .await?;
+                    groups.insert(name.clone(), prepared.table);
+                    computed.insert(
+                        name.clone(),
+                        ComputedGroup {
+                            definition: previous.definition.clone(),
+                            input_fields: prepared.input_fields,
+                            request: captured_request.clone(),
+                            native_field_ids: prepared.native_field_ids,
+                            source_metadata: table.metadata.clone(),
+                            base_manifest: base.manifest.clone(),
+                        },
+                    );
+                    stop_after(stop, &format!("group/{name}"))?;
+                }
+                if !computed.is_empty() {
+                    let _guard = lock.lock().await;
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    self.check_completion(&view, &operation, spec.operation())
+                        .await?;
+                    let key = format!("groups/{}", spec.operation());
+                    if lifecycle
+                        .get::<BTreeMap<String, ObjectRef>>(&view, &key)
+                        .await?
+                        .is_none()
+                    {
+                        let completed: BTreeMap<_, _> = groups
+                            .iter()
+                            .filter(|(name, _)| name.as_str() != "source")
+                            .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
+                            .collect();
+                        lifecycle
+                            .commit(&view, vec![record(key, completed)?])
+                            .await?;
+                    }
+                }
+            }
+            stop_after(stop, "groups")?;
+            let dataset = DatasetPin {
+                format: operation.result_format,
+                dataset: spec.dataset().clone(),
+                version: spec.operation().clone(),
+                groups,
+                computed,
+                inputs,
+                relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
+                related,
+                changes: processing.changes.clone(),
+                definition: captured_request.result_definition().to_owned(),
+                eligibility: operation.eligibility,
+                boundary: operation.boundary,
+                request: captured_request.clone(),
+                parent_manifest: base.as_ref().map(|base| base.manifest.clone()),
+                processor: PROCESSOR.into(),
+                validation: VerificationLevel::Routine,
+            };
+            backfill::verify_groups(
+                &dataset,
+                &lifecycle.budget,
+                &mut verification::Checks::composition(),
+            )
+            .await?;
+            // Readback has an operation-specific manifest because coverage can advance
+            // while the same expensive materialized values remain reusable.
+            let readback_key = format!("readback/{}", spec.operation());
+            let release = if let Some(release) = lifecycle
+                .get::<ReleasePin>(&lifecycle.open(spec.dataset()).await?, &readback_key)
+                .await?
+            {
+                if release.dataset != dataset {
+                    return Err(Error::refusal(
+                        "corrupt_phase",
+                        "retained readback differs from the prepared result",
+                    ));
+                }
+                check_release_available(&release, &lifecycle.budget).await?;
+                release
+            } else {
+                #[cfg(feature = "test-util")]
+                work_started("readback");
+                let directory = self.reserve_attempt(spec, &operation, "release").await?;
+                let path = directory.join("release.json");
+                let serialized = serde_json::to_vec_pretty(&dataset)?;
+                if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "combined release exceeds metadata allowance",
+                    ));
+                }
+                storage::write_new(&path, &serialized)?;
+                let manifest = ObjectRef {
+                    owner: spec.dataset().clone(),
+                    path: path.to_string_lossy().into_owned(),
+                    digest: blake3::hash(&serialized).to_hex().to_string(),
+                    bytes: serialized.len() as u64,
+                };
+                // Decode the serialized release independently of the producing context.
+                let memory = Arc::new(
+                    lifecycle
+                        .budget
+                        .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
+                );
+                let decoded: DatasetPin =
+                    inputs::read_manifest(&manifest, &lifecycle.budget, &mut 0, &memory).await?;
+                if decoded != dataset {
+                    return Err(Error::refusal(
+                        "release_mismatch",
+                        "serialized release differs from selected result",
+                    ));
+                }
+                let release = ReleasePin {
+                    id: spec.operation().clone(),
+                    dataset,
+                    manifest,
+                    verified: true,
+                };
+                // Prepared tables were validated at their durable phase boundaries.
+                // Equality above verifies serialization without scanning them again.
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(spec.dataset()).await?;
                 self.check_completion(&view, &operation, spec.operation())
                     .await?;
-                let key = format!("groups/{}", spec.operation());
-                if lifecycle
-                    .get::<BTreeMap<String, ObjectRef>>(&view, &key)
-                    .await?
-                    .is_none()
-                {
-                    let completed: BTreeMap<_, _> = groups
-                        .iter()
-                        .filter(|(name, _)| name.as_str() != "source")
-                        .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
-                        .collect();
+                if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
+                    completed
+                } else {
                     lifecycle
-                        .commit(&view, vec![record(key, completed)?])
+                        .commit(&view, vec![record(&readback_key, &release)?])
                         .await?;
+                    release
                 }
-            }
-        }
-        stop_after(stop, "groups")?;
-        let dataset = DatasetPin {
-            format: FORMAT,
-            dataset: spec.dataset().clone(),
-            version: spec.operation().clone(),
-            groups,
-            computed,
-            inputs,
-            relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
-            related,
-            changes: processing.changes.clone(),
-            definition: captured_request.result_definition().to_owned(),
-            eligibility: operation.eligibility,
-            boundary: operation.boundary,
-            request: captured_request.clone(),
-            parent_manifest: base.as_ref().map(|base| base.manifest.clone()),
-            processor: PROCESSOR.into(),
-            validation: VerificationLevel::Routine,
-        };
-        backfill::verify_groups(
-            &dataset,
-            &lifecycle.budget,
-            &mut verification::Checks::composition(),
-        )
-        .await?;
-        // Readback has an operation-specific manifest because coverage can advance
-        // while the same expensive materialized values remain reusable.
-        let readback_key = format!("readback/{}", spec.operation());
-        let release = if let Some(release) = lifecycle
-            .get::<ReleasePin>(&lifecycle.open(spec.dataset()).await?, &readback_key)
-            .await?
-        {
-            if release.dataset != dataset {
-                return Err(Error::refusal(
-                    "corrupt_phase",
-                    "retained readback differs from the prepared result",
-                ));
-            }
-            check_release_available(&release, &lifecycle.budget).await?;
-            release
-        } else {
-            #[cfg(feature = "test-util")]
-            work_started("readback");
-            let directory = self.reserve_attempt(spec, &operation, "release").await?;
-            let path = directory.join("release.json");
-            let serialized = serde_json::to_vec_pretty(&dataset)?;
-            if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
-                return Err(Error::refusal(
-                    "metadata_capacity",
-                    "combined release exceeds metadata allowance",
-                ));
-            }
-            storage::write_new(&path, &serialized)?;
-            let manifest = ObjectRef {
-                owner: spec.dataset().clone(),
-                path: path.to_string_lossy().into_owned(),
-                digest: blake3::hash(&serialized).to_hex().to_string(),
-                bytes: serialized.len() as u64,
             };
-            // Decode the serialized release independently of the producing context.
-            let memory = Arc::new(
-                lifecycle
-                    .budget
-                    .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
-            );
-            let decoded: DatasetPin =
-                inputs::read_manifest(&manifest, &lifecycle.budget, &mut 0, &memory).await?;
-            if decoded != dataset {
-                return Err(Error::refusal(
-                    "release_mismatch",
-                    "serialized release differs from selected result",
-                ));
+            stop_after(stop, "readback")?;
+            if let OperationRequest::Refresh(refresh) = spec {
+                let selected = Box::pin(self.select_refresh(refresh, &operation, &release)).await?;
+                stop_after(stop, "selection")?;
+                return Ok(selected);
             }
-            let release = ReleasePin {
-                id: spec.operation().clone(),
-                dataset,
-                manifest,
-                verified: true,
-            };
-            // Prepared tables were validated at their durable phase boundaries.
-            // Equality above verifies serialization without scanning them again.
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(spec.dataset()).await?;
-            self.check_completion(&view, &operation, spec.operation())
-                .await?;
-            if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
-                completed
-            } else {
-                lifecycle
-                    .commit(&view, vec![record(&readback_key, &release)?])
-                    .await?;
-                release
+            {
+                let _guard = lock.lock().await;
+                let view = lifecycle.open(spec.dataset()).await?;
+                if let Some(completed) = lifecycle
+                    .get(&view, &format!("result/{}", spec.operation()))
+                    .await?
+                {
+                    return Ok(completed);
+                }
+                let authority = self.check(&view, &operation, spec.operation()).await?;
+                if authority
+                    .selected
+                    .as_ref()
+                    .is_some_and(|p| p.boundary > operation.boundary)
+                {
+                    return Err(Error::refusal(
+                        "coverage_regression",
+                        "a newer captured input boundary is already selected",
+                    ));
+                }
+                check_group_rebuild(&authority, spec)?;
+                self.check_incremental(&authority, spec).await?;
+                Box::pin(self.select(&view, authority, &release)).await?;
             }
-        };
-        stop_after(stop, "readback")?;
-        if let OperationRequest::Refresh(refresh) = spec {
-            let selected = Box::pin(self.select_refresh(refresh, &operation, &release)).await?;
             stop_after(stop, "selection")?;
-            return Ok(selected);
-        }
-        {
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(spec.dataset()).await?;
-            if let Some(completed) = lifecycle
-                .get(&view, &format!("result/{}", spec.operation()))
-                .await?
-            {
-                return Ok(completed);
-            }
-            let authority = self.check(&view, &operation, spec.operation()).await?;
-            if authority
-                .selected
-                .as_ref()
-                .is_some_and(|p| p.boundary > operation.boundary)
-            {
-                return Err(Error::refusal(
-                    "coverage_regression",
-                    "a newer captured input boundary is already selected",
-                ));
-            }
-            check_group_rebuild(&authority, spec)?;
-            self.check_incremental(&authority, spec).await?;
-            Box::pin(self.select(&view, authority, &release)).await?;
-        }
-        stop_after(stop, "selection")?;
-        Ok(release)
+            Ok(release)
+        })
     }
 
     async fn check(
@@ -1262,10 +1304,12 @@ fn check_authority(authority: &Authority, operation: &Operation) -> Result<()> {
             "selected base manifest differs from the captured operation",
         ));
     }
-    if operation.require_current_boundary && authority.boundary != operation.boundary {
+    if operation.require_current_boundary
+        && authority.boundary != operation.admission_fence.unwrap_or(operation.boundary)
+    {
         return Err(Error::refusal(
             "stale_source_boundary",
-            "source admission advanced after this rebuild; start a new operation",
+            "source admission advanced after capture; start a new operation",
         ));
     }
     Ok(())
@@ -1673,7 +1717,7 @@ async fn verify_local_release(
     checks: &mut verification::Checks,
 ) -> Result<()> {
     let decoded = &release.dataset;
-    if decoded.format != FORMAT
+    if !supported_format(decoded.format)
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
         || decoded.request.operation() != &decoded.version

@@ -153,7 +153,7 @@ impl Engine {
             .resolve_release(&view, &version.dataset, &version.version)
             .await?;
         let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        if release.version_ref() != *version || release.dataset.format != FORMAT {
+        if release.version_ref() != *version || !supported_format(release.dataset.format) {
             return Err(invalid_relationship());
         }
         if release.dataset.eligibility != authority.eligibility {
@@ -274,7 +274,7 @@ async fn read_relationship(
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<SourceRelationship> {
     let header: InputHeader = read_manifest(&version.manifest, budget, bytes, memory).await?;
-    if header.format != FORMAT
+    if !supported_format(header.format)
         || header.dataset != version.dataset
         || header.version != version.version
     {

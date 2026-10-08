@@ -1,0 +1,9 @@
+{
+  "captured_at": "2026-10-08T17:48:03.367153+00:00",
+  "purpose": "Distinguish development-build disk from retained dataset and failed-run storage after admission-fence qualification.",
+  "debug_cache_allocated_bytes": 6595452928,
+  "volume_available_bytes": 42144997376,
+  "scope": "Post-gate snapshot, not a peak or workload storage measurement. Shared-volume availability also reflects other workstation activity.",
+  "data_work": "Small temporary test fixtures only; no Comments benchmark or corpus copy. Retained performance data and failed-run evidence were not removed.",
+  "cache_policy": "Keep the existing debug cache for continued implementation; no cleanup in this checkpoint."
+}

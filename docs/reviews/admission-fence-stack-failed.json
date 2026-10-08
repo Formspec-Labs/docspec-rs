@@ -1,0 +1,1077 @@
+{
+  "source": "/Users/mikewolfd/Library/Logs/DiagnosticReports/defaults-4c89bebbe8001542-2026-10-08-133844.ips",
+  "captureTime": "2026-10-08 13:38:37.8261 -0400",
+  "exception": {
+    "codes": "0x0000000000000002, 0x000000016d307eb8",
+    "message": "Could not determine thread index for stack guard region",
+    "rawCodes": [
+      2,
+      6126862008
+    ],
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGABRT",
+    "subtype": "KERN_PROTECTION_FAILURE at 0x000000016d307eb8"
+  },
+  "triggeredThreads": [
+    {
+      "triggered": true,
+      "id": 12841217,
+      "name": "additions_updates_defaults_and_rebuild_preserve_supplied_state_",
+      "threadState": {
+        "x": [
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 8
+          },
+          {
+            "value": 16
+          },
+          {
+            "value": 4442566407,
+            "symbolLocation": 351,
+            "symbol": "core::unicode::unicode_data::cased::OFFSETS::h159d4b24871cac39"
+          },
+          {
+            "value": 11371423845958962204
+          },
+          {
+            "value": 11371423841342127132
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 4294967293
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 328
+          },
+          {
+            "value": 8510747504
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 6
+          },
+          {
+            "value": 7427
+          },
+          {
+            "value": 6128972000
+          },
+          {
+            "value": 6126862008
+          },
+          {
+            "value": 10000000
+          },
+          {
+            "value": 1000000000
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 1
+          },
+          {
+            "value": 1000000000
+          },
+          {
+            "value": 0
+          }
+        ],
+        "flavor": "ARM_THREAD_STATE64",
+        "lr": {
+          "value": 6665337048
+        },
+        "cpsr": {
+          "value": 1073741824
+        },
+        "fp": {
+          "value": 4580407936
+        },
+        "sp": {
+          "value": 4580407904
+        },
+        "esr": {
+          "value": 1442840704,
+          "description": "(Syscall)"
+        },
+        "pc": {
+          "value": 6665094632,
+          "matchesCrashFrame": 1
+        },
+        "far": {
+          "value": 0
+        }
+      },
+      "frames": [
+        {
+          "imageOffset": 38376,
+          "symbol": "__pthread_kill",
+          "symbolLocation": 8,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 26840,
+          "symbol": "pthread_kill",
+          "symbolLocation": 296,
+          "imageIndex": 5
+        },
+        {
+          "imageOffset": 493944,
+          "symbol": "abort",
+          "symbolLocation": 148,
+          "imageIndex": 6
+        },
+        {
+          "imageOffset": 93688948,
+          "symbol": "std::sys::pal::unix::abort_internal::h7e526aa44f596455",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 93692928,
+          "symbol": "std::process::abort::h356e677792aaa82e",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 92178732,
+          "symbol": "std::sys::pal::unix::stack_overflow::imp::signal_handler::h9a5ebf494f1d8a42",
+          "symbolLocation": 680,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 14148,
+          "symbol": "_sigtramp",
+          "symbolLocation": 56,
+          "imageIndex": 7
+        },
+        {
+          "imageOffset": 15506384,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h6bc7037a062cecd0",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15506384,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h6bc7037a062cecd0",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15390256,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h83ec12393ea79a12",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15388908,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h39e70dcf57022949",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15338268,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::h0c249828012c0e94",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15355304,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h68816e6dd6d5d101",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354516,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h8ac55cf6a3452e6f",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622676,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h70aaccd9fec8e4db",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15406600,
+          "symbol": "core::iter::adapters::try_process::h6ed6d8c476b9b7a7",
+          "symbolLocation": 100,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622476,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hf835ecc34036fc57",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15515504,
+          "symbol": "core::iter::traits::iterator::Iterator::collect::h468ab97a71584f24",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15274860,
+          "symbol": "apache_avro::schema::Parser::parse_union::h7b4796e33c301437",
+          "symbolLocation": 72,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15281956,
+          "symbol": "apache_avro::schema::Parser::parse_complex::hff16d2864457048f",
+          "symbolLocation": 3536,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15253540,
+          "symbol": "apache_avro::schema::RecordField::parse::ha0e89c88c80260dd",
+          "symbolLocation": 416,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15278412,
+          "symbol": "apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hce89931a236c4e86",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15516924,
+          "symbol": "core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h0dd2c98b6d15eda1",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15509860,
+          "symbol": "_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::enumerate::_$u7b$$u7b$closure$u7d$$u7d$::hc3b7376d8068e75d",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15657568,
+          "symbol": "core::iter::adapters::filter_map::filter_map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h15268e64031f60ca",
+          "symbolLocation": 124,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15359344,
+          "symbol": "core::iter::traits::iterator::Iterator::try_fold::hdd7938657ccf475c",
+          "symbolLocation": 172,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15648844,
+          "symbol": "_$LT$core..iter..adapters..filter_map..FilterMap$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::heffa981a23282af3",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15509492,
+          "symbol": "_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::hacb9336ebc3b04e1",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15506048,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h0609866ddd9bbb8c",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15390656,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::ha1a7e792bddaaa29",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15389068,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h3fb1a9e597faff60",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15346048,
+          "symbol": "alloc::vec::Vec$LT$T$C$A$GT$::extend_desugared::h16086e1ee23eb425",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354964,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$C$A$GT$$u20$as$u20$alloc..vec..spec_extend..SpecExtend$LT$T$C$I$GT$$GT$::spec_extend::h0f71e4b79d6e4a56",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15342272,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::hef35c13919c4c98c",
+          "symbolLocation": 476,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15355284,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h56030b9c6fcb7a69",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354268,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h4a41d2bb72768e3b",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622628,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h6311dc864c48ac52",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15406244,
+          "symbol": "core::iter::adapters::try_process::h5554e1d4f90a2bea",
+          "symbolLocation": 116,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622528,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hfdadc7245bc21697",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15515764,
+          "symbol": "core::iter::traits::iterator::Iterator::collect::hedbdd9827efdb5da",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15278280,
+          "symbol": "apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::h248e564ee49952a6",
+          "symbolLocation": 88,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15635972,
+          "symbol": "core::result::Result$LT$T$C$E$GT$::and_then::h02047520690072a2",
+          "symbolLocation": 88,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15276812,
+          "symbol": "apache_avro::schema::Parser::parse_record::h708273aa7d6dc00a",
+          "symbolLocation": 900,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15282340,
+          "symbol": "apache_avro::schema::Parser::parse_complex::hff16d2864457048f",
+          "symbolLocation": 3920,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15300400,
+          "symbol": "apache_avro::schema::Parser::parse::h639421e1b4a7c6a9",
+          "symbolLocation": 256,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15272708,
+          "symbol": "apache_avro::schema::Parser::parse_array::_$u7b$$u7b$closure$u7d$$u7d$::h93994f910aaf7c2b",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15636076,
+          "symbol": "core::result::Result$LT$T$C$E$GT$::and_then::h846937cfaeee7364",
+          "symbolLocation": 88,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15272320,
+          "symbol": "apache_avro::schema::Parser::parse_array::h096e8f505b1e491b",
+          "symbolLocation": 76,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15282160,
+          "symbol": "apache_avro::schema::Parser::parse_complex::hff16d2864457048f",
+          "symbolLocation": 3740,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15300400,
+          "symbol": "apache_avro::schema::Parser::parse::h639421e1b4a7c6a9",
+          "symbolLocation": 256,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15274908,
+          "symbol": "apache_avro::schema::Parser::parse_union::_$u7b$$u7b$closure$u7d$$u7d$::h23e29d95616284be",
+          "symbolLocation": 24,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15518816,
+          "symbol": "core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::hcee953565ad45036",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15356192,
+          "symbol": "core::iter::traits::iterator::Iterator::try_fold::h0a23cf280ab32660",
+          "symbolLocation": 168,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15506384,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h6bc7037a062cecd0",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15390256,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h83ec12393ea79a12",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15388908,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h39e70dcf57022949",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15346468,
+          "symbol": "alloc::vec::Vec$LT$T$C$A$GT$::extend_desugared::h28826eb1d9c76b05",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15355184,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$C$A$GT$$u20$as$u20$alloc..vec..spec_extend..SpecExtend$LT$T$C$I$GT$$GT$::spec_extend::hb5a9af764ae96268",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15338704,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::h0c249828012c0e94",
+          "symbolLocation": 476,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15355304,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h68816e6dd6d5d101",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354516,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h8ac55cf6a3452e6f",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622676,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h70aaccd9fec8e4db",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15406600,
+          "symbol": "core::iter::adapters::try_process::h6ed6d8c476b9b7a7",
+          "symbolLocation": 100,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622476,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hf835ecc34036fc57",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15515504,
+          "symbol": "core::iter::traits::iterator::Iterator::collect::h468ab97a71584f24",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15274860,
+          "symbol": "apache_avro::schema::Parser::parse_union::h7b4796e33c301437",
+          "symbolLocation": 72,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15281956,
+          "symbol": "apache_avro::schema::Parser::parse_complex::hff16d2864457048f",
+          "symbolLocation": 3536,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15253540,
+          "symbol": "apache_avro::schema::RecordField::parse::ha0e89c88c80260dd",
+          "symbolLocation": 416,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15278412,
+          "symbol": "apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hce89931a236c4e86",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15516924,
+          "symbol": "core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h0dd2c98b6d15eda1",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15509860,
+          "symbol": "_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::enumerate::_$u7b$$u7b$closure$u7d$$u7d$::hc3b7376d8068e75d",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15657568,
+          "symbol": "core::iter::adapters::filter_map::filter_map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h15268e64031f60ca",
+          "symbolLocation": 124,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15359344,
+          "symbol": "core::iter::traits::iterator::Iterator::try_fold::hdd7938657ccf475c",
+          "symbolLocation": 172,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15648844,
+          "symbol": "_$LT$core..iter..adapters..filter_map..FilterMap$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::heffa981a23282af3",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15509492,
+          "symbol": "_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::hacb9336ebc3b04e1",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15506048,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h0609866ddd9bbb8c",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15390656,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::ha1a7e792bddaaa29",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15389068,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h3fb1a9e597faff60",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15346048,
+          "symbol": "alloc::vec::Vec$LT$T$C$A$GT$::extend_desugared::h16086e1ee23eb425",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354964,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$C$A$GT$$u20$as$u20$alloc..vec..spec_extend..SpecExtend$LT$T$C$I$GT$$GT$::spec_extend::h0f71e4b79d6e4a56",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15342272,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::hef35c13919c4c98c",
+          "symbolLocation": 476,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15355284,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h56030b9c6fcb7a69",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15354268,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h4a41d2bb72768e3b",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622628,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h6311dc864c48ac52",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15406244,
+          "symbol": "core::iter::adapters::try_process::h5554e1d4f90a2bea",
+          "symbolLocation": 116,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15622528,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hfdadc7245bc21697",
+          "symbolLocation": 40,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15515764,
+          "symbol": "core::iter::traits::iterator::Iterator::collect::hedbdd9827efdb5da",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15278280,
+          "symbol": "apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::h248e564ee49952a6",
+          "symbolLocation": 88,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15635972,
+          "symbol": "core::result::Result$LT$T$C$E$GT$::and_then::h02047520690072a2",
+          "symbolLocation": 88,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15276812,
+          "symbol": "apache_avro::schema::Parser::parse_record::h708273aa7d6dc00a",
+          "symbolLocation": 900,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15282340,
+          "symbol": "apache_avro::schema::Parser::parse_complex::hff16d2864457048f",
+          "symbolLocation": 3920,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15300400,
+          "symbol": "apache_avro::schema::Parser::parse::h639421e1b4a7c6a9",
+          "symbolLocation": 256,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15302948,
+          "symbol": "apache_avro::schema::Schema::parse::h56e95847f2a30d9d",
+          "symbolLocation": 56,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13423244,
+          "symbol": "apache_avro::reader::Block$LT$R$GT$::read_writer_schema::hcf47039bc8384681",
+          "symbolLocation": 332,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13419396,
+          "symbol": "apache_avro::reader::Block$LT$R$GT$::read_header::he42390ac042c7f10",
+          "symbolLocation": 480,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13424788,
+          "symbol": "apache_avro::reader::Block$LT$R$GT$::new::h89dba51fd8d40c53",
+          "symbolLocation": 344,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13427056,
+          "symbol": "apache_avro::reader::Reader$LT$R$GT$::new::hae02103b77103daa",
+          "symbolLocation": 108,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10788936,
+          "symbol": "iceberg::spec::manifest_list::ManifestList::parse_with_version::hd2da28937a9504e3",
+          "symbolLocation": 272,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 14493008,
+          "symbol": "iceberg::spec::manifest_list::reader::ManifestListReader::load::_$u7b$$u7b$closure$u7d$$u7d$::hdf77fe4da7097282",
+          "symbolLocation": 3068,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6426680,
+          "symbol": "iceberg::io::object_cache::ObjectCache::fetch_and_parse_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::he2a26f2c920e99e7",
+          "symbolLocation": 704,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6307612,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h9d15e5819ffa0aa6",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 7310444,
+          "symbol": "_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf3ad31c210e8038c",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3566068,
+          "symbol": "_$LT$futures_util..future..future..catch_unwind..CatchUnwind$LT$Fut$GT$$u20$as$u20$core..future..future..Future$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h4ee8760ab92123da",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 7394364,
+          "symbol": "_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::hab6216739e7f96bb",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5286196,
+          "symbol": "std::panicking::catch_unwind::do_call::h835b3bb1a010d523",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3197124,
+          "symbol": "__rust_try",
+          "symbolLocation": 32,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 2981272,
+          "symbol": "std::panic::catch_unwind::he28f27103dc4dc71",
+          "symbolLocation": 56,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3565892,
+          "symbol": "_$LT$futures_util..future..future..catch_unwind..CatchUnwind$LT$Fut$GT$$u20$as$u20$core..future..future..Future$GT$::poll::he3e468901c85f7b1",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 4011544,
+          "symbol": "moka::future::value_initializer::ValueInitializer$LT$K$C$V$C$S$GT$::try_init_or_read::_$u7b$$u7b$closure$u7d$$u7d$::hd242a9eccfe8b610",
+          "symbolLocation": 3360,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3833152,
+          "symbol": "moka::future::cache::Cache$LT$K$C$V$C$S$GT$::try_insert_with_hash_and_fun::_$u7b$$u7b$closure$u7d$$u7d$::h617b88427f0e0a1b",
+          "symbolLocation": 668,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3834904,
+          "symbol": "moka::future::cache::Cache$LT$K$C$V$C$S$GT$::get_or_try_insert_with_hash_by_ref_and_fun::_$u7b$$u7b$closure$u7d$$u7d$::h2f669c7696642d93",
+          "symbolLocation": 880,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 7454236,
+          "symbol": "moka::future::entry_selector::RefKeyEntrySelector$LT$K$C$Q$C$V$C$S$GT$::or_try_insert_with::_$u7b$$u7b$closure$u7d$$u7d$::hd1885b33cc9a9418",
+          "symbolLocation": 460,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6424256,
+          "symbol": "iceberg::io::object_cache::ObjectCache::get_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::h0fe794badeeae477",
+          "symbolLocation": 1616,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 4089188,
+          "symbol": "iceberg::scan::context::PlanContext::get_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::hc1f54bf220748932",
+          "symbolLocation": 388,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3121416,
+          "symbol": "iceberg::scan::TableScan::plan_files::_$u7b$$u7b$closure$u7d$$u7d$::h046075364cf2d028",
+          "symbolLocation": 1348,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 7021544,
+          "symbol": "docspec::storage::schema::plan_files::_$u7b$$u7b$closure$u7d$$u7d$::h5e74f80c9f72edcc",
+          "symbolLocation": 1332,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6325844,
+          "symbol": "docspec::storage::occurrences::Occurrences::capture::_$u7b$$u7b$closure$u7d$$u7d$::ha95023907db2b6d6",
+          "symbolLocation": 1780,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6333984,
+          "symbol": "docspec::storage::occurrences::OccurrenceScan::values::_$u7b$$u7b$closure$u7d$$u7d$::h999a2bff5430a403",
+          "symbolLocation": 500,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 4412284,
+          "symbol": "docspec::engine::write::_$LT$impl$u20$docspec..engine..Engine$GT$::replace_keys::_$u7b$$u7b$closure$u7d$$u7d$::h998d4052f12abd58",
+          "symbolLocation": 8708,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 4461396,
+          "symbol": "docspec::engine::write::_$LT$impl$u20$docspec..engine..Engine$GT$::process_update::_$u7b$$u7b$closure$u7d$$u7d$::h75c1e0179874da74",
+          "symbolLocation": 12144,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5964668,
+          "symbol": "docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h6f68e976eb87ca66",
+          "symbolLocation": 9568,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6308052,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hd06b689d39facc47",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5994908,
+          "symbol": "docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h0ac4459e0cd47fe0",
+          "symbolLocation": 18204,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6308252,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf1284a81759fa8f0",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5951364,
+          "symbol": "docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::h35293deb7135e5ff",
+          "symbolLocation": 1096,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6042076,
+          "symbol": "docspec::engine::Engine::update::_$u7b$$u7b$closure$u7d$$u7d$::h7293e8f0c37b4853",
+          "symbolLocation": 504,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 155292,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::_$u7b$$u7b$closure$u7d$$u7d$::h7637117c6a12a00f",
+          "symbolLocation": 12476,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 473852,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h14b642deca5b1be6",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 473932,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hca3d3f7b6a6c4884",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 395844,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h2729a79188a5126b",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 395716,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hbe655c332b46fe49",
+          "symbolLocation": 208,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 388416,
+          "symbol": "tokio::runtime::scheduler::current_thread::Context::enter::h16bb28b39d0b5403",
+          "symbolLocation": 288,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 391500,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h5abb63ee6f45b8a9",
+          "symbolLocation": 460,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 390788,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::enter::_$u7b$$u7b$closure$u7d$$u7d$::h4b821f8c5d03651b",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 386328,
+          "symbol": "tokio::runtime::context::scoped::Scoped$LT$T$GT$::set::hc6e8d4c8f013bc69",
+          "symbolLocation": 140,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 548052,
+          "symbol": "tokio::runtime::context::set_scheduler::_$u7b$$u7b$closure$u7d$$u7d$::h0c99b30de8a34e14",
+          "symbolLocation": 48,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 374972,
+          "symbol": "std::thread::local::LocalKey$LT$T$GT$::try_with::he1771ca6be49c9ae",
+          "symbolLocation": 172,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 372464,
+          "symbol": "std::thread::local::LocalKey$LT$T$GT$::with::h6939c69427aead09",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 547988,
+          "symbol": "tokio::runtime::context::set_scheduler::ha994d389785b34f7",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 390336,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::enter::h9420e8abc894e33a",
+          "symbolLocation": 340,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 390984,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::h3c1c9c429c90c6ee",
+          "symbolLocation": 64,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 387044,
+          "symbol": "tokio::runtime::scheduler::current_thread::CurrentThread::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h0a718f50399b9dbd",
+          "symbolLocation": 348,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 549572,
+          "symbol": "tokio::runtime::context::runtime::enter_runtime::haaf50f31a3047784",
+          "symbolLocation": 180,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 386680,
+          "symbol": "tokio::runtime::scheduler::current_thread::CurrentThread::block_on::hd7ba457feb53163e",
+          "symbolLocation": 108,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 352560,
+          "symbol": "tokio::runtime::runtime::Runtime::block_on_inner::ha6135fe978506923",
+          "symbolLocation": 160,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 352908,
+          "symbol": "tokio::runtime::runtime::Runtime::block_on::h1fb1a94c36e3ee11",
+          "symbolLocation": 268,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 142656,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::h4690c0a5fb208783",
+          "symbolLocation": 304,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 142796,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::_$u7b$$u7b$closure$u7d$$u7d$::h337fb087853e3e96",
+          "symbolLocation": 20,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 477192,
+          "symbol": "core::ops::function::FnOnce::call_once::h48d20a3d09a94f44",
+          "symbolLocation": 20,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 674388,
+          "symbol": "test::__rust_begin_short_backtrace::ha0e48c1a0658e118",
+          "symbolLocation": 24,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 736064,
+          "symbol": "test::run_test::_$u7b$$u7b$closure$u7d$$u7d$::hb3350d8e162b7432",
+          "symbolLocation": 908,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 610240,
+          "symbol": "std::sys::backtrace::__rust_begin_short_backtrace::he121e5b5ae94324a",
+          "symbolLocation": 132,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 622476,
+          "symbol": "core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h3cdfab2e71d5a0b4",
+          "symbolLocation": 64,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 92182000,
+          "symbol": "std::sys::thread::unix::Thread::new::thread_start::hb5c7d2a38fab9e31",
+          "symbolLocation": 408,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 27736,
+          "symbol": "_pthread_start",
+          "symbolLocation": 136,
+          "imageIndex": 5
+        },
+        {
+          "imageOffset": 7196,
+          "symbol": "thread_start",
+          "symbolLocation": 8,
+          "imageIndex": 5
+        }
+      ]
+    }
+  ]
+}

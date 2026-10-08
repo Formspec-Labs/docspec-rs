@@ -265,7 +265,7 @@ impl<'a> History<'a> {
         }
         let dataset: DatasetPin =
             inputs::read_manifest(object, self.budget, &mut self.bytes, &self.memory).await?;
-        if dataset.format != FORMAT {
+        if !supported_format(dataset.format) {
             return Err(invalid_group());
         }
         let dataset = Arc::new(dataset);

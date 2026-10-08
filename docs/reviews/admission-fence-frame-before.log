@@ -1,0 +1,32 @@
+(lldb) target create "target/debug/deps/defaults-4c89bebbe8001542"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/defaults-4c89bebbe8001542' (arm64).
+(lldb) disassemble --start-address 0x1005b3280 --count 12
+defaults-4c89bebbe8001542`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h0ac4459e0cd47fe0:
+defaults-4c89bebbe8001542[0x1005b3280] <+0>:  stp    x28, x27, [sp, #-0x20]!
+defaults-4c89bebbe8001542[0x1005b3284] <+4>:  stp    x29, x30, [sp, #0x10]
+defaults-4c89bebbe8001542[0x1005b3288] <+8>:  add    x29, sp, #0x10
+defaults-4c89bebbe8001542[0x1005b328c] <+12>: sub    x9, sp, #0x99, lsl #12    ; =0x99000 
+defaults-4c89bebbe8001542[0x1005b3290] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+defaults-4c89bebbe8001542[0x1005b3294] <+20>: str    xzr, [sp]
+defaults-4c89bebbe8001542[0x1005b3298] <+24>: cmp    sp, x9
+defaults-4c89bebbe8001542[0x1005b329c] <+28>: b.ne   0x1005b3290               ; <+16>
+defaults-4c89bebbe8001542[0x1005b32a0] <+32>: sub    sp, sp, #0xc10
+defaults-4c89bebbe8001542[0x1005b32a4] <+36>: str    xzr, [sp]
+defaults-4c89bebbe8001542[0x1005b32a8] <+40>: sub    x9, x29, #0xd0
+defaults-4c89bebbe8001542[0x1005b32ac] <+44>: str    x9, [sp, #0x1488]
+(lldb) target create "target/debug/deps/defaults-4c89bebbe8001542"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/defaults-4c89bebbe8001542' (arm64).
+(lldb) disassemble --start-address 0x1005acb3c --count 12
+defaults-4c89bebbe8001542`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::h35293deb7135e5ff:
+defaults-4c89bebbe8001542[0x1005acb3c] <+0>:  stp    x28, x27, [sp, #-0x20]!
+defaults-4c89bebbe8001542[0x1005acb40] <+4>:  stp    x29, x30, [sp, #0x10]
+defaults-4c89bebbe8001542[0x1005acb44] <+8>:  add    x29, sp, #0x10
+defaults-4c89bebbe8001542[0x1005acb48] <+12>: sub    x9, sp, #0x11, lsl #12    ; =0x11000 
+defaults-4c89bebbe8001542[0x1005acb4c] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+defaults-4c89bebbe8001542[0x1005acb50] <+20>: str    xzr, [sp]
+defaults-4c89bebbe8001542[0x1005acb54] <+24>: cmp    sp, x9
+defaults-4c89bebbe8001542[0x1005acb58] <+28>: b.ne   0x1005acb4c               ; <+16>
+defaults-4c89bebbe8001542[0x1005acb5c] <+32>: sub    sp, sp, #0x120
+defaults-4c89bebbe8001542[0x1005acb60] <+36>: add    x9, sp, #0x10, lsl #12    ; =0x10000 
+defaults-4c89bebbe8001542[0x1005acb64] <+40>: add    x9, x9, #0x848
+defaults-4c89bebbe8001542[0x1005acb68] <+44>: str    x9, [sp, #0x208]

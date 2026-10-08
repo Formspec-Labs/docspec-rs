@@ -439,7 +439,7 @@ pub(super) async fn read_release(
     if dataset.dataset != version.dataset
         || dataset.version != version.version
         || version.manifest.owner != dataset.dataset
-        || dataset.format != FORMAT
+        || !supported_format(dataset.format)
     {
         return Err(invalid());
     }
