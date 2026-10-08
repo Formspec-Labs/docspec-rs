@@ -29,9 +29,14 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                     return Err(invalid_group());
                 }
                 check_refreshed_groups(dataset, &base, parent)?;
+                if dataset.relationship != inputs::relationship(&dataset.request, Some(&base)) {
+                    return Err(inputs::invalid_relationship());
+                }
                 checked_base = Some((parent.clone(), base));
             } else if !dataset.computed.is_empty() || dataset.parent_manifest.is_some() {
                 return Err(invalid_group());
+            } else if dataset.relationship != inputs::relationship(&dataset.request, None) {
+                return Err(inputs::invalid_relationship());
             }
         }
         OperationRequest::Update(_) => {
@@ -48,6 +53,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 }
             }
             if inherited_inputs != base.inputs
+                || dataset.relationship != base.relationship
                 || base.eligibility != dataset.eligibility
                 || dataset.boundary <= base.boundary
                 || dataset.definition != base.definition
@@ -76,6 +82,8 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
                 || parent.version == dataset.version
                 || parent.groups.get("source") != Some(source)
                 || parent.inputs != dataset.inputs
+                || parent.relationship != dataset.relationship
+                || base.relationship != dataset.relationship
                 || parent.boundary != dataset.boundary
                 || parent.definition != dataset.definition
                 || parent.eligibility != dataset.eligibility
@@ -167,7 +175,7 @@ async fn read_manifest(object: &ObjectRef, budget: &Budget) -> Result<DatasetPin
     }
     storage::verify_objects(vec![object.clone()], budget).await?;
     let base: DatasetPin = serde_json::from_reader(std::fs::File::open(&object.path)?)?;
-    if base.format != 4 {
+    if base.format != FORMAT {
         return Err(invalid_group());
     }
     Ok(base)

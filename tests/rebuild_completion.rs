@@ -197,6 +197,7 @@ async fn newer_admission_preserves_finished_source_before_acknowledgment_and_reb
         dataset: base.dataset.dataset.clone(),
         operation: id("paused-rebuild"),
         base: Some(base.id.clone()),
+        relationship: None,
         input: source.path,
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),

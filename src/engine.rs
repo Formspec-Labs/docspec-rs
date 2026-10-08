@@ -28,6 +28,9 @@ mod backfill;
 #[doc(inline)]
 pub use backfill::BackfillPlan;
 mod history;
+mod inputs;
+#[doc(inline)]
+pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
 pub use read::read_group;
@@ -72,7 +75,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v4";
+const PROCESSOR: &str = "docspec.dataset.v5";
+pub(crate) const FORMAT: u32 = 5;
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -285,10 +289,19 @@ impl Engine {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
+        self.resolve_release(&view, dataset, version).await
+    }
+
+    async fn resolve_release(
+        &self,
+        view: &crate::catalog::View,
+        dataset: &Id,
+        version: &Id,
+    ) -> Result<ReleasePin> {
         let release: ReleasePin = self
             .inner
             .lifecycle
-            .get(&view, &format!("result/{version}"))
+            .get(view, &format!("result/{version}"))
             .await?
             .ok_or_else(|| Error::refusal("no_release", "operation has no completed release"))?;
         if &release.dataset.dataset != dataset
@@ -784,12 +797,13 @@ impl Engine {
         }
         stop_after(stop, "groups")?;
         let dataset = DatasetPin {
-            format: 4,
+            format: FORMAT,
             dataset: spec.dataset().clone(),
             version: spec.operation().clone(),
             groups,
             computed,
             inputs,
+            relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
             changes: processing.changes.clone(),
             definition: operation.definition.clone(),
             eligibility: operation.eligibility,
@@ -1075,6 +1089,7 @@ fn check_preparation(authority: &Authority, operation: &Operation) -> Result<()>
 }
 
 fn check_group_rebuild(authority: &Authority, request: &OperationRequest) -> Result<()> {
+    inputs::check_rebuild(authority, request)?;
     if matches!(request, OperationRequest::Build(build) if build.base.is_none())
         && authority
             .selected
@@ -1129,7 +1144,7 @@ fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
 fn fingerprint(spec: &OperationRequest) -> Result<String> {
     let material = match spec {
         OperationRequest::Build(spec) => {
-            serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base}})
+            serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base, "relationship": spec.relationship}})
         }
         OperationRequest::Update(spec) => {
             serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
@@ -1399,7 +1414,7 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
             "release manifest does not match its pin",
         ));
     }
-    if decoded.format != 4
+    if decoded.format != FORMAT
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
         || decoded.request.operation() != &decoded.version
@@ -1463,7 +1478,7 @@ async fn verify_changes(
     let before: DatasetPin =
         serde_json::from_reader(std::fs::File::open(&changes.base_manifest.path)?)?;
     let before_source = before.groups.get("source").ok_or_else(invalid)?;
-    if before.format != 4
+    if before.format != FORMAT
         || before.dataset != spec.dataset
         || before.version != spec.base
         || changes.base_version != spec.base

@@ -24,6 +24,7 @@ fn build(base: &ReleasePin, operation: &str) -> RunSpec {
         dataset: base.dataset.dataset.clone(),
         operation: id(operation),
         base: None,
+        relationship: None,
         input: base.dataset.inputs["input"].path.clone(),
         expected_digest: base.dataset.inputs["input"].digest.clone(),
         sql: "SELECT * FROM input".into(),

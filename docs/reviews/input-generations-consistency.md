@@ -1,0 +1,90 @@
+# Producer input-generation consistency review
+
+Static review of the uncommitted checkpoint after `9565e87`, dated 2026-10-08. The reviewer applied the semi-formal review and Microsoft Rust guidance, read the implementation and its callers, and executed no tests. Only this report was edited. Scope: producer declarations, exact generation seals, metadata-only input capture and independent metadata checks. This is an R5 prerequisite; dependent output selection, joins, payload verification and publication qualification are not implemented by this checkpoint.
+
+## Findings first
+
+### F1 — A later generation could omit an established family member — CLOSED
+
+- **Severity:** BLOCKER; correctness/relationship semantics.
+- **Initial location:** `src/engine/inputs.rs`, original `seal_generation` and `check_relationships` implementation, before the family roster was added.
+- **Failure sequence:** Seal family F generation g1 as `{C1,D1}`. Create C2 declaring F/g2, then seal g2 as `{C2}`. Consume C2 with an older independently declared D0. The intersection check has no D entry in g2, so neither C2's seal nor D0's declaration constrains the combination. Reusing the family name silently loses the established C/D relationship.
+- **Correction:** The first seal now commits `family-members` alongside the generation (`src/engine/inputs.rs:62–66`). Later generations require the same dataset set (`:43–47`); identical retries also require that roster (`:33–41`). Capture retains the roster from the same family snapshot (`:106–126`), and the shared checker requires exact family/seal key sets and exact member dataset sets (`:213–225`). Intentional membership changes require a new family ID.
+- **Disposition:** The small immutable roster closes the hole without introducing a mutable policy service. The feature test `stable_family_membership_and_exact_retry_survive_restart_and_invalidation` (`tests/input_generations.rs:331`) checks conflicting first seals, fixed membership on the next generation and restart reconciliation. The matrix also attempts a singleton seal using an eligible C3 that genuinely declares the new generation (`tests/input_generations.rs:114–124`); it refuses specifically because the fixed roster includes D. Assertions and successful owner execution evidence have been inspected.
+
+### O1 — Capture and offline metadata checking have deliberately different claims
+
+- **Severity:** OBSERVATION; scope.
+- `capture_inputs` qualifies the exact versions against accepted history and current eligibility while holding the complete source/family lock set (`src/engine/inputs.rs:96–136,148–165`). `verify_input_coverage` checks retained manifest identities and relationship rules without a catalog (`:169–190`). It does not certify current eligibility, payload availability or the issuer of a supplied coverage record; its documentation says so explicitly.
+- Future dependent selection must recheck source eligibility and output guards, and must retain this exact coverage in its result. This report does not treat a successful capture as authorization to publish later.
+
+## Patch summary and requirement trace
+
+`RunSpec.relationship` is optional: omission inherits an exact supplied base, or selects Independent for a new source. Explicit changes require the selected base. Updates inherit their base relationship; backfills retain the selected composition's relationship. `DatasetPin` and processor format advance together to v5 (`src/model.rs:73,109,224`; `src/engine.rs:78`). The operation fingerprint includes the requested declaration, while material source phases remain reusable across a relationship-only rebuild.
+
+Generation sealing and capture reuse the existing per-dataset locks, accepted-succession checker and guarded native lifecycle commit. A family roster and generation row add bounded immutable metadata; there is no separate mutable coverage cursor or policy backend. CLI and HTTP call the same application operations.
+
+The parent requirement is Q5 in `DocSpec/docs/plans/native-dataset-lifecycle-2026-10-07/07-operations-qualification.md:117–123`: individually advancing sources may still form an inadmissible combination; coupled selection must refuse C2/D1 while independent rules may permit it. R5's selection requirements (`05-dependent-refresh.md:29–39`) still require fresh promotion guards, retained input coverage and recovery. R2's independent reader (`02-incremental-publication.md:15–25,39`) motivates retaining seal/roster metadata outside the producer catalog. This checkpoint establishes the relationship primitive without claiming those full consumer paths.
+
+## Function trace
+
+| Function / type | Location | Inputs → outputs | Verified behavior |
+| --- | --- | --- | --- |
+| `SourceRelationship`, `GenerationSeal`, `InputCoverage` | `src/model.rs:109–140` | Producer declaration / exact member vector → retained metadata | Typed Independent or family/generation declaration; exact VersionRefs; coverage retains consumed inputs, family rosters and seal bodies. Unknown relationship/seal/coverage fields refuse. |
+| `relationship` | `src/engine/inputs.rs:321` | Request and optional base → declaration | Explicit Build declaration wins; otherwise copies the base or defaults to Independent. Update cannot introduce a relationship override. |
+| `check_rebuild` | `src/engine/inputs.rs:334` | Current authority and request → guard | Refuses an unbased rebuild of a coupled source, and an unbased relationship change. An initial source may explicitly declare coupling. |
+| `check_group_rebuild` callers | `src/engine.rs:196,579,892,1091` | Plan/admission/final selection → shared guard | Relationship changes are checked before admission mutation and again at selection. Existing exact-base, boundary, definition and eligibility checks remain in force. Completed operation reconciliation retains historical result behavior. |
+| `fingerprint`, `phase_key` | `src/engine.rs:1144,1026` | Request/material dependencies → retry/reuse identities | Relationship participates in retry identity, while source material phase keys use content/SQL/definition/processor/eligibility. New association gets its own operation and release readback. |
+| Dataset construction | `src/engine.rs:799` | Prepared values, exact base and request → DatasetPin | Binds the resolved declaration into immutable manifest bytes. Backfill clones the current selected composition (`src/engine/backfill.rs:407`). |
+| `verify_groups` | `src/engine/backfill/verification.rs:6` | Pinned request/parents/groups → independent checks | Build declaration must match explicit/inherited resolution; Update must match its base; Backfill must agree with both request base and actual composition parent. Checks apply even with no computed groups. |
+| `seal_generation` | `src/engine/inputs.rs:17` | Producer seal → retained/reconciled seal | Bounds metadata, checks member identities, takes sorted deduplicated locks, reconciles exact retries, checks fixed roster, accepted history, current eligibility and manifest declarations, then commits roster/seal atomically. |
+| `capture_inputs` | `src/engine/inputs.rs:79` | Exact input map → InputCoverage | Reads immutable declarations to establish complete lock set; under locks checks accepted identity/eligibility, retrieves relevant seal and roster from one family view, then applies shared relationship rules. No payload read or output advancement. |
+| `lock_inputs` | `src/engine/inputs.rs:139` | Ordered distinct dataset/family IDs → owned guards | Locks in one global ID order, avoiding source-then-family inversion. Family ID equal to a member ID is deduplicated. |
+| `qualify_input` | `src/engine/inputs.rs:148` | VersionRef → accepted declaration | Calls `follows(v,v)` so an orphan result cannot establish acceptance, resolves exact release identity from the same view, checks format and current producer eligibility. Caller owns the dataset lock. |
+| `resolve_release` | `src/engine.rs:295` | Captured View/dataset/version → ReleasePin | Extracted from public `release` so capture/sealing can reuse identity/verified checks without recursively acquiring a dataset lock. Public `release` still acquires its lock. |
+| `verify_input_coverage` | `src/engine/inputs.rs:178` | Coverage and Limits → metadata verification | Reads exact consumed manifests without Engine/catalog and applies the same relationship checker. Does not consult current state or inspect payloads. |
+| `check_relationships` | `src/engine/inputs.rs:193` | Coverage plus manifest declarations → admissibility | Every coupled input must match its exact seal member and family/generation; no missing/extraneous family data; seal roster must be exact; every consumed dataset intersecting any seal must match, even if its older declaration says Independent or another family. |
+| `validate_members`, `validate_seal` | `src/engine/inputs.rs:245,249` | Member map → identity validation | Refuses empty selections and member keys or manifest owners that differ from the VersionRef dataset. |
+| `read_relationship` | `src/engine/inputs.rs:270` | VersionRef/shared Budget → immutable header | Charges admitted bytes, reads only the exact size plus one overflow byte, hashes and parses the same buffer, verifies format/dataset/version, and carries reservations into blocking work. Does not open referenced data objects. |
+| `metadata_size`, `check_size`, refusal helpers | `src/engine/inputs.rs:352–390` | Metadata/counts → bounded size or structured error | Counts serialization without creating another complete serialized copy; aggregate arithmetic saturates and refuses over-budget work. |
+| CLI/HTTP entry points | `src/main.rs:69,144,255`; `src/http.rs:35,81,88` | Typed bounded metadata → shared operations | CLI offline verification avoids Engine construction. Seal/capture routes reuse application methods; conflicting reseals map to HTTP 409. |
+
+Existing callees inspected: `history::follows` and its head/revision anchors (`src/engine/history.rs:30–124`), `Lifecycle::get/rows` (`src/catalog.rs:118–145`), and `Lifecycle::commit`/`GuardedCatalog` (`src/catalog.rs:205–280,363–380`). The maintained catalog's expected metadata/snapshot condition still guards the family commit. Per-dataset locks, not a multi-table catalog transaction, hold source eligibility stable during local capture/sealing.
+
+## Data flow and invariants
+
+1. **Producer authority:** The request determines a declaration, which is bound into the immutable source manifest. Consumer capture accepts only exact VersionRefs; it has no switch to override a producer's declaration. Independent metadata verification hashes the full admitted manifest before interpreting its small header.
+2. **Explicit relationship transition:** An existing coupled source cannot become independent merely because a caller omitted the new field. Based Build resolves inheritance against its exact base; stale-base and strict boundary guards prevent a concurrent producer selection from being silently replaced.
+3. **Exact generation membership:** Seals identify immutable versions, not equal rows or generation labels alone. Update/backfill can create another version with the same declaration, but it cannot satisfy an older seal. A based Build can establish a new generation association while reusing source computation; the final versions are then sealed.
+4. **Stable family membership:** The initial roster and initial seal share one lifecycle commit. Later member omission/addition is a conflict requiring a different family. A consumer may use a subset of a sealed family; every member it does consume must be the exact sealed version. Unrelated independent datasets remain allowed.
+5. **Accepted and eligible capture:** `follows(v,v)` establishes accepted chain membership; current authority eligibility prevents new capture of an invalidated historical version. Identical seal retries reconcile a past durable result without pretending that it is currently eligible for new consumption.
+6. **One local observation:** Declarations determine the complete lock set before acquisition. Source and family guards stay owned through qualification/commit or coverage return. Captured coverage may become stale afterward; it is retained metadata, not a freshness lease.
+7. **Independent metadata semantics:** Coverage carries the seal and roster needed to reproduce relationship checks. Its offline verifier intentionally does not authenticate externally supplied expected metadata, walk current accepted history or verify data/evidence payloads. Those remain separate requirements for a future derived release.
+8. **No digest cycle:** Seals refer to already created source manifests; source declarations name only family/generation. Coverage carries completed seals. No source digest includes a seal that includes that same digest.
+
+## Test behavior and edge cases
+
+The following feature assertions were inspected. The owner executed them successfully; the reviewer inspected the retained output and did not execute tests.
+
+| Test | Location | Assertions / trace |
+| --- | --- | --- |
+| `independent_and_coupled_inputs_follow_the_entire_consumed_member_map` | `tests/input_generations.rs:79` | Complete independent/historical coupled generations succeed, unsealed and cross-generation combinations refuse, and older Independent or foreign-family versions cannot bypass an intersecting member constraint. A subset and unrelated independent source succeed. An eligible g3 member cannot shrink the established family roster. |
+| `omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base` | `tests/input_generations.rs:173` | An unbased transition refuses before an operation record exists; plan/run both refuse an unbased coupled rebuild. Omitted JSON declaration inherits its base, preserves exact source TablePin, and differs from an explicit Independent declaration for retry identity. Explicit based uncoupling verifies. |
+| `updates_and_backfills_inherit_but_resealing_requires_exact_new_members` | `tests/input_generations.rs:242` | Update/backfill retain producer declarations, but a new version cannot replace the old seal member. A based generation reassociation preserves the exact source TablePin and scalar Parquet ObjectRefs, then seals/captures successfully. |
+| `stable_family_membership_and_exact_retry_survive_restart_and_invalidation` | `tests/input_generations.rs:331` | Concurrent conflicting first seals have one winner; bounded timeout and family/member ID overlap exercise lock deduplication. Conflicting reseal and changed roster refuse. Invalidation blocks fresh capture while offline metadata checking still succeeds; identical durable seal retry survives restart after member manifests are removed. |
+| `offline_relationship_checks_need_only_captured_manifests_and_detect_tampering` | `tests/input_generations.rs:398` | Hides catalog and removes input/native Parquet payloads; metadata verification succeeds without recreating the catalog. Missing seal/roster, wrong generation/member, extra roster, aggregate byte exhaustion, false size and same-size byte corruption refuse. |
+| `invalid_seals_and_rebound_input_keys_refuse` | `tests/input_generations.rs:503` | Independent producer cannot be sealed as coupled; empty seals/coverage and incorrect member key/manifest owner refuse. |
+| `independent_release_verification_rejects_rewritten_producer_relationships` | `tests/input_generations.rs:551` | Rehashes a false relationship into otherwise unchanged initial, explicit Build, inherited Build and Backfill manifests. Verification reaches the declaration/parent rules and refuses rather than relying on stale digest failure. |
+| `canceled_manifest_read_keeps_admission_until_its_blocking_work_exits` | `src/engine/inputs.rs:399` | Queues the actual reader behind a controlled blocking task, cancels its async caller, proves metadata/buffer/I/O admission remains occupied, then releases the worker and proves admission returns. |
+| `canceled_partial_input_lock_acquisition_releases_prior_locks` | `src/engine/inputs.rs:457` | Holds the later lock, observes the earlier lock acquired, cancels the acquisition future and proves both locks become acquirable. |
+| `cli_and_http_use_the_same_generation_guards` | `tests/input_generations.rs:603` | HTTP sealing/capture returns the exact input map; real CLI sealing retry and capture succeed after releasing Engine ownership. CLI offline verification succeeds with the catalog hidden and does not recreate it. |
+
+Existing test fixture changes explicitly set `relationship: None`; they preserve their previous independent-source meaning. Both requested strengthening cases are present: eligible g3 family shrink and independently rehashed declaration forgeries. The retained `docs/reviews/input-generations-check.log` shows successful fmt/Clippy gate progression, all feature and existing suites through final doc tests, and completion of `cargo check --locked --no-default-features`. The owner confirmed the combined command exited 0. The reviewer inspected the log and executed no tests.
+
+The final scope wording was inspected in `README.md:186–228` and `docs/STATUS.md:426–475`. It explains fixed membership, explicit inheritance/transitions, exact resealing after Update/Backfill, format 5 without compatibility migration, and the distinction between capture eligibility and offline metadata verification. It explicitly leaves guarded derived output selection, joins, contributor evidence, full Q5 publication, retention and performance qualification unfinished. No broader claim is inferred from these passing checks.
+
+## Conclusion
+
+**VERDICT: APPROVE**
+
+The fixed family roster closes the identified consistency defect, and the production trace has no other identified correctness blocker for the declared metadata-only scope. Coverage of changed paths is **ADEQUATE** for this prerequisite. Confidence is **HIGH** in static consistency and the inspected successful owner-run gate. Full Q5 output selection/publication and dependent refresh remain outside this checkpoint.

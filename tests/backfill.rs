@@ -428,6 +428,7 @@ async fn refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_
     );
     let build = RunSpec {
         base: None,
+        relationship: None,
         dataset: base.dataset.dataset.clone(),
         operation: id("unsupported-build"),
         input: replacement.path,
@@ -551,6 +552,7 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
     let base = engine
         .run(&RunSpec {
             base: None,
+            relationship: None,
             dataset: id("wide"),
             operation: id("initial"),
             input: input.path,
@@ -686,6 +688,7 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
             let alternate = engine
                 .run(&RunSpec {
                     base: None,
+                    relationship: None,
                     dataset: id(&format!("malformed_{kind}")),
                     operation: id("build"),
                     input: path.to_string_lossy().into_owned(),

@@ -93,7 +93,7 @@ The independently verified release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
 all groups together after independent verification. General incremental SQL
-remains unfinished. Release format 4 is the current greenfield
+remains unfinished. Release format 5 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
 ## Add a computed field group
@@ -183,9 +183,57 @@ These counts describe selection history, not elapsed time or upstream acquisitio
 completeness. Missing, malformed, backward or orphaned history refuses. The check
 does not establish payload availability; use `verify` for that.
 
+## Qualify related input generations
+
+A producer can add a relationship declaration to a run request:
+
+```json
+"relationship": {"kind": "coupled", "family": "regulations", "generation": "g1"}
+```
+
+An omitted declaration inherits the exact `base`, or makes a new source
+independent. Rebuilding a coupled source or changing a selected relationship
+requires that selected base. Updates and backfills inherit the relationship.
+An explicit `{"kind": "independent"}` with a base removes the requirement for
+that new producer version; consumers cannot override another version's rule.
+
+After producing all related versions, save a seal request with `family`,
+`generation`, and `members`. Each member key is its dataset ID; its value contains
+`dataset`, `version`, and the exact `manifest` object from the release pin.
+The first seal fixes the family's dataset membership. Later generations use the
+same members; an intentional membership change requires a new family ID.
+
+```sh
+target/debug/docspec --workspace workspaces/comments seal-generation generation.json
+target/debug/docspec --workspace workspaces/comments capture-inputs inputs.json > coverage.json
+target/debug/docspec verify-inputs coverage.json
+```
+
+`inputs.json` is a dataset-to-version map with the same shape as `members`.
+Capture checks accepted history, current producer eligibility, and exact sealed
+membership. A current Comments version requiring Dockets D2 refuses Dockets D1,
+even when D1's older declaration was independent. Consumers may read a subset of
+a family. Every member they do consume must match the seal.
+
+Seals are immutable: an identical retry returns the original; different members
+under the same generation refuse. Backfill creates a new version, so it cannot
+silently replace an already sealed member. Use a based rebuild to declare a new
+generation and seal its final versions. Qualified unchanged source and scalar
+files remain reusable across that association change.
+
+Capture and `verify-inputs` read bounded manifests, not data payloads. The latter
+checks retained relationships without a catalog; it does not establish current
+eligibility, payload availability or who issued a supplied coverage record.
+This is the input-selection prerequisite for related refresh. Joined processing,
+contributor evidence, and guarded output selection are still unfinished.
+
+## HTTP access
+
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
 `POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `POST /succession`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
+`POST /generations/seal` and `POST /inputs/capture` accept the same metadata as
+the corresponding CLI commands.
 CLI and HTTP call the same application services. HTTP accepts bounded JSON and
 streams Arrow IPC for bulk reads. One process owns a workspace; use HTTP to submit
 concurrent requests to that process.

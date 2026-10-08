@@ -77,6 +77,8 @@ pub struct DatasetPin {
     pub groups: BTreeMap<String, TablePin>,
     pub computed: BTreeMap<String, ComputedGroup>,
     pub inputs: BTreeMap<String, ObjectRef>,
+    /// Producer-declared relationship retained with this exact version.
+    pub relationship: SourceRelationship,
     pub definition: String,
     pub eligibility: u64,
     pub boundary: u64,
@@ -102,6 +104,39 @@ pub struct VersionRef {
     pub dataset: Id,
     pub version: Id,
     pub manifest: ObjectRef,
+}
+
+/// Producer-declared admissibility of a version alongside related datasets.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceRelationship {
+    /// This version imposes no cross-dataset generation requirement.
+    #[default]
+    Independent,
+    /// Consumed members of this family must match one sealed generation.
+    Coupled { family: Id, generation: Id },
+}
+
+/// Create-once producer selection of exact members belonging to one generation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerationSeal {
+    pub family: Id,
+    pub generation: Id,
+    pub members: BTreeMap<Id, VersionRef>,
+}
+
+/// Exact consumed versions and the producer seals required to combine them.
+///
+/// Retaining this metadata permits independent relationship checks. It does not
+/// promise payload availability or certify current eligibility after capture.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputCoverage {
+    pub inputs: BTreeMap<Id, VersionRef>,
+    /// Immutable member set established by each family's first seal.
+    pub families: BTreeMap<Id, std::collections::BTreeSet<Id>>,
+    pub generations: BTreeMap<Id, GenerationSeal>,
 }
 
 impl ReleasePin {
@@ -192,6 +227,10 @@ pub struct RunSpec {
     /// Exact selected version to rebuild, preserving its computed group definitions.
     #[serde(default)]
     pub base: Option<Id>,
+    /// Omission inherits the exact base, or declares a new source independent.
+    /// Changing an existing relationship requires its selected base.
+    #[serde(default)]
+    pub relationship: Option<SourceRelationship>,
     pub input: String,
     pub expected_digest: String,
     pub sql: String,

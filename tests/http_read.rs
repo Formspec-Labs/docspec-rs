@@ -329,6 +329,7 @@ async fn rebound_catalog_results_cannot_change_an_exact_version_url() {
             dataset: base.dataset.dataset.clone(),
             operation: scalar::id("second"),
             base: None,
+            relationship: None,
             input: base.dataset.inputs["input"].path.clone(),
             expected_digest: base.dataset.inputs["input"].digest.clone(),
             sql: "SELECT * FROM input".into(),

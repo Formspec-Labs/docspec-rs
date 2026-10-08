@@ -92,6 +92,7 @@ pub(super) async fn fixture(root: &Path, empty: bool) -> (Engine, ReleasePin, Ve
     let base = engine
         .run(&RunSpec {
             base: None,
+            relationship: None,
             dataset: id("comments"),
             operation: id("initial"),
             input: source.path,

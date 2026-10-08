@@ -5,7 +5,10 @@
 
 use crate::{
     Engine, Error,
-    model::{BackfillSpec, Id, ReleasePin, RunSpec, SuccessionProof, UpdateSpec, VersionRef},
+    model::{
+        BackfillSpec, GenerationSeal, Id, InputCoverage, ReleasePin, RunSpec, SuccessionProof,
+        UpdateSpec, VersionRef,
+    },
 };
 use axum::{
     Json, Router,
@@ -29,6 +32,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/backfills/plan", post(plan_backfill))
         .route("/backfills/run", post(backfill))
         .route("/succession", post(succession))
+        .route("/generations/seal", post(seal_generation))
+        .route("/inputs/capture", post(capture_inputs))
         .route("/datasets/{dataset}", get(inspect))
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
@@ -55,6 +60,7 @@ impl IntoResponse for HttpError {
         let status = match self.0.code() {
             "no_release" | "missing_group" => StatusCode::NOT_FOUND,
             "operation_conflict"
+            | "generation_conflict"
             | "stale_definition"
             | "stale_eligibility"
             | "coverage_regression" => StatusCode::CONFLICT,
@@ -70,6 +76,20 @@ impl IntoResponse for HttpError {
         )
             .into_response()
     }
+}
+
+async fn seal_generation(
+    State(engine): State<Engine>,
+    Json(seal): Json<GenerationSeal>,
+) -> Result<Json<GenerationSeal>, HttpError> {
+    Ok(Json(engine.seal_generation(&seal).await?))
+}
+
+async fn capture_inputs(
+    State(engine): State<Engine>,
+    Json(inputs): Json<std::collections::BTreeMap<Id, VersionRef>>,
+) -> Result<Json<InputCoverage>, HttpError> {
+    Ok(Json(engine.capture_inputs(&inputs).await?))
 }
 async fn plan(
     State(engine): State<Engine>,

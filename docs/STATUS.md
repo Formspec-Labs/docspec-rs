@@ -14,7 +14,7 @@ or compatibility layer for legacy DocSpec.
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; full concurrent-ingestion cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal; bounded accepted-history proof; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Multiple pinned related inputs; old/new-key affected-result discovery for joins; joined and aggregate-group refresh against full reconstruction |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture and independent relationship verification; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Native related-input processing and guarded output selection; old/new-key affected-result discovery for joins; contributor evidence; joined and aggregate-group refresh against full reconstruction |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
@@ -367,8 +367,8 @@ bounds limit history traversal; full cold replay still grows with retained histo
 See [succession tests](../tests/succession.rs), the
 [consistency review](reviews/succession-consistency.md),
 [resource review](reviews/succession-resources.md), and
-[gate output](reviews/succession-check.log). This does not complete multiple-input
-selection, coupled-generation declarations, joins or aggregate refresh under R5.
+[gate output](reviews/succession-check.log). Related-generation declarations are
+described below; joins, guarded output selection and aggregate refresh remain open.
 
 The first full gate stopped when a recovery fixture inherited the production
 32 GiB scratch profile while available disk approached that size. The
@@ -422,3 +422,55 @@ See [HTTP tests](../tests/http_read.rs), [encoder tests](../src/http/ipc.rs), th
 [resource review](reviews/http-read-resources.md) and
 [gate output](reviews/http-read-check.log). Tests use the Axum router/body and
 native readers; real-network transport performance and the Comments gate remain open.
+
+## Related-input generation checkpoint
+
+Source manifests retain a producer-owned `SourceRelationship`. Omission inherits
+a specified base; new unbased sources default to Independent. Rebuilding a coupled
+source or changing a selected relationship requires the exact selected base.
+Updates and backfills preserve the declaration. Independent release verification
+checks that the declaration agrees with the request and inherited parent.
+The greenfield manifest/processor format advances to 5; earlier experimental
+outputs need rebuilding rather than a compatibility layer.
+
+`seal_generation` commits exact accepted versions under one family/generation.
+The first seal also fixes the family's member dataset set in the same commit;
+later seals cannot silently drop a member. New membership requires a new family.
+Identical retries reconcile the original before opening manifests or payloads,
+including after source invalidation. Fresh sealing and capture require current
+producer eligibility. Source and family locks are acquired in one sorted distinct
+set; this is a local ownership guarantee, not a qualified multi-host transaction.
+
+`capture_inputs` returns exact version references, family membership and required
+seals. Every consumed member intersecting a seal must match it, even when an older
+manifest declared itself independent or belonged to another family. A subset is
+allowed; additional unrelated independent sources remain independent. Captured
+coverage can become stale afterward and does not itself select a derived result.
+The CLI and HTTP invoke these shared operations. Catalog-free `verify-inputs`
+hashes the captured manifests and applies the same relationship rules; it does
+not verify payloads, current eligibility, acquisition completeness or authorship
+of user-supplied coverage metadata.
+
+Backfill and updates create new version identities, even when source bytes match.
+They cannot replace a member of a sealed generation. A based rebuild can associate
+unchanged qualified source/scalar work with a new generation, followed by sealing
+the final exact versions. Tests assert the same source table and scalar Parquet
+objects survive that association change. No timing improvement is claimed.
+
+Review caught a shrinking-family consistency gap and an unbuffered manifest read,
+then resource custody and size-bound issues. The corrected reader admits a fixed
+buffer, checks actual size, reads the declared bytes plus an overflow probe, and
+hashes/parses those same bytes. The blocking worker retains both byte and metadata
+reservations after caller cancellation. Metadata charges are cumulative across
+the input vector and seals. Existing cold lifecycle replay still grows with
+history; these controls do not establish a whole-process memory ceiling.
+
+See [generation tests](../tests/input_generations.rs), the cancellation/lock cases
+in [the input module](../src/engine/inputs.rs),
+[consistency review](reviews/input-generations-consistency.md),
+[resource review](reviews/input-generations-resources.md), and
+[gate output](reviews/input-generations-check.log). This implements an R5/Q5
+prerequisite. Native joins, contributor relations, captured/latest output guards,
+incremental discovery and full Q5 publication remain unfinished. Cleanup stays
+disabled; retention must account for seals and captured dependencies before it
+can retire their objects. No remote or Comments performance claim follows.

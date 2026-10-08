@@ -23,6 +23,7 @@ fn rebuild(root: &Path, base: &ReleasePin, operation: &str, rows: &[Row]) -> Run
         dataset: base.dataset.dataset.clone(),
         operation: id(operation),
         base: Some(base.id.clone()),
+        relationship: None,
         input: source.path,
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),

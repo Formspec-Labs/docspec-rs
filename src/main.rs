@@ -4,8 +4,11 @@ use clap::{Parser, Subcommand};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_group, verify_release},
-    model::{BackfillSpec, Id, ReleasePin, RunSpec, UpdateSpec},
+    engine::{read_group, verify_input_coverage, verify_release},
+    model::{
+        BackfillSpec, GenerationSeal, Id, InputCoverage, ReleasePin, RunSpec, UpdateSpec,
+        VersionRef,
+    },
     storage,
 };
 use futures::TryStreamExt;
@@ -63,6 +66,12 @@ enum Command {
     Release { dataset: String, version: String },
     /// Prove that target follows prior on accepted history, without reading payloads.
     CheckSuccession { prior: PathBuf, target: PathBuf },
+    /// Seal a producer generation's exact accepted versions once.
+    SealGeneration { spec: PathBuf },
+    /// Capture admissible input versions and the producer seals they require.
+    CaptureInputs { spec: PathBuf },
+    /// Verify retained input relationships without opening the catalog or payloads.
+    VerifyInputs { coverage: PathBuf },
     /// Plan complete key replacements and deletions against an exact base.
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
@@ -131,6 +140,10 @@ async fn main() -> anyhow::Result<()> {
             let release: ReleasePin = read_json(release)?;
             verify_release(&release, limits).await?;
             print_json(&serde_json::json!({"verified": true, "release": release.id}))?;
+        }
+        Command::VerifyInputs { coverage } => {
+            verify_input_coverage(&read_json::<InputCoverage>(coverage)?, limits).await?;
+            print_json(&serde_json::json!({"relationships_verified": true}))?;
         }
         Command::Read {
             release,
@@ -238,6 +251,17 @@ async fn main() -> anyhow::Result<()> {
                             .prove_succession(&prior.version_ref(), &target.version_ref())
                             .await?,
                     )?;
+                }
+                Command::SealGeneration { spec } => {
+                    print_json(
+                        &engine
+                            .seal_generation(&read_json::<GenerationSeal>(spec)?)
+                            .await?,
+                    )?;
+                }
+                Command::CaptureInputs { spec } => {
+                    let inputs: std::collections::BTreeMap<Id, VersionRef> = read_json(spec)?;
+                    print_json(&engine.capture_inputs(&inputs).await?)?;
                 }
                 Command::Compare {
                     before,
