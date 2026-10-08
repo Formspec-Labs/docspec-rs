@@ -97,6 +97,7 @@ impl Occurrences {
         inventory: super::SnapshotFiles,
         located: bool,
     ) -> Result<Self> {
+        super::defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
         let schema = if located {
             occurrence_schema(table)?
         } else {

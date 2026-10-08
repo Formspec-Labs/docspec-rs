@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.62s
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 3 tests
+
+thread 'additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history' (12128550) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test defaults`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/defaults-4c89bebbe8001542` (signal: 6, SIGABRT: process abort signal)

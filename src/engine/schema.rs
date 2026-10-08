@@ -1,10 +1,34 @@
 //! Retained native schema edits and atomic writer-definition cutover.
 
 use super::*;
-use iceberg::spec::{Schema, TableMetadata};
+use iceberg::spec::{
+    FormatVersion, Literal, NestedField, PrimitiveType, Schema, TableMetadata, Type,
+};
 use std::collections::BTreeSet;
 
 impl Engine {
+    pub(super) async fn schema_key(
+        &self,
+        authority: &Authority,
+        request: &OperationRequest,
+    ) -> Result<Option<String>> {
+        if !matches!(request, OperationRequest::Build(build) if build.base.is_some()) {
+            return Ok(None);
+        }
+        let source = authority
+            .selected
+            .as_ref()
+            .and_then(|s| s.groups.get("source"))
+            .ok_or_else(invalid)?;
+        let native = storage::open_pin(source).await?;
+        if !storage::defaults::evolved(native.metadata()) {
+            return Ok(None);
+        }
+        Ok(Some(schema_identity(
+            native.metadata(),
+            &self.inner.lifecycle.budget,
+        )?))
+    }
     /// Plans a source schema edit against an exact selected version.
     ///
     /// # Errors
@@ -40,6 +64,18 @@ impl Engine {
         new_admission: bool,
     ) -> Result<()> {
         let OperationRequest::Schema(spec) = request else {
+            if matches!(request, OperationRequest::Build(build) if build.base.is_none())
+                && let Some(source) = authority
+                    .selected
+                    .as_ref()
+                    .and_then(|s| s.groups.get("source"))
+                && storage::defaults::evolved(storage::open_pin(source).await?.metadata())
+            {
+                return Err(Error::refusal(
+                    "schema_base_required",
+                    "rebuild an evolved source against its exact selected base",
+                ));
+            }
             return Ok(());
         };
         let base = authority.selected.as_ref().ok_or_else(invalid)?;
@@ -51,7 +87,9 @@ impl Engine {
         }
         let source = base.groups.get("source").ok_or_else(invalid)?;
         let native = storage::open_pin(source).await?;
-        let proposed = fields(native.metadata().current_schema(), spec)?;
+        let proposed = fields(native.metadata(), spec)?;
+        storage::defaults::check_expansion(&proposed, &self.inner.lifecycle.budget.limits, false)?;
+        storage::defaults::check_expansion(&proposed, &self.inner.lifecycle.budget.limits, true)?;
         for group in base.computed.values() {
             if group
                 .input_fields
@@ -148,6 +186,181 @@ impl Engine {
     }
 }
 
+fn schema_identity(metadata: &TableMetadata, budget: &Budget) -> Result<String> {
+    let _memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    let schemas = metadata
+        .schemas_iter()
+        .map(|schema| (schema.schema_id(), schema))
+        .collect::<BTreeMap<_, _>>();
+    let mut material = serde_json::to_value((
+        metadata.format_version(),
+        metadata.current_schema_id(),
+        metadata.last_column_id(),
+        schemas,
+    ))?;
+    if let Some(schemas) = material[3].as_object_mut() {
+        for schema in schemas.values_mut() {
+            if let Some(ids) = schema["identifier-field-ids"].as_array_mut() {
+                // Native identifiers are an unordered set; field order is material.
+                ids.sort_by_key(serde_json::Value::as_i64);
+            }
+        }
+    }
+    material.sort_all_objects();
+    Ok(blake3::hash(&storage::bounded_json(
+        &material,
+        budget.limits.max_metadata_bytes,
+    )?)
+    .to_hex()
+    .to_string())
+}
+
+pub(super) async fn verify_rebuild(
+    before: &TablePin,
+    after: &TablePin,
+    budget: &Budget,
+) -> Result<()> {
+    let before = storage::open_pin(before).await?;
+    if !storage::defaults::evolved(before.metadata()) {
+        return Ok(());
+    }
+    let after = storage::open_pin(after).await?;
+    if schema_identity(before.metadata(), budget)? != schema_identity(after.metadata(), budget)? {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// Normalize fresh observations once; internal rewrites carry stored values and flags.
+pub(super) async fn normalize(
+    frame: DataFrame,
+    schema: &Schema,
+    keys: &[String],
+    budget: &Budget,
+) -> Result<DataFrame> {
+    use arrow::datatypes::DataType;
+    use datafusion::prelude::{col, lit, when};
+    storage::defaults::validate(schema)?;
+    storage::defaults::check_expansion(schema, &budget.limits, true)?;
+    let incoming = frame.schema().as_arrow();
+    let native = iceberg::arrow::schema_to_arrow_schema(schema)?;
+    for field in incoming.fields() {
+        if native.field_with_name(field.name()).is_err() {
+            return Err(Error::refusal(
+                "schema_mismatch",
+                "input contains a field outside the selected source schema",
+            ));
+        }
+    }
+    for key in keys {
+        if incoming.field_with_name(key).is_err() || storage::defaults::supplied_id(key).is_some() {
+            return Err(Error::refusal(
+                "unknown_key",
+                "update keys must be explicitly supplied source fields",
+            ));
+        }
+    }
+    let mut values = BTreeMap::new();
+    let mut flags = BTreeMap::new();
+    for field in schema.as_struct().fields() {
+        if storage::defaults::supplied_id(&field.name).is_some() {
+            continue;
+        }
+        let marker = storage::defaults::supplied_name(field.id);
+        let tracked = schema.field_by_name(&marker).is_some();
+        let supplied = incoming.field_with_name(&field.name).is_ok();
+        if let Ok(actual) = incoming.field_with_name(&field.name)
+            && !write::same_fields(
+                &arrow::datatypes::Schema::new(vec![native.field_with_name(&field.name)?.clone()]),
+                &arrow::datatypes::Schema::new(vec![actual.clone()]),
+            )?
+        {
+            return Err(Error::refusal(
+                "schema_mismatch",
+                "supplied values must retain the selected field type and requiredness",
+            ));
+        }
+        let explicit = incoming.field_with_name(&marker).ok();
+        if !tracked {
+            if !supplied {
+                return Err(Error::refusal(
+                    "schema_mismatch",
+                    "input omits an existing source field",
+                ));
+            }
+            values.insert(
+                field.id,
+                col(datafusion::common::Column::from_name(&field.name)),
+            );
+            continue;
+        }
+        let default = lit(storage::defaults::scalar(field)?);
+        let flag = if let Some(flag) = explicit {
+            if !supplied || flag.data_type() != &DataType::Boolean || flag.is_nullable() {
+                return Err(Error::refusal(
+                    "invalid_presence",
+                    "supplied flags need a value column and a required Boolean type",
+                ));
+            }
+            col(datafusion::common::Column::from_name(&marker))
+        } else {
+            lit(supplied)
+        };
+        let value = if supplied {
+            // A physical column may contain explicit nulls. Only its supplied
+            // flag, never value equality or nullness, selects the omission rule.
+            when(
+                flag.clone(),
+                col(datafusion::common::Column::from_name(&field.name)),
+            )
+            .otherwise(default)?
+        } else {
+            default
+        };
+        values.insert(field.id, value);
+        flags.insert(field.id, flag);
+    }
+    let key_absence = keys
+        .iter()
+        .filter_map(|key| {
+            let field = schema.field_by_name(key)?;
+            incoming
+                .field_with_name(&storage::defaults::supplied_name(field.id))
+                .ok()?;
+            Some(
+                col(datafusion::common::Column::from_name(
+                    storage::defaults::supplied_name(field.id),
+                ))
+                .is_not_true(),
+            )
+        })
+        .reduce(|left, right| left.or(right));
+    // Explicit per-row key omission is rare. A bounded key-flag probe avoids a
+    // custom execution operator while refusing before defaulted keys define scope.
+    if let Some(missing) = key_absence
+        && write::any_rows(frame.clone().filter(missing)?).await?
+    {
+        return Err(Error::refusal(
+            "invalid_presence",
+            "update key rows must be explicitly supplied",
+        ));
+    }
+    let expressions = schema
+        .as_struct()
+        .fields()
+        .iter()
+        .map(|field| {
+            let expression = match storage::defaults::supplied_id(&field.name) {
+                Some(id) => flags.remove(&id),
+                None => values.remove(&field.id),
+            }
+            .ok_or_else(invalid)?;
+            Ok(expression.alias(&field.name))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(frame.select(expressions)?)
+}
+
 pub(super) fn validate(spec: &SchemaSpec) -> Result<()> {
     let ids = spec
         .fields
@@ -157,39 +370,48 @@ pub(super) fn validate(spec: &SchemaSpec) -> Result<()> {
     let names = spec
         .fields
         .iter()
-        .map(|field| field.name.as_str())
+        .map(|field| field.name.to_ascii_lowercase())
+        .chain(
+            spec.additions
+                .iter()
+                .map(|field| field.name.to_ascii_lowercase()),
+        )
         .collect::<BTreeSet<_>>();
     if spec.definition.trim().is_empty()
         || spec.next_definition.trim().is_empty()
         || spec.definition == spec.next_definition
         || spec.base == spec.operation
-        || spec.fields.is_empty()
+        || (spec.fields.is_empty() && spec.additions.is_empty())
         || ids.len() != spec.fields.len()
-        || names.len() != spec.fields.len()
+        || names.len() != spec.fields.len() + spec.additions.len()
         || spec.fields.iter().any(|field| {
             field.id <= 0
                 || field.name.trim().is_empty()
-                || field.name.eq_ignore_ascii_case(storage::OCCURRENCE_FILE)
-                || field.name.eq_ignore_ascii_case(storage::OCCURRENCE_ROW)
+                || field.name.to_ascii_lowercase().starts_with("__docspec_")
+        })
+        || spec.additions.iter().any(|field| {
+            field.name.trim().is_empty()
+                || field.name.to_ascii_lowercase().starts_with("__docspec_")
         })
     {
         return Err(Error::refusal(
             "invalid_schema",
-            "schema edit needs distinct existing root fields, an exact base and a new writer definition",
+            "schema edit needs distinct root fields, an exact base and a new writer definition",
         ));
     }
     Ok(())
 }
 
-fn fields(before: &Schema, spec: &SchemaSpec) -> Result<Schema> {
+fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
     validate(spec)?;
+    let before = metadata.current_schema();
     let roots = before
         .as_struct()
         .fields()
         .iter()
         .map(|field| (field.id, field))
         .collect::<BTreeMap<_, _>>();
-    let fields = spec
+    let mut fields = spec
         .fields
         .iter()
         .map(|selected| {
@@ -198,10 +420,62 @@ fn fields(before: &Schema, spec: &SchemaSpec) -> Result<Schema> {
                 .ok_or_else(invalid)?
                 .as_ref()
                 .clone();
+            if field.name.starts_with(storage::defaults::SUPPLIED_PREFIX) {
+                return Err(invalid());
+            }
             field.name = selected.name.clone();
+            if let Some(value) = spec.write_defaults.get(&field.id) {
+                if before
+                    .field_by_name(&storage::defaults::supplied_name(field.id))
+                    .is_none()
+                {
+                    return Err(invalid());
+                }
+                field.write_default = storage::defaults::literal(&field.field_type, value.clone())?;
+            }
             Ok(Arc::new(field))
         })
         .collect::<Result<Vec<_>>>()?;
+    if spec
+        .write_defaults
+        .keys()
+        .any(|id| !spec.fields.iter().any(|f| f.id == *id))
+    {
+        return Err(invalid());
+    }
+    // Keep presence paired with the logical field through rename/reorder/removal.
+    let markers = fields
+        .iter()
+        .filter_map(|field| {
+            before
+                .field_by_name(&storage::defaults::supplied_name(field.id))
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    fields.extend(markers);
+    let mut next = metadata.last_column_id();
+    for addition in &spec.additions {
+        let id = next.checked_add(1).ok_or_else(invalid)?;
+        next = id
+            .checked_add(1)
+            .filter(|id| !iceberg::metadata_columns::is_metadata_field(*id))
+            .ok_or_else(invalid)?;
+        let data_type = storage::defaults::native_type(addition.data_type);
+        let default = storage::defaults::literal(&data_type, addition.default.clone())?;
+        let mut field = NestedField::optional(id, &addition.name, data_type);
+        field.initial_default = default.clone();
+        field.write_default = default;
+        fields.push(Arc::new(field));
+        fields.push(Arc::new(
+            NestedField::required(
+                next,
+                storage::defaults::supplied_name(id),
+                Type::Primitive(PrimitiveType::Boolean),
+            )
+            .with_initial_default(Literal::bool(false))
+            .with_write_default(Literal::bool(false)),
+        ));
+    }
     // Native validation prevents removing identifier fields or invalidating nested IDs.
     Ok(Schema::builder()
         .with_fields(fields)
@@ -215,12 +489,19 @@ fn evolve(
     location: &str,
     uuid: uuid::Uuid,
 ) -> Result<TableMetadata> {
+    let schema = fields(before, spec)?;
+    let version = if storage::defaults::has_supplied(&schema) {
+        FormatVersion::V3
+    } else {
+        before.format_version()
+    };
     Ok(before
         .clone()
         .into_builder(None)
         .assign_uuid(uuid)
         .set_location(location.into())
-        .add_current_schema(fields(before.current_schema(), spec)?)?
+        .upgrade_format_version(version)?
+        .add_current_schema(schema)?
         .build()?
         .metadata)
 }
@@ -314,4 +595,38 @@ fn invalid() -> Error {
         "invalid_schema",
         "schema selection differs from its exact base, field identities or retained native state",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn material_schema_identity_ignores_set_order_but_keeps_allocation_state() {
+        let root = tempfile::tempdir().unwrap();
+        let schema = Schema::builder()
+            .with_fields((1..=4).map(|id| {
+                Arc::new(NestedField::required(
+                    id,
+                    format!("key_{id}"),
+                    Type::Primitive(PrimitiveType::Long),
+                ))
+            }))
+            .with_identifier_field_ids([1, 2, 3, 4])
+            .build()
+            .unwrap();
+        let metadata = storage::fresh_metadata(schema, root.path()).unwrap();
+        let budget = Budget::new(Limits::default()).unwrap();
+        let expected = schema_identity(&metadata, &budget).unwrap();
+        let encoded = serde_json::to_value(&metadata).unwrap();
+        // Native deserialization rebuilds unordered identifier sets per open.
+        for _ in 0..16 {
+            let reopened: TableMetadata = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(schema_identity(&reopened, &budget).unwrap(), expected);
+        }
+        let mut changed = encoded;
+        changed["last-column-id"] = 99.into();
+        let changed: TableMetadata = serde_json::from_value(changed).unwrap();
+        assert_ne!(schema_identity(&changed, &budget).unwrap(), expected);
+    }
 }

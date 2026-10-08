@@ -98,6 +98,33 @@ impl Engine {
             .await?;
         let dataframe = context.sql(&spec.sql).await?;
         validate_plan(dataframe.logical_plan())?;
+        if let Some(base) = &spec.base {
+            let release = self.release(&spec.dataset, base).await?;
+            let native = storage::open_pin(&release.dataset.groups["source"]).await?;
+            if storage::defaults::evolved(native.metadata()) {
+                let dataframe = schema::normalize(
+                    dataframe,
+                    native.metadata().current_schema(),
+                    &[],
+                    &self.inner.lifecycle.budget,
+                )
+                .await?;
+                let table = self
+                    .replacement_output(&spec.dataset, directory, &native)
+                    .await?;
+                return self.write_output(&spec.dataset, table, dataframe).await;
+            }
+        }
+        if dataframe.schema().fields().iter().any(|f| {
+            f.name()
+                .to_ascii_lowercase()
+                .starts_with(storage::defaults::SUPPLIED_PREFIX)
+        }) {
+            return Err(Error::refusal(
+                "reserved_field",
+                "supplied-state columns require an evolved source schema",
+            ));
+        }
         self.write_frame(&spec.dataset, directory, dataframe).await
     }
 
@@ -110,6 +137,15 @@ impl Engine {
         let schema =
             iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(dataframe.schema().as_arrow())?;
         let table = self.create_output(dataset, directory, schema).await?;
+        self.write_output(dataset, table, dataframe).await
+    }
+
+    async fn write_output(
+        &self,
+        dataset: &Id,
+        table: Table,
+        dataframe: DataFrame,
+    ) -> Result<Prepared> {
         let budget = &self.inner.lifecycle.budget;
         let files = storage::write_batches(
             &table,
@@ -157,7 +193,18 @@ impl Engine {
                 .await?;
         }
         let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-        let replacement = context.table("replacements").await?;
+        let mut replacement = context.table("replacements").await?;
+        if storage::defaults::has_supplied(native.metadata().current_schema()) {
+            replacement = schema::normalize(
+                replacement,
+                native.metadata().current_schema(),
+                &spec.keys,
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
+            context.deregister_table("replacements")?;
+            context.register_table("replacements", replacement.clone().into_view())?;
+        }
         if !same_fields(&schema, replacement.schema().as_arrow())? {
             return Err(Error::refusal(
                 "schema_mismatch",
@@ -547,15 +594,33 @@ fn key_join(
         .alias("l")?
         .join_on(right.alias("r")?, kind, conditions)?)
 }
-fn same_fields(left: &arrow::datatypes::Schema, right: &arrow::datatypes::Schema) -> Result<bool> {
+pub(super) fn same_fields(
+    left: &arrow::datatypes::Schema,
+    right: &arrow::datatypes::Schema,
+) -> Result<bool> {
     // The maintained converter assigns comparison-only IDs consistently and
     // preserves nested names, types and nullability. Caller files need no IDs.
+    let fields = right
+        .fields()
+        .iter()
+        .zip(left.fields())
+        .map(|(actual, expected)| {
+            actual
+                .as_ref()
+                .clone()
+                .with_nullable(actual.is_nullable() || expected.is_nullable())
+        })
+        .collect::<Vec<_>>();
+    if fields.len() != right.fields().len() {
+        return Ok(false);
+    }
+    let right = arrow::datatypes::Schema::new(fields);
     Ok(
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(left)?
-            == iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(right)?,
+            == iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(&right)?,
     )
 }
-async fn any_rows(frame: DataFrame) -> Result<bool> {
+pub(super) async fn any_rows(frame: DataFrame) -> Result<bool> {
     let batches = frame
         .select(vec![lit(1)])?
         .limit(0, Some(1))?

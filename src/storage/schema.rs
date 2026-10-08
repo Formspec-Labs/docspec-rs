@@ -16,6 +16,7 @@ use std::sync::Arc;
 /// Qualifies top-level renames, reorderings, removals and nullable additions.
 pub(super) fn read_schema(table: &Table) -> Result<SchemaRef> {
     let current = table.metadata().current_schema();
+    super::defaults::validate(current)?;
     // This virtual ID cannot also identify a nested physical field.
     if current.field_by_id(RESERVED_FIELD_ID_FILE).is_some() {
         return Err(Error::refusal(
@@ -51,9 +52,12 @@ pub(super) fn read_schema(table: &Table) -> Result<SchemaRef> {
                 {
                     return Err(unsupported());
                 }
-                None if field.required
-                    || field.initial_default.is_some()
-                    || !field.field_type.is_primitive() =>
+                None if !field.field_type.is_primitive()
+                    || ((field.required || field.initial_default.is_some())
+                        && (table.metadata().format_version()
+                            != iceberg::spec::FormatVersion::V3
+                            || !super::defaults::qualified_type(&field.field_type)
+                            || (field.required && field.initial_default.is_none()))) =>
                 {
                     return Err(unsupported());
                 }

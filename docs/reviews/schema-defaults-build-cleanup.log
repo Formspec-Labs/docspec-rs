@@ -1,0 +1,19 @@
+{
+  "before": {
+    "utc": "2026-10-08T16:35:53.525864+00:00",
+    "active_owned_readers": [],
+    "volume_free_bytes": 15236202496,
+    "debug_allocated_kib": 5704160
+  }
+}
+     Removed 5632 files, 5.4GiB total
+{
+  "after": {
+    "utc": "2026-10-08T16:35:58.248507+00:00",
+    "exit_code": 0,
+    "volume_free_bytes": 20590071808,
+    "release_binary_metadata_unchanged": true,
+    "debug_directory_exists": false
+  }
+}
+Cargo removal is rebuildable development output only. Volume free-space changes include concurrent workstation activity. Sources, retained inputs/results/failures, experiment evidence and release binaries were not selected for cleanup.

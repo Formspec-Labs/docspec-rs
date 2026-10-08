@@ -106,7 +106,8 @@ impl Engine {
             .fields()
             .iter()
             .filter(|field| {
-                release.dataset.related.is_none() || !refresh::hidden_field(&field.name)
+                storage::defaults::supplied_id(&field.name).is_none()
+                    && (release.dataset.related.is_none() || !refresh::hidden_field(&field.name))
             })
             .map(|field| format!("s.{}", quote(&field.name)))
             .collect::<Vec<_>>();
@@ -192,6 +193,7 @@ impl Engine {
                 definition: spec.definition.clone(),
                 base: Some(spec.base.clone()),
                 base_manifest: None,
+                schema_key: None,
                 require_current_boundary: false,
             });
             let capture = lifecycle
@@ -349,6 +351,7 @@ impl Engine {
                     definition: spec.definition.clone(),
                     base: Some(spec.base.clone()),
                     base_manifest: None,
+                    schema_key: None,
                     require_current_boundary: false,
                 };
                 let capture = Capture {
@@ -781,6 +784,7 @@ mod tests {
             definition: "v1".into(),
             base: Some(spec.base.clone()),
             base_manifest: None,
+            schema_key: None,
             require_current_boundary: false,
         };
         let request = OperationRequest::Backfill(spec.clone());

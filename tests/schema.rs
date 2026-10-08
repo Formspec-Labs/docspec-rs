@@ -34,6 +34,8 @@ fn request(base: &ReleasePin, operation: &str) -> SchemaSpec {
                 name: "comment_id".into(),
             },
         ],
+        additions: vec![],
+        write_defaults: BTreeMap::new(),
     }
 }
 fn payloads(release: &ReleasePin) -> BTreeMap<String, Vec<docspec::model::ObjectRef>> {

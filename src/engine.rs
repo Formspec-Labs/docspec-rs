@@ -63,6 +63,9 @@ struct Operation {
     definition: String,
     base: Option<Id>,
     base_manifest: Option<ObjectRef>,
+    /// Material native schema/history for full rebuilds with omission rules.
+    #[serde(default)]
+    schema_key: Option<String>,
     /// Explicit rebuilds fence later source admissions before replacing the selection.
     require_current_boundary: bool,
 }
@@ -206,6 +209,10 @@ impl Engine {
                 phases.insert(3, "groups");
             }
         }
+        let schema_key = match &operation {
+            Some(operation) => operation.schema_key.clone(),
+            None => self.schema_key(&authority, spec).await?,
+        };
         for phase in phases {
             let exists = if phase == "groups" {
                 lifecycle
@@ -236,6 +243,7 @@ impl Engine {
                                 .as_ref()
                                 .and_then(|o| o.base_manifest.as_ref())
                                 .or_else(|| captured_manifest(&authority, spec)),
+                            schema_key.as_ref(),
                         )?,
                     )
                     .await?
@@ -569,6 +577,128 @@ impl Engine {
         result
     }
 
+    // Source work finishes before composition. Keep its large native futures out
+    // of the enclosing poll frame while later groups, checks and selection run.
+    fn prepare_source<'a>(
+        &'a self,
+        spec: &'a OperationRequest,
+        operation: &'a Operation,
+        request: &'a str,
+        stop: Option<&'a str>,
+    ) -> futures::future::BoxFuture<'a, Result<(PhaseResult, PhaseResult)>> {
+        Box::pin(async move {
+            let lifecycle = &self.inner.lifecycle;
+            let admission = if let Some(phase) = self.phase(spec, operation, "admission").await? {
+                phase
+            } else if let OperationRequest::Refresh(refresh) = spec {
+                Box::pin(self.admit_refresh(refresh, operation)).await?
+            } else if let OperationRequest::Schema(schema) = spec {
+                self.admit_schema(schema, operation).await?
+            } else {
+                #[cfg(feature = "test-util")]
+                work_started("admission");
+                let directory = self.reserve_attempt(spec, operation, "admission").await?;
+                let inputs = spec.inputs();
+                let size = inputs
+                    .values()
+                    .try_fold(0u64, |sum, input| -> Result<u64> {
+                        Ok(sum.saturating_add(std::fs::metadata(&input.path)?.len()))
+                    })?;
+                let available = fs2::available_space(&self.inner.root)?;
+                if available
+                    < size
+                        .saturating_mul(3)
+                        .saturating_add(lifecycle.budget.limits.scratch_bytes)
+                {
+                    return Err(Error::refusal(
+                        "disk_capacity",
+                        "input, output and declared scratch do not fit available disk",
+                    ));
+                }
+                let mut outputs = Vec::new();
+                for (name, input) in inputs {
+                    let owner = spec.dataset().clone();
+                    let source = PathBuf::from(input.path);
+                    let destination = directory.join(format!("{name}.parquet"));
+                    let retained = lifecycle
+                        .budget
+                        .blocking(move || {
+                            storage::copy_verified(&owner, &source, &destination, &input.digest)
+                        })
+                        .await?;
+                    outputs.push(retained);
+                }
+                let phase = PhaseResult {
+                    operation: spec.operation().clone(),
+                    phase: "admission".into(),
+                    request_digest: request.to_owned(),
+                    eligibility: operation.eligibility,
+                    outputs,
+                    table: None,
+                    rows: 0,
+                    changes: None,
+                    coverage: None,
+                    metrics: WriteMetrics::default(),
+                };
+                self.complete(spec, operation, &phase).await?
+            };
+            stop_after(stop, "admission")?;
+
+            let processing = if let Some(phase) = self.phase(spec, operation, "processing").await? {
+                phase
+            } else {
+                #[cfg(feature = "test-util")]
+                work_started("processing");
+                let directory = self.reserve_attempt(spec, operation, "processing").await?;
+                let prepared = match spec {
+                    OperationRequest::Build(build) => {
+                        self.process_build(build, &directory, &admission).await?
+                    }
+                    OperationRequest::Update(update) => {
+                        self.process_update(update, &directory, &admission).await?
+                    }
+                    OperationRequest::Schema(schema) => {
+                        self.process_schema(schema, &directory, operation).await?
+                    }
+                    OperationRequest::Refresh(refresh) => {
+                        Box::pin(self.process_refresh(refresh, &directory, &admission, operation))
+                            .await?
+                    }
+                    OperationRequest::Backfill(_) => {
+                        return Err(Error::refusal(
+                            "invalid_operation",
+                            "use the backfill service",
+                        ));
+                    }
+                };
+                let mut outputs = prepared.table.objects.clone();
+                if let Some(changes) = &prepared.changes {
+                    outputs.push(changes.base_manifest.clone());
+                    outputs.extend(changes.removed.objects.clone());
+                    outputs.extend(changes.added.objects.clone());
+                }
+                outputs.sort_by(|left, right| left.path.cmp(&right.path));
+                outputs.dedup();
+                let phase = PhaseResult {
+                    operation: spec.operation().clone(),
+                    phase: "processing".into(),
+                    request_digest: request.to_owned(),
+                    eligibility: operation.eligibility,
+                    outputs,
+                    rows: prepared.table.rows,
+                    table: Some(prepared.table),
+                    changes: prepared.changes,
+                    coverage: admission.coverage.clone(),
+                    metrics: prepared.metrics,
+                };
+                self.complete(spec, operation, &phase).await?
+            };
+            stop_after(stop, "processing")?;
+
+            Ok((admission, processing))
+        })
+    }
+
     async fn prepare_and_select(
         &self,
         spec: &OperationRequest,
@@ -619,6 +749,7 @@ impl Engine {
                     definition: authority.definition.clone(),
                     base: spec.base().cloned(),
                     base_manifest: captured_manifest(&authority, spec).cloned(),
+                    schema_key: self.schema_key(&authority, spec).await?,
                     require_current_boundary: matches!(spec, OperationRequest::Schema(_))
                         || matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
                 };
@@ -651,112 +782,9 @@ impl Engine {
             .await?
             .ok_or_else(|| Error::refusal("corrupt_phase", "operation has no admitted request"))?;
 
-        let admission = if let Some(phase) = self.phase(spec, &operation, "admission").await? {
-            phase
-        } else if let OperationRequest::Refresh(refresh) = spec {
-            Box::pin(self.admit_refresh(refresh, &operation)).await?
-        } else if let OperationRequest::Schema(schema) = spec {
-            self.admit_schema(schema, &operation).await?
-        } else {
-            #[cfg(feature = "test-util")]
-            work_started("admission");
-            let directory = self.reserve_attempt(spec, &operation, "admission").await?;
-            let inputs = spec.inputs();
-            let size = inputs
-                .values()
-                .try_fold(0u64, |sum, input| -> Result<u64> {
-                    Ok(sum.saturating_add(std::fs::metadata(&input.path)?.len()))
-                })?;
-            let available = fs2::available_space(&self.inner.root)?;
-            if available
-                < size
-                    .saturating_mul(3)
-                    .saturating_add(lifecycle.budget.limits.scratch_bytes)
-            {
-                return Err(Error::refusal(
-                    "disk_capacity",
-                    "input, output and declared scratch do not fit available disk",
-                ));
-            }
-            let mut outputs = Vec::new();
-            for (name, input) in inputs {
-                let owner = spec.dataset().clone();
-                let source = PathBuf::from(input.path);
-                let destination = directory.join(format!("{name}.parquet"));
-                let retained = lifecycle
-                    .budget
-                    .blocking(move || {
-                        storage::copy_verified(&owner, &source, &destination, &input.digest)
-                    })
-                    .await?;
-                outputs.push(retained);
-            }
-            let phase = PhaseResult {
-                operation: spec.operation().clone(),
-                phase: "admission".into(),
-                request_digest: request.clone(),
-                eligibility: operation.eligibility,
-                outputs,
-                table: None,
-                rows: 0,
-                changes: None,
-                coverage: None,
-                metrics: WriteMetrics::default(),
-            };
-            self.complete(spec, &operation, &phase).await?
-        };
-        stop_after(stop, "admission")?;
-
-        let processing = if let Some(phase) = self.phase(spec, &operation, "processing").await? {
-            phase
-        } else {
-            #[cfg(feature = "test-util")]
-            work_started("processing");
-            let directory = self.reserve_attempt(spec, &operation, "processing").await?;
-            let prepared = match spec {
-                OperationRequest::Build(build) => {
-                    self.process_build(build, &directory, &admission).await?
-                }
-                OperationRequest::Update(update) => {
-                    self.process_update(update, &directory, &admission).await?
-                }
-                OperationRequest::Schema(schema) => {
-                    self.process_schema(schema, &directory, &operation).await?
-                }
-                OperationRequest::Refresh(refresh) => {
-                    Box::pin(self.process_refresh(refresh, &directory, &admission, &operation))
-                        .await?
-                }
-                OperationRequest::Backfill(_) => {
-                    return Err(Error::refusal(
-                        "invalid_operation",
-                        "use the backfill service",
-                    ));
-                }
-            };
-            let mut outputs = prepared.table.objects.clone();
-            if let Some(changes) = &prepared.changes {
-                outputs.push(changes.base_manifest.clone());
-                outputs.extend(changes.removed.objects.clone());
-                outputs.extend(changes.added.objects.clone());
-            }
-            outputs.sort_by(|left, right| left.path.cmp(&right.path));
-            outputs.dedup();
-            let phase = PhaseResult {
-                operation: spec.operation().clone(),
-                phase: "processing".into(),
-                request_digest: request.clone(),
-                eligibility: operation.eligibility,
-                outputs,
-                rows: prepared.table.rows,
-                table: Some(prepared.table),
-                changes: prepared.changes,
-                coverage: admission.coverage.clone(),
-                metrics: prepared.metrics,
-            };
-            self.complete(spec, &operation, &phase).await?
-        };
-        stop_after(stop, "processing")?;
+        let (admission, processing) = self
+            .prepare_source(spec, &operation, &request, stop)
+            .await?;
 
         let table = processing.table.clone().ok_or_else(|| {
             Error::refusal("corrupt_phase", "processing completion has no table pin")
@@ -1052,6 +1080,7 @@ impl Engine {
                     operation.eligibility,
                     phase,
                     operation.base_manifest.as_ref(),
+                    operation.schema_key.as_ref(),
                 )?,
             )
             .await?;
@@ -1120,6 +1149,7 @@ impl Engine {
             operation.eligibility,
             &phase.phase,
             operation.base_manifest.as_ref(),
+            operation.schema_key.as_ref(),
         )?;
         // Another attempt may have completed the same deterministic phase. Preserve
         // that generation rather than relabeling or replacing its evidence.
@@ -1151,6 +1181,7 @@ fn phase_key(
     eligibility: u64,
     phase: &str,
     base_manifest: Option<&ObjectRef>,
+    schema_key: Option<&String>,
 ) -> Result<String> {
     if let OperationRequest::Refresh(refresh) = spec {
         return refresh::phase_key(refresh, eligibility, phase, base_manifest);
@@ -1176,6 +1207,10 @@ fn phase_key(
         ] {
             hash.update(&(value.len() as u64).to_le_bytes());
             hash.update(value.as_bytes());
+        }
+        if let Some(source) = schema_key {
+            hash.update(b"native-omission-rules-v1");
+            hash.update(source.as_bytes());
         }
         return Ok(format!(
             "phase/build/{}/{eligibility}/{phase}",
@@ -1298,8 +1333,15 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"refresh": {"base": spec.base, "definition": spec.definition, "transform": spec.transform, "policy": spec.policy, "mode": spec.mode, "relationship": spec.relationship}})
         }
         OperationRequest::Schema(spec) => {
-            serde_json::json!({"schema": {"base": spec.base, "definition": spec.definition,
-                "next_definition": spec.next_definition, "fields": spec.fields}})
+            let mut value = serde_json::json!({"schema": {"base": spec.base, "definition": spec.definition,
+                "next_definition": spec.next_definition, "fields": spec.fields}});
+            if !spec.additions.is_empty() {
+                value["schema"]["additions"] = serde_json::to_value(&spec.additions)?;
+            }
+            if !spec.write_defaults.is_empty() {
+                value["schema"]["write_defaults"] = serde_json::to_value(&spec.write_defaults)?;
+            }
+            value
         }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)

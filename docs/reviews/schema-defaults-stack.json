@@ -1,0 +1,578 @@
+{
+  "exception": {
+    "codes": "0x0000000000000002, 0x000000016d12be90",
+    "message": "Could not determine thread index for stack guard region",
+    "rawCodes": [
+      2,
+      6124912272
+    ],
+    "type": "EXC_BAD_ACCESS",
+    "signal": "SIGABRT",
+    "subtype": "KERN_PROTECTION_FAILURE at 0x000000016d12be90"
+  },
+  "faultingThread": 1,
+  "threads": [
+    {
+      "triggered": true,
+      "id": 12005186,
+      "name": "additions_updates_defaults_and_rebuild_preserve_supplied_state_",
+      "threadState": {
+        "x": [
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 8
+          },
+          {
+            "value": 16
+          },
+          {
+            "value": 4444428679,
+            "symbolLocation": 351,
+            "symbol": "core::unicode::unicode_data::cased::OFFSETS::h159d4b24871cac39"
+          },
+          {
+            "value": 5410130209673012876
+          },
+          {
+            "value": 5410130212305868428
+          },
+          {
+            "value": 2
+          },
+          {
+            "value": 4294967293
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 328
+          },
+          {
+            "value": 8510747504
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 6
+          },
+          {
+            "value": 7427
+          },
+          {
+            "value": 6127022304
+          },
+          {
+            "value": 6124912272
+          },
+          {
+            "value": 10000000
+          },
+          {
+            "value": 1000000000
+          },
+          {
+            "value": 0
+          },
+          {
+            "value": 1
+          },
+          {
+            "value": 1000000000
+          },
+          {
+            "value": 0
+          }
+        ],
+        "flavor": "ARM_THREAD_STATE64",
+        "lr": {
+          "value": 6665337048
+        },
+        "cpsr": {
+          "value": 1073741824
+        },
+        "fp": {
+          "value": 4577983104
+        },
+        "sp": {
+          "value": 4577983072
+        },
+        "esr": {
+          "value": 1442840704,
+          "description": "(Syscall)"
+        },
+        "pc": {
+          "value": 6665094632,
+          "matchesCrashFrame": 1
+        },
+        "far": {
+          "value": 0
+        }
+      },
+      "frames": [
+        {
+          "imageOffset": 38376,
+          "symbol": "__pthread_kill",
+          "symbolLocation": 8,
+          "imageIndex": 1
+        },
+        {
+          "imageOffset": 26840,
+          "symbol": "pthread_kill",
+          "symbolLocation": 296,
+          "imageIndex": 5
+        },
+        {
+          "imageOffset": 493944,
+          "symbol": "abort",
+          "symbolLocation": 148,
+          "imageIndex": 6
+        },
+        {
+          "imageOffset": 93607028,
+          "symbol": "std::sys::pal::unix::abort_internal::h7e526aa44f596455",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 93611008,
+          "symbol": "std::process::abort::h356e677792aaa82e",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 92096812,
+          "symbol": "std::sys::pal::unix::stack_overflow::imp::signal_handler::h9a5ebf494f1d8a42",
+          "symbolLocation": 680,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 14148,
+          "symbol": "_sigtramp",
+          "symbolLocation": 56,
+          "imageIndex": 7
+        },
+        {
+          "imageOffset": 15568700,
+          "symbol": "apache_avro::util::zag_i64::hf50eddb8c9396b26",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 15568700,
+          "symbol": "apache_avro::util::zag_i64::hf50eddb8c9396b26",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 11500248,
+          "symbol": "apache_avro::util::zag_i32::h51d654fc577a0bd3",
+          "symbolLocation": 20,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13104720,
+          "symbol": "apache_avro::decode::decode_int::hfcf9fe6517297cf7",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13106572,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 336,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13113948,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 7712,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13110076,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 3840,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13112412,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 6176,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13113948,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 7712,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13113948,
+          "symbol": "apache_avro::decode::decode_internal::h57f40eb8a48cb568",
+          "symbolLocation": 7712,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13343536,
+          "symbol": "apache_avro::reader::Block$LT$R$GT$::read_next::hd1115f62727c3a55",
+          "symbolLocation": 124,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13345400,
+          "symbol": "apache_avro::reader::Reader$LT$R$GT$::read_next::h0e409e99f90d86c7",
+          "symbolLocation": 72,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13661892,
+          "symbol": "_$LT$apache_avro..reader..Reader$LT$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h86d3f21f56251a12",
+          "symbolLocation": 48,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 13401800,
+          "symbol": "core::iter::traits::iterator::Iterator::try_fold::hd3d48d39a561a85b",
+          "symbolLocation": 56,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10777152,
+          "symbol": "_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::hb045ba7d4cfa2648",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 12430388,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h5f94fdc63e10bfd4",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 12417640,
+          "symbol": "_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h3bf6b903fe879986",
+          "symbolLocation": 32,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10047376,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::h244989c6a8f8cbd3",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10268624,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h9bc850003373eaf7",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10257096,
+          "symbol": "_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h7abfd16bcb78299d",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 11707804,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h57da6967a4172a0d",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 12551968,
+          "symbol": "core::iter::adapters::try_process::h1905341665694d8d",
+          "symbolLocation": 128,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 11703764,
+          "symbol": "_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::h4430327e65750c2f",
+          "symbolLocation": 44,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 10850452,
+          "symbol": "core::iter::traits::iterator::Iterator::collect::h9d7a37201f5d1fb6",
+          "symbolLocation": 12,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 12293604,
+          "symbol": "iceberg::spec::manifest::Manifest::try_from_avro_bytes::h2e328cf09ad5ae51",
+          "symbolLocation": 2236,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 14406140,
+          "symbol": "iceberg::spec::manifest_list::manifest_file::ManifestFile::load_manifest::_$u7b$$u7b$closure$u7d$$u7d$::hcd9ba44302ed2e67",
+          "symbolLocation": 1872,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6925640,
+          "symbol": "docspec::storage::snapshot_files::_$u7b$$u7b$closure$u7d$$u7d$::h57ae9c1ebd62c4fb",
+          "symbolLocation": 1712,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 3850700,
+          "symbol": "docspec::storage::inspection::inspect_table::_$u7b$$u7b$closure$u7d$$u7d$::h1c8ffcb6f80aaf51",
+          "symbolLocation": 1936,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5165936,
+          "symbol": "docspec::engine::verification::Checks::table::_$u7b$$u7b$closure$u7d$$u7d$::h989c2e8936351d8c",
+          "symbolLocation": 1792,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6477048,
+          "symbol": "docspec::engine::backfill::verification::verify_group_data::_$u7b$$u7b$closure$u7d$$u7d$::h2d0e581376b4a25c",
+          "symbolLocation": 720,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6444064,
+          "symbol": "docspec::engine::backfill::preparation::_$LT$impl$u20$docspec..engine..Engine$GT$::prepare_group::_$u7b$$u7b$closure$u7d$$u7d$::h17e250f2aa839f10",
+          "symbolLocation": 25888,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6843220,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h6da9c9be62464ca5",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5256080,
+          "symbol": "docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h0ac4459e0cd47fe0",
+          "symbolLocation": 39200,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 6844132,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf1284a81759fa8f0",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 5205400,
+          "symbol": "docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::h35293deb7135e5ff",
+          "symbolLocation": 1108,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 4250400,
+          "symbol": "docspec::engine::schema::_$LT$impl$u20$docspec..engine..Engine$GT$::evolve_schema::_$u7b$$u7b$closure$u7d$$u7d$::had9274c3b11a6d5d",
+          "symbolLocation": 504,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 140296,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::_$u7b$$u7b$closure$u7d$$u7d$::h7637117c6a12a00f",
+          "symbolLocation": 8148,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 392832,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h14b642deca5b1be6",
+          "symbolLocation": 36,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 392912,
+          "symbol": "_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hca3d3f7b6a6c4884",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 333656,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h2729a79188a5126b",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 333528,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hbe655c332b46fe49",
+          "symbolLocation": 208,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 326228,
+          "symbol": "tokio::runtime::scheduler::current_thread::Context::enter::h16bb28b39d0b5403",
+          "symbolLocation": 288,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 329312,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h5abb63ee6f45b8a9",
+          "symbolLocation": 460,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 328600,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::enter::_$u7b$$u7b$closure$u7d$$u7d$::h4b821f8c5d03651b",
+          "symbolLocation": 28,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 489676,
+          "symbol": "tokio::runtime::context::scoped::Scoped$LT$T$GT$::set::hc6e8d4c8f013bc69",
+          "symbolLocation": 140,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 506580,
+          "symbol": "tokio::runtime::context::set_scheduler::_$u7b$$u7b$closure$u7d$$u7d$::h0c99b30de8a34e14",
+          "symbolLocation": 48,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 355836,
+          "symbol": "std::thread::local::LocalKey$LT$T$GT$::try_with::he1771ca6be49c9ae",
+          "symbolLocation": 172,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 353328,
+          "symbol": "std::thread::local::LocalKey$LT$T$GT$::with::h6939c69427aead09",
+          "symbolLocation": 16,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 506516,
+          "symbol": "tokio::runtime::context::set_scheduler::ha994d389785b34f7",
+          "symbolLocation": 52,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 328148,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::enter::h9420e8abc894e33a",
+          "symbolLocation": 340,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 328796,
+          "symbol": "tokio::runtime::scheduler::current_thread::CoreGuard::block_on::h3c1c9c429c90c6ee",
+          "symbolLocation": 64,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 324856,
+          "symbol": "tokio::runtime::scheduler::current_thread::CurrentThread::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h0a718f50399b9dbd",
+          "symbolLocation": 348,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 508100,
+          "symbol": "tokio::runtime::context::runtime::enter_runtime::haaf50f31a3047784",
+          "symbolLocation": 180,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 324492,
+          "symbol": "tokio::runtime::scheduler::current_thread::CurrentThread::block_on::hd7ba457feb53163e",
+          "symbolLocation": 108,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 490172,
+          "symbol": "tokio::runtime::runtime::Runtime::block_on_inner::ha6135fe978506923",
+          "symbolLocation": 160,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 490520,
+          "symbol": "tokio::runtime::runtime::Runtime::block_on::h1fb1a94c36e3ee11",
+          "symbolLocation": 268,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 131988,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::h4690c0a5fb208783",
+          "symbolLocation": 308,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 132128,
+          "symbol": "defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history::_$u7b$$u7b$closure$u7d$$u7d$::h337fb087853e3e96",
+          "symbolLocation": 20,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 472532,
+          "symbol": "core::ops::function::FnOnce::call_once::h48d20a3d09a94f44",
+          "symbolLocation": 20,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 642588,
+          "symbol": "test::__rust_begin_short_backtrace::ha0e48c1a0658e118",
+          "symbolLocation": 24,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 704264,
+          "symbol": "test::run_test::_$u7b$$u7b$closure$u7d$$u7d$::hb3350d8e162b7432",
+          "symbolLocation": 908,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 578440,
+          "symbol": "std::sys::backtrace::__rust_begin_short_backtrace::he121e5b5ae94324a",
+          "symbolLocation": 132,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 590676,
+          "symbol": "core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h3cdfab2e71d5a0b4",
+          "symbolLocation": 64,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 92100080,
+          "symbol": "std::sys::thread::unix::Thread::new::thread_start::hb5c7d2a38fab9e31",
+          "symbolLocation": 408,
+          "imageIndex": 0
+        },
+        {
+          "imageOffset": 27736,
+          "symbol": "_pthread_start",
+          "symbolLocation": 136,
+          "imageIndex": 5
+        },
+        {
+          "imageOffset": 7196,
+          "symbol": "thread_start",
+          "symbolLocation": 8,
+          "imageIndex": 5
+        }
+      ]
+    }
+  ]
+}

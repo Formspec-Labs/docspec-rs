@@ -493,10 +493,32 @@ pub struct SchemaField {
     pub name: String,
 }
 
-/// Renames, reorders or hides existing source fields without rewriting values.
+/// Scalar types qualified for metadata-only source additions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColumnType {
+    Boolean,
+    Long,
+    Double,
+    String,
+}
+
+/// Adds a nullable field; its literal applies to old absence and future omission.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColumnAddition {
+    pub name: String,
+    pub data_type: ColumnType,
+    /// Null when omitted. Explicitly supplied nulls never take this default.
+    #[serde(default)]
+    pub default: serde_json::Value,
+}
+
+/// Edits source fields and defaults without rewriting existing values.
 ///
 /// `fields` lists the complete new root order; omitted fields remain in retained
-/// old versions. New fields, type changes and nested edits require other operations.
+/// old versions. Additions follow this order and receive fresh native IDs. Type
+/// changes and nested edits require other operations.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchemaSpec {
@@ -508,6 +530,11 @@ pub struct SchemaSpec {
     /// Writer definition selected atomically with the new schema.
     pub next_definition: String,
     pub fields: Vec<SchemaField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additions: Vec<ColumnAddition>,
+    /// Changes future omission rules by field ID, without changing old values.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub write_defaults: BTreeMap<i32, serde_json::Value>,
 }
 
 /// A stable field identity and a row-local SQL expression over source values.

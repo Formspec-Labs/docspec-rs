@@ -136,6 +136,8 @@ impl Expressions {
                 let field = &native_source.as_struct().fields()[root_index(native_source, *id)?];
                 let mut interpretation = field.as_ref().clone();
                 interpretation.name = String::new();
+                // Future omission policy cannot change this immutable file's values.
+                interpretation.write_default = None;
                 if !observes_metadata {
                     interpretation.doc = None;
                 }

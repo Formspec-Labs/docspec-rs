@@ -1,5 +1,6 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
+pub(crate) mod defaults;
 mod inspection;
 mod occurrences;
 mod schema;
@@ -82,6 +83,7 @@ pub async fn read_batches(
     table: &Table,
     budget: &Budget,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
     let limit = budget.limits.max_batch_bytes;
     let tasks = schema::plan_files(table).await?;
@@ -210,6 +212,27 @@ where
                 ),
             ));
         }
+        // Literal expressions may be non-nullable even for optional native
+        // fields. Preserve the native physical nullability, without copying values.
+        let expected = table.metadata().current_schema();
+        let fields = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| {
+                let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                    Error::refusal(
+                        "schema_mismatch",
+                        "writer field is absent from native schema",
+                    )
+                })?;
+                Ok(field.as_ref().clone().with_nullable(!native.required))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let batch = RecordBatch::try_new(
+            Arc::new(arrow::datatypes::Schema::new(fields)),
+            batch.columns().to_vec(),
+        )?;
         writer.write(batch).await?;
     }
     Ok(writer.close().await?)

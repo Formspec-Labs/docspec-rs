@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.75s
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 3 tests
+test update_scope_refuses_omitted_keys_without_changing_selection ... ok
+test invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules ... ok
+test additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.74s
+

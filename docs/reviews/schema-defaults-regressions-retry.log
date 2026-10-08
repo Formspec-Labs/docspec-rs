@@ -1,0 +1,77 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.97s
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 3 tests
+test update_scope_refuses_omitted_keys_without_changing_selection ... ok
+test invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules ... ok
+test additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history ... FAILED
+
+failures:
+
+---- additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/319c1cb7b9e94a96b3fa2480e2b4499d/data/5c62eeba-943a-49e3-b67c-57e00fcaf1f2-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/319c1cb7b9e94a96b3fa2480e2b4499d/data/5c62eeba-943a-49e3-b67c-57e00fcaf1f2-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/319c1cb7b9e94a96b3fa2480e2b4499d/data/5c62eeba-943a-49e3-b67c-57e00fcaf1f2-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/e186439b851642869ad3563ad689dbb2/data/067708c5-126e-415f-a339-d800a3b91b0c-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/e186439b851642869ad3563ad689dbb2/data/2ce0ff99-7f3c-4e3a-8f17-60383783f81f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/e186439b851642869ad3563ad689dbb2/data/a0a3903b-a1a2-4f8f-ae5e-707b0c2e0acc-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/fde2bfafbab542d9bf6fb16983a02767/data/data/4ce064fa-4ae4-4715-b6f2-0b2040fd4f92-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/fde2bfafbab542d9bf6fb16983a02767/data/data/5d26952f-d21c-4493-afe6-8d052de410c0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/fde2bfafbab542d9bf6fb16983a02767/removed/data/e6163255-9860-4839-a38c-26f4cd518cc7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/fc1bf5a12dda48b7b6f0a7cdb6453bda/data/10178407-2b78-4dbf-9a67-9550bed90216-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpnuYzHL/workspace/objects/comments/fc1bf5a12dda48b7b6f0a7cdb6453bda/data/84cc3230-63a2-44bd-a3ab-c0f314d20364-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+
+thread 'additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history' (12035412) panicked at tests/defaults.rs:447:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "workspace_busy", message: "another execution host owns this workspace", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.80s
+
+error: test failed, to rerun pass `--test defaults`

@@ -38,14 +38,14 @@ pub(crate) fn replacement_metadata(
     base: &TableMetadata,
     directory: &Path,
 ) -> Result<TableMetadata> {
-    if base.format_version() != FormatVersion::V2
+    if !matches!(base.format_version(), FormatVersion::V2 | FormatVersion::V3)
         || !base.default_partition_spec().is_unpartitioned()
         || !base.default_sort_order().is_unsorted()
         || base.encryption_keys_iter().next().is_some()
     {
         return Err(Error::refusal(
             "unsupported_write_layout",
-            "replacement candidates require unpartitioned, unsorted, unencrypted Iceberg v2 metadata",
+            "replacement candidates require unpartitioned, unsorted, unencrypted Iceberg v2/v3 metadata",
         ));
     }
     let snapshots = base

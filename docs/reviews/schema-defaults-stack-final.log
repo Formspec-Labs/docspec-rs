@@ -1,0 +1,17 @@
+(lldb) target create target/debug/deps/defaults-4c89bebbe8001542
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/defaults-4c89bebbe8001542' (arm64).
+(lldb) disassemble --start-address 0x000000010051f0e4 --count 12
+defaults-4c89bebbe8001542`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h0ac4459e0cd47fe0:
+defaults-4c89bebbe8001542[0x10051f0e4] <+0>:  stp    x28, x27, [sp, #-0x20]!
+defaults-4c89bebbe8001542[0x10051f0e8] <+4>:  stp    x29, x30, [sp, #0x10]
+defaults-4c89bebbe8001542[0x10051f0ec] <+8>:  add    x29, sp, #0x10
+defaults-4c89bebbe8001542[0x10051f0f0] <+12>: sub    x9, sp, #0x94, lsl #12    ; =0x94000 
+defaults-4c89bebbe8001542[0x10051f0f4] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+defaults-4c89bebbe8001542[0x10051f0f8] <+20>: str    xzr, [sp]
+defaults-4c89bebbe8001542[0x10051f0fc] <+24>: cmp    sp, x9
+defaults-4c89bebbe8001542[0x10051f100] <+28>: b.ne   0x10051f0f4               ; <+16>
+defaults-4c89bebbe8001542[0x10051f104] <+32>: sub    sp, sp, #0x4f0
+defaults-4c89bebbe8001542[0x10051f108] <+36>: str    xzr, [sp]
+defaults-4c89bebbe8001542[0x10051f10c] <+40>: sub    x9, x29, #0xd0
+defaults-4c89bebbe8001542[0x10051f110] <+44>: str    x9, [sp, #0x1390]
+(lldb) quit

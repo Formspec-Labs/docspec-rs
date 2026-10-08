@@ -22,6 +22,65 @@ records raw results, disk accounting, sampling limits and the independent review
 Live experiment stops are not a production disk quota. Repeated history and
 maintenance capacity remain open, and no automatic reclamation is claimed.
 
+## Nullable source fields and defaults
+
+`SchemaSpec.additions` supports nullable Boolean, signed 64-bit integer, Double
+and String roots. The same operation allocates stable native IDs and selects
+Iceberg v3 initial/write defaults plus a required Boolean supplied flag. It shares
+every existing source payload file. There is no separate schema registry or
+backfill scan for a literal addition.
+
+Initial defaults interpret old physical absence. Future omission defaults can
+change by field ID without reinterpreting existing rows or recomputing scalar
+groups that only consume their unchanged values. New input normalization applies
+the selected rule once; internal kept/removed-row rewrites retain stored values
+and flags. Explicit null, explicit equal-default values and omission stay distinct
+for every supported type. Combined reads hide flags; raw source-group reads and
+scalar expressions expose `__docspec_supplied_<field-ID>`.
+
+Based rebuilds of these sources preserve the retained schema history and native
+allocation high-water mark, including after all added fields are hidden. Reuse
+depends on the bounded material schema identity rather than a physical metadata
+location or snapshot. Verification checks that relationship using metadata.
+Tracked update keys cannot omit their values: explicit per-row key flags receive
+one streaming probe before replacement scope is derived. This probe can read all
+replacement flags in the all-supplied case; it avoids a custom execution operator
+and does not scan the existing population solely to validate presence.
+
+Default expansion receives a conservative pre-decode batch check. This is not a
+whole-process memory quota. Writer batches retain native nullability without
+copying value buffers. Adding fields saves an immediate source rewrite; this
+checkpoint does not measure schema-operation latency, marker storage overhead,
+history growth or maintenance reclamation on the Comments workload.
+
+The [focused tests](../tests/defaults.rs) exercise exact values/types, preserved
+historical reads, partial-file sharing, hidden-field ID history, default changes,
+rebuild reuse without original input, omitted-key refusal and forged metadata.
+The [independent review](reviews/schema-defaults-review.md) retains findings and
+their resolution; [gate output](reviews/schema-defaults-check-retry.log) records the
+repository check. Earlier test failures and the native inspection stack trace
+remain under `reviews/schema-defaults-*`. A stack failure led to separating the
+existing source-admission/processing block from later result assembly. A regular
+function constructs its boxed future, so native source state is not embedded in
+the assembly poll frame. Bounded debug disassembly measured that frame decreasing
+from 903,344 to 607,504 bytes, including its saved registers; this is a debug-frame
+measurement, not a release throughput or total-memory result. Phase order,
+cancellation, selection guards and payload work stay the same. An attempted
+expression-worker change and inspection boxing were removed; normal stack limits
+remain in use.
+
+Nested/type evolution, related-output edits, global source IDs across legacy
+non-evolved rebuilds, continuous-ingestion catch-up and the broader R3/performance
+gates remain open.
+
+The full repository gate passed with normal stack limits. After its process
+finished, an owned-reader check found no active debug executable or build in this
+repository. `cargo clean --profile dev` removed **5.4 GiB** of rebuildable artifacts;
+the release binary's size and modification time stayed unchanged. Free volume
+space measured 20.59 GB afterward, including concurrent workstation effects. The
+[cleanup log](reviews/schema-defaults-build-cleanup.log) separates this development
+cost from retained dataset, historical-result and failure evidence.
+
 ## Current verification policy
 
 User steering on 2026-10-08 supersedes earlier notes below that describe automatic
@@ -84,7 +143,7 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide with atomic writer-definition cutover; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Optional/default and nested schema evolution; related-output schema edits; global source IDs across full rebuilds; durable absence/default semantics; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |

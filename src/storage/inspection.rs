@@ -25,7 +25,29 @@ impl CheckedFile {
 }
 
 pub(crate) fn schema_identity(schema: &iceberg::spec::StructType) -> Result<String> {
-    Ok(blake3::hash(&serde_json::to_vec(schema)?)
+    // Defaults and documentation are native read rules, absent from Parquet's
+    // physical type tree. Compare only identities, names, types and nullability.
+    fn physical(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for key in ["doc", "initial-default", "write-default"] {
+                    fields.remove(key);
+                }
+                for value in fields.values_mut() {
+                    physical(value);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    physical(value);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut schema = serde_json::to_value(schema)?;
+    physical(&mut schema);
+    Ok(blake3::hash(&serde_json::to_vec(&schema)?)
         .to_hex()
         .to_string())
 }
@@ -50,6 +72,7 @@ pub(crate) async fn inspect_table(
     eprintln!("DOCSPEC_TEST_INSPECT_TABLE");
     check_available(pin.objects.clone(), budget).await?;
     let table = open_pin(pin).await?;
+    super::defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let expected = schema::read_schema(&table)?;
     let inventory = snapshot_files(&table, budget).await?;
     check_inventory_files(pin, &inventory)?;

@@ -173,11 +173,7 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
         original.metadata().current_snapshot_id()
     );
     assert_eq!(defaulted.metadata().last_column_id(), 9);
-    // No public default/absence support follows merely from this native probe.
-    assert_eq!(
-        storage::occurrence_schema(&defaulted).unwrap_err().code(),
-        "unsupported_schema_evolution"
-    );
+    storage::occurrence_schema(&defaulted).unwrap();
     let mut expected = vec![vec![Some(1), Some(1), None, Some(7), Some(8), Some(9), Some(10)]; 2]
         .concat()
         .into_iter()
@@ -185,6 +181,13 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
         .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(rows(&native_batches(&defaulted).await), expected);
+    let batches = storage::read_batches(&defaulted, &budget)
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(rows(&batches), expected);
     let old_expected = expected.clone();
 
     // A future admission normalizer must materialize write-default=9 for omission;
@@ -254,22 +257,8 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
 
     // Exercise the native replacement mechanism before widening the production
     // format gate. Keep its schema/history/high-water and clear only snapshots.
-    let snapshots = later
-        .metadata()
-        .snapshots()
-        .map(|s| s.snapshot_id())
-        .collect::<Vec<_>>();
-    let metadata = later
-        .metadata()
-        .clone()
-        .into_builder(None)
-        .assign_uuid(uuid::Uuid::new_v4())
-        .set_location(root.path().join("rewritten").to_string_lossy().into_owned())
-        .remove_ref("main")
-        .remove_snapshots(&snapshots)
-        .build()
-        .unwrap()
-        .metadata;
+    let metadata =
+        storage::replacement_metadata(later.metadata(), &root.path().join("rewritten")).unwrap();
     let rewritten = register(&later, catalog.as_ref(), metadata, "rewritten", &budget).await;
     let mut inventory = storage::snapshot_files(&later, &budget).await.unwrap();
     // One untouched original file remains shared; every other row is materialized.

@@ -49,6 +49,12 @@ pub(crate) async fn verify_groups(
                     return Err(invalid_group());
                 }
                 check_refreshed_groups(dataset, &base, parent)?;
+                super::super::schema::verify_rebuild(
+                    base.groups.get("source").ok_or_else(invalid_group)?,
+                    source,
+                    budget,
+                )
+                .await?;
                 if dataset.relationship != inputs::relationship(&dataset.request, Some(&base)) {
                     return Err(inputs::invalid_relationship());
                 }

@@ -1,0 +1,80 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: for loop over a `&Option`. This is more readably written as an `if let` statement
+   --> src/storage/defaults.rs:113:22
+    |
+113 |           for value in if writing {
+    |  ______________________^
+114 | |             &field.write_default
+115 | |         } else {
+116 | |             &field.initial_default
+117 | |         } {
+    | |_________^
+    |
+    = note: `#[warn(for_loops_over_fallibles)]` on by default
+help: to check pattern in a loop use `while let`
+    |
+113 -         for value in if writing {
+113 +         while let Some(value) = if writing {
+    |
+help: consider using `if let` to clear intent
+    |
+113 -         for value in if writing {
+113 +         if let Some(value) = if writing {
+    |
+
+warning: `docspec` (lib) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 12.31s
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 2 tests
+test additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history ... FAILED
+test invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules ... ok
+
+failures:
+
+---- additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/ebde168b735744a8ab83df5873861ee3/data/22d1d835-aa11-4635-8c30-1f18ca589749-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/ebde168b735744a8ab83df5873861ee3/data/22d1d835-aa11-4635-8c30-1f18ca589749-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/ebde168b735744a8ab83df5873861ee3/data/22d1d835-aa11-4635-8c30-1f18ca589749-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/293f29da-bac5-4f19-8ddd-580c09a6a7d7-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/367a5bdd-4869-4933-a8e5-ddd2d41f08f0-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/45704693-2d69-49e1-8648-96b5da784a62-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history' (11896342) panicked at tests/defaults.rs:212:5:
+assertion `left == right` failed
+  left: TablePin { table: "data_e80a82558e7d46f2a327e073c8dd6325", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/379dbec3105f412c9d5bf49e4f54aec2/metadata/00001-6e2c3566-cc42-4c6b-bc75-5ea3a41c3d39.metadata.json", digest: "12ab14a617c6dc182dac210405c3fe645a6d4abb0f2ea1a886f974c092ed9799", bytes: 1883 }, snapshot: Some(2478219968175387950), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/379dbec3105f412c9d5bf49e4f54aec2/metadata/00001-6e2c3566-cc42-4c6b-bc75-5ea3a41c3d39.metadata.json", digest: "12ab14a617c6dc182dac210405c3fe645a6d4abb0f2ea1a886f974c092ed9799", bytes: 1883 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/379dbec3105f412c9d5bf49e4f54aec2/metadata/01a11c3f-8860-73af-bc07-80624431d480-m0.avro", digest: "9460c6c462b4d56cced77e870d998246b9d20eed05a033268a1a8efe18c834c6", bytes: 4385 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/379dbec3105f412c9d5bf49e4f54aec2/metadata/snap-2478219968175387950-0-01a11c3f-8860-73af-bc07-80624431d480.avro", digest: "4da0f8fcb46ebddee8fcd23c1533d491bac0ed03a6e32108d15fbb15ba194b0c", bytes: 1685 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/293f29da-bac5-4f19-8ddd-580c09a6a7d7-00000.parquet", digest: "9d3d224b5b7b63feb48aaf05d8e1886ac0cbc9e79aff1480c0d43b63c2df0628", bytes: 8404 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/367a5bdd-4869-4933-a8e5-ddd2d41f08f0-00000.parquet", digest: "8662260021d634892c842d023929b48b3031946d8f0db56239ba1f4f4ee34f97", bytes: 15006 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/45704693-2d69-49e1-8648-96b5da784a62-00000.parquet", digest: "82c272538354b607c202a0edcca30df24d830fc036b7e910f5c30f078849e9e4", bytes: 15006 }], rows: 516 }
+ right: TablePin { table: "data_74191b34d1ad4473aa63fdb324264777", metadata: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/metadata/00001-5112be32-5b55-4271-af7e-09ec8a2b7ae0.metadata.json", digest: "aaf167e0e232d503ace85328ab1197fa23e218c6e3f5a7417f6dc15cce730581", bytes: 1883 }, snapshot: Some(3967480648897837051), schema_id: 0, objects: [ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/293f29da-bac5-4f19-8ddd-580c09a6a7d7-00000.parquet", digest: "9d3d224b5b7b63feb48aaf05d8e1886ac0cbc9e79aff1480c0d43b63c2df0628", bytes: 8404 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/367a5bdd-4869-4933-a8e5-ddd2d41f08f0-00000.parquet", digest: "8662260021d634892c842d023929b48b3031946d8f0db56239ba1f4f4ee34f97", bytes: 15006 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/data/45704693-2d69-49e1-8648-96b5da784a62-00000.parquet", digest: "82c272538354b607c202a0edcca30df24d830fc036b7e910f5c30f078849e9e4", bytes: 15006 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/metadata/00001-5112be32-5b55-4271-af7e-09ec8a2b7ae0.metadata.json", digest: "aaf167e0e232d503ace85328ab1197fa23e218c6e3f5a7417f6dc15cce730581", bytes: 1883 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/metadata/01a11c3f-855b-77cb-ad80-efc9dc7716bd-m0.avro", digest: "a38788b86460dfb8b08f06cce1c3cafb57560a89c26e2f5fc6dd8369e75d7d62", bytes: 4385 }, ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpD8291M/workspace/objects/comments/bc2b1e16286240dd849f023f089a20b3/metadata/snap-3967480648897837051-0-01a11c3f-855b-77cb-ad80-efc9dc7716bd.avro", digest: "ca21d347d1c196da7e5f18fbb1f7dfdadbb7f5df3a32aa28e7f8e98e27e4dc84", bytes: 1685 }], rows: 516 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.85s
+
+error: test failed, to rerun pass `--test defaults`

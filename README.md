@@ -115,7 +115,8 @@ format; there is no reader migration for earlier experiment outputs.
 
 ## Change a source schema
 
-Use `plan-schema` and `schema` to rename, reorder or hide existing root fields.
+Use `plan-schema` and `schema` to rename, reorder or hide existing root fields,
+add nullable scalar fields, or change defaults for future omitted values.
 The request lists native field IDs from the selected source's Iceberg schema;
 these IDs are independent of column position and computed groups' logical IDs.
 For a source with native fields `id` (1) and `text` (2), save `schema.json`:
@@ -139,7 +140,8 @@ target/debug/docspec --workspace workspaces/comments plan-schema schema.json
 target/debug/docspec --workspace workspaces/comments schema schema.json > renamed-release.json
 ```
 
-The field list defines the complete new order and must retain at least one field.
+The field list defines the complete order of retained roots; additions follow it.
+The resulting schema must contain at least one logical field.
 Omitted fields stay available in retained historical versions. Removing a field
 consumed by a selected computed group refuses. Computed expressions keep their
 original input IDs after a rename;
@@ -150,9 +152,42 @@ Finish pending source admission before starting a schema change. Selection
 atomically installs the schema and `next_definition`. New writes use
 that definition; pending old-definition writes refuse. A changed selected base or
 later source admission also refuses cutover and preserves completed work. The
-operation shares existing value files, while verification still reads their values.
-Optional/default additions, type or nested edits, and schema edits of related
-join/summary outputs are not yet supported.
+operation shares existing value files. Creation checks the metadata composition
+and reuses completed checks for inherited files. Explicit deep verification reads
+values when requested.
+
+For a nullable addition, include this property in the same request:
+
+```json
+"additions": [
+  {"name": "reviewed", "data_type": "boolean", "default": false},
+  {"name": "note", "data_type": "string"}
+]
+```
+
+Supported types are `boolean`, `long` (signed 64-bit integer), `double` and
+`string`. Omitting `default` means null. Old files receive the initial default
+through Iceberg v3 read rules; the operation writes no replacement data files.
+Updates and based rebuilds apply the current default to newly omitted values.
+An explicitly supplied null stays null, and a supplied value equal to the default
+still counts as supplied. Change a future default with `"write_defaults": {"3": 9}`
+using the selected logical field ID; null clears it. This never changes the
+interpretation of existing rows.
+
+Raw source-group reads and scalar expressions expose one required Boolean
+`__docspec_supplied_<field-ID>` column per addition. False means the value was
+omitted; true means supplied, including explicit nulls. Combined reads hide these
+columns. For mixed omission within an incoming column, supply that Boolean column
+alongside the value. Without it, a present column counts as supplied for every row.
+Update keys must be explicitly supplied; false key flags refuse before defining
+the replacement scope. Marker fields cannot be edited as public source fields.
+
+After adding fields, full builds require an exact `base` and preserve native field
+IDs and schema history, even after the added fields are hidden. Identical rebuilds
+reuse completed output when input, SQL, definition and material schema rules match.
+New writes retain the supplied flags alongside values; old files remain shared.
+Large defaults must fit the configured batch allowance. Type changes, nested
+additions, and schema edits of related join/summary outputs remain unsupported.
 
 ## Add a computed field group
 
