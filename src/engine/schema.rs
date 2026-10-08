@@ -138,6 +138,7 @@ impl Engine {
             changes: None,
             coverage: None,
             metrics: WriteMetrics::default(),
+            dependencies: Some(PhaseDependencies::default()),
         };
         self.complete(&OperationRequest::Schema(spec.clone()), operation, &phase)
             .await
@@ -181,6 +182,7 @@ impl Engine {
             table,
             changes: None,
             metrics: WriteMetrics::default(),
+            schema_input: Some(source.metadata.clone()),
         })
     }
 }

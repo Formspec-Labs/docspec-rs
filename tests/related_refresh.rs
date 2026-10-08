@@ -173,6 +173,26 @@ async fn abandoned_refresh_cannot_select_but_new_operation_reuses_its_result() {
     let before = engine.inspect(&request.dataset).await.unwrap();
     let retained: ReleasePin =
         serde_json::from_value(before[&format!("readback/{}", request.operation)].clone()).unwrap();
+    let phases: Vec<docspec::model::PhaseResult> = before
+        .values()
+        .filter_map(|value| serde_json::from_value(value.clone()).ok())
+        .collect();
+    let evidence = phases
+        .iter()
+        .find(|phase| phase.phase == "evidence")
+        .unwrap();
+    assert_eq!(
+        evidence.dependencies.as_ref().unwrap().tables,
+        vec![(&retained.dataset.groups["source"]).into()]
+    );
+    let validation = phases
+        .iter()
+        .find(|phase| phase.phase == "validation")
+        .unwrap();
+    assert_eq!(
+        validation.dependencies.as_ref().unwrap().tables,
+        vec![(&retained.dataset.related.as_ref().unwrap().evidence).into()]
+    );
     engine
         .abandon(&request.dataset, &request.operation, "withdrawn")
         .await

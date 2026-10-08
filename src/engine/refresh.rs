@@ -72,6 +72,7 @@ impl Engine {
             changes: None,
             coverage: Some(coverage),
             metrics: WriteMetrics::default(),
+            dependencies: Some(PhaseDependencies::default()),
         };
         self.complete(
             &OperationRequest::Refresh(Box::new(spec.clone())),
@@ -162,6 +163,15 @@ impl Engine {
                 outputs: prepared.table.objects.clone(),
                 table: Some(prepared.table),
                 metrics: prepared.metrics,
+                dependencies: processing.dependencies.clone().map(|mut dependencies| {
+                    if spec.mode == RefreshMode::Full
+                        && matches!(spec.transform, RefreshTransform::Join(_))
+                        && let Some(table) = &processing.table
+                    {
+                        dependencies.tables.push(table.into());
+                    }
+                    dependencies
+                }),
                 ..processing.clone()
             };
             self.complete(&request, operation, &phase).await?

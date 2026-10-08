@@ -79,6 +79,24 @@ pub struct TablePin {
     pub rows: u64,
 }
 
+/// Exact native interpretation without copying the table's physical object inventory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeSnapshotRef {
+    pub metadata: ObjectRef,
+    pub snapshot: Option<i64>,
+    pub schema_id: i32,
+}
+
+impl From<&TablePin> for NativeSnapshotRef {
+    fn from(table: &TablePin) -> Self {
+        Self {
+            metadata: table.metadata.clone(),
+            snapshot: table.snapshot,
+            schema_id: table.schema_id,
+        }
+    }
+}
+
 /// A complete data, schema, evidence, and input-coverage selection.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatasetPin {
@@ -425,6 +443,23 @@ pub struct PhaseResult {
     pub changes: Option<ChangePin>,
     pub coverage: Option<InputCoverage>,
     pub metrics: WriteMetrics,
+    /// Exact retained dependencies used by this completion. Absence marks an older
+    /// record whose recovery dependencies cannot authorize cleanup by inference.
+    #[serde(default)]
+    pub dependencies: Option<PhaseDependencies>,
+}
+
+/// Small immutable references needed to recover or reuse a completed phase.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhaseDependencies {
+    /// Input names before the operation-specific release prefix is applied.
+    pub admitted_inputs: BTreeMap<String, ObjectRef>,
+    /// Selected schema/history consumed while preparing this phase.
+    pub base_manifest: Option<ObjectRef>,
+    /// Metadata consumed for schema/default interpretation, without its old data rows.
+    pub schema_metadata: Vec<ObjectRef>,
+    /// Native tables consumed by later processing or validation.
+    pub tables: Vec<NativeSnapshotRef>,
 }
 
 /// Mutable eligibility and coverage facts checked by the same lifecycle commit.

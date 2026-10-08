@@ -657,6 +657,7 @@ impl Engine {
                     changes: None,
                     coverage: None,
                     metrics: WriteMetrics::default(),
+                    dependencies: Some(PhaseDependencies::default()),
                 };
                 self.complete(spec, operation, &phase).await?
             };
@@ -708,6 +709,17 @@ impl Engine {
                     changes: prepared.changes,
                     coverage: admission.coverage.clone(),
                     metrics: prepared.metrics,
+                    dependencies: Some(PhaseDependencies {
+                        admitted_inputs: spec
+                            .inputs()
+                            .keys()
+                            .cloned()
+                            .zip(admission.outputs.iter().cloned())
+                            .collect(),
+                        base_manifest: operation.base_manifest.clone(),
+                        schema_metadata: prepared.schema_input.into_iter().collect(),
+                        tables: Vec::new(),
+                    }),
                 };
                 self.complete(spec, operation, &phase).await?
             };
@@ -872,6 +884,12 @@ impl Engine {
                 }
                 let phase = PhaseResult {
                     phase: "validation".into(),
+                    dependencies: processing.dependencies.clone().map(|mut dependencies| {
+                        if let Some(related) = &related {
+                            dependencies.tables.push((&related.evidence).into());
+                        }
+                        dependencies
+                    }),
                     ..processing.clone()
                 };
                 self.complete(spec, &operation, &phase).await?;
@@ -890,8 +908,16 @@ impl Engine {
                 })
                 .map(|base| base.dataset.inputs.clone())
                 .unwrap_or_default();
-            for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
-                inputs.insert(spec.input_key(name), input.clone());
+            if let Some(dependencies) = &processing.dependencies {
+                for (name, input) in &dependencies.admitted_inputs {
+                    inputs.insert(spec.input_key(name), input.clone());
+                }
+            } else {
+                // Earlier completions remain readable while cleanup is disabled.
+                // Their inferred input edge is not sufficient removal authority.
+                for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
+                    inputs.insert(spec.input_key(name), input.clone());
+                }
             }
             let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
             let mut computed = BTreeMap::new();

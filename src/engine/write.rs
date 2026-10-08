@@ -12,6 +12,7 @@ pub(super) struct Prepared {
     pub table: TablePin,
     pub changes: Option<ChangePin>,
     pub metrics: WriteMetrics,
+    pub schema_input: Option<ObjectRef>,
 }
 
 /// An explicit replacement scope, separate from potentially expensive new rows.
@@ -112,7 +113,9 @@ impl Engine {
                 let table = self
                     .replacement_output(&spec.dataset, directory, &native)
                     .await?;
-                return self.write_output(&spec.dataset, table, dataframe).await;
+                let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
+                prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
+                return Ok(prepared);
             }
         }
         if dataframe.schema().fields().iter().any(|f| {
@@ -169,6 +172,7 @@ impl Engine {
             table,
             changes: None,
             metrics,
+            schema_input: None,
         })
     }
 
@@ -322,6 +326,7 @@ impl Engine {
             table,
             changes: Some(changes),
             metrics,
+            schema_input: None,
         })
     }
     /// Replaces complete key groups and retains actual applied rows with shared files.

@@ -270,6 +270,7 @@ impl Engine {
         applied.metrics.data_files_written += discovery_files;
         applied.metrics.bytes_written += discovery_bytes;
         Ok(write::Prepared {
+            schema_input: None,
             changes: Some(ChangePin {
                 base_version: base.id.clone(),
                 base_manifest: base.manifest.clone(),
@@ -342,6 +343,7 @@ impl Engine {
             table: applied.table,
             changes: None,
             metrics: applied.metrics,
+            schema_input: None,
         })
     }
 }

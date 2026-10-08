@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.42s
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s
+

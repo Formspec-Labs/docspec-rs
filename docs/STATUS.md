@@ -1,5 +1,44 @@
 # Implementation and qualification status
 
+## Exact dependencies for reusable work
+
+New processing completions retain the exact admitted copies they consumed.
+Release assembly uses those captured references when reusing processing, so a
+later admission under the same material key cannot silently replace the original
+input provenance. Validation inherits those dependencies. Older completions
+remain resumable through the existing admission lookup, with missing dependencies
+explicitly unknown for future reclamation.
+
+Schema interpretation and consumed table snapshots have distinct references.
+An evolved source build retains the native schema/default metadata it actually
+read. Full-join evidence retains the processing snapshot it consumed, and
+validation retains the evidence snapshot. Scalar file completions retain their
+original source schema/default metadata across valid reuse after a schema change.
+Existing change and coverage records continue to supply their typed dependencies.
+
+These references are captured from metadata already available during processing.
+They add no payload read, hash, verification pass, lifecycle transaction or
+per-file inventory copy to the general phase path. Material reuse identities stay
+unchanged. This is a correctness prerequisite for retention, not a measured
+throughput improvement or permission to delete objects.
+
+Focused tests cover admission-key rebinding for builds and updates, actual legacy
+resume, source defaults, scalar completion reuse after schema reorder, and exact
+join/evidence snapshot references. See the [input cases](../tests/phase_dependencies.rs),
+[expanded focused log](reviews/phase-dependencies-inputs-focused.log),
+[snapshot case log](reviews/phase-dependencies-snapshot-focused.log) and
+[independent review](reviews/phase-dependencies-review.md).
+The full [repository gate](reviews/phase-dependencies-check.log) passed, including
+formatting, strict all-target linting and the complete tests with normal stack
+limits. No large-data benchmark was rerun for this metadata change.
+
+The [retention design review](reviews/retention-inventory-design.md) identifies
+the remaining work: complete typed roots and native dependency expansion,
+independently interpretable prepared/validation backfill dependencies, retirement
+of exact completion generations, worker exclusion, durable removal intents and
+exact deletion outcomes. Phase retirement, physical cleanup, compaction and
+restore remain unfinished. No expiration or deletion is enabled here.
+
 ## Explicit operation abandonment
 
 `Engine::abandon`, the CLI `abandon` command and HTTP operation endpoint record
@@ -235,7 +274,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact dependency capture for new general phases and scalar file completions; all cleanup disabled | Complete shared-owner roots and dependency expansion; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

@@ -70,6 +70,13 @@ currently rebuilds the complete result. The input path is a locator; its trusted
 expected digest determines the selected bytes. Original bytes, request SQL,
 processing revision and runtime dependency-lock digest are retained.
 
+New completed phases also retain the exact input copies and schema interpretation
+they consumed. Reuse keeps those references even if a later admission stores an
+equivalent copy elsewhere. This records small metadata references during existing
+work, without another payload read. Older completions remain resumable; missing
+dependency information does not authorize future cleanup. Retention and physical
+cleanup remain unfinished.
+
 To stop an unfinished operation, use:
 
 ```sh

@@ -242,6 +242,7 @@ impl Engine {
             table: applied.table,
             changes: Some(changes),
             metrics: applied.metrics,
+            schema_input: None,
         })
     }
 
@@ -447,6 +448,7 @@ impl Engine {
             table: applied.table,
             changes: None,
             metrics: applied.metrics,
+            schema_input: None,
         })
     }
 }

@@ -77,7 +77,10 @@ impl Engine {
                         )
                         .await;
                     let completion = match result {
-                        Ok(completion) => completion,
+                        Ok(mut completion) => {
+                            completion.source_metadata = Some(source.metadata.clone());
+                            completion
+                        }
                         Err(error) => {
                             self.acknowledge_files(request, operation, &mut completions)
                                 .await?;
@@ -311,6 +314,7 @@ impl Engine {
             })
             .await?;
         Ok(FileCompletion {
+            source_metadata: None,
             source: source.clone(),
             rows,
             descriptor: storage::object(dataset, &descriptor_path)?,

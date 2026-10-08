@@ -33,6 +33,10 @@ struct Capture {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct FileCompletion {
     source: ObjectRef,
+    /// Exact schema/default interpretation used for this physical source file.
+    /// Missing on older completions; not part of the material reuse key.
+    #[serde(default)]
+    source_metadata: Option<ObjectRef>,
     rows: u64,
     descriptor: ObjectRef,
     outputs: Vec<ObjectRef>,
@@ -956,6 +960,7 @@ mod tests {
             bytes: 600,
         };
         let completion = FileCompletion {
+            source_metadata: None,
             source: object.clone(),
             rows: 0,
             descriptor: object,
