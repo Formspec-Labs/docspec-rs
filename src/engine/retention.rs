@@ -9,6 +9,7 @@ use crate::catalog::View;
 use std::collections::BTreeSet;
 
 mod inventory;
+mod owners;
 mod phases;
 pub(super) use phases::completion_key;
 

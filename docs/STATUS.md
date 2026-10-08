@@ -1,5 +1,54 @@
 # Implementation and qualification status
 
+## Durable owner protection and generation seals
+
+Generation sealing now acquires immutable protection from each actual file owner
+before acknowledging the seal. The owner commits one batch of exact object
+references through its guarded lifecycle table; the family then commits its seal
+and exact token bindings together. Acquisition holds no consumer lock. Existing
+member/family locks still guard final eligibility. A failed handoff leaves extra
+protection, and retry reuses the committed owner records. A family that also owns
+a member needs no foreign token for its own files.
+
+The shared retention traversal collects the supplied releases' dependencies,
+including history, evidence, changes and sealed siblings, without enumerating the
+catalog or reading data payloads. Complete native inventories avoid reopening
+native metadata. Compact paths without retained owner/digest evidence refuse.
+Owner identity requires the original production reservation and exact typed
+creation evidence; merely putting a file in a reserved directory is insufficient.
+Protection survives retirement of the original creation phase.
+
+The independent review caught an avoidable memory-admission floor and repeated
+owner-history reads. Decoded collections now keep size-based reservations after
+their larger temporary allowance is released. Inspection groups obligations by
+owner/token and deduplicates direct required roots. It makes at most one additional
+history read per referenced owner at the same reported metadata boundary, avoiding
+both repeated reads per consumer binding and retention of every owner's full
+history in memory. A changed boundary refuses the inspection. No throughput or
+whole-process memory improvement is claimed from these structural changes.
+
+The [independent review](reviews/owner-protection-review.md) approves this scoped
+increment and retains the original findings and their dispositions. The
+[focused checks](reviews/owner-protection-focused-ready.log) cover owner recovery,
+exact ownership, provisional-file refusal and interrupted handoffs. The
+[repository gate](reviews/owner-protection-check.log) passed. Subsequent
+[focused inspection checks](reviews/owner-protection-final-focused.log) cover the
+last review-requested assertions without repeating the full integration suite. The
+[resource snapshot](reviews/owner-protection-resources.json) separates allocated
+development cache from shared-volume availability; it is not a peak measurement.
+Original failed compilation and capacity-test logs remain beside the passing logs.
+
+This is the acquisition primitive and its generation-seal integration. Refresh
+request/admission, independently retained phases/readbacks, selection progress,
+backfill and managed input locators still need protection integration. Tokens
+remain permanently active here. Retry checks validate tokens and direct member
+manifests, without reconstructing the complete transitive closure each time.
+Token retirement needs separate complete claim-lifetime rules. Legacy histories
+remain protected by inventory; missing old bindings never establish removal
+eligibility. Physical removal, expiration, compaction, fenced restore, hosted
+qualification and complete fresh Comments acceptance remain unfinished. No corpus
+benchmark, payload copy or data deletion was added for this metadata increment.
+
 ## Exact-generation phase retirement
 
 Library, CLI and HTTP now preview and explicitly retire specific completion

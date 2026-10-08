@@ -1,0 +1,62 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 30.34s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 20 tests
+test engine::retention::inventory::collector_tests::conflicts_refuse_and_duplicate_references_do_not_consume_more_capacity ... ok
+test engine::retention::inventory::collector_tests::native_paths_require_exact_identities_discovered_anywhere_in_the_closure ... ok
+test engine::retention::inventory::collector_tests::native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar ... ok
+test engine::retention::inventory::collector_tests::closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads ... ok
+test engine::retention::inventory::collector_tests::oversized_roots_refuse_before_following_missing_metadata ... ok
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::retention::phases::tests::lost_native_reply_and_concurrent_retry_record_one_retirement ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::retention::phases::tests::receipt_membership_and_marker_presence_are_required ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test engine::retention::owners::tests::shared_owner_grant_survives_retirement_of_its_creation_phase ... ok
+test engine::retention::owners::tests::forged_object_identities_cannot_acquire_owner_protection ... ok
+test engine::retention::owners::tests::a_reserved_path_without_completed_identity_cannot_grant_a_reference ... ok
+test engine::retention::owners::tests::lost_native_owner_reply_reconciles_without_another_commit ... ok
+test engine::retention::owners::tests::owner_availability_and_grants_conflict_at_the_native_boundary ... ok
+test engine::retention::phases::tests::legacy_processing_cannot_adopt_a_replacement_admission ... ok
+test engine::retention::owners::tests::owner_grant_retry_and_reopen_reuse_one_native_commit ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+test engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads ... FAILED
+
+failures:
+
+---- engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpusyy1q/workspace/objects/comments/6246240ac6ae4257b614929a15dc4c85/data/32aa954f-31f0-4f1f-819e-0e4466e62f5d-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpusyy1q/workspace/objects/dockets/b5d43302485d47f99a9b13efe968e690/data/7e74f3ab-443e-4503-b7a6-ff2a88c3b3a1-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpusyy1q/workspace/objects/joined/bb2cfc09202044bda81d3bce266aba16/data/eaa914d6-deec-4711-aaf2-9680fba73bbc-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpusyy1q/workspace/objects/joined/21cde159fbec4f7e8f956b5a6fb1974a/data/d1fd659f-9a2f-437b-877b-6b4693f0a3fd-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads' (13968831) panicked at src/engine/retention/owners/tests.rs:218:73:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads
+
+test result: FAILED. 19 passed; 1 failed; 0 ignored; 0 measured; 55 filtered out; finished in 4.24s
+
+error: test failed, to rerun pass `--lib`

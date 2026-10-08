@@ -32,22 +32,67 @@ impl Engine {
         );
         metadata_size(seal, lifecycle.budget.limits.max_metadata_bytes)?;
         validate_seal(seal)?;
+        let key = format!("generation/{}", seal.generation);
+        let members: BTreeSet<_> = seal.members.keys().cloned().collect();
+        // Reconcile an existing seal before reopening its metadata closure or
+        // acquiring new protection. Acquisition then runs without consumer locks.
+        {
+            let lock = self.lock(&seal.family).await;
+            let _guard = lock.lock().await;
+            let view = lifecycle.open(&seal.family).await?;
+            if let Some(previous) = self.retained_seal(&view, seal, &members).await? {
+                return Ok(previous);
+            }
+            if lifecycle
+                .get::<BTreeSet<Id>>(&view, "family-members")
+                .await?
+                .is_some_and(|family| family != members)
+            {
+                return Err(Error::refusal(
+                    "family_membership",
+                    "a family retains its original member datasets; use a new family for a different set",
+                ));
+            }
+        }
+        let mut release_memory = lifecycle
+            .budget
+            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(8))?;
+        let mut releases = Vec::with_capacity(seal.members.len());
+        let mut release_bytes = 0usize;
+        let expected = SourceRelationship::Coupled {
+            family: seal.family.clone(),
+            generation: seal.generation.clone(),
+        };
+        for version in seal.members.values() {
+            let release = self
+                .release_admitted(&version.dataset, &version.version)
+                .await?;
+            if release.version_ref() != *version || release.dataset.relationship != expected {
+                return Err(invalid_relationship());
+            }
+            release_bytes = release_bytes.saturating_add(metadata_size(
+                &release,
+                lifecycle.budget.limits.max_metadata_bytes,
+            )?);
+            check_size(release_bytes, lifecycle.budget.limits.max_metadata_bytes)?;
+            releases.push(release);
+        }
+        // Decoding is finished. Retain a size-based allowance for these pins
+        // while the collector separately admits its metadata traversal.
+        let retained_memory = release_memory
+            .split(release_bytes.saturating_mul(4))
+            .ok_or_else(capacity)?;
+        drop(release_memory);
+        let protections = self.protect_releases(&seal.family, &releases).await?;
+        drop(releases);
+        drop(retained_memory);
         let mut datasets: BTreeSet<_> = seal.members.keys().cloned().collect();
         datasets.insert(seal.family.clone());
         let _guards = self.lock_inputs(datasets).await;
         let view = lifecycle.open(&seal.family).await?;
-        let key = format!("generation/{}", seal.generation);
-        let members: BTreeSet<_> = seal.members.keys().cloned().collect();
         let family: Option<BTreeSet<Id>> = lifecycle.get(&view, "family-members").await?;
-        if let Some(previous) = lifecycle.get::<GenerationSeal>(&view, &key).await? {
-            return if previous == *seal && family.as_ref() == Some(&members) {
-                Ok(previous)
-            } else {
-                Err(Error::refusal(
-                    "generation_conflict",
-                    "a sealed generation cannot change its exact members",
-                ))
-            };
+        if let Some(previous) = self.retained_seal(&view, seal, &members).await? {
+            return Ok(previous);
         }
         if family.as_ref().is_some_and(|family| family != &members) {
             return Err(Error::refusal(
@@ -55,10 +100,6 @@ impl Engine {
                 "a family retains its original member datasets; use a new family for a different set",
             ));
         }
-        let expected = SourceRelationship::Coupled {
-            family: seal.family.clone(),
-            generation: seal.generation.clone(),
-        };
         let mut bytes = metadata_size(seal, lifecycle.budget.limits.max_metadata_bytes)?;
         for version in seal.members.values() {
             let accepted = self.qualify_input(version).await?;
@@ -68,12 +109,36 @@ impl Engine {
                 return Err(invalid_relationship());
             }
         }
-        let mut records = vec![record(key, seal)?];
+        let claim = record(&key, seal)?;
+        let binding = protections.binding(&seal.family, &view, &key, &claim.1)?;
+        let mut records = vec![claim, binding];
         if family.is_none() {
             records.push(record("family-members", members)?);
         }
         lifecycle.commit(&view, records).await?;
         Ok(seal.clone())
+    }
+
+    async fn retained_seal(
+        &self,
+        view: &crate::catalog::View,
+        seal: &GenerationSeal,
+        members: &BTreeSet<Id>,
+    ) -> Result<Option<GenerationSeal>> {
+        let lifecycle = &self.inner.lifecycle;
+        let key = format!("generation/{}", seal.generation);
+        let Some(previous) = lifecycle.get::<GenerationSeal>(view, &key).await? else {
+            return Ok(None);
+        };
+        let family: Option<BTreeSet<Id>> = lifecycle.get(view, "family-members").await?;
+        if previous != *seal || family.as_ref() != Some(members) {
+            return Err(Error::refusal(
+                "generation_conflict",
+                "a sealed generation cannot change its exact members",
+            ));
+        }
+        self.check_reference_binding(view, &key).await?;
+        Ok(Some(previous))
     }
 
     /// Captures admissible accepted inputs and their exact producer seals.
