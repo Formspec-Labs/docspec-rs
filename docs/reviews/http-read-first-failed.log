@@ -1,0 +1,34 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.72s
+     Running tests/http_read.rs (target/debug/deps/http_read-f692d827ad3b731b)
+
+running 3 tests
+test empty_streams_keep_schema_and_known_failures_return_structured_errors ... ok
+test in_flight_response_keeps_workspace_ownership_until_canceled ... ok
+test http_reads_exact_historical_source_and_combined_values_in_bounded_frames ... FAILED
+
+failures:
+
+---- http_reads_exact_historical_source_and_combined_values_in_bounded_frames stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'http_reads_exact_historical_source_and_combined_values_in_bounded_frames' (8328762) panicked at tests/http_read.rs:88:26:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    http_reads_exact_historical_source_and_combined_values_in_bounded_frames
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+
+error: test failed, to rerun pass `--test http_read`

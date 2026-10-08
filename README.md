@@ -186,9 +186,26 @@ does not establish payload availability; use `verify` for that.
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
 `POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `POST /succession`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
-CLI and HTTP call the same application services. HTTP accepts bounded JSON;
-the CLI streams bulk reads. One process owns a workspace; use HTTP to submit
+CLI and HTTP call the same application services. HTTP accepts bounded JSON and
+streams Arrow IPC for bulk reads. One process owns a workspace; use HTTP to submit
 concurrent requests to that process.
+
+With `serve` running, read an exact version through either route:
+
+```sh
+curl --fail -o comments.arrow http://127.0.0.1:7391/datasets/comments/versions/initial/arrow/source
+curl --fail -o enriched.arrow http://127.0.0.1:7391/datasets/comments/versions/text-stats-001/arrow
+```
+
+The `/arrow/{group}` route reads a named physical field group; `/arrow` combines
+source fields with all selected scalar groups. Responses identify the dataset,
+version and manifest digest in `docspec-*` headers. Each read verifies the complete
+retained release before sending its schema, so first-byte latency still depends
+on release size. Batches then follow client demand without a background producer
+or whole-result buffer. Missing versions/groups and initial verification failures
+return structured JSON errors. A later failure aborts the response: clients must
+require successful HTTP completion and discard partial output. Empty results keep
+their schema. This local codec currently refuses Arrow dictionary array schemas.
 
 Update inspection includes observed file scans, reused files/bytes, newly written
 data files/bytes and removed/added row counts. Writes include temporary prepared

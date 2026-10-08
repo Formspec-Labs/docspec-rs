@@ -9,11 +9,15 @@ use crate::{
 };
 use axum::{
     Json, Router,
+    body::Body,
     extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use futures::StreamExt;
+
+mod ipc;
 
 /// Builds a bounded local API over an existing execution host.
 pub fn router(engine: Engine) -> Router {
@@ -28,6 +32,14 @@ pub fn router(engine: Engine) -> Router {
         .route("/datasets/{dataset}", get(inspect))
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
+        .route(
+            "/datasets/{dataset}/versions/{version}/arrow",
+            get(read_combined),
+        )
+        .route(
+            "/datasets/{dataset}/versions/{version}/arrow/{group}",
+            get(read_group),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(engine)
 }
@@ -41,7 +53,7 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
-            "no_release" => StatusCode::NOT_FOUND,
+            "no_release" | "missing_group" => StatusCode::NOT_FOUND,
             "operation_conflict"
             | "stale_definition"
             | "stale_eligibility"
@@ -136,4 +148,53 @@ async fn succession(
             .prove_succession(&request.prior, &request.target)
             .await?,
     ))
+}
+
+async fn read_combined(
+    State(engine): State<Engine>,
+    Path((dataset, version)): Path<(String, String)>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, None).await
+}
+
+async fn read_group(
+    State(engine): State<Engine>,
+    Path((dataset, version, group)): Path<(String, String, String)>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, Some(group)).await
+}
+
+async fn read(
+    engine: Engine,
+    dataset: String,
+    version: String,
+    group: Option<String>,
+) -> Result<Response, HttpError> {
+    let release = engine
+        .release(&Id::new(dataset)?, &Id::new(version)?)
+        .await?;
+    let batches = if let Some(group) = group {
+        engine.read_group(&release, &group).await?
+    } else {
+        engine.read_combined(&release).await?
+    };
+    let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
+        // The in-flight response retains local workspace ownership as well as
+        // reader admission, even if the router itself is dropped.
+        let _owner = &engine;
+        chunk
+    });
+    Ok((
+        [
+            (
+                "content-type",
+                "application/vnd.apache.arrow.stream".to_owned(),
+            ),
+            ("docspec-dataset", release.dataset.dataset.to_string()),
+            ("docspec-version", release.id.to_string()),
+            ("docspec-manifest-blake3", release.manifest.digest),
+        ],
+        Body::from_stream(stream),
+    )
+        .into_response())
 }

@@ -16,7 +16,7 @@ or compatibility layer for legacy DocSpec.
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal; bounded accepted-history proof; complete-key source updates with coordinated scalar-group refresh and unchanged-file computation reuse | Multiple pinned related inputs; old/new-key affected-result discovery for joins; joined and aggregate-group refresh against full reconstruction |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; combined CLI reads; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource qualification; broader fault tests; HTTP bulk streaming; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
@@ -376,3 +376,49 @@ The first full gate stopped when a recovery fixture inherited the production
 process-kill harness now writes an explicit small-fixture resource profile and
 passes it to both the interrupted worker and resume. Production resource limits
 are unchanged; these fixtures do not qualify the production performance target.
+
+## HTTP bulk-read checkpoint
+
+Exact-version routes stream a native field group or the combined source/scalar
+view as Arrow IPC. The shared group reader supplies both HTTP and catalog-free
+CLI reads, removing the CLI's separate verification/reader setup. The catalog
+resolver now checks that the returned dataset and both version identities match
+the requested path and describe a verified result; another valid release cannot
+satisfy a rebound catalog key. Response headers identify the captured version and
+manifest digest. No live-head lookup changes a read midway through transmission.
+
+The maintained Arrow stream writer emits the schema, successive batches and a
+successful end marker only after source exhaustion. Each body poll requests at
+most one source batch. There is no application producer queue or detached encoder.
+The capped output sink reserves capacity before growth, and each outgoing
+`Bytes` owner retains its reservation until its last clone drops. Cancellation
+drops the native stream and encoder; the response retains local workspace ownership
+while in flight. Engine-native cancellation and network buffering outside this
+adapter remain subject to their existing qualification limits.
+
+The codec rejects top-level and nested Arrow dictionary schemas. Review found
+that the native writer can retain old dictionary buffers across batches, which
+would require additional accounting beyond this implementation's fixed encoder
+admission. The maintained schema traversal detects those types before streaming;
+each actual batch must also match the declared schema. Ordinary native Iceberg
+output remains supported. Arrow constructs temporary encoded data before the sink
+checks its wire size. These reservations are admission controls, not an established
+whole-process memory ceiling or hard bound on upstream allocations.
+
+The response starts only after full retained-release verification. Streaming
+removes whole-result transport buffering; it does not make verification or time
+to first byte independent of population. Initial failures return JSON refusals.
+After headers, source or encoding failures abort the body without a successful
+end marker. Consumers must require successful HTTP completion; a parser accepting
+a truncated Arrow prefix is insufficient. Empty results still carry their schema.
+
+Tests exercise exact historical and computed-group values, duplicates/nulls,
+empty schemas, catalog-free CLI reading, rebound identities, demand-driven source
+polling, canceled responses, cloned-byte reservation custody and failed bodies.
+The [initial fixture failure](reviews/http-read-first-failed.log) assumed a 64-bit
+length without declaring that result type; the fixture now explicitly casts it.
+See [HTTP tests](../tests/http_read.rs), [encoder tests](../src/http/ipc.rs), the
+[consistency review](reviews/http-read-consistency.md),
+[resource review](reviews/http-read-resources.md) and
+[gate output](reviews/http-read-check.log). Tests use the Axum router/body and
+native readers; real-network transport performance and the Comments gate remain open.

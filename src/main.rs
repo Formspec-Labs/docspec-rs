@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::verify_release,
+    engine::{read_group, verify_release},
     model::{BackfillSpec, Id, ReleasePin, RunSpec, UpdateSpec},
     storage,
 };
@@ -138,27 +138,15 @@ async fn main() -> anyhow::Result<()> {
             group,
         } => {
             let release: ReleasePin = read_json(release)?;
-            verify_release(&release, limits.clone()).await?;
-            let pin = release
-                .dataset
-                .groups
-                .get(&group)
-                .ok_or_else(|| anyhow::anyhow!("unknown field group"))?;
-            let table = storage::open_pin(pin).await?;
-            let schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
+            let mut stream = read_group(&release, &group, &Budget::new(limits)?).await?;
             let file = std::fs::OpenOptions::new()
                 .create_new(true)
                 .write(true)
                 .open(output)?;
             let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(BufWriter::new(file), &schema)?;
-            if pin.snapshot.is_some() {
-                let budget = Budget::new(limits)?;
-                let stream = storage::read_batches(&table, &budget).await?;
-                futures::pin_mut!(stream);
-                while let Some(batch) = stream.try_next().await? {
-                    writer.write(&batch)?;
-                }
+                arrow::ipc::writer::StreamWriter::try_new(BufWriter::new(file), &stream.schema())?;
+            while let Some(batch) = stream.try_next().await? {
+                writer.write(&batch)?;
             }
             writer.finish()?;
         }

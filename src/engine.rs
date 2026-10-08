@@ -28,6 +28,9 @@ mod backfill;
 #[doc(inline)]
 pub use backfill::BackfillPlan;
 mod history;
+mod read;
+#[doc(inline)]
+pub use read::read_group;
 mod write;
 
 /// Local execution host sharing catalog, admission, and resource accounting.
@@ -277,16 +280,28 @@ impl Engine {
     /// Resolves a historical operation's immutable release without changing latest.
     ///
     /// # Errors
-    /// Refuses unknown versions or unavailable lifecycle metadata.
+    /// Refuses unknown versions, rebound identities, or unavailable lifecycle metadata.
     pub async fn release(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
-        self.inner
+        let release: ReleasePin = self
+            .inner
             .lifecycle
             .get(&view, &format!("result/{version}"))
             .await?
-            .ok_or_else(|| Error::refusal("no_release", "operation has no completed release"))
+            .ok_or_else(|| Error::refusal("no_release", "operation has no completed release"))?;
+        if &release.dataset.dataset != dataset
+            || &release.id != version
+            || &release.dataset.version != version
+            || !release.verified
+        {
+            return Err(Error::refusal(
+                "release_mismatch",
+                "catalog result differs from the requested accepted version",
+            ));
+        }
+        Ok(release)
     }
 
     /// Compares pinned values with duplicate-aware full reconstruction.
