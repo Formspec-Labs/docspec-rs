@@ -77,6 +77,19 @@ impl Engine {
             inventory.charge(boundary.table.len() + boundary.metadata.len() + 128)?;
             boundaries.push(boundary);
             let rows = lifecycle.rows(&view).await?;
+            // Decode each retirement batch once. The bounded set lets both marker
+            // validation and completion filtering share its exact authorization.
+            let mut retired_phases = BTreeSet::new();
+            for (key, revision, json) in rows.prefix("phase-retirement/") {
+                let retired: PhaseRetirement = decode(json)?;
+                super::phases::validate_markers(&rows, &retired, &view, key, revision)?;
+                for phase in retired.plan.phases {
+                    inventory.charge(phase.key.len().saturating_add(128))?;
+                    if !retired_phases.insert(phase) {
+                        return Err(super::phases::invalid_retirement());
+                    }
+                }
+            }
             for (key, revision, json) in rows.prefix("") {
                 tokio::task::consume_budget().await;
                 if revision <= 0 || revision > view.revision {
@@ -87,6 +100,26 @@ impl Engine {
                     key: key.into(),
                     revision,
                 };
+                if key.starts_with("phase-retirement/") {
+                    continue;
+                }
+                if key.starts_with("phase-retired/") {
+                    let marker: super::phases::RetiredPhase = decode(json)?;
+                    if key != super::phases::marker_key(&marker.phase)
+                        || !retired_phases.contains(&marker.phase)
+                    {
+                        return Err(super::phases::invalid_retirement());
+                    }
+                    continue;
+                }
+                if completion_key(key)
+                    && retired_phases.contains(&PhaseGeneration {
+                        key: key.into(),
+                        revision,
+                    })
+                {
+                    continue;
+                }
                 inventory.record(key, json, &rows, &origin)?;
                 inventory.expand(budget, &memory).await?;
             }

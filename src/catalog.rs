@@ -26,6 +26,8 @@ pub struct Lifecycle {
     pub(crate) catalog: Arc<dyn Catalog>,
     pub(crate) budget: Budget,
     cache: Arc<Mutex<Option<Arc<SnapshotRows>>>>,
+    #[cfg(test)]
+    pub(crate) lose_commit_response: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -37,6 +39,10 @@ pub(crate) struct SnapshotRows {
 }
 
 impl SnapshotRows {
+    pub(crate) fn revision(&self, key: &str) -> Option<i64> {
+        self.values.get(key).map(|(revision, _)| *revision)
+    }
+
     /// Iterates matching current records without allocating another record map.
     pub(crate) fn prefix<'a>(
         &'a self,
@@ -72,6 +78,17 @@ pub struct View {
     pub revision: i64,
 }
 
+pub(crate) fn lifecycle_ident(dataset: &Id) -> TableIdent {
+    let namespace = NamespaceIdent::new(format!("d_{}", dataset.as_str().replace('-', "_")));
+    // Preserve distinct names such as a-b and a_b by including a digest.
+    let namespace = NamespaceIdent::new(format!(
+        "{}_{}",
+        namespace,
+        &blake3::hash(dataset.as_str().as_bytes()).to_hex()[..12]
+    ));
+    TableIdent::new(namespace, "lifecycle".into())
+}
+
 impl Lifecycle {
     /// Connects lifecycle operations to a maintained catalog.
     pub fn new(catalog: Arc<dyn Catalog>, budget: Budget) -> Self {
@@ -79,6 +96,8 @@ impl Lifecycle {
             catalog,
             budget,
             cache: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            lose_commit_response: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -87,19 +106,13 @@ impl Lifecycle {
     /// # Errors
     /// Returns catalog or schema errors; callers serialize first-time creation.
     pub async fn open(&self, dataset: &Id) -> Result<View> {
-        let namespace = NamespaceIdent::new(format!("d_{}", dataset.as_str().replace('-', "_")));
-        // Preserve distinct names such as a-b and a_b by including a digest.
-        let namespace = NamespaceIdent::new(format!(
-            "{}_{}",
-            namespace,
-            &blake3::hash(dataset.as_str().as_bytes()).to_hex()[..12]
-        ));
+        let ident = lifecycle_ident(dataset);
+        let namespace = ident.namespace().clone();
         if !self.catalog.namespace_exists(&namespace).await? {
             self.catalog
                 .create_namespace(&namespace, HashMap::new())
                 .await?;
         }
-        let ident = TableIdent::new(namespace.clone(), "lifecycle".into());
         let table = if self.catalog.table_exists(&ident).await? {
             self.catalog.load_table(&ident).await?
         } else {
@@ -297,6 +310,16 @@ impl Lifecycle {
         )
         .await?;
         let table = storage::append(&view.table, &guard, files).await?;
+        #[cfg(test)]
+        if self
+            .lose_commit_response
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Error::refusal(
+                "lost_commit_response",
+                "test interruption after native commit and before cache publication",
+            ));
+        }
         let entry = Arc::new(SnapshotRows {
             metadata: table.metadata_location_result()?.to_owned(),
             values: next_values,

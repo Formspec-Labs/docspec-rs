@@ -227,6 +227,7 @@ impl Engine {
             failures: BTreeMap::new(),
             promotion_refusal: None,
         };
+        let mut retained_target = plan.completed;
         if !plan.completed {
             let operation = old.clone().unwrap_or(Operation {
                 request_digest: request,
@@ -255,6 +256,12 @@ impl Engine {
                     base_manifest: base.manifest.clone(),
                     related: base.dataset.related.clone(),
                 });
+            if old.is_some() {
+                retained_target = self
+                    .retained_backfill_readback(spec, &operation, &capture, &base)
+                    .await?
+                    .is_some();
+            }
             plan.promotion_refusal =
                 check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
                     .and_then(|()| {
@@ -285,10 +292,11 @@ impl Engine {
         for file in scan.files() {
             let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
             let key = file_key(object, &expressions, eligibility)?;
-            if lifecycle
-                .get::<FileCompletion>(&view, &key)
-                .await?
-                .is_some()
+            if retained_target
+                || self
+                    .active_completion::<FileCompletion>(&view, &key)
+                    .await?
+                    .is_some()
             {
                 plan.files_completed += 1;
             } else {
@@ -450,40 +458,61 @@ impl Engine {
             .groups
             .get("source")
             .ok_or_else(invalid_group)?;
-        // Resolve durable computation before opening source payloads. Fresh file work
-        // verifies its source bytes; final readback verifies the complete selection.
-        if base.manifest.bytes > lifecycle.budget.limits.max_metadata_bytes as u64 {
-            return Err(Error::refusal(
-                "metadata_capacity",
-                "source manifest exceeds metadata allowance",
-            ));
-        }
-        storage::verify_objects(vec![base.manifest.clone()], &lifecycle.budget).await?;
-        let decoded: DatasetPin =
-            serde_json::from_reader(std::fs::File::open(&base.manifest.path)?)?;
-        if decoded != base.dataset {
-            return Err(invalid_group());
-        }
-        let definition = spec.group_definition();
-        let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
-        checks.trust(&base, &lifecycle.budget).await?;
-        let prepared = Box::pin(self.prepare_group(
-            &request,
-            &operation,
-            source,
-            &definition,
-            None,
-            stop,
-            &mut checks,
-        ))
-        .await?;
-        let binding = ComputedGroup {
-            definition,
-            input_fields: prepared.input_fields,
-            request: request.clone(),
-            native_field_ids: prepared.native_field_ids,
-            source_metadata: source.metadata.clone(),
-            base_manifest: capture.base_manifest.clone(),
+        // Issued readbacks retain their qualified target even when earlier phase
+        // promises retire. Resolve them before reopening those preparation paths.
+        let mut retained_readback = self
+            .retained_backfill_readback(spec, &operation, &capture, &base)
+            .await?;
+        let (prepared, binding) = if let Some(readback) = &retained_readback {
+            (
+                readback
+                    .dataset
+                    .groups
+                    .get(spec.group.as_str())
+                    .ok_or_else(invalid_group)?
+                    .clone(),
+                readback
+                    .dataset
+                    .computed
+                    .get(spec.group.as_str())
+                    .ok_or_else(invalid_group)?
+                    .clone(),
+            )
+        } else {
+            if base.manifest.bytes > lifecycle.budget.limits.max_metadata_bytes as u64 {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "source manifest exceeds metadata allowance",
+                ));
+            }
+            storage::verify_objects(vec![base.manifest.clone()], &lifecycle.budget).await?;
+            let decoded: DatasetPin =
+                serde_json::from_reader(std::fs::File::open(&base.manifest.path)?)?;
+            if decoded != base.dataset {
+                return Err(invalid_group());
+            }
+            let definition = spec.group_definition();
+            let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
+            checks.trust(&base, &lifecycle.budget).await?;
+            let prepared = Box::pin(self.prepare_group(
+                &request,
+                &operation,
+                source,
+                &definition,
+                None,
+                stop,
+                &mut checks,
+            ))
+            .await?;
+            let binding = ComputedGroup {
+                definition,
+                input_fields: prepared.input_fields,
+                request: request.clone(),
+                native_field_ids: prepared.native_field_ids,
+                source_metadata: source.metadata.clone(),
+                base_manifest: capture.base_manifest.clone(),
+            };
+            (prepared.table, binding)
         };
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
@@ -512,7 +541,7 @@ impl Engine {
             dataset.processor = PROCESSOR.into();
             dataset
                 .groups
-                .insert(spec.group.to_string(), prepared.table.clone());
+                .insert(spec.group.to_string(), prepared.clone());
             dataset
                 .computed
                 .insert(spec.group.to_string(), binding.clone());
@@ -535,9 +564,16 @@ impl Engine {
                 spec.operation,
                 blake3::hash(&serialized).to_hex()
             );
-            let recorded: Option<ReleasePin> = lifecycle
-                .get(&lifecycle.open(&spec.dataset).await?, &readback_key)
-                .await?;
+            let recorded: Option<ReleasePin> = if retained_readback
+                .as_ref()
+                .is_some_and(|readback| readback.dataset == dataset)
+            {
+                retained_readback.take()
+            } else {
+                lifecycle
+                    .get(&lifecycle.open(&spec.dataset).await?, &readback_key)
+                    .await?
+            };
             let release = if let Some(recorded) = recorded {
                 if recorded.dataset != dataset {
                     return Err(invalid_group());
@@ -545,6 +581,10 @@ impl Engine {
                 check_release_available(&recorded, &lifecycle.budget).await?;
                 recorded
             } else {
+                if let Some(readback) = retained_readback.take() {
+                    // A sibling changed composition, not this completed target.
+                    check_release_available(&readback, &lifecycle.budget).await?;
+                }
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");
                 let directory = self.reserve_group(&request, &operation, "release").await?;
@@ -624,6 +664,86 @@ impl Engine {
             stop_after(stop, "selection")?;
             return Ok(release);
         }
+    }
+
+    async fn retained_backfill_readback(
+        &self,
+        spec: &BackfillSpec,
+        operation: &Operation,
+        capture: &Capture,
+        base: &ReleasePin,
+    ) -> Result<Option<ReleasePin>> {
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(&spec.dataset).await?;
+        let rows = lifecycle.rows(&view).await?;
+        let prefix = format!("backfill-readback/{}/", spec.operation);
+        let mut readbacks = rows.prefix(&prefix).peekable();
+        if readbacks.peek().is_none() {
+            return Ok(None);
+        }
+        let _memory = lifecycle
+            .budget
+            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
+        let request = OperationRequest::Backfill(spec.clone());
+        let definition = spec.group_definition();
+        let source = base
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(invalid_group)?;
+        let mut retained: Option<(i64, ReleasePin)> = None;
+        for (key, revision, json) in readbacks {
+            tokio::task::consume_budget().await;
+            let readback: ReleasePin = serde_json::from_str(json)?;
+            let dataset = &readback.dataset;
+            let table = dataset
+                .groups
+                .get(spec.group.as_str())
+                .ok_or_else(invalid_group)?;
+            let binding = dataset
+                .computed
+                .get(spec.group.as_str())
+                .ok_or_else(invalid_group)?;
+            if !readback.verified
+                || readback.id != spec.operation
+                || dataset.dataset != spec.dataset
+                || dataset.version != spec.operation
+                || dataset.request != request
+                || dataset.format != operation.result_format
+                || dataset.eligibility != operation.eligibility
+                || dataset.boundary != operation.boundary
+                || dataset.definition != operation.definition
+                || dataset.processor != PROCESSOR
+                || dataset.groups.get("source") != Some(source)
+                || dataset.related != capture.related
+                || dataset.inputs != base.dataset.inputs
+                || dataset.relationship != base.dataset.relationship
+                || dataset.changes.is_some()
+                || dataset.parent_manifest.is_none()
+                || binding.definition != definition
+                || binding.request != request
+                || binding.source_metadata != source.metadata
+                || binding.base_manifest != capture.base_manifest
+                || capture.base_manifest != base.manifest
+                || readback.manifest.owner != spec.dataset
+                || key != format!("{prefix}{}", readback.manifest.digest)
+            {
+                return Err(invalid_group());
+            }
+            if let Some((_, previous)) = &retained
+                && (previous.dataset.groups.get(spec.group.as_str()) != Some(table)
+                    || previous.dataset.computed.get(spec.group.as_str()) != Some(binding))
+            {
+                return Err(Error::refusal(
+                    "phase_generation_conflict",
+                    format!("retained readback {key} binds a different target generation"),
+                ));
+            }
+            if retained.as_ref().is_none_or(|(prior, _)| revision > *prior) {
+                retained = Some((revision, readback));
+            }
+        }
+        Ok(retained.map(|(_, readback)| readback))
     }
 }
 

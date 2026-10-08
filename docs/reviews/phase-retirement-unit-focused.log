@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.67s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 2 tests
+test engine::retention::phases::tests::receipt_membership_and_marker_presence_are_required ... ok
+test engine::retention::phases::tests::legacy_processing_cannot_adopt_a_replacement_admission ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.41s
+

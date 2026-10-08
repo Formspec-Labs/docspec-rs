@@ -265,6 +265,20 @@ impl Engine {
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
         }
+        if lifecycle
+            .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
+            .await?
+            .is_some()
+        {
+            return Ok(RunPlan {
+                dataset: spec.dataset().clone(),
+                operation: spec.operation().clone(),
+                completed,
+                reusable_phases: vec!["readback".into()],
+                required_phases: Vec::new(),
+                limits: lifecycle.budget.limits.clone(),
+            });
+        }
         let mut reusable_phases = Vec::new();
         let mut required_phases = Vec::new();
         let mut phases = PHASES.to_vec();
@@ -286,12 +300,15 @@ impl Engine {
             Some(operation) => operation.schema_key.clone(),
             None => self.schema_key(&authority, spec).await?,
         };
+        let mut retained_processing = false;
         for phase in phases {
             let exists = if phase == "groups" {
-                lifecycle
-                    .get::<CompletedGroups>(&view, &format!("groups/{}", spec.operation()))
-                    .await?
-                    .is_some()
+                self.active_completion::<CompletedGroups>(
+                    &view,
+                    &format!("groups/{}", spec.operation()),
+                )
+                .await?
+                .is_some()
             } else if phase == "readback" {
                 lifecycle
                     .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
@@ -301,8 +318,8 @@ impl Engine {
                 let eligibility = operation
                     .as_ref()
                     .map_or(authority.eligibility, |o| o.eligibility);
-                lifecycle
-                    .get::<PhaseResult>(
+                let completion = self
+                    .active_completion::<PhaseResult>(
                         &view,
                         &phase_key(
                             spec,
@@ -316,14 +333,22 @@ impl Engine {
                             schema_key.as_ref(),
                         )?,
                     )
-                    .await?
-                    .is_some()
+                    .await?;
+                if phase == "processing" {
+                    retained_processing = completion
+                        .as_ref()
+                        .is_some_and(|phase| phase.dependencies.is_some());
+                }
+                completion.is_some()
             };
             if exists {
                 reusable_phases.push(phase.to_owned());
             } else {
                 required_phases.push(phase.to_owned());
             }
+        }
+        if retained_processing {
+            required_phases.retain(|phase| phase != "admission");
         }
         Ok(RunPlan {
             dataset: spec.dataset().clone(),
@@ -717,9 +742,46 @@ impl Engine {
         operation: &'a Operation,
         request: &'a str,
         stop: Option<&'a str>,
-    ) -> futures::future::BoxFuture<'a, Result<(PhaseResult, PhaseResult)>> {
+    ) -> futures::future::BoxFuture<'a, Result<(Option<PhaseResult>, PhaseResult)>> {
         Box::pin(async move {
             let lifecycle = &self.inner.lifecycle;
+            if let Some(processing) = self.phase(spec, operation, "processing").await? {
+                let admission = if processing.dependencies.is_none() {
+                    let admission = self.phase(spec, operation, "admission").await?.ok_or_else(|| {
+                        Error::refusal("phase_dependencies_unknown", "legacy processing needs its original admission; retire that processing generation before rebuilding")
+                    })?;
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    let rows = lifecycle.rows(&view).await?;
+                    let revision = |phase| -> Result<i64> {
+                        rows.revision(&phase_key(
+                            spec,
+                            request,
+                            operation.eligibility,
+                            phase,
+                            operation.base_manifest.as_ref(),
+                            operation.schema_key.as_ref(),
+                        )?)
+                        .ok_or_else(|| {
+                            Error::refusal(
+                                "phase_dependencies_unknown",
+                                "original phase generation is unavailable",
+                            )
+                        })
+                    };
+                    if revision("admission")? > revision("processing")? {
+                        return Err(Error::refusal(
+                            "phase_dependencies_unknown",
+                            "legacy processing cannot adopt a newer admission generation; retire that processing before rebuilding",
+                        ));
+                    }
+                    Some(admission)
+                } else {
+                    None
+                };
+                stop_after(stop, "admission")?;
+                stop_after(stop, "processing")?;
+                return Ok((admission, processing));
+            }
             let admission = if let Some(phase) = self.phase(spec, operation, "admission").await? {
                 phase
             } else if let OperationRequest::Refresh(refresh) = spec {
@@ -839,7 +901,7 @@ impl Engine {
             };
             stop_after(stop, "processing")?;
 
-            Ok((admission, processing))
+            Ok((Some(admission), processing))
         })
     }
 
@@ -952,6 +1014,39 @@ impl Engine {
                     Error::refusal("corrupt_phase", "operation has no admitted request")
                 })?;
 
+            // Readback is an independent retained promise. Earlier phase retirement
+            // must not force its already qualified values through preparation again.
+            if let Some(release) = lifecycle
+                .get::<ReleasePin>(
+                    &lifecycle.open(spec.dataset()).await?,
+                    &format!("readback/{}", spec.operation()),
+                )
+                .await?
+            {
+                if !release.verified
+                    || &release.id != spec.operation()
+                    || &release.dataset.dataset != spec.dataset()
+                    || release.dataset.version != release.id
+                    || release.dataset.request != captured_request
+                    || release.dataset.definition != captured_request.result_definition()
+                    || release.dataset.format != operation.result_format
+                    || release.dataset.eligibility != operation.eligibility
+                    || release.dataset.boundary != operation.boundary
+                {
+                    return Err(Error::refusal(
+                        "corrupt_phase",
+                        "retained readback differs from its admitted operation",
+                    ));
+                }
+                // Refresh selection checks the complete dependency graph below.
+                // Other selections check retained availability here, once.
+                if !matches!(spec, OperationRequest::Refresh(_)) {
+                    check_release_available(&release, &lifecycle.budget).await?;
+                }
+                stop_after(stop, "readback")?;
+                return self.select_prepared(spec, &operation, release, stop).await;
+            }
+
             let (admission, processing) = self
                 .prepare_source(spec, &operation, &request, stop)
                 .await?;
@@ -975,7 +1070,24 @@ impl Engine {
             if let Some(base) = &base {
                 checks.trust(base, &lifecycle.budget).await?;
             }
-            if self.phase(spec, &operation, "validation").await?.is_none() {
+            let validation_dependencies =
+                processing.dependencies.clone().map(|mut dependencies| {
+                    if let Some(related) = &related {
+                        dependencies.tables.push((&related.evidence).into());
+                    }
+                    dependencies
+                });
+            if let Some(validated) = self.phase(spec, &operation, "validation").await? {
+                if validated.table != processing.table
+                    || validated.outputs != processing.outputs
+                    || validated.rows != processing.rows
+                    || validated.changes != processing.changes
+                    || validated.coverage != processing.coverage
+                    || validated.dependencies != validation_dependencies
+                {
+                    return Err(self.phase_generation_conflict(spec, &operation, "validation")?);
+                }
+            } else {
                 #[cfg(feature = "test-util")]
                 work_started("validation");
                 checks.table(&table, &lifecycle.budget).await?;
@@ -998,12 +1110,7 @@ impl Engine {
                 }
                 let phase = PhaseResult {
                     phase: "validation".into(),
-                    dependencies: processing.dependencies.clone().map(|mut dependencies| {
-                        if let Some(related) = &related {
-                            dependencies.tables.push((&related.evidence).into());
-                        }
-                        dependencies
-                    }),
+                    dependencies: validation_dependencies,
                     ..processing.clone()
                 };
                 self.complete(spec, &operation, &phase).await?;
@@ -1029,6 +1136,12 @@ impl Engine {
             } else {
                 // Earlier completions remain readable while cleanup is disabled.
                 // Their inferred input edge is not sufficient removal authority.
+                let admission = admission.as_ref().ok_or_else(|| {
+                    Error::refusal(
+                        "phase_dependencies_unknown",
+                        "legacy processing lacks its original admission",
+                    )
+                })?;
                 for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
                     inputs.insert(spec.input_key(name), input.clone());
                 }
@@ -1080,16 +1193,30 @@ impl Engine {
                     self.check_completion(&view, &operation, spec.operation())
                         .await?;
                     let key = format!("groups/{}", spec.operation());
-                    if lifecycle
-                        .get::<CompletedGroups>(&view, &key)
-                        .await?
-                        .is_none()
-                    {
-                        let completed: BTreeMap<_, _> = groups
-                            .iter()
-                            .filter(|(name, _)| name.as_str() != "source")
-                            .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
-                            .collect();
+                    let completed: BTreeMap<_, _> = groups
+                        .iter()
+                        .filter(|(name, _)| name.as_str() != "source")
+                        .map(|(name, pin)| (name.clone(), pin.metadata.clone()))
+                        .collect();
+                    let existing = self
+                        .active_completion::<CompletedGroups>(&view, &key)
+                        .await?;
+                    if let Some(existing) = existing {
+                        let matches = match existing {
+                            CompletedGroups::Captured { outputs, source } => {
+                                outputs == completed && source == (&table).into()
+                            }
+                            CompletedGroups::Legacy(outputs) => outputs == completed,
+                        };
+                        if !matches {
+                            return Err(Error::refusal(
+                                "phase_generation_conflict",
+                                format!(
+                                    "retained completion {key} belongs to another physical generation; explicitly retire it before recomputing its dependencies"
+                                ),
+                            ));
+                        }
+                    } else {
                         lifecycle
                             .commit(
                                 &view,
@@ -1200,35 +1327,47 @@ impl Engine {
                 }
             };
             stop_after(stop, "readback")?;
+            self.select_prepared(spec, &operation, release, stop).await
+        })
+    }
+
+    fn select_prepared<'a>(
+        &'a self,
+        spec: &'a OperationRequest,
+        operation: &'a Operation,
+        release: ReleasePin,
+        stop: Option<&'a str>,
+    ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
+        Box::pin(async move {
             if let OperationRequest::Refresh(refresh) = spec {
-                let selected = Box::pin(self.select_refresh(refresh, &operation, &release)).await?;
+                let selected = self.select_refresh(refresh, operation, &release).await?;
                 stop_after(stop, "selection")?;
                 return Ok(selected);
             }
+            let lock = self.lock(spec.dataset()).await;
+            let _guard = lock.lock().await;
+            let lifecycle = &self.inner.lifecycle;
+            let view = lifecycle.open(spec.dataset()).await?;
+            if let Some(completed) = lifecycle
+                .get(&view, &format!("result/{}", spec.operation()))
+                .await?
             {
-                let _guard = lock.lock().await;
-                let view = lifecycle.open(spec.dataset()).await?;
-                if let Some(completed) = lifecycle
-                    .get(&view, &format!("result/{}", spec.operation()))
-                    .await?
-                {
-                    return Ok(completed);
-                }
-                let authority = self.check(&view, &operation, spec.operation()).await?;
-                if authority
-                    .selected
-                    .as_ref()
-                    .is_some_and(|p| p.boundary > operation.boundary)
-                {
-                    return Err(Error::refusal(
-                        "coverage_regression",
-                        "a newer captured input boundary is already selected",
-                    ));
-                }
-                check_group_rebuild(&authority, spec)?;
-                self.check_incremental(&authority, spec).await?;
-                Box::pin(self.select(&view, authority, &release)).await?;
+                return Ok(completed);
             }
+            let authority = self.check(&view, operation, spec.operation()).await?;
+            if authority
+                .selected
+                .as_ref()
+                .is_some_and(|p| p.boundary > operation.boundary)
+            {
+                return Err(Error::refusal(
+                    "coverage_regression",
+                    "a newer captured input boundary is already selected",
+                ));
+            }
+            check_group_rebuild(&authority, spec)?;
+            self.check_incremental(&authority, spec).await?;
+            self.select(&view, authority, &release).await?;
             stop_after(stop, "selection")?;
             Ok(release)
         })
@@ -1278,9 +1417,7 @@ impl Engine {
         let view = self.inner.lifecycle.open(spec.dataset()).await?;
         self.check(&view, operation, spec.operation()).await?;
         let found: Option<PhaseResult> = self
-            .inner
-            .lifecycle
-            .get(
+            .active_completion(
                 &view,
                 &phase_key(
                     spec,
@@ -1304,6 +1441,28 @@ impl Engine {
             tracing::info!(phase, operation = %spec.operation(), "reusing qualified phase");
         }
         Ok(found)
+    }
+
+    fn phase_generation_conflict(
+        &self,
+        spec: &OperationRequest,
+        operation: &Operation,
+        phase: &str,
+    ) -> Result<Error> {
+        let key = phase_key(
+            spec,
+            &operation.request_digest,
+            operation.eligibility,
+            phase,
+            operation.base_manifest.as_ref(),
+            operation.schema_key.as_ref(),
+        )?;
+        Ok(Error::refusal(
+            "phase_generation_conflict",
+            format!(
+                "retained completion {key} belongs to another physical generation; explicitly retire it before recomputing its dependencies"
+            ),
+        ))
     }
 
     async fn reserve_attempt(
@@ -1362,7 +1521,13 @@ impl Engine {
         )?;
         // Another attempt may have completed the same deterministic phase. Preserve
         // that generation rather than relabeling or replacing its evidence.
-        if let Some(completed) = self.inner.lifecycle.get::<PhaseResult>(&view, &key).await? {
+        if let Some(completed) = self.active_completion::<PhaseResult>(&view, &key).await? {
+            if matches!(phase.phase.as_str(), "validation" | "evidence")
+                && (completed.dependencies != phase.dependencies
+                    || (phase.phase == "validation" && completed.table != phase.table))
+            {
+                return Err(self.phase_generation_conflict(spec, operation, &phase.phase)?);
+            }
             return Ok(completed);
         }
         self.inner

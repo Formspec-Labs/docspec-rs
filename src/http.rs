@@ -6,9 +6,9 @@
 use crate::{
     Engine, Error,
     model::{
-        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
-        ReleasePin, RetentionInspection, RunSpec, SchemaSpec, SuccessionProof, UpdateSpec,
-        VersionRef,
+        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, PhaseRetirement,
+        PhaseRetirementPlan, RefreshSpec, ReleasePin, RetentionInspection, RunSpec, SchemaSpec,
+        SuccessionProof, UpdateSpec, VersionRef,
     },
 };
 use axum::{
@@ -40,6 +40,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
         .route("/retention/inspect", post(inspect_retention))
+        .route("/retention/phases/plan", post(plan_phase_retirement))
+        .route("/retention/phases/retire", post(retire_phases))
         .route("/datasets/{dataset}", get(inspect))
         .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
@@ -71,6 +73,39 @@ async fn inspect_retention(
 ) -> Result<Json<RetentionInspection>, HttpError> {
     Ok(Json(engine.inspect_retention(&objects).await?))
 }
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhaseRetirementRequest {
+    dataset: Id,
+    retirement: Id,
+    keys: Vec<String>,
+    reason: String,
+}
+
+async fn plan_phase_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<PhaseRetirementRequest>,
+) -> Result<Json<PhaseRetirementPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_phase_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.keys,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_phases(
+    State(engine): State<Engine>,
+    Json(plan): Json<PhaseRetirementPlan>,
+) -> Result<Json<PhaseRetirement>, HttpError> {
+    Ok(Json(engine.retire_phases(&plan).await?))
+}
+
 impl From<Error> for HttpError {
     fn from(error: Error) -> Self {
         Self(error)
@@ -79,7 +114,7 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
-            "no_release" | "no_operation" | "missing_group" | "missing_evidence" => {
+            "no_release" | "no_operation" | "no_phase" | "missing_group" | "missing_evidence" => {
                 StatusCode::NOT_FOUND
             }
             "operation_conflict"
@@ -87,6 +122,10 @@ impl IntoResponse for HttpError {
             | "operation_abandoned"
             | "abandonment_conflict"
             | "generation_conflict"
+            | "phase_generation_conflict"
+            | "phase_retired"
+            | "retirement_conflict"
+            | "stale_retirement"
             | "stale_definition"
             | "stale_eligibility"
             | "stale_input"

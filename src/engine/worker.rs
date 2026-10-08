@@ -5,10 +5,7 @@ mod tests;
 
 use super::*;
 use std::{future::Future, sync::atomic::Ordering};
-use tokio::{
-    runtime::Handle,
-    sync::{OwnedRwLockReadGuard, OwnedSemaphorePermit},
-};
+use tokio::{runtime::Handle, sync::OwnedSemaphorePermit};
 
 /// Process ownership retained after uncertain private-worker termination.
 #[derive(Debug)]
@@ -66,15 +63,15 @@ impl Drop for Custody {
     }
 }
 
-struct Admitted {
+struct Admitted<G> {
     // Poison the host before releasing maintenance admission on abnormal drop.
     custody: Custody,
-    _guard: OwnedRwLockReadGuard<()>,
+    _guard: G,
     _request: OwnedSemaphorePermit,
     _task: OwnedSemaphorePermit,
 }
 
-impl Admitted {
+impl<G> Admitted<G> {
     fn complete(mut self) {
         self.custody.completed = true;
     }
@@ -131,6 +128,47 @@ impl Engine {
         // await before spawning the task that owns the complete service future.
         let guard = self.inner.maintenance.clone().read_owned().await;
         self.check_admission()?;
+        self.spawn_work(runtime, guard, memory, task, operation)
+            .await?
+    }
+
+    pub(super) async fn maintain_work<T, F, Fut>(
+        &self,
+        memory: OwnedSemaphorePermit,
+        operation: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Engine) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
+        self.check_admission()?;
+        let runtime = runtime()?;
+        let task = self.inner.lifecycle.budget.reserve(
+            std::mem::size_of::<Fut>()
+                .saturating_add(std::mem::size_of::<F>())
+                .saturating_add(4096),
+        )?;
+        let guard = self.inner.maintenance.clone().write_owned().await;
+        self.check_admission()?;
+        self.spawn_work(runtime, guard, memory, task, operation)
+            .await?
+    }
+
+    fn spawn_work<T, G, F, Fut>(
+        &self,
+        runtime: Handle,
+        guard: G,
+        memory: OwnedSemaphorePermit,
+        task: OwnedSemaphorePermit,
+        operation: F,
+    ) -> tokio::task::JoinHandle<Result<T>>
+    where
+        T: Send + 'static,
+        G: Send + 'static,
+        F: FnOnce(Engine) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
         let admitted = Admitted {
             custody: Custody::new(self.inner.host.clone()),
             _guard: guard,
@@ -138,13 +176,11 @@ impl Engine {
             _task: task,
         };
         let engine = self.clone();
-        runtime
-            .spawn(async move {
-                let result = operation(engine).await;
-                admitted.complete();
-                result
-            })
-            .await?
+        runtime.spawn(async move {
+            let result = operation(engine).await;
+            admitted.complete();
+            result
+        })
     }
 
     /// Stops new catalog work and waits for admitted operations to finish.

@@ -37,8 +37,15 @@ impl Engine {
         .to_hex()
         .to_string();
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
-        let prepared: Option<PreparedCompletion> = lifecycle.get(&view, &prepared_key).await?;
+        let prepared: Option<PreparedCompletion> =
+            self.active_completion(&view, &prepared_key).await?;
         let prepared = if let Some(prepared) = prepared {
+            check_group_dependencies(
+                &prepared_key,
+                prepared.dependencies.as_ref(),
+                source,
+                &prepared.table,
+            )?;
             storage::check_available(prepared.table.objects.clone(), &lifecycle.budget).await?;
             prepared.table
         } else {
@@ -62,7 +69,7 @@ impl Engine {
                 let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
                 let key = file_key(object, &expressions, operation.eligibility)?;
                 let existing: Option<FileCompletion> =
-                    lifecycle.get(&completion_view, &key).await?;
+                    self.active_completion(&completion_view, &key).await?;
                 let completion = if let Some(existing) = existing {
                     existing
                 } else {
@@ -147,10 +154,16 @@ impl Engine {
             let view = lifecycle.open(request.dataset()).await?;
             self.check_completion(&view, operation, request.operation())
                 .await?;
-            if let Some(existing) = lifecycle
-                .get::<PreparedCompletion>(&view, &prepared_key)
+            if let Some(existing) = self
+                .active_completion::<PreparedCompletion>(&view, &prepared_key)
                 .await?
             {
+                check_group_dependencies(
+                    &prepared_key,
+                    existing.dependencies.as_ref(),
+                    source,
+                    &existing.table,
+                )?;
                 existing.table
             } else {
                 let completed = PreparedCompletion {
@@ -168,10 +181,12 @@ impl Engine {
         };
         stop_after(stop, "processing")?;
         let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
-        let validated: Option<ValidationCompletion> = lifecycle
-            .get(&lifecycle.open(request.dataset()).await?, &validation_key)
+        let validated: Option<ValidationCompletion> = self
+            .active_completion(&lifecycle.open(request.dataset()).await?, &validation_key)
             .await?;
-        if validated.as_ref().map(|completed| &completed.output) != Some(&prepared.metadata) {
+        if let Some(validated) = validated {
+            check_validation(&validation_key, &validated, source, &prepared)?;
+        } else {
             #[cfg(feature = "test-util")]
             work_started("backfill-validation");
             verification::verify_group_data(
@@ -189,8 +204,10 @@ impl Engine {
             self.check_completion(&view, operation, request.operation())
                 .await?;
             let existing: Option<ValidationCompletion> =
-                lifecycle.get(&view, &validation_key).await?;
-            if existing.as_ref().map(|completed| &completed.output) != Some(&prepared.metadata) {
+                self.active_completion(&view, &validation_key).await?;
+            if let Some(existing) = existing {
+                check_validation(&validation_key, &existing, source, &prepared)?;
+            } else {
                 let completed = ValidationCompletion {
                     output: prepared.metadata.clone(),
                     dependencies: Some(GroupDependencies {
@@ -266,7 +283,11 @@ impl Engine {
             .await?;
         let mut changes = Vec::new();
         for (key, completion) in pending.iter() {
-            if lifecycle.get::<FileCompletion>(&view, key).await?.is_none() {
+            if self
+                .active_completion::<FileCompletion>(&view, key)
+                .await?
+                .is_none()
+            {
                 changes.push(record(key, completion)?);
             }
         }
@@ -342,4 +363,44 @@ impl Engine {
             outputs,
         })
     }
+}
+
+fn check_group_dependencies(
+    key: &str,
+    dependencies: Option<&GroupDependencies>,
+    source: &TablePin,
+    output: &TablePin,
+) -> Result<()> {
+    // The prepared key already binds source metadata for legacy completions.
+    // Known dependencies additionally bind the exact source and output snapshots.
+    if let Some(dependencies) = dependencies
+        && (dependencies.source.metadata != source.metadata
+            || dependencies.source.snapshot != source.snapshot
+            || dependencies.source.schema_id != source.schema_id
+            || dependencies.output.metadata != output.metadata
+            || dependencies.output.snapshot != output.snapshot
+            || dependencies.output.schema_id != output.schema_id)
+    {
+        return Err(generation_conflict(key));
+    }
+    Ok(())
+}
+
+fn check_validation(
+    key: &str,
+    completion: &ValidationCompletion,
+    source: &TablePin,
+    output: &TablePin,
+) -> Result<()> {
+    if completion.output != output.metadata {
+        return Err(generation_conflict(key));
+    }
+    check_group_dependencies(key, completion.dependencies.as_ref(), source, output)
+}
+
+fn generation_conflict(key: &str) -> Error {
+    Error::refusal(
+        "phase_generation_conflict",
+        format!("active completion {key} binds a different source or output generation"),
+    )
 }

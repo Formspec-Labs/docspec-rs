@@ -1,5 +1,46 @@
 # Implementation and qualification status
 
+## Exact-generation phase retirement
+
+Library, CLI and HTTP now preview and explicitly retire specific completion
+revisions. Execution waits for admitted work, records the markers and decision
+in one guarded Iceberg commit, and reconciles identical retries after a lost
+response. Later completion generations at the same material key remain reusable.
+Retirement preserves files, attempt protections, issued readbacks and releases;
+it does not establish reclaimable space or enable deletion.
+
+Recovery resolves surviving processing or readback before upstream preparation.
+Captured input references keep their original provenance. A retained column
+backfill can reuse its target and compose with a newly selected sibling. Active
+validation and evidence refuse a different physical processing generation until
+their own completion is explicitly retired. Plans report the work actually still
+needed. These changes add bounded metadata decisions, without new payload scans,
+a separate state store, or an ordinary-read validation step.
+
+The independent review corrected receipt membership, retry-marker integrity and
+legacy admission provenance. Inventory validates each retirement batch once and
+keeps a charged set of exact generations; ordinary reuse looks up its exact marker
+and referenced receipt. Both paths reject unknown retirement fields. Receipt and
+marker history still accumulates within the existing metadata allowance; large
+history performance is unqualified.
+
+The [focused recovery and transport checks](reviews/phase-retirement-focused.log)
+and [adversarial unit checks](reviews/phase-retirement-unit-focused.log) passed.
+The final [repository gate](reviews/phase-retirement-check.log) also covers canceled
+exclusive maintenance, lost native retirement replies, concurrent retry and reopen.
+See the [independent review](reviews/phase-retirement-review.md) for dispositions
+and the [design note](reviews/retention-execution-next.md) for the next boundary.
+The full gate passed with normal stack limits, including formatting, strict
+all-target linting and the complete tests. The [resource snapshot](reviews/phase-retirement-resources.json)
+separates allocated development cache from shared-volume availability; neither is
+a measured peak for a corpus run.
+
+Physical cleanup still requires durable owner protections and removal intents,
+reservation closure, fresh eligibility and exact deletion reconciliation.
+Compaction, fenced restore, the remaining R1–R7 work and the complete fresh
+Comments performance acceptance remain open. No corpus benchmark was rerun for
+this metadata increment.
+
 ## Owned worker lifetime and graceful shutdown
 
 Catalog-using Engine services now execute in private owned Tokio tasks. A caller
@@ -42,9 +83,9 @@ cache allocation from shared-volume availability. Existing corpus inputs, select
 outputs and failed attempts were unchanged. No throughput, full-process memory or
 ordinary-call overhead result is claimed from these small correctness fixtures.
 
-Destructive maintenance, retirement generations, durable unavailability/removal
-intent, exact deletion reconciliation, compaction and fenced restore remain
-unfinished. No deletion or expiration is enabled. The full R1–R7 scope and
+Physical removal, durable unavailability/removal intent, exact deletion
+reconciliation, compaction and fenced restore remain unfinished. Exact-generation
+phase retirement is described above. No deletion or expiration is enabled. The full R1–R7 scope and
 complete Comments performance acceptance remain open.
 
 ## Shared protection inspection

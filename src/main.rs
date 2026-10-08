@@ -6,8 +6,8 @@ use docspec::{
     budget::{Budget, Limits},
     engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin,
-        RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, PhaseRetirementPlan,
+        RefreshSpec, ReleasePin, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     storage,
 };
@@ -62,6 +62,16 @@ enum Command {
     Inspect { dataset: String },
     /// Explain protection for exact objects; this does not authorize removal.
     InspectRetention { objects: PathBuf },
+    /// Capture exact phase generations for logical retirement; change no recovery promise.
+    PlanPhaseRetirement {
+        dataset: String,
+        retirement: String,
+        /// JSON array of completion keys from inspect.
+        keys: PathBuf,
+        reason: String,
+    },
+    /// Retire the phase generations in a saved plan; preserve files and releases.
+    RetirePhases { plan: PathBuf },
     /// Stop an unfinished operation; preserve its completed phases and retained files.
     Abandon {
         dataset: String,
@@ -259,6 +269,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::InspectRetention { objects } => print_json(
                     &engine
                         .inspect_retention(&read_json::<Vec<ObjectRef>>(objects)?)
+                        .await?,
+                )?,
+                Command::PlanPhaseRetirement {
+                    dataset,
+                    retirement,
+                    keys,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_phase_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &read_json::<Vec<String>>(keys)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetirePhases { plan } => print_json(
+                    &engine
+                        .retire_phases(&read_json::<PhaseRetirementPlan>(plan)?)
                         .await?,
                 )?,
                 Command::Abandon {

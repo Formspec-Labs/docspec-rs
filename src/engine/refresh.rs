@@ -125,7 +125,22 @@ impl Engine {
         stop: Option<&str>,
     ) -> Result<RelatedResult> {
         let request = OperationRequest::Refresh(Box::new(spec.clone()));
+        let dependencies = processing.dependencies.clone().map(|mut dependencies| {
+            if spec.mode == RefreshMode::Full
+                && matches!(spec.transform, RefreshTransform::Join(_))
+                && let Some(table) = &processing.table
+            {
+                dependencies.tables.push(table.into());
+            }
+            dependencies
+        });
         let evidence = if let Some(phase) = self.phase(&request, operation, "evidence").await? {
+            if phase.dependencies != dependencies
+                || phase.coverage != processing.coverage
+                || phase.changes != processing.changes
+            {
+                return Err(self.phase_generation_conflict(&request, operation, "evidence")?);
+            }
             phase
         } else {
             #[cfg(feature = "test-util")]
@@ -171,15 +186,7 @@ impl Engine {
                 outputs: prepared.table.objects.clone(),
                 table: Some(prepared.table),
                 metrics: prepared.metrics,
-                dependencies: processing.dependencies.clone().map(|mut dependencies| {
-                    if spec.mode == RefreshMode::Full
-                        && matches!(spec.transform, RefreshTransform::Join(_))
-                        && let Some(table) = &processing.table
-                    {
-                        dependencies.tables.push(table.into());
-                    }
-                    dependencies
-                }),
+                dependencies,
                 ..processing.clone()
             };
             self.complete(&request, operation, &phase).await?

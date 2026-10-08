@@ -91,6 +91,23 @@ An unmatched object is not permission to delete it: concurrent work, catalog
 recovery and worker ownership still require the separate retention execution
 boundary. Inspection changes no availability promise and removes no files.
 
+To retire specific completed recovery phases, save their exact completion keys
+from `inspect` as a JSON array in `phase-keys.json`, then capture and apply a plan:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-phase-retirement comments retired-preparation phase-keys.json "preparation recovery no longer needed" > phase-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-phases phase-retirement.json
+```
+
+HTTP uses `POST /retention/phases/plan` with JSON fields `dataset`, `retirement`,
+`keys` and `reason`; `POST /retention/phases/retire` accepts the returned plan.
+These call `Engine::plan_phase_retirement` and `Engine::retire_phases`. Execution
+retires only the captured completion revisions, and identical retries return the
+same durable decision. A new completion at the same key remains independently
+reusable. Retirement changes recovery promises: it preserves files, attempt
+protections, issued readbacks and selected releases. It does not delete objects
+or establish reclaimable space.
+
 Catalog work keeps running after a caller disconnects or drops its future. The
 owned task retains workspace ownership, shared maintenance admission and its
 request/task memory reservation until the existing operation finishes. Unrelated

@@ -9,6 +9,8 @@ use crate::catalog::View;
 use std::collections::BTreeSet;
 
 mod inventory;
+mod phases;
+pub(super) use phases::completion_key;
 
 impl Engine {
     /// Proves that every unselected admission in a captured interval was abandoned.

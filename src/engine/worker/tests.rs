@@ -168,6 +168,50 @@ async fn unrelated_shared_work_can_enter_before_either_operation_finishes() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn canceled_maintenance_keeps_exclusion_until_its_native_decision_finishes() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let shared = engine.inner.maintenance.clone().read_owned().await;
+    let (started, entered) = oneshot::channel();
+    let (release, parked) = oneshot::channel();
+    let owner = engine.clone();
+    let mut maintenance = Box::pin(async move {
+        let memory = owner.request_memory(&()).unwrap();
+        owner
+            .maintain_work(memory, move |worker| async move {
+                started.send(()).unwrap();
+                parked.await.unwrap();
+                let lifecycle = &worker.inner.lifecycle;
+                let view = lifecycle.open(&Id::new("maintenance").unwrap()).await?;
+                lifecycle
+                    .commit(&view, vec![record("finished", true)?])
+                    .await?;
+                Ok(())
+            })
+            .await
+    });
+    assert!(futures::poll!(&mut maintenance).is_pending());
+    let caller = tokio::spawn(maintenance);
+    let dataset = Id::new("maintenance").unwrap();
+    let mut reader = Box::pin(engine.inspect(&dataset));
+    assert!(
+        futures::poll!(&mut reader).is_pending(),
+        "queued writer fences later readers"
+    );
+    drop(shared);
+    within(entered).await.unwrap();
+    caller.abort();
+    assert!(within(caller).await.unwrap_err().is_cancelled());
+    assert!(
+        futures::poll!(&mut reader).is_pending(),
+        "caller cancellation must not release exclusive custody"
+    );
+    release.send(()).unwrap();
+    assert_eq!(within(reader).await.unwrap()["finished"], true);
+    engine.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn canceled_callers_cannot_accumulate_unbounded_owned_requests() {
     let root = tempfile::tempdir().unwrap();
     let small = Limits {

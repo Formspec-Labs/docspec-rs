@@ -493,6 +493,36 @@ pub struct RetentionBoundary {
     pub revision: i64,
 }
 
+/// One explicitly selected generation of a reusable completion.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseGeneration {
+    pub key: String,
+    pub revision: i64,
+}
+
+/// Explicit retirement of recovery promises, without deleting physical objects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseRetirementPlan {
+    pub dataset: Id,
+    pub retirement: Id,
+    pub reason: String,
+    pub table_uuid: String,
+    pub metadata: String,
+    pub snapshot_id: i64,
+    pub revision: i64,
+    pub phases: Vec<PhaseGeneration>,
+}
+
+/// A durable retirement decision and its native lifecycle revision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseRetirement {
+    pub plan: PhaseRetirementPlan,
+    pub revision: i64,
+}
+
 /// One retained record sufficient to protect a candidate object.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetentionBlocker {
