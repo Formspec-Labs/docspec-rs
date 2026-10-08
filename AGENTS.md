@@ -135,6 +135,17 @@ completion. Later direct user instructions take precedence over older plans.
   as full runs. Hold update size fixed while growing population, file count,
   retained history and evidence depth. Record time, requests, bytes moved,
   retries, peak memory, scratch and retained storage as relevant to the decision.
+- Treat ballooning disk use as a performance problem. Measure peak additional
+  disk space during execution and retained space afterward, including input
+  copies, intermediate files, spills, outputs, metadata, history and failed
+  attempts. Report storage amplification against a stated input or selected-output
+  size; distinguish logical file sizes, allocated blocks and whole-volume free
+  space. Attribute build caches and unrelated workstation growth separately.
+  Include space needed while old and new versions coexist and while maintenance
+  runs. Sample live free space and stop bounded experiments before exhausting it;
+  a fast run that cannot fit the storage budget does not pass. Reuse immutable
+  files, avoid unnecessary materialization, and retire disposable work through
+  the appropriate lifecycle rules without deleting retained evidence.
 - Optimize measured bottlenecks: repeated scans/transfers, unnecessary rewrites,
   metadata operations, then execution overhead. Prefer narrow reads and maintained
   execution primitives. Avoid optimizing a microbenchmark at the expense of the

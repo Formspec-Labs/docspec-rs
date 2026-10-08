@@ -74,3 +74,34 @@ groups** instead of the originally proposed 65,536, matching the reference batch
 size and reducing that known source of oversized backing buffers. The selection,
 columns, values and engine limits remain unchanged. This still consolidates the
 capture's roughly 1,000-row groups; record the actual footer size after preparation.
+
+## Disk-growth amendment before engine timing
+
+The user explicitly requires accounting for ballooning disk use. Sample workspace
+logical bytes and allocated blocks by category (admitted objects, native tables,
+catalog, scratch and other files), and volume free space during each arm. Record
+the before/after inventories, sampled peaks, final retained bytes and amplification
+relative to the frozen input. Count shared paths once; allocated blocks on APFS
+are a filesystem report, not proof of unique physical extents. Whole-volume free
+space also reflects other workstation activity and is not attributed to DocSpec.
+
+Poll process-tree RSS and free space once per second; sample workspace categories
+every five seconds and at arm boundaries. Record the sampling intervals and cost;
+short-lived peaks can escape observation. Stop this pilot if free space falls
+below 2 GiB, sampled workspace scratch exceeds the declared 8 GiB ceiling, or
+workspace growth exceeds three input sizes plus that scratch allowance. Keep the
+partial workspace and failure evidence. These are experiment stop bounds, not a
+claim that the production engine enforces total workspace storage.
+
+Account for input preparation, build caches and existing retained history
+separately from timed workspace growth. Do not delete a failed run to improve the
+reported storage result. Unchanged/retry arms must preserve native file identities;
+report metadata growth even when payloads are shared. Retirement and maintenance
+are unfinished and cannot be credited with reclaiming retained space in this pilot.
+
+Harness review clarified a measurement limit before collection: unchanged file
+identities detect copies and rewrites, not cached payload rereads. The pilot will
+report whether its bounded measurements and readback checks pass; payload-read
+avoidance remains unmeasured here. Existing process tests and code-path review
+cover verification reuse. Neither those tests nor stable file identities establish
+the original complete performance hypothesis or the full acceptance target.
