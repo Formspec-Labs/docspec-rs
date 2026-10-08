@@ -1,5 +1,17 @@
 # Implementation and qualification status
 
+## Comments performance and disk checkpoint
+
+The first release-build pilot over the frozen 10-million-Comments input failed
+during processing: a decoded batch exceeded its 64 MiB allowance. It stopped
+after 7.95 seconds and retained 2.80 GB, mostly the admitted input copy. Readback
+and reuse arms did not run. The full performance target remains unqualified.
+The [pilot report](../experiments/comments-input/REPORT.md) records partial-output
+storage, sampled disk peaks, memory measurement limits, retained failures and
+the next batch-sizing and output-encoding questions. The independently reviewed
+harness now includes live free-space stops and storage amplification accounting;
+these experiment controls do not establish a production disk quota.
+
 ## Current verification policy
 
 User steering on 2026-10-08 supersedes earlier notes below that describe automatic

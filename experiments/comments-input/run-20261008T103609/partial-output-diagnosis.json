@@ -1,0 +1,47 @@
+[
+  {
+    "file": "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00001.parquet",
+    "footer_readable": false,
+    "error": "Parquet magic bytes not found in footer. Either the file is corrupted or this is not a parquet file."
+  },
+  {
+    "file": "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00000.parquet",
+    "rows": 65536,
+    "codecs": [
+      "UNCOMPRESSED"
+    ],
+    "footer_readable": true
+  },
+  {
+    "file": "warehouse/d_comments_c4796b76a5de/lifecycle/data/60a1355b-d9af-4ded-9c90-b881c74e65ca-00000.parquet",
+    "rows": 1,
+    "codecs": [
+      "UNCOMPRESSED"
+    ],
+    "footer_readable": true
+  },
+  {
+    "file": "warehouse/d_comments_c4796b76a5de/lifecycle/data/e19a390d-964f-4602-a50a-87d5951f1f2a-00000.parquet",
+    "rows": 1,
+    "codecs": [
+      "UNCOMPRESSED"
+    ],
+    "footer_readable": true
+  },
+  {
+    "file": "warehouse/d_comments_c4796b76a5de/lifecycle/data/d23d18de-1e8c-4757-852a-8742abe84e18-00000.parquet",
+    "rows": 4,
+    "codecs": [
+      "UNCOMPRESSED"
+    ],
+    "footer_readable": true
+  },
+  {
+    "file": "warehouse/d_comments_c4796b76a5de/lifecycle/data/f1a47c52-34d4-495c-8829-9a29f128b5d8-00000.parquet",
+    "rows": 1,
+    "codecs": [
+      "UNCOMPRESSED"
+    ],
+    "footer_readable": true
+  }
+]

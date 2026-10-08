@@ -1,0 +1,2 @@
+2026-10-08T14:36:16.784226Z  INFO docspec::engine: phase durably complete phase="admission" rows=0 operation=fresh
+Error: oversized_batch: decoded batch uses 97641135 bytes, exceeding the 67108864 byte allowance; reduce batch rows or split oversized values

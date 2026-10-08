@@ -1,0 +1,8 @@
+{"seconds": 0.001759999999194406, "tree_rss_bytes": 1310720, "volume_free_bytes": 23402160128}
+{"seconds": 1.0227434160042321, "tree_rss_bytes": 1343488, "volume_free_bytes": 23400787968, "workspace": {}}
+{"seconds": 2.0427822080091573, "tree_rss_bytes": 30752768, "volume_free_bytes": 23361191936}
+{"seconds": 3.0676519160042517, "tree_rss_bytes": 30752768, "volume_free_bytes": 22773989376}
+{"seconds": 4.087413665998611, "tree_rss_bytes": 30752768, "volume_free_bytes": 22186704896}
+{"seconds": 5.104347166008665, "tree_rss_bytes": 30752768, "volume_free_bytes": 21719576576}
+{"seconds": 6.142865083005745, "tree_rss_bytes": 30752768, "volume_free_bytes": 21217517568, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 12, "bytes": 1677763348, "allocated_bytes": 1687216128}, "admitted_or_prepared_data": {"files": 1, "bytes": 1677721600, "allocated_bytes": 1687158784}, "lifecycle": {"files": 9, "bytes": 21268, "allocated_bytes": 36864}}}
+{"seconds": 7.168798666010844, "tree_rss_bytes": 30752768, "volume_free_bytes": 20731179008}

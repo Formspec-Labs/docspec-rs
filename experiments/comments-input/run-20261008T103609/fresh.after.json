@@ -1,0 +1,117 @@
+{
+  "catalog.sqlite": {
+    "bytes": 20480,
+    "allocated_bytes": 20480,
+    "mtime_ns": 1791470176849872245
+  },
+  "host.lock": {
+    "bytes": 0,
+    "allocated_bytes": 0,
+    "mtime_ns": 1791470171377061046
+  },
+  "objects/comments/cc29f7036d774e619da3b625d8aee07e/input.parquet": {
+    "bytes": 2670490619,
+    "allocated_bytes": 2677014528,
+    "mtime_ns": 1791470176670644529
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00001.parquet": {
+    "bytes": 64329017,
+    "allocated_bytes": 64331776,
+    "mtime_ns": 1791470177178862432
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00000.parquet": {
+    "bytes": 67884310,
+    "allocated_bytes": 67887104,
+    "mtime_ns": 1791470177057710914
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/metadata/00000-77159a8d-5edb-4681-a982-228aee3b3163.metadata.json": {
+    "bytes": 2211,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176836907164
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/60a1355b-d9af-4ded-9c90-b881c74e65ca-00000.parquet": {
+    "bytes": 1924,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171446710324
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/e19a390d-964f-4602-a50a-87d5951f1f2a-00000.parquet": {
+    "bytes": 2417,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176703950189
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/d23d18de-1e8c-4757-852a-8742abe84e18-00000.parquet": {
+    "bytes": 2590,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171391991918
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/f1a47c52-34d4-495c-8829-9a29f128b5d8-00000.parquet": {
+    "bytes": 1925,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176785168174
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-753c-758c-81ce-2677b46710f9-m0.avro": {
+    "bytes": 3777,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171454144781
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-8832935691944557881-0-01a11bf1-8a16-756b-b515-3e408d6eec35.avro": {
+    "bytes": 2394,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176796849963
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-8a16-756b-b515-3e408d6eec35-m0.avro": {
+    "bytes": 3778,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176791690256
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-2945663449007193784-0-01a11bf1-750f-731b-b3c0-4702ae9540c5.avro": {
+    "bytes": 1702,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171430842535
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00003-b046bda3-26c2-4967-a28f-3b4af5d01e18.metadata.json": {
+    "bytes": 3833,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176783672674
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00002-01f75250-7d0e-44b1-b63c-fee3c0639a7f.metadata.json": {
+    "bytes": 2871,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171464783570
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00004-f00e0b73-4353-4beb-9e92-a9a3d409fe20.metadata.json": {
+    "bytes": 4795,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791470176802503671
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-4986827508730521883-0-01a11bf1-89dd-76be-b100-b92484f28c96.avro": {
+    "bytes": 2168,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176777453550
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-4534258461862170327-0-01a11bf1-753c-758c-81ce-2677b46710f9.avro": {
+    "bytes": 1942,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171459025030
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00001-d6f4b011-8457-4a92-bfcd-aea0579c01b8.metadata.json": {
+    "bytes": 1909,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171444869366
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-89dd-76be-b100-b92484f28c96-m0.avro": {
+    "bytes": 3688,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176734520434
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-750f-731b-b3c0-4702ae9540c5-m0.avro": {
+    "bytes": 3713,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171409015206
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00000-9bc88a38-4c05-4ac4-bdd0-dbec8c51a53d.metadata.json": {
+    "bytes": 840,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171387430627
+  }
+}

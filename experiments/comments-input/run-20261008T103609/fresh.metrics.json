@@ -1,0 +1,46 @@
+{
+  "sampled_peak_tree_rss_bytes": 30752768,
+  "min_volume_free_bytes": 20731179008,
+  "sampled_peak_workspace_bytes": 2802772903,
+  "sampled_peak_allocated_bytes": 2809331712,
+  "sampled_peak_scratch_bytes": 0,
+  "inventory_sampling_seconds": 0.004795124012161978,
+  "before": {},
+  "stop_reason": null,
+  "elapsed_seconds": 7.948089166005957,
+  "exit_code": 1,
+  "after": {
+    "catalog_and_other": {
+      "files": 2,
+      "bytes": 20480,
+      "allocated_bytes": 20480
+    },
+    "total": {
+      "files": 23,
+      "bytes": 2802772903,
+      "allocated_bytes": 2809331712
+    },
+    "admitted_or_prepared_data": {
+      "files": 1,
+      "bytes": 2670490619,
+      "allocated_bytes": 2677014528
+    },
+    "native_data": {
+      "files": 2,
+      "bytes": 132213327,
+      "allocated_bytes": 132218880
+    },
+    "object_metadata": {
+      "files": 1,
+      "bytes": 2211,
+      "allocated_bytes": 4096
+    },
+    "lifecycle": {
+      "files": 17,
+      "bytes": 46266,
+      "allocated_bytes": 73728
+    }
+  },
+  "volume_free_after_bytes": 20598681600,
+  "time_max_rss_bytes": 1483898880
+}

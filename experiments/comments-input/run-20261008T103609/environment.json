@@ -1,0 +1,34 @@
+{
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "python": "3.12.9 (main, Mar 17 2025, 21:36:21) [Clang 20.1.0 ]",
+  "libraries": {
+    "psutil": "7.2.2",
+    "pyarrow": "25.0.1",
+    "pyiceberg": "0.12.0"
+  },
+  "source_commit": "0da368bf4a9d36e2162a4da2801f0d56d85c5195",
+  "worktree_status": "?? experiments/comments-input/pilot-20261008.log\n?? experiments/comments-input/run-20261008T103609/\n",
+  "cpu_count": 14,
+  "load_average": [
+    7.14306640625,
+    7.85791015625,
+    9.98388671875
+  ],
+  "source_mtime_ns": 1791469143865380101,
+  "physical_memory_bytes": 51539607552,
+  "volume_free_bytes": 23402409984,
+  "workspace_stop_bytes": 16601406449,
+  "cache": "not cleared; input may be warm; ordinary workstation background load",
+  "sampling": {
+    "rss_free_space_seconds": 1,
+    "workspace_seconds": 5,
+    "peak_scope": "sampled lower bounds; short-lived peaks may be missed"
+  },
+  "digests": {
+    "binary": "fe9a3edadaf129eca3ae10de86c0718a6f77be4806f6ca594a5089fb83fc26c4",
+    "lock": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+    "harness": "23ae53a0c855aa55541bbd1090ec257ca6999b3462b2936695b5041d6fdaba23",
+    "protocol": "0709403e5072b9ac94393d3c94afc39c1522ec4fa19763a47eb2f9ebea56ec0d",
+    "preparation": "b49cb539d96e1c46061611725bbcf587ded31eaee45c07e1452ec0764ae53157"
+  }
+}

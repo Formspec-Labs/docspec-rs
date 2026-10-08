@@ -1,0 +1,40 @@
+{
+  "bounded_checks_passed": false,
+  "implemented_slice_only": true,
+  "payload_read_avoidance_measured": false,
+  "full_performance_acceptance_passed": false,
+  "failure": "RuntimeError('fresh failed: see retained logs and metrics')",
+  "final_workspace": {
+    "catalog_and_other": {
+      "files": 2,
+      "bytes": 20480,
+      "allocated_bytes": 20480
+    },
+    "total": {
+      "files": 23,
+      "bytes": 2802772903,
+      "allocated_bytes": 2809331712
+    },
+    "admitted_or_prepared_data": {
+      "files": 1,
+      "bytes": 2670490619,
+      "allocated_bytes": 2677014528
+    },
+    "native_data": {
+      "files": 2,
+      "bytes": 132213327,
+      "allocated_bytes": 132218880
+    },
+    "object_metadata": {
+      "files": 1,
+      "bytes": 2211,
+      "allocated_bytes": 4096
+    },
+    "lifecycle": {
+      "files": 17,
+      "bytes": 46266,
+      "allocated_bytes": 73728
+    }
+  },
+  "retained_amplification_vs_input": 1.0495348244471778
+}

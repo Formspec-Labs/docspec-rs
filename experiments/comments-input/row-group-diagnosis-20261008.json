@@ -1,0 +1,109 @@
+{
+  "scope": "Footer-only diagnosis after actual batch-capacity refusal; no values scanned",
+  "row_groups": 2442,
+  "total_uncompressed_bytes": 15369920390,
+  "largest_groups": [
+    {
+      "index": 1722,
+      "rows": 4096,
+      "uncompressed_bytes": 325203265
+    },
+    {
+      "index": 1717,
+      "rows": 4096,
+      "uncompressed_bytes": 275209351
+    },
+    {
+      "index": 1715,
+      "rows": 4096,
+      "uncompressed_bytes": 209765509
+    },
+    {
+      "index": 1716,
+      "rows": 4096,
+      "uncompressed_bytes": 202818690
+    },
+    {
+      "index": 1714,
+      "rows": 4096,
+      "uncompressed_bytes": 198156401
+    },
+    {
+      "index": 1726,
+      "rows": 4096,
+      "uncompressed_bytes": 196439330
+    },
+    {
+      "index": 1751,
+      "rows": 4096,
+      "uncompressed_bytes": 193042496
+    },
+    {
+      "index": 1713,
+      "rows": 4096,
+      "uncompressed_bytes": 162964674
+    },
+    {
+      "index": 1711,
+      "rows": 4096,
+      "uncompressed_bytes": 156432332
+    },
+    {
+      "index": 1727,
+      "rows": 4096,
+      "uncompressed_bytes": 155060233
+    }
+  ],
+  "first_groups": [
+    {
+      "index": 0,
+      "rows": 4096,
+      "uncompressed_bytes": 5697100
+    },
+    {
+      "index": 1,
+      "rows": 4096,
+      "uncompressed_bytes": 1364588
+    },
+    {
+      "index": 2,
+      "rows": 4096,
+      "uncompressed_bytes": 1975393
+    },
+    {
+      "index": 3,
+      "rows": 4096,
+      "uncompressed_bytes": 3168811
+    },
+    {
+      "index": 4,
+      "rows": 4096,
+      "uncompressed_bytes": 2062231
+    },
+    {
+      "index": 5,
+      "rows": 4096,
+      "uncompressed_bytes": 1290916
+    },
+    {
+      "index": 6,
+      "rows": 4096,
+      "uncompressed_bytes": 3198098
+    },
+    {
+      "index": 7,
+      "rows": 4096,
+      "uncompressed_bytes": 2730050
+    },
+    {
+      "index": 8,
+      "rows": 4096,
+      "uncompressed_bytes": 3645593
+    },
+    {
+      "index": 9,
+      "rows": 4096,
+      "uncompressed_bytes": 3989089
+    }
+  ]
+}
