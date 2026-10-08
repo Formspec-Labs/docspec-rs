@@ -1,0 +1,3 @@
+[build]
+# Bound compiler pressure on the shared reference workstation.
+jobs = 6

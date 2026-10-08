@@ -1,0 +1,50 @@
+[package]
+name = "docspec"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+description = "Recoverable, evidence-bound dataset operations over Apache Iceberg"
+
+[features]
+test-util = []
+
+[dependencies]
+anyhow = "1"
+arrow = { version = "58", features = ["ipc", "json"] }
+async-trait = "0.1"
+axum = "0.8"
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+datafusion = { version = "=53.1.0", default-features = false, features = ["parquet", "unicode_expressions"] }
+fs2 = "0.4"
+futures = "0.3"
+iceberg = "=0.10.1"
+iceberg-catalog-sql = "=0.10.1"
+iceberg-datafusion = "=0.10.1"
+mimalloc = "0.1"
+parquet = { version = "58", features = ["arrow"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.release]
+debug = 1
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
