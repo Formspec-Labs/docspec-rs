@@ -1,0 +1,8 @@
+{
+  "dataset": "comments",
+  "operation": "unchanged-zstd",
+  "input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-10m-20261008/comments.parquet",
+  "expected_digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+  "sql": "SELECT * FROM input",
+  "definition": "comments-probe-v1"
+}

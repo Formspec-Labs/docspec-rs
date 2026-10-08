@@ -1,0 +1,367 @@
+{
+  "catalog.sqlite": {
+    "bytes": 20480,
+    "allocated_bytes": 20480,
+    "mtime_ns": 1791473520594101451
+  },
+  "host.lock": {
+    "bytes": 0,
+    "allocated_bytes": 0,
+    "mtime_ns": 1791470171377061046
+  },
+  "objects/comments/1834a0d4fedf48ec8c63844d775b5346/release.json": {
+    "bytes": 4591,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473520554675916
+  },
+  "objects/comments/cc29f7036d774e619da3b625d8aee07e/input.parquet": {
+    "bytes": 2670490619,
+    "allocated_bytes": 2670493696,
+    "mtime_ns": 1791470176670644529
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00001.parquet": {
+    "bytes": 64329017,
+    "allocated_bytes": 64331776,
+    "mtime_ns": 1791470177178862432
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/data/fbd3e20c-3f3c-4cf6-afd6-44c26f693611-00000.parquet": {
+    "bytes": 67884310,
+    "allocated_bytes": 67887104,
+    "mtime_ns": 1791470177057710914
+  },
+  "objects/comments/b3f8a5375fa64a5da4a549be23b0370e/metadata/00000-77159a8d-5edb-4681-a982-228aee3b3163.metadata.json": {
+    "bytes": 2211,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176836907164
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00001.parquet": {
+    "bytes": 810848643,
+    "allocated_bytes": 824356864,
+    "mtime_ns": 1791473500755406817
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00000.parquet": {
+    "bytes": 808883348,
+    "allocated_bytes": 822743040,
+    "mtime_ns": 1791473487810907273
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00002.parquet": {
+    "bytes": 810880752,
+    "allocated_bytes": 816050176,
+    "mtime_ns": 1791473512641365371
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00003.parquet": {
+    "bytes": 219251496,
+    "allocated_bytes": 235495424,
+    "mtime_ns": 1791473516606977399
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/00000-267619b0-1945-4c25-9863-b0474e768359.metadata.json": {
+    "bytes": 2211,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473479206881266
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/00001-3f440a12-38b9-481d-8c65-dbf252067579.metadata.json": {
+    "bytes": 3318,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473516643987303
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/snap-5805067651843608744-0-01a11c24-804b-76bc-bf95-e86c858a08e7.avro": {
+    "bytes": 1713,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473516631434265
+  },
+  "objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/01a11c24-804b-76bc-bf95-e86c858a08e7-m0.avro": {
+    "bytes": 21300,
+    "allocated_bytes": 24576,
+    "mtime_ns": 1791473516620771399
+  },
+  "objects/comments/021c48bea5f5400c946ffbce2f136c32/release.json": {
+    "bytes": 4573,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473518804289791
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/d12f0227-f061-424e-947a-2181cdce6fb7-00000.parquet": {
+    "bytes": 3055,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520577689361
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/ed8c7bd6-6ae3-46c4-8c27-3a6b188915f4-00000.parquet": {
+    "bytes": 2750,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518658762476
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/b770998b-dc79-48a8-90ea-4c458c8beaf6-00000.parquet": {
+    "bytes": 2748,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518765869175
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/bfdc7dc3-eeee-4d8c-b146-91a1bec9b5a3-00000.parquet": {
+    "bytes": 1894,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473479143108364
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/f30bce04-32b8-4342-95a6-12945b49a69f-00000.parquet": {
+    "bytes": 2841,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520559934099
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/2a688370-60d7-443c-8368-01abbf93d6f9-00000.parquet": {
+    "bytes": 1899,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520537148280
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/7aa58583-bff3-4cdb-93e4-159daabc77ef-00000.parquet": {
+    "bytes": 3183,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520514264669
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/f8581ea2-7525-49f9-93dc-aafed88a7f1e-00000.parquet": {
+    "bytes": 2791,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518810320685
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/60a1355b-d9af-4ded-9c90-b881c74e65ca-00000.parquet": {
+    "bytes": 1924,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171446710324
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/28579ea1-69c6-4956-aff4-1860ec9cafb7-00000.parquet": {
+    "bytes": 2928,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518829132450
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/e19a390d-964f-4602-a50a-87d5951f1f2a-00000.parquet": {
+    "bytes": 2417,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176703950189
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/d23d18de-1e8c-4757-852a-8742abe84e18-00000.parquet": {
+    "bytes": 2590,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171391991918
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/b9de3c63-d240-4bed-8285-5cec4c3744f0-00000.parquet": {
+    "bytes": 1892,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518785562193
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/data/f1a47c52-34d4-495c-8829-9a29f128b5d8-00000.parquet": {
+    "bytes": 1925,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176785168174
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-6180784593246221544-0-01a11c24-8fc6-714f-b977-4e6c27f637b8.avro": {
+    "bytes": 4650,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473520588397435
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-753c-758c-81ce-2677b46710f9-m0.avro": {
+    "bytes": 3777,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171454144781
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-2929560374800910673-0-01a11c24-8f89-75cc-bf73-a68229f5bdf8.avro": {
+    "bytes": 3973,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520528604463
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-8832935691944557881-0-01a11bf1-8a16-756b-b515-3e408d6eec35.avro": {
+    "bytes": 2394,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176796849963
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-8a16-756b-b515-3e408d6eec35-m0.avro": {
+    "bytes": 3778,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176791690256
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-88f2-7479-863a-6b9697cc41dd-m0.avro": {
+    "bytes": 3717,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518836432514
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-2945663449007193784-0-01a11bf1-750f-731b-b3c0-4702ae9540c5.avro": {
+    "bytes": 1702,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171430842535
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00014-114959c0-f16c-40d7-80a6-ef5b91ef877d.metadata.json": {
+    "bytes": 14436,
+    "allocated_bytes": 16384,
+    "mtime_ns": 1791473520593448949
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00003-b046bda3-26c2-4967-a28f-3b4af5d01e18.metadata.json": {
+    "bytes": 3833,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176783672674
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00002-01f75250-7d0e-44b1-b63c-fee3c0639a7f.metadata.json": {
+    "bytes": 2871,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171464783570
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-8fb4-759a-9a5f-3e6b60c4f6a2-m0.avro": {
+    "bytes": 3737,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520566046118
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-88b3-7265-9ec3-1def37417b50-m0.avro": {
+    "bytes": 3687,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518773108155
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-8849-7761-aa87-9db3a284be31-m0.avro": {
+    "bytes": 3688,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518667165294
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00006-dc6981e9-5f7d-4f23-b3a2-9adfcce989be.metadata.json": {
+    "bytes": 6721,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473518677795409
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-275182415897579862-0-01a11c24-88c6-714e-a02d-ee402f346124.avro": {
+    "bytes": 3293,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518796166850
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00010-80a41d1a-476c-4d1c-adb3-07770ea16570.metadata.json": {
+    "bytes": 10572,
+    "allocated_bytes": 12288,
+    "mtime_ns": 1791473518862275258
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00004-f00e0b73-4353-4beb-9e92-a9a3d409fe20.metadata.json": {
+    "bytes": 4795,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791470176802503671
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-88df-70fa-9a7c-cf1095e22c8a-m0.avro": {
+    "bytes": 3720,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518817099414
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-807904204691307405-0-01a11c24-88b3-7265-9ec3-1def37417b50.avro": {
+    "bytes": 3069,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518778057754
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-8f89-75cc-bf73-a68229f5bdf8-m0.avro": {
+    "bytes": 3722,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520523527364
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-5724142819966470906-0-01a11c24-8849-7761-aa87-9db3a284be31.avro": {
+    "bytes": 2845,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518672659435
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00009-35306bb4-a863-4e27-ab62-85fee066fad9.metadata.json": {
+    "bytes": 9605,
+    "allocated_bytes": 12288,
+    "mtime_ns": 1791473518827585737
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-1816832539136657822-0-01a11c24-8fb4-759a-9a5f-3e6b60c4f6a2.avro": {
+    "bytes": 4424,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473520570128547
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-88c6-714e-a02d-ee402f346124-m0.avro": {
+    "bytes": 3777,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518791560836
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-4986827508730521883-0-01a11bf1-89dd-76be-b100-b92484f28c96.avro": {
+    "bytes": 2168,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176777453550
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-9061233886922606838-0-01a11c24-8f9e-7048-b29f-ab98d98df6ce.avro": {
+    "bytes": 4199,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473520548962691
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-6113267457984696292-0-01a11c24-88f2-7479-863a-6b9697cc41dd.avro": {
+    "bytes": 3748,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518841115986
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c23-edf3-7615-aa42-c02988a6ba18-m0.avro": {
+    "bytes": 3777,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473479156411988
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00005-3c02b366-c72f-4dc8-a25e-20b8958962ee.metadata.json": {
+    "bytes": 5758,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473479168040190
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-9060157104814228365-0-01a11c24-88df-70fa-9a7c-cf1095e22c8a.avro": {
+    "bytes": 3520,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473518822581847
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-4534258461862170327-0-01a11bf1-753c-758c-81ce-2677b46710f9.avro": {
+    "bytes": 1942,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171459025030
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00007-efce10d4-74f0-4ade-bbd2-52342ca4d26b.metadata.json": {
+    "bytes": 7680,
+    "allocated_bytes": 8192,
+    "mtime_ns": 1791473518783665854
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00001-d6f4b011-8457-4a92-bfcd-aea0579c01b8.metadata.json": {
+    "bytes": 1909,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171444869366
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-89dd-76be-b100-b92484f28c96-m0.avro": {
+    "bytes": 3688,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470176734520434
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00011-8347765f-e8ce-4ba0-ba6e-b1bb56b99f74.metadata.json": {
+    "bytes": 11538,
+    "allocated_bytes": 12288,
+    "mtime_ns": 1791473520533769437
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00012-1ee0537c-9ce1-402a-8fc4-499927a805c5.metadata.json": {
+    "bytes": 12504,
+    "allocated_bytes": 16384,
+    "mtime_ns": 1791473520553479538
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00008-97fe6537-45af-4672-a32c-b3b4427d6ede.metadata.json": {
+    "bytes": 8640,
+    "allocated_bytes": 12288,
+    "mtime_ns": 1791473518801962243
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11bf1-750f-731b-b3c0-4702ae9540c5-m0.avro": {
+    "bytes": 3713,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171409015206
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00013-b9d38d42-915d-4911-b3f9-430170e1b287.metadata.json": {
+    "bytes": 13470,
+    "allocated_bytes": 16384,
+    "mtime_ns": 1791473520576094398
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-8fc6-714f-b977-4e6c27f637b8-m0.avro": {
+    "bytes": 3726,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520584329506
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/01a11c24-8f9e-7048-b29f-ab98d98df6ce-m0.avro": {
+    "bytes": 3778,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473520544448219
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/snap-3813187999992332899-0-01a11c23-edf3-7615-aa42-c02988a6ba18.avro": {
+    "bytes": 2619,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791473479161469670
+  },
+  "warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00000-9bc88a38-4c05-4ac4-bdd0-dbec8c51a53d.metadata.json": {
+    "bytes": 840,
+    "allocated_bytes": 4096,
+    "mtime_ns": 1791470171387430627
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "python": "3.12.9 (main, Mar 17 2025, 21:36:21) [Clang 20.1.0 ]",
+  "load_average": [
+    5.591796875,
+    5.779296875,
+    7.0595703125
+  ],
+  "source_commit": "7052a2b6182eddcab3a912bb1b01166750fa44a4",
+  "status": "?? experiments/comments-input/resume-20261008.log\n?? experiments/comments-input/resume-20261008T113117/\n",
+  "input_identity": {
+    "bytes": 2670490619,
+    "digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875"
+  },
+  "workspace": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace",
+  "cache": "not cleared; retained input has been scanned by diagnostics; may be warm",
+  "digests": {
+    "binary": "0f155737dfb0d61c87d13fc5733376d5914354366f6fae498703c0fc8254df7c",
+    "driver": "ce96a0a03045e5af43bd3f617339129c31dc21e7ab84d7f7365c2adf22b58ac3",
+    "monitor": "c888995572964b3dc2b59cdf841b5e142f984e2974b30de034ab83885995ddd2",
+    "protocol": "b59f8c0eaab4f43d79ef8bc61a0bc0e48be4db3e2d33fa212e9d7270ccf08e19",
+    "lock": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+    "original_metrics": "9872d87323b24d61e6dc603ec3bc108ec25dce6758c88dfab578aeaffe4b66f2"
+  }
+}

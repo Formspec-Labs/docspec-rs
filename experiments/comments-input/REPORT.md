@@ -1,5 +1,12 @@
 # Retained Comments pilot
 
+The revised, resumed source-processing slice **passed its bounded checks**:
+41.35 seconds through processing, catalog selection and independent readback,
+or 49.29 seconds including the original failed attempt. The final engine workspace
+retains 5.45 GB, including the original input copy and failed output: **2.04 times
+the frozen input size**. This is a resumed `SELECT *` source build, not the full
+lifecycle acceptance workload. See [the resumed result](#resumed-source-processing-result).
+
 The first 10-million-Comments pilot **failed during processing**. It does not
 qualify the performance target. The engine stopped after 7.95 seconds when a
 decoded batch used 97,641,135 bytes against its 67,108,864-byte allowance. Admission
@@ -119,3 +126,81 @@ checks the changed profile through processing, selection, independent readback,
 unchanged work and exact retry. The independent
 [diagnostic review](../../docs/reviews/comments-processing-diagnostics.md) and
 [writer review](../../docs/reviews/zstd-writer-review.md) retain findings and scope.
+
+## Resumed source-processing result
+
+The [frozen resume protocol](resume-protocol.md) ran from source commit `7052a2b`
+with the existing 4,096-row reader, a 768 MiB batch allowance, the maintained
+default Zstandard writer and the unchanged 24 GiB process ceiling. The
+[raw results](resume-20261008T113117/results.json),
+[command log](resume-20261008.log) and per-command inventories retain the evidence.
+The original admitted object and failed partial output remain in place. The
+operating-system cache was not cleared after diagnostics; input may have been warm.
+
+| Step | Seconds | Result |
+| --- | ---: | --- |
+| Resume processing through local release | 39.823 | Reused exact completed admission; selected the 10M-row source result |
+| Resolve catalog selection | 0.024 | Returned the same release |
+| Independent Iceberg/PyArrow readback | 1.500 | Exact live-file membership, types, sizes, footer counts and bounded decoded sample passed |
+| Resume plus selection and readback | **41.347** | Implemented source slice only |
+| Including the original failed attempt | **49.295** | Includes its 7.948 seconds; excludes preparation, diagnostics, build and preflight inspection |
+| Unchanged operation | 0.158 | Reused exact admitted input and native pins; added 99,726 metadata bytes |
+| Exact retry of unchanged operation | 0.025 | Returned the same release and left the complete file inventory unchanged |
+
+Preflight inspection took another 1.848 seconds. All monitored commands, including
+preflight, reuse checks and the original failed attempt, total 51.326 seconds.
+
+The independent reader found four selected data files with 10 million rows. It
+decoded 24 sample rows (129,699 bytes) across three files. This establishes the
+reported shape/count/reference/sample checks, not equality of every unsampled
+value. No complete reconstruction was added to routine readback. The bounded codec
+qualification separately compared exact values and schema.
+
+### Disk and memory cost
+
+All sizes below are logical bytes unless explicitly marked as allocated blocks.
+
+| Retained item | Bytes | Accounting |
+| --- | ---: | --- |
+| Admitted immutable input | 2,670,490,619 | Reused from the failed attempt; no new copy |
+| Selected native output | 2,649,864,239 | New output, about 0.992 times the encoded input |
+| Prior failed native output | 132,213,327 | Still retained; no cleanup credit |
+| Catalog, lifecycle and other object metadata | 307,237 | Includes the unchanged operation's records |
+| **Final engine workspace** | **5,452,875,422** | **2.042 times the input; 2.650 GB additional retained space during this resumed experiment** |
+| Sampled peak workspace allocated blocks | 5,501,767,680 | Filesystem allocation, not unique APFS extents |
+| Frozen input outside the engine workspace | 2,670,490,619 | Preparation output still coexists with the admitted copy |
+| Retained codec diagnostic outputs | 98,562,344 | Experiment cost outside the engine workspace |
+
+The listed engine workspace, external frozen input and codec outputs together
+retain **8,221,928,385 bytes**. That subtotal excludes small diagnostic logs,
+build artifacts and the shared original 6,680,266,997-byte corpus capture. Counting
+only selected output would hide both retained copies and failed work.
+
+The sampled peak logical workspace equaled its final 5.453 GB. No scratch was
+observed. Five-second inventories can miss brief temporary peaks; one-second
+free-space observations and `/usr/bin/time` measurements complement them. Volume
+free space ended at 17.575 GB, above the 2 GiB stop, and includes unrelated
+workstation activity. The sampled process-tree peak was 3,306,389,504 bytes;
+the timing tool reported 3,305,832,448 bytes for the resumed command. Both stayed
+below the declared process ceiling. These observations do not establish continuous
+production enforcement or future history/maintenance capacity.
+
+The release build and repository gate passed before measurement. Reclaiming
+5.2 GiB of rebuildable debug cache is recorded in the
+[cleanup log](../../docs/reviews/zstd-debug-cache-cleanup.log), separately from
+dataset costs. No retained source, result or failure evidence was removed.
+
+### What this permits
+
+Keep the small shared-writer compression change and this Comments workload
+profile. The run establishes a bounded source-build result and physical reuse;
+it does not measure absence of cached payload reads or a complete-path speedup
+against an uncompressed full build. The original 64 MiB failure remains a failure.
+
+Joins/summaries, complete evidence, flat exports, maintenance, remote publication
+and the required fresh-workspace repetitions remain outside this result. Future
+update, history and maintenance measurements must include old/new coexistence,
+failed attempts and retained phase outputs. Retention is still unfinished, so
+successful processing does not imply that repeated jobs will reclaim their storage.
+
+See the [independent result review](../../docs/reviews/comments-resume-results.md).

@@ -1,0 +1,545 @@
+{
+  "bounded_checks_passed": true,
+  "resumed_run": true,
+  "full_performance_acceptance_passed": false,
+  "payload_read_avoidance_measured": false,
+  "before": {
+    "catalog_and_other": {
+      "files": 2,
+      "bytes": 20480,
+      "allocated_bytes": 20480
+    },
+    "total": {
+      "files": 23,
+      "bytes": 2802772903,
+      "allocated_bytes": 2802810880
+    },
+    "admitted_or_prepared_data": {
+      "files": 1,
+      "bytes": 2670490619,
+      "allocated_bytes": 2670493696
+    },
+    "native_data": {
+      "files": 2,
+      "bytes": 132213327,
+      "allocated_bytes": 132218880
+    },
+    "object_metadata": {
+      "files": 1,
+      "bytes": 2211,
+      "allocated_bytes": 4096
+    },
+    "lifecycle": {
+      "files": 17,
+      "bytes": 46266,
+      "allocated_bytes": 73728
+    }
+  },
+  "preflight_inspection": {
+    "sampled_peak_tree_rss_bytes": 1343488,
+    "min_volume_free_bytes": 20299395072,
+    "sampled_peak_workspace_bytes": 2802772903,
+    "sampled_peak_allocated_bytes": 2802810880,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.0015997080045053735,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 23,
+        "bytes": 2802772903,
+        "allocated_bytes": 2802810880
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 2,
+        "bytes": 132213327,
+        "allocated_bytes": 132218880
+      },
+      "object_metadata": {
+        "files": 1,
+        "bytes": 2211,
+        "allocated_bytes": 4096
+      },
+      "lifecycle": {
+        "files": 17,
+        "bytes": 46266,
+        "allocated_bytes": 73728
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 1.8475774170074146,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 23,
+        "bytes": 2802772903,
+        "allocated_bytes": 2802810880
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 2,
+        "bytes": 132213327,
+        "allocated_bytes": 132218880
+      },
+      "object_metadata": {
+        "files": 1,
+        "bytes": 2211,
+        "allocated_bytes": 4096
+      },
+      "lifecycle": {
+        "files": 17,
+        "bytes": 46266,
+        "allocated_bytes": 73728
+      }
+    },
+    "volume_free_after_bytes": 20299243520,
+    "time_max_rss_bytes": 26640384
+  },
+  "resume": {
+    "sampled_peak_tree_rss_bytes": 3306389504,
+    "min_volume_free_bytes": 17576361984,
+    "sampled_peak_workspace_bytes": 5452775696,
+    "sampled_peak_allocated_bytes": 5501636608,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.020446871989406645,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 23,
+        "bytes": 2802772903,
+        "allocated_bytes": 2802810880
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 2,
+        "bytes": 132213327,
+        "allocated_bytes": 132218880
+      },
+      "object_metadata": {
+        "files": 1,
+        "bytes": 2211,
+        "allocated_bytes": 4096
+      },
+      "lifecycle": {
+        "files": 17,
+        "bytes": 46266,
+        "allocated_bytes": 73728
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 39.82282295799814,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "volume_free_after_bytes": 17576353792,
+    "time_max_rss_bytes": 3305832448
+  },
+  "selection": {
+    "sampled_peak_tree_rss_bytes": 1310720,
+    "min_volume_free_bytes": 17576308736,
+    "sampled_peak_workspace_bytes": 5452775696,
+    "sampled_peak_allocated_bytes": 5501636608,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.0032422910007881,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 0.024409457997535355,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "volume_free_after_bytes": 17576292352,
+    "time_max_rss_bytes": 27820032
+  },
+  "readback": {
+    "rows": 10000000,
+    "data_files": 4,
+    "sample_rows": 24,
+    "sample_bytes": 129699,
+    "shape_types_counts_and_sample_passed": true
+  },
+  "readback_metrics": {
+    "sampled_peak_tree_rss_bytes": 113098752,
+    "min_volume_free_bytes": 17576173568,
+    "sampled_peak_workspace_bytes": 5452775696,
+    "sampled_peak_allocated_bytes": 5501636608,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.0034326669992879033,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 1.499658125001588,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "volume_free_after_bytes": 17575096320,
+    "time_max_rss_bytes": 268943360
+  },
+  "resume_with_readback_seconds": 41.346890540997265,
+  "original_failed_seconds": 7.948089166005957,
+  "cumulative_engine_and_readback_seconds": 49.29497970700322,
+  "unchanged": {
+    "sampled_peak_tree_rss_bytes": 1310720,
+    "min_volume_free_bytes": 17575051264,
+    "sampled_peak_workspace_bytes": 5452875422,
+    "sampled_peak_allocated_bytes": 5501767680,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.0033612499973969534,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 56,
+        "bytes": 5452775696,
+        "allocated_bytes": 5501636608
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "object_metadata": {
+        "files": 6,
+        "bytes": 35326,
+        "allocated_bytes": 49152
+      },
+      "lifecycle": {
+        "files": 41,
+        "bytes": 151705,
+        "allocated_bytes": 208896
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 0.15838916700158734,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 73,
+        "bytes": 5452875422,
+        "allocated_bytes": 5501767680
+      },
+      "object_metadata": {
+        "files": 7,
+        "bytes": 39917,
+        "allocated_bytes": 57344
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "lifecycle": {
+        "files": 57,
+        "bytes": 246840,
+        "allocated_bytes": 331776
+      }
+    },
+    "volume_free_after_bytes": 17574985728,
+    "time_max_rss_bytes": 46055424
+  },
+  "retry": {
+    "sampled_peak_tree_rss_bytes": 1310720,
+    "min_volume_free_bytes": 17574928384,
+    "sampled_peak_workspace_bytes": 5452875422,
+    "sampled_peak_allocated_bytes": 5501767680,
+    "sampled_peak_scratch_bytes": 0,
+    "inventory_sampling_seconds": 0.004067834001034498,
+    "before": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 73,
+        "bytes": 5452875422,
+        "allocated_bytes": 5501767680
+      },
+      "object_metadata": {
+        "files": 7,
+        "bytes": 39917,
+        "allocated_bytes": 57344
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "lifecycle": {
+        "files": 57,
+        "bytes": 246840,
+        "allocated_bytes": 331776
+      }
+    },
+    "stop_reason": null,
+    "elapsed_seconds": 0.025163375001284294,
+    "exit_code": 0,
+    "after": {
+      "catalog_and_other": {
+        "files": 2,
+        "bytes": 20480,
+        "allocated_bytes": 20480
+      },
+      "total": {
+        "files": 73,
+        "bytes": 5452875422,
+        "allocated_bytes": 5501767680
+      },
+      "object_metadata": {
+        "files": 7,
+        "bytes": 39917,
+        "allocated_bytes": 57344
+      },
+      "admitted_or_prepared_data": {
+        "files": 1,
+        "bytes": 2670490619,
+        "allocated_bytes": 2670493696
+      },
+      "native_data": {
+        "files": 6,
+        "bytes": 2782077566,
+        "allocated_bytes": 2830864384
+      },
+      "lifecycle": {
+        "files": 57,
+        "bytes": 246840,
+        "allocated_bytes": 331776
+      }
+    },
+    "volume_free_after_bytes": 17574912000,
+    "time_max_rss_bytes": 29474816
+  },
+  "selected_native_data_bytes": 2649864239,
+  "final_workspace": {
+    "catalog_and_other": {
+      "files": 2,
+      "bytes": 20480,
+      "allocated_bytes": 20480
+    },
+    "total": {
+      "files": 73,
+      "bytes": 5452875422,
+      "allocated_bytes": 5501767680
+    },
+    "object_metadata": {
+      "files": 7,
+      "bytes": 39917,
+      "allocated_bytes": 57344
+    },
+    "admitted_or_prepared_data": {
+      "files": 1,
+      "bytes": 2670490619,
+      "allocated_bytes": 2670493696
+    },
+    "native_data": {
+      "files": 6,
+      "bytes": 2782077566,
+      "allocated_bytes": 2830864384
+    },
+    "lifecycle": {
+      "files": 57,
+      "bytes": 246840,
+      "allocated_bytes": 331776
+    }
+  },
+  "marginal_retained_bytes": 2650102519,
+  "cumulative_retained_amplification_vs_input": 2.041900234812246
+}

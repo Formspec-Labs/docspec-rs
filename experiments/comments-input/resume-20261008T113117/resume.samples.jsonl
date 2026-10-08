@@ -1,0 +1,40 @@
+{"seconds": 0.0016867500089574605, "tree_rss_bytes": 1310720, "volume_free_bytes": 20299214848}
+{"seconds": 1.021394292009063, "tree_rss_bytes": 2065645568, "volume_free_bytes": 20247777280, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 23, "bytes": 2802772903, "allocated_bytes": 2802810880}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 2, "bytes": 132213327, "allocated_bytes": 132218880}, "object_metadata": {"files": 1, "bytes": 2211, "allocated_bytes": 4096}, "lifecycle": {"files": 17, "bytes": 46266, "allocated_bytes": 73728}}}
+{"seconds": 2.0378882079967298, "tree_rss_bytes": 2359525376, "volume_free_bytes": 20121649152}
+{"seconds": 3.0547205000038957, "tree_rss_bytes": 2932523008, "volume_free_bytes": 20026294272}
+{"seconds": 4.076726750005037, "tree_rss_bytes": 3042902016, "volume_free_bytes": 19926265856}
+{"seconds": 5.096113082996453, "tree_rss_bytes": 3162947584, "volume_free_bytes": 19856302080}
+{"seconds": 6.11471279199759, "tree_rss_bytes": 3235233792, "volume_free_bytes": 19770052608, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 29, "bytes": 3234979136, "allocated_bytes": 3245957120}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 3, "bytes": 564403301, "allocated_bytes": 575340544}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 7.132091125007719, "tree_rss_bytes": 3240034304, "volume_free_bytes": 19614052352}
+{"seconds": 8.148724500002572, "tree_rss_bytes": 3241017344, "volume_free_bytes": 19510145024}
+{"seconds": 9.168452833007905, "tree_rss_bytes": 3244146688, "volume_free_bytes": 19428073472}
+{"seconds": 10.190360624997993, "tree_rss_bytes": 3247325184, "volume_free_bytes": 19323265024}
+{"seconds": 11.207645792004769, "tree_rss_bytes": 3256991744, "volume_free_bytes": 19254206464, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 30, "bytes": 3737001701, "allocated_bytes": 3762069504}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 4, "bytes": 1066425866, "allocated_bytes": 1091452928}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 12.23054212500574, "tree_rss_bytes": 3263381504, "volume_free_bytes": 19200376832}
+{"seconds": 13.248566249996657, "tree_rss_bytes": 3268313088, "volume_free_bytes": 19136663552}
+{"seconds": 14.271161124997889, "tree_rss_bytes": 3279224832, "volume_free_bytes": 19086372864}
+{"seconds": 15.295338167008595, "tree_rss_bytes": 3280764928, "volume_free_bytes": 19018080256}
+{"seconds": 16.31083616700198, "tree_rss_bytes": 3281272832, "volume_free_bytes": 18967756800, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 30, "bytes": 4034102104, "allocated_bytes": 4064059392}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 4, "bytes": 1363526269, "allocated_bytes": 1393442816}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 17.324322000000393, "tree_rss_bytes": 3281436672, "volume_free_bytes": 18883846144}
+{"seconds": 18.33806095800537, "tree_rss_bytes": 3282092032, "volume_free_bytes": 18816704512}
+{"seconds": 19.356667667001602, "tree_rss_bytes": 3282223104, "volume_free_bytes": 18122526720}
+{"seconds": 20.373954624999897, "tree_rss_bytes": 3282337792, "volume_free_bytes": 18072104960}
+{"seconds": 21.391999500003294, "tree_rss_bytes": 3282501632, "volume_free_bytes": 18004992000, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 30, "bytes": 4348795675, "allocated_bytes": 4366049280}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 4, "bytes": 1678219840, "allocated_bytes": 1695432704}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 22.408310375001747, "tree_rss_bytes": 3282911232, "volume_free_bytes": 18581663744}
+{"seconds": 23.429860167001607, "tree_rss_bytes": 3282976768, "volume_free_bytes": 18496933888}
+{"seconds": 24.448231333008152, "tree_rss_bytes": 3284451328, "volume_free_bytes": 18463469568}
+{"seconds": 25.464974333008286, "tree_rss_bytes": 3284467712, "volume_free_bytes": 18319257600}
+{"seconds": 26.48723162499664, "tree_rss_bytes": 3284631552, "volume_free_bytes": 18251788288, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 31, "bytes": 4726584657, "allocated_bytes": 4762669056}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 5, "bytes": 2056008822, "allocated_bytes": 2092052480}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 27.509477917003096, "tree_rss_bytes": 3284910080, "volume_free_bytes": 18167775232}
+{"seconds": 28.526694708009018, "tree_rss_bytes": 3284926464, "volume_free_bytes": 18100625408}
+{"seconds": 29.541516666999087, "tree_rss_bytes": 3284975616, "volume_free_bytes": 18050355200}
+{"seconds": 30.563688167007058, "tree_rss_bytes": 3292446720, "volume_free_bytes": 17983225856}
+{"seconds": 31.585991583007853, "tree_rss_bytes": 3296460800, "volume_free_bytes": 17916080128, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 31, "bytes": 5061909835, "allocated_bytes": 5098213376}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 5, "bytes": 2391334000, "allocated_bytes": 2427596800}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 32.60821787500754, "tree_rss_bytes": 3300376576, "volume_free_bytes": 17865646080}
+{"seconds": 33.62498329200025, "tree_rss_bytes": 3301113856, "volume_free_bytes": 17808945152}
+{"seconds": 34.64813270799641, "tree_rss_bytes": 3301457920, "volume_free_bytes": 17769406464}
+{"seconds": 35.66861437499756, "tree_rss_bytes": 3303751680, "volume_free_bytes": 17696161792}
+{"seconds": 36.68157387500105, "tree_rss_bytes": 3303849984, "volume_free_bytes": 17628979200, "workspace": {"catalog_and_other": {"files": 2, "bytes": 20480, "allocated_bytes": 20480}, "total": {"files": 32, "bytes": 5340135720, "allocated_bytes": 5384040448}, "admitted_or_prepared_data": {"files": 1, "bytes": 2670490619, "allocated_bytes": 2670493696}, "native_data": {"files": 6, "bytes": 2669559885, "allocated_bytes": 2713423872}, "object_metadata": {"files": 2, "bytes": 4422, "allocated_bytes": 8192}, "lifecycle": {"files": 21, "bytes": 60314, "allocated_bytes": 94208}}}
+{"seconds": 37.69757375000336, "tree_rss_bytes": 3304177664, "volume_free_bytes": 17578598400}
+{"seconds": 38.71304816700285, "tree_rss_bytes": 3304177664, "volume_free_bytes": 17576452096}
+{"seconds": 39.72943941700214, "tree_rss_bytes": 3306389504, "volume_free_bytes": 17576361984}

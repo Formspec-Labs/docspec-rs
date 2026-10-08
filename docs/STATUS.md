@@ -2,15 +2,25 @@
 
 ## Comments performance and disk checkpoint
 
-The first release-build pilot over the frozen 10-million-Comments input failed
-during processing: a decoded batch exceeded its 64 MiB allowance. It stopped
-after 7.95 seconds and retained 2.80 GB, mostly the admitted input copy. Readback
-and reuse arms did not run. The full performance target remains unqualified.
-The [pilot report](../experiments/comments-input/REPORT.md) records partial-output
-storage, sampled disk peaks, memory measurement limits, retained failures and
-the next batch-sizing and output-encoding questions. The independently reviewed
-harness now includes live free-space stops and storage amplification accounting;
-these experiment controls do not establish a production disk quota.
+The resumed source-processing slice over the frozen 10-million-Comments input
+passed in 41.35 seconds through selection and independent readback, or 49.29 seconds
+including its original failed attempt. It used the maintained default Zstandard
+writer and a measured 768 MiB batch allowance; the generic default stays unchanged.
+The first attempt exceeded its 64 MiB batch allowance and remains a retained failure.
+
+The final workspace retains 5.45 GB, **2.04 times the encoded input**, including
+admission, selected output, failed output and metadata. The frozen input and codec
+diagnostics outside that workspace bring the listed task-owned data to 8.22 GB,
+before build artifacts and the shared source corpus. Observed peak process-tree
+memory was 3.31 GB; no scratch was observed. Unchanged processing reused the same
+input/native objects and added 99.7 KB of metadata; its exact retry changed no
+retained files. Physical reuse does not measure absence of cached reads.
+
+This is a potentially warm, resumed `SELECT *` source build. The complete lifecycle
+performance target remains unqualified. The [pilot report](../experiments/comments-input/REPORT.md)
+records raw results, disk accounting, sampling limits and the independent reviews.
+Live experiment stops are not a production disk quota. Repeated history and
+maintenance capacity remain open, and no automatic reclamation is claimed.
 
 ## Current verification policy
 
@@ -102,7 +112,8 @@ per-value evidence relationships or complete DocSpec conformance.
 
 The local foundation and retained Parquet path are implemented and tested. The
 first milestone's wider capacity and durability qualifications are still open;
-the Comments milestone also needs actual Comments inputs and evidence semantics.
+the Comments milestone still needs its complete evidence and consumer path beyond
+the measured retained source-processing slice.
 
 The required sequence continues with incremental updates and backfill, maintenance
 and restore, then R2 and Dagster. Provider credentials and actual deployment behavior

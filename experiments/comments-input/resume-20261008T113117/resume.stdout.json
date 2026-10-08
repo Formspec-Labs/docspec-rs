@@ -1,0 +1,106 @@
+{
+  "id": "fresh",
+  "dataset": {
+    "format": 10,
+    "dataset": "comments",
+    "version": "fresh",
+    "groups": {
+      "source": {
+        "table": "data_82237c68cef14add8fd7891bc4c334f5",
+        "metadata": {
+          "owner": "comments",
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/00001-3f440a12-38b9-481d-8c65-dbf252067579.metadata.json",
+          "digest": "795c43233236aedaab800e8b92a9631001dd9a942aeee2790dbf0b6f969ce19e",
+          "bytes": 3318
+        },
+        "snapshot": 5805067651843608744,
+        "schema_id": 0,
+        "objects": [
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00000.parquet",
+            "digest": "da37e2ad0e2f2968fd20e4fe2ea8eee0ed633222518df811335806191a8e4b78",
+            "bytes": 808883348
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00001.parquet",
+            "digest": "b67efcb22c83f86dfeffd92bb053b0fe80f57678ceccc4043851472e6f36685f",
+            "bytes": 810848643
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00002.parquet",
+            "digest": "c35c8773f50130ef5d2508e431180f370bc50c2b1e9cee9f597033ae924bfbff",
+            "bytes": 810880752
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/data/35000369-aeaa-4052-9ddf-8bd7e6372d51-00003.parquet",
+            "digest": "79306b81bcebdc50c6e51b79482b57be2a1a802d977f973f85be2c46167bd254",
+            "bytes": 219251496
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/00001-3f440a12-38b9-481d-8c65-dbf252067579.metadata.json",
+            "digest": "795c43233236aedaab800e8b92a9631001dd9a942aeee2790dbf0b6f969ce19e",
+            "bytes": 3318
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/01a11c24-804b-76bc-bf95-e86c858a08e7-m0.avro",
+            "digest": "1c9f0034455f06c350955f7a8c5c956d8f6745ce418512679baec7637d6ad414",
+            "bytes": 21300
+          },
+          {
+            "owner": "comments",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b6a9c1ddccc24863b410613c07615242/metadata/snap-5805067651843608744-0-01a11c24-804b-76bc-bf95-e86c858a08e7.avro",
+            "digest": "5420d76176e7107bc583679f52920ef671766e115fc739d9d466a95387e1d8ee",
+            "bytes": 1713
+          }
+        ],
+        "rows": 10000000
+      }
+    },
+    "computed": {},
+    "inputs": {
+      "input": {
+        "owner": "comments",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/cc29f7036d774e619da3b625d8aee07e/input.parquet",
+        "digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+        "bytes": 2670490619
+      }
+    },
+    "relationship": {
+      "kind": "independent"
+    },
+    "related": null,
+    "definition": "comments-probe-v1",
+    "eligibility": 0,
+    "boundary": 1,
+    "request": {
+      "kind": "build",
+      "spec": {
+        "dataset": "comments",
+        "operation": "fresh",
+        "base": null,
+        "relationship": null,
+        "input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-10m-20261008/comments.parquet",
+        "expected_digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+        "sql": "SELECT * FROM input",
+        "definition": "comments-probe-v1"
+      }
+    },
+    "parent_manifest": null,
+    "changes": null,
+    "processor": "docspec.dataset.v10",
+    "validation": "routine"
+  },
+  "manifest": {
+    "owner": "comments",
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/021c48bea5f5400c946ffbce2f136c32/release.json",
+    "digest": "1d02fca727fb3bf3bc07b960bf93460874e14ca62e4a89e52638ed605fe1d3ce",
+    "bytes": 4573
+  },
+  "verified": true
+}

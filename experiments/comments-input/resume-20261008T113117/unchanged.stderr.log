@@ -1,0 +1,3 @@
+2026-10-08T15:32:00.535636Z  INFO docspec::engine: reusing qualified phase phase="admission" operation=unchanged-zstd
+2026-10-08T15:32:00.536028Z  INFO docspec::engine: reusing qualified phase phase="processing" operation=unchanged-zstd
+2026-10-08T15:32:00.536299Z  INFO docspec::engine: reusing qualified phase phase="validation" operation=unchanged-zstd
