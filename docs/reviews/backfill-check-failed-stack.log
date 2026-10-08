@@ -1,0 +1,41 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 3.98s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.24s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 15 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b4733b2016bf5a7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 14 tests
+
+thread 'concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict' (7794268) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test backfill`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/backfill-a6d11c8e0e1629aa` (signal: 6, SIGABRT: process abort signal)

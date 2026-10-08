@@ -90,9 +90,55 @@ Updates retain typed removed and added rows with exact before/after native
 metadata, the base release and stable native key field IDs. Unaffected source files
 are shared; affected files supply both kept and removed rows in one joined read.
 The independently verified release and old versions remain readable without the
-catalog. This supports source updates; dependent field groups and general
-incremental SQL remain unfinished. Release format 2 is the current greenfield
+catalog. Source updates currently require a selection without computed field
+groups; coordinated group refresh and general incremental SQL remain unfinished.
+Release format 3 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
+
+## Add a computed field group
+
+Save a request as `backfill.json`:
+
+```json
+{
+  "dataset": "comments",
+  "operation": "text-stats-001",
+  "base": "update-001",
+  "definition": "comments-v1",
+  "group": "text_stats",
+  "group_definition": "text-stats-v1",
+  "fields": [
+    {"id": 10, "name": "character_count", "expression": "CAST(length(comment) AS BIGINT)"}
+  ]
+}
+```
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-backfill backfill.json
+target/debug/docspec --workspace workspaces/comments backfill backfill.json > enriched-release.json
+target/debug/docspec --workspace workspaces/comments read-combined enriched-release.json comments.arrow
+```
+
+Fields have stable logical IDs within their group and explicit mappings to native
+Iceberg field IDs. Expressions use source columns and immutable scalar functions.
+Aggregates, windows, subqueries and nested computed outputs refuse until qualified.
+Each source occurrence receives one output row, including successful null or empty
+values. Empty sources retain the declared schema. A failed file prevents selection
+of the group; inspection distinguishes it from pending work and successful nulls.
+
+Backfill preserves the source files and retains completed file computations,
+validation and independent readback. Retrying the request resumes those handoffs.
+The plan reports completed and pending files, failures and any reason selection
+would refuse. If ingestion advances before selection, a new request against the
+new source can reuse unchanged file computations. Independent groups merge into
+the latest selection; competing replacements of one group reject a stale target.
+Combined reads join group values to exact source-file row positions.
+
+Coordinated source/group refresh, metadata-only schema changes and logical row
+identity across compaction remain unfinished. Once a group is selected, source
+updates refuse before changing the source admission boundary. Full independent
+release verification still reads retained inputs and data; file reuse does not
+establish population-independent backfill latency.
 
 ```sh
 target/debug/docspec --workspace workspaces/comments latest comments
@@ -105,10 +151,12 @@ target/debug/docspec --workspace workspaces/comments serve
 `compare` performs a full, duplicate-aware value comparison, not a write journal.
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement
-definition explicitly. A new operation is required after invalidation.
+definition explicitly. A new operation is required after invalidation. Requalifying
+an already enriched selection also requires coordinated source/group refresh,
+which is not implemented yet; historical releases remain readable.
 
 The loopback HTTP API exposes `POST /plan`, `POST /run`, `POST /updates/plan`,
-`POST /updates/run`, `GET /datasets/{dataset}`,
+`POST /updates/run`, `POST /backfills/plan`, `POST /backfills/run`, `GET /datasets/{dataset}`,
 `GET /datasets/{dataset}/latest`, and `GET /datasets/{dataset}/versions/{version}`.
 CLI and HTTP call the same application services. HTTP accepts bounded JSON;
 the CLI streams bulk reads. One process owns a workspace; use HTTP to submit
@@ -173,8 +221,9 @@ SQL is limited to a read-only query over retained `input`. Clock and random
 functions, limits, offsets, window functions and order-sensitive aggregates are
 refused until their repeatability is qualified. `EXCEPT ALL` and `INTERSECT ALL` are refused because the
 pinned engine's implementation does not preserve the required multiplicity. SQL
-relations have no promised physical row order. Per-value evidence, source
-occurrence identities and broader transformation semantics still need qualification.
+relations have no promised physical row order. Source-file row positions are
+verified; durable logical identities, per-value evidence and broader transformation
+semantics still need qualification.
 
 ## Verification
 
@@ -193,6 +242,12 @@ independent reconstruction. They cover duplicate and null keys, quoted composite
 keys, nested values, deletion to an empty table, empty updates, stale-base races,
 competing retries, corrupted base files, altered change declarations, HTTP routes,
 retained-phase recovery and failure while the paired writers are active.
+
+[Backfill tests](tests/backfill.rs) check independent value reconstruction,
+duplicate and null occurrences, empty schemas, interrupted handoffs, unchanged-file
+reuse, concurrent group selection, stale source and target refusal, malformed
+coverage, missing cached objects, failure versus successful nulls, combined-reader
+capacity and HTTP behavior.
 
 The [retained-data experiment](experiments/local-reuse/protocol.md) uses a separate
 PyArrow reader and preserves raw commands, outputs, timing and memory measurements.

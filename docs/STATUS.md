@@ -12,16 +12,17 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery for builds | Broader durability failures; source-update process-kill qualification; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; full-query replacement; explicit definition invalidation; historical schema reads | Stable field identities; independently computed groups; pending/null/failure outcomes; backfill and exact-boundary cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; scalar computed groups; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file catch-up reuse; guarded source/target selection; combined reads | Metadata-only evolution; nested computed values; selective material dependencies; coordinated source/group refresh and requalification; full concurrent-ingestion cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source writes; exact endpoints and key field IDs | Evidence-only changes; history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; complete captured input selection; coverage regression refusal | Multiple pinned related inputs; old/new-key affected-result discovery; joins and affected-group refresh against full reconstruction |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; all cleanup disabled | Reader/release/phase retirement; shared-owner roots; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify and compare; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare and backfill; combined CLI reads; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource qualification; broader fault tests; HTTP bulk streaming; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
-an explicit full query. General incremental SQL and independent column backfill
-remain unfinished. A retained source file establishes whole-input provenance, not
+an explicit full query. Independent scalar backfill is available; source changes
+after selecting computed groups require unfinished coordinated refresh. General
+incremental SQL remains unfinished. A retained source file establishes whole-input provenance, not
 per-value evidence relationships or complete DocSpec conformance.
 
 ## Component qualifications
@@ -52,8 +53,9 @@ evidence, native and flat outputs, release selection and independent readback in
 fixtures nor repeated local metadata lookups establish this target.
 
 Q1–Q8 remain the acceptance framework. Current tests cover bounded worker recovery,
-stale dependency refusal and independent reading. Concurrent field-group updates,
-shared cleanup, related-input selection, old-actor restore, the full metadata-growth
+stale dependency refusal, concurrent independent field-group selection and independent
+reading. Concurrent ingestion with coordinated group refresh, shared cleanup,
+related-input selection, old-actor restore, the full metadata-growth
 matrix and the complete consumer path remain unqualified. See the original
 [qualification plan](requirements/07-operations-qualification.md).
 
@@ -74,7 +76,8 @@ backup or full restore point: previous metadata-log files, catalog bookkeeping a
 provider authority still require the R6 restore implementation. Delete-bearing
 current snapshots explicitly refuse this candidate-sharing path until delete
 semantics are qualified. The source-update checkpoint below adds affected-key
-discovery and guarded selection. Shared retention and backfill remain unfinished.
+discovery and guarded selection. Shared retention remains unfinished; independent
+scalar backfill is described below.
 
 ## Source-update checkpoint
 
@@ -150,8 +153,60 @@ oversized batches and reader admission release. See the
 [resource review](reviews/occurrences-resources.md) and
 [check output](reviews/occurrences-check.log).
 
-This supplies a prerequisite for independent field groups. Backfill, combined
-consumer reads, durable logical occurrence identity and compaction are still
-unfinished. Native manifest planning may continue briefly after cancellation;
+This supplies the source locations used by the backfill checkpoint below. Durable
+logical occurrence identity and compaction are still unfinished. Native manifest
+planning may continue briefly after cancellation;
 wrapper permit tests do not establish upstream task quiescence or aggregate RSS.
 No throughput improvement is claimed.
+
+## Independent field-group checkpoint
+
+`BackfillSpec` binds an exact selected source, group definition and scalar field
+expressions. Logical field IDs map explicitly to the native IDs assigned by
+Iceberg. The native table schema and mapping are independently checked. Expressions
+must be immutable and row-local; nested computed outputs are not yet supported.
+
+The engine looks up completed work before opening source payloads. Missing work
+reads one verified source file through the native occurrence adapter and evaluates
+maintained DataFusion expressions on Arrow batches. Each completion retains the
+exact source object, definition, output schema, output objects and native Avro
+file descriptors. Acknowledgments are bounded bundles; aggregate descriptor
+assembly and final combined batches have explicit byte limits. The engine creates
+one final group table from retained outputs. It does not create a cumulative group
+snapshot or copy the entire source pin for each input file.
+
+Validation checks every file/row location for complete, unique coverage. Null and
+empty values remain successful outputs; failed files remain distinct from pending
+files. Validation and independent readback are durable handoffs. Resumption checks
+that retained objects are still present before adopting completed work. Fixture
+reconstruction separately checks computed values. Malformed native group fixtures
+exercise duplicates, gaps, unknown files, invalid positions and altered field maps.
+
+Selection checks current eligibility, the exact source and its admission boundary,
+and the expected target group. Backfill does not advance source admission. A newer
+source blocks selection while preserving completed file work; a new request can
+reuse exact unchanged source objects. Compatible sibling groups merge into the
+latest selection and receive a fresh independent readback. A competing replacement
+of the same group refuses its stale target. Original operation retries still return
+their original recorded result.
+
+Source updates after group selection refuse before advancing admission. Coordinated
+source/group refresh and requalification after invalidating an enriched selection
+remain unfinished; historical reads continue to work. Reuse currently depends on
+the complete source schema, not only referenced columns. Physical source locations
+do not supply logical identities across compaction. Release format 3 carries these
+group declarations; no migration of older development outputs is supplied.
+
+See [backfill tests](../tests/backfill.rs), the
+[consistency review](reviews/backfill-consistency.md),
+[resource review](reviews/backfill-resources.md) and
+[gate output](reviews/backfill-check.log). A default-stack test failure is retained
+in [the original log](reviews/backfill-check-failed-stack.log); placing the large
+native preparation future on the heap fixes the overflow without raising stack
+limits. Tests cover reopen/resume, concurrent attempts, independent groups, stale
+targets, missing retained objects, file failures and combined-read capacity.
+
+This is an R3 implementation slice, not completion of R3 or Q2. Complete release
+verification still reads whole retained inputs and inventories. Native allocations,
+process-kill backfill recovery and complete-path scaling remain unqualified; no
+throughput improvement or whole-process memory ceiling is claimed.

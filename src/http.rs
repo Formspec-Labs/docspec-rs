@@ -5,7 +5,7 @@
 
 use crate::{
     Engine, Error,
-    model::{Id, ReleasePin, RunSpec, UpdateSpec},
+    model::{BackfillSpec, Id, ReleasePin, RunSpec, UpdateSpec},
 };
 use axum::{
     Json, Router,
@@ -22,6 +22,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/run", post(run))
         .route("/updates/plan", post(plan_update))
         .route("/updates/run", post(update))
+        .route("/backfills/plan", post(plan_backfill))
+        .route("/backfills/run", post(backfill))
         .route("/datasets/{dataset}", get(inspect))
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
@@ -43,7 +45,7 @@ impl IntoResponse for HttpError {
             | "stale_definition"
             | "stale_eligibility"
             | "coverage_regression" => StatusCode::CONFLICT,
-            "stale_base" => StatusCode::CONFLICT,
+            "stale_base" | "stale_source_boundary" | "stale_group" => StatusCode::CONFLICT,
             "capacity" | "metadata_capacity" | "disk_capacity" => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };
@@ -101,4 +103,17 @@ async fn release(
             .release(&Id::new(dataset)?, &Id::new(version)?)
             .await?,
     ))
+}
+
+async fn plan_backfill(
+    State(engine): State<Engine>,
+    Json(spec): Json<BackfillSpec>,
+) -> Result<Json<crate::engine::BackfillPlan>, HttpError> {
+    Ok(Json(engine.plan_backfill(&spec).await?))
+}
+async fn backfill(
+    State(engine): State<Engine>,
+    Json(spec): Json<BackfillSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.backfill(&spec).await?))
 }

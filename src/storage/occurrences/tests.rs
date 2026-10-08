@@ -211,6 +211,28 @@ async fn locator_columns_participate_in_batch_admission() {
 }
 
 #[tokio::test]
+async fn selective_scan_skips_unrequested_payloads_and_keeps_stream_admission() {
+    let (_root, _catalog, table, _) = fixture().await;
+    let budget = budget(2);
+    let scan = OccurrenceScan::open(&table, &budget).await.unwrap();
+    let paths: Vec<_> = scan
+        .files()
+        .map(|file| file.file_path().to_owned())
+        .collect();
+    std::fs::remove_file(&paths[0]).unwrap();
+    let mut stream = scan.read_file(&paths[1], &budget).unwrap().boxed();
+    drop(scan);
+    assert!(stream.try_next().await.unwrap().is_some());
+    assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
+    let mut rows = 2;
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 7);
+    drop(budget.reserve(budget.limits.memory_bytes / 2).unwrap());
+}
+
+#[tokio::test]
 async fn malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage() {
     let (_root, _catalog, table, _) = fixture().await;
     let tasks: Vec<_> = table

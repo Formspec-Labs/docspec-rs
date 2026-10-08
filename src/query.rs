@@ -10,19 +10,32 @@ use datafusion::{
         SendableRecordBatchStream, stream::RecordBatchStreamAdapter, streaming::PartitionStream,
     },
 };
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use iceberg::table::Table;
 use std::sync::Arc;
 
 /// Uses the same reader admission and native field interpretation as independent reads.
 pub(crate) fn table(native: Table, budget: Budget) -> Result<Arc<dyn TableProvider>> {
-    let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
-        native.metadata().current_schema(),
-    )?);
+    provider(native, budget, false)
+}
+
+pub(crate) fn occurrences(native: Table, budget: Budget) -> Result<Arc<dyn TableProvider>> {
+    provider(native, budget, true)
+}
+
+fn provider(native: Table, budget: Budget, located: bool) -> Result<Arc<dyn TableProvider>> {
+    let schema = if located {
+        storage::occurrence_schema(&native)?
+    } else {
+        Arc::new(iceberg::arrow::schema_to_arrow_schema(
+            native.metadata().current_schema(),
+        )?)
+    };
     let partition = NativePartition {
         table: native,
         schema: schema.clone(),
         budget,
+        located,
     };
     Ok(Arc::new(StreamingTable::try_new(
         schema,
@@ -35,6 +48,7 @@ struct NativePartition {
     table: Table,
     schema: SchemaRef,
     budget: Budget,
+    located: bool,
 }
 
 impl PartitionStream for NativePartition {
@@ -45,11 +59,20 @@ impl PartitionStream for NativePartition {
     fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
         let table = self.table.clone();
         let budget = self.budget.clone();
+        let located = self.located;
         let prepare = async move {
-            storage::read_batches(&table, &budget)
+            let stream = if located {
+                storage::read_occurrences(&table, &budget).await?.boxed()
+            } else {
+                storage::read_batches(&table, &budget).await?.boxed()
+            };
+            Ok::<_, crate::Error>(stream)
+        };
+        let prepare = async move {
+            prepare
                 .await
-                .map_err(external)
                 .map(|stream| stream.map_err(external))
+                .map_err(external)
         };
         let stream = futures::stream::once(prepare).try_flatten();
         Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), stream))
@@ -58,6 +81,32 @@ impl PartitionStream for NativePartition {
 
 fn external(error: crate::Error) -> DataFusionError {
     DataFusionError::External(Box::new(error))
+}
+
+/// Applies final consumer admission after joins combine independently bounded inputs.
+pub(crate) fn bounded(
+    stream: SendableRecordBatchStream,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    let schema = stream.schema();
+    let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
+    let limit = budget.limits.max_batch_bytes;
+    let stream = futures::stream::try_unfold(
+        (stream, reservation),
+        move |(mut stream, reservation)| async move {
+            let Some(batch) = stream.try_next().await? else {
+                return Ok(None);
+            };
+            if batch.get_array_memory_size() > limit {
+                return Err(external(crate::Error::refusal(
+                    "oversized_batch",
+                    "combined result exceeds the consumer batch allowance",
+                )));
+            }
+            Ok(Some((batch, (stream, reservation))))
+        },
+    );
+    Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
 }
 
 #[cfg(test)]
@@ -144,6 +193,7 @@ mod tests {
             table: native,
             schema,
             budget: budget.clone(),
+            located: false,
         };
         let context = SessionContext::new();
         let mut stream = partition.execute(context.task_ctx());

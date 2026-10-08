@@ -90,7 +90,7 @@ struct Occurrences {
     schema: SchemaRef,
     limit: usize,
     _batches: OwnedSemaphorePermit,
-    _metadata: OwnedSemaphorePermit,
+    _metadata: Arc<OwnedSemaphorePermit>,
 }
 
 impl Occurrences {
@@ -125,7 +125,7 @@ impl Occurrences {
             schema,
             limit: budget.limits.max_batch_bytes,
             _batches: batches,
-            _metadata: inventory._reservation,
+            _metadata: Arc::new(inventory._reservation),
         })
     }
 
@@ -194,6 +194,87 @@ impl Occurrences {
             // An empty-file population still yields cooperatively between tasks.
             tokio::task::yield_now().await;
         }
+    }
+}
+
+/// Captures native file tasks once; payloads open only for requested files.
+pub(crate) struct OccurrenceScan {
+    tasks: BTreeMap<String, (FileScanTask, DataFile)>,
+    reader: ArrowReader,
+    schema: SchemaRef,
+    _metadata: Arc<OwnedSemaphorePermit>,
+}
+
+impl OccurrenceScan {
+    pub async fn open(table: &Table, budget: &Budget) -> Result<Self> {
+        let mut state = Occurrences::open(table, budget).await?;
+        let mut tasks = BTreeMap::new();
+        let mut bytes = 0usize;
+        while let Some(task) = state.tasks.try_next().await? {
+            let file = state.expected.remove(&task.data_file_path).ok_or_else(|| {
+                Error::refusal(
+                    "occurrence_tasks",
+                    "native scan repeats or introduces a file",
+                )
+            })?;
+            check_task(&task, &file)?;
+            // Bound retained task details as well as the native inventory. Schema
+            // objects are shared; field projections and paths are task-owned.
+            bytes = bytes
+                .saturating_add(task.data_file_path.len().saturating_mul(3))
+                .saturating_add(
+                    task.project_field_ids
+                        .len()
+                        .saturating_mul(size_of::<i32>()),
+                )
+                .saturating_add(512);
+            if bytes > budget.limits.max_metadata_bytes {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "captured file tasks exceed metadata allowance",
+                ));
+            }
+            tasks.insert(task.data_file_path.clone(), (task, file));
+        }
+        if !state.expected.is_empty() {
+            return Err(Error::refusal(
+                "occurrence_tasks",
+                "native scan omitted a captured file",
+            ));
+        }
+        Ok(Self {
+            tasks,
+            reader: state.reader,
+            schema: state.schema,
+            _metadata: state._metadata,
+        })
+    }
+
+    pub fn files(&self) -> impl Iterator<Item = &DataFile> {
+        self.tasks.values().map(|(_, file)| file)
+    }
+
+    pub fn read_file(
+        &self,
+        path: &str,
+        budget: &Budget,
+    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+        let (task, file) = self.tasks.get(path).ok_or_else(|| {
+            Error::refusal("occurrence_tasks", "file is outside the captured source")
+        })?;
+        let state = Occurrences {
+            tasks: futures::stream::iter([Ok(task.clone())]).boxed(),
+            reader: self.reader.clone(),
+            schema: self.schema.clone(),
+            expected: BTreeMap::from([(path.to_owned(), file.clone())]),
+            current: None,
+            limit: budget.limits.max_batch_bytes,
+            _batches: budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?,
+            _metadata: self._metadata.clone(),
+        };
+        Ok(futures::stream::try_unfold(state, |mut state| async move {
+            Ok(state.next().await?.map(|batch| (batch, state)))
+        }))
     }
 }
 

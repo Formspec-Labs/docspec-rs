@@ -5,7 +5,7 @@ use docspec::{
     Engine,
     budget::{Budget, Limits},
     engine::verify_release,
-    model::{Id, ReleasePin, RunSpec, UpdateSpec},
+    model::{BackfillSpec, Id, ReleasePin, RunSpec, UpdateSpec},
     storage,
 };
 use futures::TryStreamExt;
@@ -60,6 +60,12 @@ enum Command {
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
     Update { spec: PathBuf },
+    /// Explain completed and pending computed field-group files.
+    PlanBackfill { spec: PathBuf },
+    /// Compute or resume an independent scalar field group.
+    Backfill { spec: PathBuf },
+    /// Stream a pinned combined view as Arrow IPC.
+    ReadCombined { release: PathBuf, output: PathBuf },
     /// Compare complete pinned results, preserving duplicate row counts.
     Compare {
         before: PathBuf,
@@ -173,6 +179,31 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Command::Update { spec } => {
                     print_json(&engine.update(&read_json::<UpdateSpec>(spec)?).await?)?
+                }
+                Command::PlanBackfill { spec } => print_json(
+                    &engine
+                        .plan_backfill(&read_json::<BackfillSpec>(spec)?)
+                        .await?,
+                )?,
+                Command::Backfill { spec } => {
+                    print_json(&engine.backfill(&read_json::<BackfillSpec>(spec)?).await?)?
+                }
+                Command::ReadCombined { release, output } => {
+                    let mut stream = engine
+                        .read_combined(&read_json::<ReleasePin>(release)?)
+                        .await?;
+                    let file = std::fs::OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(output)?;
+                    let mut writer = arrow::ipc::writer::StreamWriter::try_new(
+                        BufWriter::new(file),
+                        &stream.schema(),
+                    )?;
+                    while let Some(batch) = stream.try_next().await? {
+                        writer.write(&batch)?;
+                    }
+                    writer.finish()?;
                 }
                 Command::Latest { dataset } => {
                     print_json(&engine.latest(&Id::new(dataset)?).await?)?

@@ -24,6 +24,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+mod backfill;
+#[doc(inline)]
+pub use backfill::BackfillPlan;
 mod write;
 
 /// Local execution host sharing catalog, admission, and resource accounting.
@@ -63,7 +66,7 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
-const PROCESSOR: &str = "docspec.dataset.v2";
+const PROCESSOR: &str = "docspec.dataset.v3";
 
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
@@ -519,6 +522,16 @@ impl Engine {
             }
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
+            if authority
+                .selected
+                .as_ref()
+                .is_some_and(|selected| !selected.computed.is_empty())
+            {
+                return Err(Error::refusal(
+                    "dependent_groups",
+                    "source admission requires refreshing selected computed groups",
+                ));
+            }
             if let Some(old) = old {
                 check_authority(&authority, &old)?;
                 old
@@ -613,6 +626,12 @@ impl Engine {
                 OperationRequest::Update(update) => {
                     self.process_update(update, &directory, &admission).await?
                 }
+                OperationRequest::Backfill(_) => {
+                    return Err(Error::refusal(
+                        "invalid_operation",
+                        "use the backfill service",
+                    ));
+                }
             };
             let mut outputs = prepared.table.objects.clone();
             if let Some(changes) = &prepared.changes {
@@ -659,15 +678,18 @@ impl Engine {
         for ((name, _), input) in spec.inputs().iter().zip(&admission.outputs) {
             let name = match spec {
                 OperationRequest::Build(_) => name.clone(),
-                OperationRequest::Update(_) => format!("{}/{name}", spec.operation()),
+                OperationRequest::Update(_) | OperationRequest::Backfill(_) => {
+                    format!("{}/{name}", spec.operation())
+                }
             };
             inputs.insert(name, input.clone());
         }
         let dataset = DatasetPin {
-            format: 2,
+            format: 3,
             dataset: spec.dataset().clone(),
             version: spec.operation().clone(),
             groups: BTreeMap::from([("source".into(), table)]),
+            computed: BTreeMap::new(),
             inputs,
             changes: processing.changes.clone(),
             definition: operation.definition.clone(),
@@ -735,6 +757,16 @@ impl Engine {
                 return Err(Error::refusal(
                     "coverage_regression",
                     "a newer captured input boundary is already selected",
+                ));
+            }
+            if authority
+                .selected
+                .as_ref()
+                .is_some_and(|selected| !selected.computed.is_empty())
+            {
+                return Err(Error::refusal(
+                    "dependent_groups",
+                    "source selection requires refreshing selected computed groups",
                 ));
             }
             authority.selected = Some(release.dataset.clone());
@@ -925,12 +957,18 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
         OperationRequest::Update(spec) => {
             serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
         }
+        OperationRequest::Backfill(spec) => {
+            serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})
+        }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
         .to_hex()
         .to_string())
 }
 fn validate_request(spec: &OperationRequest) -> Result<()> {
+    if let OperationRequest::Backfill(spec) = spec {
+        return backfill::validate(spec);
+    }
     if let OperationRequest::Build(build) = spec {
         return validate_spec(build);
     }
@@ -1141,7 +1179,7 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
             "release manifest does not match its pin",
         ));
     }
-    if decoded.format != 2
+    if decoded.format != 3
         || release.id != decoded.version
         || decoded.request.dataset() != &decoded.dataset
         || decoded.request.operation() != &decoded.version
@@ -1149,7 +1187,9 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
         || decoded.request.inputs().iter().any(|(name, input)| {
             let key = match &decoded.request {
                 OperationRequest::Build(_) => name.clone(),
-                OperationRequest::Update(_) => format!("{}/{name}", decoded.version),
+                OperationRequest::Update(_) | OperationRequest::Backfill(_) => {
+                    format!("{}/{name}", decoded.version)
+                }
             };
             decoded
                 .inputs
@@ -1168,9 +1208,8 @@ async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Re
         .get("source")
         .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
     verify_changes(&decoded.request, source, decoded.changes.as_ref(), budget).await?;
-    for pin in decoded.groups.values() {
-        verify_table(pin, budget).await?;
-    }
+    verify_table(source, budget).await?;
+    backfill::verify_groups(&decoded, budget).await?;
     Ok(())
 }
 
@@ -1187,7 +1226,7 @@ async fn verify_changes(
         )
     };
     let (spec, changes) = match (request, changes) {
-        (OperationRequest::Build(_), None) => return Ok(()),
+        (OperationRequest::Build(_) | OperationRequest::Backfill(_), None) => return Ok(()),
         (OperationRequest::Update(spec), Some(changes)) => (spec, changes),
         _ => return Err(invalid()),
     };
@@ -1209,7 +1248,7 @@ async fn verify_changes(
     let before: DatasetPin =
         serde_json::from_reader(std::fs::File::open(&changes.base_manifest.path)?)?;
     let before_source = before.groups.get("source").ok_or_else(invalid)?;
-    if before.format != 2
+    if before.format != 3
         || before.dataset != spec.dataset
         || before.version != spec.base
         || changes.base_version != spec.base

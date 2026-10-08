@@ -75,6 +75,7 @@ pub struct DatasetPin {
     pub dataset: Id,
     pub version: Id,
     pub groups: BTreeMap<String, TablePin>,
+    pub computed: BTreeMap<String, ComputedGroup>,
     pub inputs: BTreeMap<String, ObjectRef>,
     pub definition: String,
     pub eligibility: u64,
@@ -167,12 +168,44 @@ pub struct UpdateSpec {
     pub deletions: Option<InputSpec>,
 }
 
+/// A stable field identity and a row-local SQL expression over source values.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputedField {
+    /// Stable logical field ID within its group, independent of native table numbering.
+    pub id: i32,
+    pub name: String,
+    pub expression: String,
+}
+
+/// Independently computes a field group against a retained source version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackfillSpec {
+    pub dataset: Id,
+    pub operation: OperationId,
+    pub base: Id,
+    /// Required active source definition.
+    pub definition: String,
+    pub group: Id,
+    pub group_definition: String,
+    pub fields: Vec<ComputedField>,
+}
+
+/// Exact source and expression binding for a completely covered field group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputedGroup {
+    pub request: BackfillSpec,
+    pub native_field_ids: BTreeMap<i32, i32>,
+    pub source_metadata: ObjectRef,
+    pub base_manifest: ObjectRef,
+}
+
 /// A typed request sharing the same recovery and guarded selection path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "spec", rename_all = "snake_case")]
 pub enum OperationRequest {
     Build(RunSpec),
     Update(UpdateSpec),
+    Backfill(BackfillSpec),
 }
 
 impl OperationRequest {
@@ -181,6 +214,7 @@ impl OperationRequest {
         match self {
             Self::Build(spec) => &spec.dataset,
             Self::Update(spec) => &spec.dataset,
+            Self::Backfill(spec) => &spec.dataset,
         }
     }
     /// Returns the stable retry identity.
@@ -188,6 +222,7 @@ impl OperationRequest {
         match self {
             Self::Build(spec) => &spec.operation,
             Self::Update(spec) => &spec.operation,
+            Self::Backfill(spec) => &spec.operation,
         }
     }
     /// Returns the required active definition.
@@ -195,6 +230,7 @@ impl OperationRequest {
         match self {
             Self::Build(spec) => &spec.definition,
             Self::Update(spec) => &spec.definition,
+            Self::Backfill(spec) => &spec.definition,
         }
     }
     /// Returns the version that an update is allowed to replace.
@@ -202,6 +238,7 @@ impl OperationRequest {
         match self {
             Self::Build(_) => None,
             Self::Update(spec) => Some(&spec.base),
+            Self::Backfill(spec) => Some(&spec.base),
         }
     }
     /// Lists bounded input declarations, excluding their payloads.
@@ -222,6 +259,7 @@ impl OperationRequest {
                 }
                 inputs
             }
+            Self::Backfill(_) => BTreeMap::new(),
         }
     }
 }

@@ -1,6 +1,8 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
 mod occurrences;
+pub(crate) use occurrences::OccurrenceScan;
+#[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
 
 use crate::{
@@ -103,6 +105,28 @@ pub(crate) async fn verify_objects(objects: Vec<ObjectRef>, budget: &Budget) -> 
         .blocking(move || {
             for object in objects {
                 verify_object(&object)?;
+            }
+            Ok(())
+        })
+        .await
+}
+
+pub(crate) async fn check_available(objects: Vec<ObjectRef>, budget: &Budget) -> Result<()> {
+    budget
+        .blocking(move || {
+            for object in objects {
+                let metadata = std::fs::metadata(&object.path).map_err(|_| {
+                    Error::refusal(
+                        "unavailable_phase",
+                        "retained completion references an unavailable object",
+                    )
+                })?;
+                if !metadata.is_file() || metadata.len() != object.bytes {
+                    return Err(Error::refusal(
+                        "unavailable_phase",
+                        "retained completion object size changed",
+                    ));
+                }
             }
             Ok(())
         })
