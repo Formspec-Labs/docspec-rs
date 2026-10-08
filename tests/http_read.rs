@@ -224,14 +224,24 @@ async fn empty_streams_keep_schema_and_known_failures_return_structured_errors()
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        serde_json::from_slice::<serde_json::Value>(
-            &to_bytes(response.into_body(), 1 << 20).await.unwrap()
-        )
-        .unwrap()
-        .get("code")
-        .is_some()
+    // Serving the committed result does not revalidate its historical input.
+    assert_eq!(response.status(), StatusCode::OK);
+    let reader = StreamReader::try_new(
+        Cursor::new(to_bytes(response.into_body(), 1 << 20).await.unwrap()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        reader.map(|batch| batch.unwrap().num_rows()).sum::<usize>(),
+        0
+    );
+    // The explicit integrity diagnostic still discovers that retained corruption.
+    assert_eq!(
+        docspec::engine::verify_release(&base, scalar::limits())
+            .await
+            .unwrap_err()
+            .code(),
+        "corrupt_object"
     );
 }
 

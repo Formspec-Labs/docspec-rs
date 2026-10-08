@@ -1,0 +1,60 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0277]: the trait bound `FooterTail: TryFrom<&[u8; 8]>` is not satisfied
+  --> src/storage/inspection.rs:48:24
+   |
+48 |             let size = FooterTail::try_from(&tail)?.metadata_length();
+   |                        ^^^^^^^^^^ the trait `std::convert::From<&[u8; 8]>` is not implemented for `FooterTail`
+   |
+help: the following other types implement trait `TryFrom<T>`
+  --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parquet-58.4.0/src/file/metadata/footer_tail.rs:90:1
+   |
+90 | impl TryFrom<[u8; FOOTER_SIZE]> for FooterTail {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `FooterTail` implements `TryFrom<[u8; 8]>`
+...
+98 | impl TryFrom<&[u8]> for FooterTail {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `FooterTail` implements `TryFrom<&[u8]>`
+   = note: required for `&[u8; 8]` to implement `Into<FooterTail>`
+   = note: required for `FooterTail` to implement `TryFrom<&[u8; 8]>`
+
+error[E0277]: `?` couldn't convert the error to `error::Error`
+  --> src/storage/inspection.rs:48:51
+   |
+48 |             let size = FooterTail::try_from(&tail)?.metadata_length();
+   |                        ---------------------------^ the trait `std::convert::From<Infallible>` is not implemented for `error::Error`
+   |                        |
+   |                        this can't be annotated with `?` because it has type `Result<_, Infallible>`
+   |
+note: `error::Error` needs to implement `From<Infallible>`
+  --> src/error.rs:7:1
+   |
+ 7 | pub struct Error {
+   | ^^^^^^^^^^^^^^^^
+   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+   = help: the following other types implement trait `std::convert::From<T>`:
+             `error::Error` implements `std::convert::From<DataFusionError>`
+             `error::Error` implements `std::convert::From<arrow::error::ArrowError>`
+             `error::Error` implements `std::convert::From<iceberg::Error>`
+             `error::Error` implements `std::convert::From<parquet::errors::ParquetError>`
+             `error::Error` implements `std::convert::From<serde_json::Error>`
+             `error::Error` implements `std::convert::From<std::io::Error>`
+             `error::Error` implements `std::convert::From<tokio::task::JoinError>`
+
+error[E0277]: the trait bound `FooterTail: std::convert::From<&[u8; 8]>` is not satisfied
+  --> src/storage/inspection.rs:48:24
+   |
+48 |             let size = FooterTail::try_from(&tail)?.metadata_length();
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `std::convert::From<&[u8; 8]>` is not implemented for `FooterTail`
+   |
+help: the following other types implement trait `TryFrom<T>`
+  --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parquet-58.4.0/src/file/metadata/footer_tail.rs:90:1
+   |
+90 | impl TryFrom<[u8; FOOTER_SIZE]> for FooterTail {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `FooterTail` implements `TryFrom<[u8; 8]>`
+...
+98 | impl TryFrom<&[u8]> for FooterTail {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `FooterTail` implements `TryFrom<&[u8]>`
+   = note: required for `&[u8; 8]` to implement `Into<FooterTail>`
+   = note: required for `FooterTail` to implement `TryFrom<&[u8; 8]>`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `docspec` (lib) due to 3 previous errors

@@ -1,8 +1,10 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
+mod inspection;
 mod occurrences;
 mod schema;
 mod tables;
+pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};
 pub(crate) use occurrences::OccurrenceScan;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
@@ -104,22 +106,23 @@ pub(crate) async fn verify_objects(objects: Vec<ObjectRef>, budget: &Budget) -> 
 }
 
 pub(crate) async fn check_available(objects: Vec<ObjectRef>, budget: &Budget) -> Result<()> {
-    check_objects(objects, budget, |object| {
-        let metadata = std::fs::metadata(&object.path).map_err(|_| {
-            Error::refusal(
-                "unavailable_phase",
-                "retained completion references an unavailable object",
-            )
-        })?;
-        if !metadata.is_file() || metadata.len() != object.bytes {
-            return Err(Error::refusal(
-                "unavailable_phase",
-                "retained completion object size changed",
-            ));
-        }
-        Ok(())
-    })
-    .await
+    check_objects(objects, budget, check_object_available).await
+}
+
+fn check_object_available(object: &ObjectRef) -> Result<()> {
+    let metadata = std::fs::metadata(&object.path).map_err(|_| {
+        Error::refusal(
+            "unavailable_phase",
+            "retained completion references an unavailable object",
+        )
+    })?;
+    if !metadata.is_file() || metadata.len() != object.bytes {
+        return Err(Error::refusal(
+            "unavailable_phase",
+            "retained completion object size changed",
+        ));
+    }
+    Ok(())
 }
 
 async fn check_objects(
@@ -484,7 +487,7 @@ pub(crate) async fn pin(
         let mut objects = Vec::new();
         for path in &inventory.paths {
             if let Some(shared) = inherited.get(path) {
-                verify_object(shared)?;
+                check_object_available(shared)?;
                 objects.push(shared.clone());
             } else {
                 let canonical = std::fs::canonicalize(path)?;

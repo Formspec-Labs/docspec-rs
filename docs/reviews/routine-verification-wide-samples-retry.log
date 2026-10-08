@@ -1,0 +1,31 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 5.31s
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00002.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00003.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00004.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00005.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00006.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00007.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00002.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00003.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00004.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00005.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00006.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgcRmeG/workspace/objects/comments/b7345fc550a94435bf2af97f52f3b472/data/cf68d375-ebec-41e0-af1d-f5ea31ced526-00007.parquet
+test routine_samples_allow_several_individually_bounded_wide_batches ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.48s
+

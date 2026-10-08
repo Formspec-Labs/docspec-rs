@@ -96,7 +96,7 @@ impl Engine {
         release: &ReleasePin,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
         let budget = &self.inner.lifecycle.budget;
-        verify_release_with_budget(release, budget).await?;
+        resolve_release(release, budget).await?;
         let source = storage::open_pin(&release.dataset.groups["source"]).await?;
         let context = self.context();
         let mut columns = source
@@ -388,9 +388,18 @@ impl Engine {
             return Err(invalid_group());
         }
         let definition = spec.group_definition();
-        let prepared =
-            Box::pin(self.prepare_group(&request, &operation, source, &definition, None, stop))
-                .await?;
+        let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
+        checks.trust(&base, &lifecycle.budget).await?;
+        let prepared = Box::pin(self.prepare_group(
+            &request,
+            &operation,
+            source,
+            &definition,
+            None,
+            stop,
+            &mut checks,
+        ))
+        .await?;
         let binding = ComputedGroup {
             definition,
             input_fields: prepared.input_fields,
@@ -429,6 +438,12 @@ impl Engine {
                 .computed
                 .insert(spec.group.to_string(), binding.clone());
             check_names(&dataset)?;
+            verify_groups(
+                &dataset,
+                &lifecycle.budget,
+                &mut super::verification::Checks::composition(),
+            )
+            .await?;
             let serialized = serde_json::to_vec_pretty(&dataset)?;
             if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
                 return Err(Error::refusal(
@@ -459,10 +474,25 @@ impl Engine {
                 let release = ReleasePin {
                     id: spec.operation.clone(),
                     dataset,
-                    manifest: storage::object(&spec.dataset, &manifest_path)?,
+                    manifest: ObjectRef {
+                        owner: spec.dataset.clone(),
+                        path: manifest_path.to_string_lossy().into_owned(),
+                        digest: blake3::hash(&serialized).to_hex().to_string(),
+                        bytes: serialized.len() as u64,
+                    },
                     verified: true,
                 };
-                verify_release_with_budget(&release, &lifecycle.budget).await?;
+                let memory = Arc::new(
+                    lifecycle
+                        .budget
+                        .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
+                );
+                let decoded: DatasetPin =
+                    inputs::read_manifest(&release.manifest, &lifecycle.budget, &mut 0, &memory)
+                        .await?;
+                if decoded != release.dataset {
+                    return Err(invalid_group());
+                }
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
                 let authority: Authority =
@@ -630,9 +660,8 @@ async fn read_completion(
         ));
     }
     let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
-    let mut objects = completion.outputs.clone();
-    objects.push(completion.descriptor.clone());
-    storage::verify_objects(objects, budget).await?;
+    storage::check_available(completion.outputs.clone(), budget).await?;
+    storage::verify_objects(vec![completion.descriptor.clone()], budget).await?;
     let files = iceberg::spec::read_data_files_from_avro(
         &mut std::fs::File::open(&completion.descriptor.path)?,
         schema,
@@ -705,9 +734,15 @@ mod tests {
     #[tokio::test]
     async fn native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning() {
         let root = tempfile::TempDir::new().unwrap();
-        let engine = Engine::open(root.path().join("workspace"), Limits::default())
-            .await
-            .unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
         let dataset = Id::new("cache").unwrap();
         let prepared = engine
             .write_frame(
@@ -757,6 +792,7 @@ mod tests {
                 &spec.group_definition(),
                 None,
                 None,
+                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
             )
             .await
             .unwrap();
@@ -821,6 +857,7 @@ mod tests {
                 &spec.group_definition(),
                 Some(&first.input_fields),
                 None,
+                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
             )
             .await
             .unwrap();
@@ -853,6 +890,7 @@ mod tests {
                 &spec.group_definition(),
                 None,
                 None,
+                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
             )
             .await
             .unwrap();

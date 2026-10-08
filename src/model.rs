@@ -89,6 +89,9 @@ pub struct DatasetPin {
     pub parent_manifest: Option<ObjectRef>,
     pub changes: Option<ChangePin>,
     pub processor: String,
+    /// Validation scope completed before selection. Older releases meet at least routine scope.
+    #[serde(default)]
+    pub validation: VerificationLevel,
 }
 
 /// An immutable consumer release selected through the lifecycle table.
@@ -97,7 +100,33 @@ pub struct ReleasePin {
     pub id: Id,
     pub dataset: DatasetPin,
     pub manifest: ObjectRef,
+    /// Routine validation/readback completed; this does not certify every payload value.
     pub verified: bool,
+}
+
+/// The amount of payload work requested by an independent verifier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationLevel {
+    /// Check references, schemas, sizes, footer counts and a bounded row sample.
+    #[default]
+    Routine,
+    /// Also hash payloads and reconstruct complete values, changes and evidence.
+    Deep,
+}
+
+/// Reports the scope of completed checks; routine counts come from metadata.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationReport {
+    pub level: VerificationLevel,
+    pub tables_checked: usize,
+    /// Unique files whose footers were inspected; not collected by the deep verifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_files_checked: Option<usize>,
+    pub rows_from_metadata: u64,
+    pub sampled_files: usize,
+    pub sampled_rows: usize,
+    pub sampled_decoded_bytes: usize,
 }
 
 /// Exact identity of one accepted release, without embedding its payload inventory.

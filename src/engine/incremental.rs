@@ -53,12 +53,9 @@ impl Engine {
         let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
         let budget = &self.inner.lifecycle.budget;
         // A base is read as an immutable result, never inferred from table heads.
-        verification::check_available(&base, budget).await?;
+        resolve_release(&base, budget).await?;
         let previous = refresh::load_inputs(&related.coverage, budget).await?;
         let current = refresh::load_inputs(coverage, budget).await?;
-        for release in previous.releases.values() {
-            storage::verify_objects(source(release)?.objects.clone(), budget).await?;
-        }
         match &spec.transform {
             RefreshTransform::Join(_) => {
                 Box::pin(self.process_incremental_join(spec, directory, &base, &previous, &current))

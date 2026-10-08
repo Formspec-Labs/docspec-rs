@@ -408,7 +408,7 @@ async fn identical_competing_updates_reconcile_and_noop_preserves_files() {
 }
 
 #[tokio::test]
-async fn affected_base_corruption_is_refused_before_rewriting() {
+async fn affected_base_with_incompatible_physical_schema_refuses_during_read() {
     let root = TempDir::new().unwrap();
     let (engine, _, before, _) = fixture(root.path()).await;
     let pin = &before.dataset.groups["source"];
@@ -417,7 +417,8 @@ async fn affected_base_corruption_is_refused_before_rewriting() {
         .iter()
         .find(|object| object.path.ends_with(".parquet"))
         .unwrap();
-    // Still-valid Parquet must not be accepted under its old retained identity.
+    // Replacing native output with ordinary Parquet loses the required field IDs.
+    // The native processing read refuses it without a preliminary payload hash.
     input(
         Path::new(&file.path),
         &[(Some(1), Some("corrupt".into()))],
@@ -426,9 +427,89 @@ async fn affected_base_corruption_is_refused_before_rewriting() {
     let mutation = update(root.path(), "initial", "changed", &[(Some(1), None)], &[]);
     assert_eq!(
         engine.update(&mutation).await.unwrap_err().code(),
-        "corrupt_object"
+        "iceberg"
     );
     assert_eq!(engine.latest(&mutation.dataset).await.unwrap(), before);
+}
+
+#[tokio::test]
+async fn routine_verification_inspects_shared_change_files_once() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+    let root = TempDir::new().unwrap();
+    let (engine, _, _, _) = fixture(root.path()).await;
+    let mutation = update(
+        root.path(),
+        "initial",
+        "changed",
+        &[(Some(1), Some("replacement".into()))],
+        &[],
+    );
+    let release = engine.update(&mutation).await.unwrap();
+    let changes = release.dataset.changes.as_ref().unwrap();
+    let paths: std::collections::BTreeSet<_> = [
+        &release.dataset.groups["source"],
+        &changes.added,
+        &changes.removed,
+    ]
+    .into_iter()
+    .flat_map(|pin| &pin.objects)
+    .filter(|object| object.path.ends_with(".parquet"))
+    .map(|object| object.path.as_str())
+    .collect();
+    let report = verify_release_at(&release, limits(), VerificationLevel::Routine)
+        .await
+        .unwrap();
+    assert_eq!(report.data_files_checked, Some(paths.len()));
+    assert!(report.sampled_files <= 3);
+}
+
+#[tokio::test]
+#[cfg(feature = "test-util")]
+async fn update_creation_inspects_only_new_files_without_duplicate_change_checks() {
+    let root = TempDir::new().unwrap();
+    let (engine, _, base, _) = fixture(root.path()).await;
+    let mutation = update(
+        root.path(),
+        "initial",
+        "changed",
+        &[(Some(1), Some("new value".into()))],
+        &[],
+    );
+    drop(engine);
+    let request = root.path().join("request.json");
+    let profile = root.path().join("limits.json");
+    std::fs::write(&request, serde_json::to_vec(&mutation).unwrap()).unwrap();
+    std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(root.path().join("workspace"))
+        .arg("--limits")
+        .arg(profile)
+        .arg("update")
+        .arg(request)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(result.status.success(), "{stderr}");
+    let inspected: Vec<_> = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("DOCSPEC_TEST_INSPECT_FILE "))
+        .collect();
+    assert!(!inspected.is_empty());
+    assert_eq!(
+        inspected.len(),
+        inspected
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    );
+    assert!(inspected.iter().all(|path| {
+        !base.dataset.groups["source"]
+            .objects
+            .iter()
+            .any(|object| object.path == *path)
+    }));
+    assert!(!stderr.contains("DOCSPEC_TEST_DEEP_TABLE"));
 }
 
 #[tokio::test]

@@ -8,6 +8,7 @@ pub(super) async fn verify_changes(
     source: &TablePin,
     changes: Option<&ChangePin>,
     budget: &Budget,
+    checks: &mut verification::Checks,
 ) -> Result<()> {
     let invalid = || {
         Error::refusal(
@@ -72,7 +73,9 @@ pub(super) async fn verify_changes(
     }
     // Shallow verification of the exact prior source avoids recursively scanning
     // every historical change chain while establishing the delta's before state.
-    verify_table(before_source, budget).await?;
+    if checks.deep() {
+        checks.table(before_source, budget).await?;
+    }
     let native_before = storage::open_pin(before_source).await?;
     let native_after = storage::open_pin(source).await?;
     let expected_ids: Option<Vec<_>> = keys
@@ -111,11 +114,14 @@ pub(super) async fn verify_changes(
         ("added", &changes.added),
     ] {
         if name == "removed" || name == "added" {
-            verify_table(pin, budget).await?;
+            checks.table(pin, budget).await?;
         }
         let native = storage::open_pin(pin).await?;
         if native.metadata().current_schema() != native_after.metadata().current_schema() {
             return Err(invalid());
+        }
+        if !checks.deep() {
+            continue;
         }
         context.register_table(
             format!("raw_{name}"),
@@ -128,6 +134,9 @@ pub(super) async fn verify_changes(
                 .await?
                 .into_view(),
         )?;
+    }
+    if !checks.deep() {
+        return Ok(());
     }
     // One aggregate checks both invariants without decoding before/removed twice.
     let union = [("before", 1, 1), ("removed", -1, -1), ("added", 0, 1), ("after", 0, -1)]

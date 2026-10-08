@@ -3,6 +3,10 @@
 use super::*;
 
 impl Engine {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "One operation shares validation and sampling state across field groups"
+    )]
     pub(in crate::engine) async fn prepare_group(
         &self,
         request: &OperationRequest,
@@ -11,6 +15,7 @@ impl Engine {
         definition: &GroupDefinition,
         input_fields: Option<&BTreeMap<String, i32>>,
         stop: Option<&str>,
+        checks: &mut super::super::verification::Checks,
     ) -> Result<PreparedGroup> {
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(request.dataset()).await;
@@ -162,6 +167,7 @@ impl Engine {
                 &expressions.input_fields,
                 &expressions.native_field_ids,
                 &lifecycle.budget,
+                checks,
             )
             .await?;
             let _guard = lock.lock().await;
@@ -269,7 +275,6 @@ impl Engine {
                 "computed output and scratch do not fit available disk",
             ));
         }
-        storage::verify_objects(vec![source.clone()], budget).await?;
         let _execution = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
         let limit = budget.limits.max_batch_bytes;
         let stream = scan

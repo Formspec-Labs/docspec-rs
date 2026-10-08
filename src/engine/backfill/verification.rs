@@ -18,7 +18,11 @@ pub(in crate::engine) async fn verify_binding_dependencies(
     Ok(())
 }
 
-pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Result<()> {
+pub(crate) async fn verify_groups(
+    dataset: &DatasetPin,
+    budget: &Budget,
+    checks: &mut super::super::verification::Checks,
+) -> Result<()> {
     if dataset.groups.len() != dataset.computed.len() + 1 {
         return Err(invalid_group());
     }
@@ -201,6 +205,7 @@ pub(crate) async fn verify_groups(dataset: &DatasetPin, budget: &Budget) -> Resu
             &binding.input_fields,
             &binding.native_field_ids,
             budget,
+            checks,
         )
         .await?;
     }
@@ -369,14 +374,14 @@ pub(super) async fn verify_group_data(
     input_fields: &BTreeMap<String, i32>,
     native_field_ids: &BTreeMap<i32, i32>,
     budget: &Budget,
+    checks: &mut super::super::verification::Checks,
 ) -> Result<()> {
     if group.rows != source.rows {
         return Err(invalid_group());
     }
-    storage::verify_objects(group.objects.clone(), budget).await?;
+    checks.table(group, budget).await?;
     let source_native = storage::open_pin(source).await?;
     let group_native = storage::open_pin(group).await?;
-    storage::check_inventory(group, &group_native, budget).await?;
     let expressions = Expressions::compile(
         &budget.context(),
         source_native.metadata().current_schema(),
@@ -390,6 +395,9 @@ pub(super) async fn verify_group_data(
             "invalid_group",
             "computed schema or logical-to-native field mapping differs",
         ));
+    }
+    if !checks.deep() {
+        return Ok(());
     }
     {
         let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
@@ -595,6 +603,7 @@ mod tests {
                 parent_manifest: None,
                 changes: None,
                 processor: "test".into(),
+                validation: VerificationLevel::Routine,
             };
             let path = root.path().join(format!("{version}.json"));
             std::fs::write(&path, serde_json::to_vec(&dataset).unwrap()).unwrap();

@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.16s
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 1 test
+test cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 5.76s
+

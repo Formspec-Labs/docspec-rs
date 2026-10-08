@@ -1,0 +1,21 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.25s
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'routine_samples_allow_several_individually_bounded_wide_batches' (10640425) panicked at tests/lifecycle.rs:199:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "oversized_batch", message: "decoded batch uses 722144 bytes, exceeding the 65536 byte allowance; reduce batch rows or split oversized values", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test routine_samples_allow_several_individually_bounded_wide_batches ... FAILED
+
+failures:
+
+failures:
+    routine_samples_allow_several_individually_bounded_wide_batches
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.25s
+
+error: test failed, to rerun pass `--test lifecycle`

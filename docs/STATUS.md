@@ -1,5 +1,55 @@
 # Implementation and qualification status
 
+## Current verification policy
+
+User steering on 2026-10-08 supersedes earlier notes below that describe automatic
+full verification. Creation now checks schema/field IDs/types, file sizes, footer
+counts and bounded samples. Output validation runs once at its retained phase;
+final assembly checks metadata composition, and readback checks the serialized
+manifest. Ordinary reads resolve that manifest and stream the requested data,
+without inspecting historical payloads or replaying the dependency graph. Refresh
+admission trusts accepted captured versions. Newly created durable objects retain
+one initial digest; inherited objects reuse their retained digest.
+
+`verify` is an explicit routine diagnostic. It reports its sample scope (at most
+three native files, eight rows each, and one configured decoded batch-byte
+allowance per file, at most three allowances across its graph). It reads each live file's footer; work still scales with file
+and metadata count. Native readers may fetch/decode compressed pages or row groups
+larger than the returned sample. Neither footer admission nor decoded sample limits
+establish a whole-process memory or physical-I/O bound. Same-size unsampled
+corruption may pass. `verify --deep` and qualification callers retain payload
+hashes and complete reconstruction. Neither is a prerequisite for serving data.
+
+The first suite exposed an outdated HTTP expectation that historical input damage
+must prevent reading an already completed empty result. The updated test requires
+the read to succeed and the explicit deep diagnostic to identify that damage.
+The 10-million-Comments performance target remains **unqualified**; removed scans
+are established by the call paths and tests, not a measured throughput claim.
+
+Creation now trusts physical files from the exact completed base and shares one
+bounded check inventory across source, changes, evidence and coordinated scalar
+groups. A newly written file shared by source and change tables is inspected once.
+Reuse requires the same object identity, native row count and compatible physical
+schema history. Each table still checks its own metadata, declared counts and
+references. Explicit routine verification starts without trusted files and deduplicates
+physical checks within that diagnostic. File-size/stat checks and metadata traversal
+can still repeat; this does not establish update latency independent of population.
+
+Review exposed a sample-budget refusal for individually valid wide batches; the
+shared allowance now covers at most three per-batch limits. A regression fixture
+also encountered retained input row-group buffers exceeding a small batch allowance
+during processing. Smaller input row groups isolate the sampling test, whose retry
+passes; the original failure remains in the review logs. It does not establish a
+general bound on DataFusion's backing-buffer memory.
+
+The corrected full repository gate passed; see
+[the gate log](reviews/routine-verification-final-check-retry.log) and
+[independent review](reviews/routine-verification-consistency.md). Process tests
+show creation inspection once, no inspection during ordinary read/resume, no
+duplicate source/change file inspection, and no inherited-file footer inspection
+during an update. Explicit deep corruption/reconstruction tests remain enabled.
+
+
 This repository follows the user's local-first, Iceberg-only revision of the
 [greenfield proposal](PLAN.md).
 The revision selects Iceberg rather than the older document's Lance-first
@@ -95,8 +145,8 @@ The common phase path retains admission, processing, validation and readback.
 Every phase and final selection checks the captured base. Competing attempts of
 the same operation reconcile its durable result. Changes bind the base manifest,
 exact before/after metadata, key IDs, typed removed/added tables and row counts.
-Base bytes are verified before rewriting; validation and independent readback
-verify the change tables, removed-row membership and exact multiset reconstruction.
+Creation checks the change-table shape and count arithmetic. Explicit deep
+verification checks removed-row membership and exact multiset reconstruction.
 Fixtures additionally compare the applied source values against request semantics.
 
 See [update tests](../tests/updates.rs), the independent
@@ -820,9 +870,9 @@ cancellation. This admission does not bound every allocation in native metadata
 opening. Cached related readback also checks the schema input's original metadata,
 even when that input has no computed groups.
 
-The source writes are metadata-only. Pinning still hashes inherited objects;
-validation and independent readback still decode values, and computed groups retain
-their full verification work. Rename latency independent of population, total I/O
+The source writes are metadata-only. Pinning now preserves inherited digests;
+creation uses routine checks and serialized readback. Explicit deep verification
+retains complete value checks. Rename latency independent of population, total I/O
 savings and whole-process memory bounds have not been measured. Native metadata
 handles now share the maintained `Arc<TableMetadata>` before creating the one
 candidate copy, avoiding redundant owned clones. A diagnostic debug-build probe

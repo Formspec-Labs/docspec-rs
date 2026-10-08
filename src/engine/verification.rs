@@ -4,6 +4,152 @@ use super::*;
 
 type Key = (Id, Id);
 
+/// One sampling allowance across all tables and semantic dependencies in a request.
+pub(super) struct Checks {
+    pub report: VerificationReport,
+    inspect_tables: bool,
+    known: BTreeMap<String, storage::CheckedFile>,
+    _memory: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+}
+
+impl Checks {
+    pub fn new(level: VerificationLevel) -> Self {
+        Self {
+            report: VerificationReport {
+                level,
+                data_files_checked: (level == VerificationLevel::Routine).then_some(0),
+                ..VerificationReport::default()
+            },
+            inspect_tables: true,
+            known: BTreeMap::new(),
+            _memory: None,
+        }
+    }
+
+    /// Components already passed their durable validation; check only their assembly.
+    pub fn composition() -> Self {
+        Self {
+            inspect_tables: false,
+            ..Self::new(VerificationLevel::Routine)
+        }
+    }
+
+    pub fn deep(&self) -> bool {
+        self.report.level == VerificationLevel::Deep
+    }
+
+    pub fn inspects_tables(&self) -> bool {
+        self.inspect_tables
+    }
+
+    /// Trust immutable files from the operation's already completed captured base.
+    pub async fn trust(&mut self, release: &ReleasePin, budget: &Budget) -> Result<()> {
+        self.admit(budget)?;
+        let mut bytes = self.known.values().fold(0usize, |sum, file| {
+            sum.saturating_add(file.estimated_bytes())
+        });
+        for pin in release.dataset.groups.values().chain(
+            release
+                .dataset
+                .related
+                .iter()
+                .map(|related| &related.evidence),
+        ) {
+            let table = storage::open_pin(pin).await?;
+            let schemas = Arc::new(
+                table
+                    .metadata()
+                    .schemas_iter()
+                    .map(|schema| storage::schema_identity(schema.as_struct()))
+                    .collect::<Result<std::collections::BTreeSet<_>>>()?,
+            );
+            let inventory = storage::snapshot_files(&table, budget).await?;
+            let objects: BTreeMap<_, _> = pin
+                .objects
+                .iter()
+                .map(|object| (object.path.as_str(), object))
+                .collect();
+            for file in &inventory.data {
+                let object = objects
+                    .get(file.file_path())
+                    .ok_or_else(|| invalid("completed table has no data-file identity"))?;
+                let known = storage::CheckedFile {
+                    object: (*object).clone(),
+                    schemas: schemas.clone(),
+                    rows: file.record_count(),
+                };
+                bytes = bytes
+                    .saturating_add(known.estimated_bytes())
+                    .saturating_sub(
+                        self.known
+                            .get(&object.path)
+                            .map_or(0, storage::CheckedFile::estimated_bytes),
+                    );
+                if bytes > budget.limits.max_metadata_bytes {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "checked-file inventory exceeds metadata allowance",
+                    ));
+                }
+                if let Some(previous) = self.known.insert(object.path.clone(), known)
+                    && (previous.object != **object || previous.rows != file.record_count())
+                {
+                    return Err(invalid(
+                        "completed tables disagree about shared file identity",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn admit(&mut self, budget: &Budget) -> Result<()> {
+        if self._memory.is_none() {
+            self._memory = Some(Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?));
+        }
+        Ok(())
+    }
+
+    pub async fn table(&mut self, pin: &TablePin, budget: &Budget) -> Result<()> {
+        if !self.inspect_tables {
+            return Ok(());
+        }
+        if self.deep() {
+            verify_table(pin, budget).await?;
+        } else {
+            self.admit(budget)?;
+            let (inspected, known) = storage::inspect_table(
+                pin,
+                budget,
+                3usize.saturating_sub(self.report.sampled_files),
+                budget
+                    .limits
+                    .max_batch_bytes
+                    .saturating_mul(3)
+                    .saturating_sub(self.report.sampled_decoded_bytes),
+                std::mem::take(&mut self.known),
+                self._memory
+                    .as_ref()
+                    .ok_or_else(|| invalid("checked files lack admission"))?
+                    .clone(),
+            )
+            .await?;
+            self.known = known;
+            *self.report.data_files_checked.get_or_insert(0) += inspected.files;
+            self.report.sampled_files += inspected.sampled_files;
+            self.report.sampled_rows += inspected.sampled_rows;
+            self.report.sampled_decoded_bytes += inspected.sampled_bytes;
+        }
+        self.report.tables_checked += 1;
+        self.report.rows_from_metadata = self
+            .report
+            .rows_from_metadata
+            .checked_add(pin.rows)
+            .ok_or_else(|| invalid("verified metadata counts overflow"))?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
     Visiting,
@@ -61,8 +207,14 @@ enum Work {
     Finish(Key),
 }
 
-pub(super) async fn verify_all(roots: &[&ReleasePin], budget: &Budget) -> Result<()> {
-    Box::pin(walk(roots, budget, true)).await.map(|_| ())
+pub(super) async fn verify_all(
+    roots: &[&ReleasePin],
+    budget: &Budget,
+    checks: &mut Checks,
+) -> Result<()> {
+    Box::pin(walk(roots, budget, Some(checks)))
+        .await
+        .map(|_| ())
 }
 
 pub(super) async fn check_available(release: &ReleasePin, budget: &Budget) -> Result<()> {
@@ -73,10 +225,14 @@ pub(super) async fn available_graph(
     release: &ReleasePin,
     budget: &Budget,
 ) -> Result<DependencyGraph> {
-    Box::pin(walk(&[release], budget, false)).await
+    Box::pin(walk(&[release], budget, None)).await
 }
 
-async fn walk(roots: &[&ReleasePin], budget: &Budget, full: bool) -> Result<DependencyGraph> {
+async fn walk(
+    roots: &[&ReleasePin],
+    budget: &Budget,
+    mut checks: Option<&mut Checks>,
+) -> Result<DependencyGraph> {
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut nodes: BTreeMap<Key, Node> = BTreeMap::new();
     let mut expected = BTreeMap::new();
@@ -140,17 +296,14 @@ async fn walk(roots: &[&ReleasePin], budget: &Budget, full: bool) -> Result<Depe
                 let node = nodes
                     .get(&key)
                     .ok_or_else(|| invalid("missing verification node"))?;
-                if !full {
+                let mut composition = Checks::composition();
+                let checks = if let Some(checks) = checks.as_deref_mut() {
+                    checks
+                } else {
                     storage::check_available(release_objects(&node.release), budget).await?;
-                    schema::check_available(&node.release.dataset, budget).await?;
-                    backfill::verify_binding_dependencies(&node.release.dataset, budget).await?;
-                    nodes
-                        .get_mut(&key)
-                        .ok_or_else(|| invalid("missing verification node"))?
-                        .state = State::Verified;
-                    continue;
-                }
-                verify_local_release(&node.release, budget).await?;
+                    &mut composition
+                };
+                verify_local_release(&node.release, budget, checks).await?;
                 if let Some(related) = &node.release.dataset.related {
                     let inputs: BTreeMap<_, _> = related
                         .coverage
@@ -179,6 +332,7 @@ async fn walk(roots: &[&ReleasePin], budget: &Budget, full: bool) -> Result<Depe
                         related,
                         &inputs,
                         budget,
+                        checks,
                     ))
                     .await?;
                 }

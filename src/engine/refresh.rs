@@ -53,7 +53,6 @@ impl Engine {
         let coverage = self.capture_inputs(&spec.inputs()).await?;
         let budget = &self.inner.lifecycle.budget;
         let loaded = load_inputs(&coverage, budget).await?;
-        verification::verify_all(&loaded.releases.values().collect::<Vec<_>>(), budget).await?;
         if let RefreshTransform::Aggregate(aggregate) = &spec.transform {
             aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
                 .await?;
@@ -103,6 +102,7 @@ impl Engine {
             &spec.transform,
             &loaded.borrowed(),
             &self.inner.lifecycle.budget,
+            true,
         )
         .await?;
         self.write_frame(&spec.dataset, directory, frame).await
@@ -456,6 +456,7 @@ async fn join_frame(
     spec: &JoinTransform,
     releases: &BTreeMap<Id, &ReleasePin>,
     budget: &Budget,
+    enforce_cardinality: bool,
 ) -> Result<DataFrame> {
     for (alias, version) in [("join_left", &spec.left), ("join_right", &spec.right)] {
         let release = releases.get(&version.dataset).ok_or_else(invalid)?;
@@ -466,12 +467,20 @@ async fn join_frame(
             storage::open_pin(release.dataset.groups.get("source").ok_or_else(invalid)?).await?;
         context.register_table(alias, crate::query::occurrences(native, budget.clone())?)?;
     }
-    join_registered(context, spec).await
+    join_plan(context, spec, enforce_cardinality).await
 }
 
 pub(super) async fn join_registered(
     context: &SessionContext,
     spec: &JoinTransform,
+) -> Result<DataFrame> {
+    join_plan(context, spec, true).await
+}
+
+async fn join_plan(
+    context: &SessionContext,
+    spec: &JoinTransform,
+    enforce_cardinality: bool,
 ) -> Result<DataFrame> {
     let schemas = [
         context
@@ -563,10 +572,14 @@ pub(super) async fn join_registered(
     };
     // A semi join preserves each candidate partner once, so malformed declared
     // cardinality refuses before a duplicate-key Cartesian result is written.
-    for side in match spec.join.cardinality {
-        JoinCardinality::ManyToMany => vec![],
-        JoinCardinality::ManyToOne => vec![JoinSide::Right],
-        JoinCardinality::OneToOne => vec![JoinSide::Right, JoinSide::Left],
+    for side in if !enforce_cardinality {
+        vec![]
+    } else {
+        match spec.join.cardinality {
+            JoinCardinality::ManyToMany => vec![],
+            JoinCardinality::ManyToOne => vec![JoinSide::Right],
+            JoinCardinality::OneToOne => vec![JoinSide::Right, JoinSide::Left],
+        }
     } {
         let (from, keys) = match side {
             JoinSide::Right => (
@@ -613,9 +626,10 @@ pub(super) async fn verify_related(
     source: &TablePin,
     related: &RelatedResult,
     budget: &Budget,
+    checks: &mut verification::Checks,
 ) -> Result<()> {
     let loaded = load_inputs(&related.coverage, budget).await?;
-    verify_related_with_inputs(source, related, &loaded.borrowed(), budget).await
+    verify_related_with_inputs(source, related, &loaded.borrowed(), budget, checks).await
 }
 
 pub(super) async fn verify_related_with_inputs(
@@ -623,6 +637,7 @@ pub(super) async fn verify_related_with_inputs(
     related: &RelatedResult,
     releases: &BTreeMap<Id, &ReleasePin>,
     budget: &Budget,
+    checks: &mut verification::Checks,
 ) -> Result<()> {
     if related.coverage.inputs != related.request.inputs() {
         return Err(invalid());
@@ -641,7 +656,14 @@ pub(super) async fn verify_related_with_inputs(
     inputs::check_relationships(&related.coverage, &relationships)?;
     let context = budget.context();
     validate(&related.request)?;
-    let expected = source_frame(&context, &related.request.transform, releases, budget).await?;
+    let expected = source_frame(
+        &context,
+        &related.request.transform,
+        releases,
+        budget,
+        false,
+    )
+    .await?;
     let expected_schema =
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
     let native = storage::open_pin(source).await?;
@@ -661,8 +683,10 @@ pub(super) async fn verify_related_with_inputs(
         .iter()
         .map(|field| quote(field.name()))
         .collect::<Vec<_>>();
-    equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
-    verify_table(&related.evidence, budget).await?;
+    if checks.deep() {
+        equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
+    }
+    checks.table(&related.evidence, budget).await?;
     let evidence = storage::open_pin(&related.evidence).await?;
     let expected_evidence = evidence_frame(&context, &related.request.transform, "actual").await?;
     let evidence_columns = expected_evidence
@@ -681,6 +705,9 @@ pub(super) async fn verify_related_with_inputs(
             "invalid_related_result",
             "contributor evidence schema differs from the selected native result",
         ));
+    }
+    if !checks.deep() {
+        return Ok(());
     }
     context.register_table("evidence", crate::query::table(evidence, budget.clone())?)?;
     equal_multisets(&context, "expected_evidence", "evidence", &evidence_columns).await?;
@@ -757,9 +784,12 @@ async fn source_frame(
     transform: &RefreshTransform,
     releases: &BTreeMap<Id, &ReleasePin>,
     budget: &Budget,
+    enforce_cardinality: bool,
 ) -> Result<DataFrame> {
     match transform {
-        RefreshTransform::Join(join) => join_frame(context, join, releases, budget).await,
+        RefreshTransform::Join(join) => {
+            join_frame(context, join, releases, budget, enforce_cardinality).await
+        }
         RefreshTransform::Aggregate(aggregate) => {
             aggregation::register_input(context, aggregate, releases, budget).await?;
             aggregation::aggregate_frame(context, &aggregate.grouping, "aggregate_input").await

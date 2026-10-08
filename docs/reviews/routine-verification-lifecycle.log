@@ -1,0 +1,128 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.23s
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 20 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+test dependency_correction_fences_adoption_without_output_change ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+DOCSPEC_TEST_WORK admission
+test independent_reader_rejects_same_size_corruption ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... DOCSPEC_TEST_WORK processing
+ok
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK admission
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+test empty_output_keeps_schema_and_readable_history ... ok
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+test comparison_preserves_duplicates_and_historical_release ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+test plan_and_run_apply_the_same_definition_fence ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+test relocated_build_retry_keeps_the_original_readback_request ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+killed build worker after admission; status=signal: 9 (SIGKILL)
+killed build worker after processing; status=signal: 9 (SIGKILL)
+killed build worker after validation; status=signal: 9 (SIGKILL)
+killed build worker after readback; status=signal: 9 (SIGKILL)
+killed build worker after selection; status=signal: 9 (SIGKILL)
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.73s
+

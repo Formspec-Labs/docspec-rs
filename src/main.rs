@@ -4,10 +4,10 @@ use clap::{Parser, Subcommand};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_evidence, read_group, verify_input_coverage, verify_release},
+    engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
     model::{
         BackfillSpec, GenerationSeal, Id, InputCoverage, RefreshSpec, ReleasePin, RunSpec,
-        SchemaSpec, UpdateSpec, VersionRef,
+        SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     storage,
 };
@@ -107,7 +107,12 @@ enum Command {
         definition: Option<String>,
     },
     /// Verify a release pin without opening the producer catalog.
-    Verify { release: PathBuf },
+    Verify {
+        release: PathBuf,
+        /// Hash every payload and reconstruct derived results.
+        #[arg(long)]
+        deep: bool,
+    },
     /// Stream a pinned result as Arrow IPC without the producer catalog.
     Read {
         release: PathBuf,
@@ -148,10 +153,17 @@ async fn main() -> anyhow::Result<()> {
             let (digest, bytes) = storage::digest(&input)?;
             print_json(&serde_json::json!({"digest": digest, "bytes": bytes}))?;
         }
-        Command::Verify { release } => {
+        Command::Verify { release, deep } => {
             let release: ReleasePin = read_json(release)?;
-            verify_release(&release, limits).await?;
-            print_json(&serde_json::json!({"verified": true, "release": release.id}))?;
+            let level = if deep {
+                VerificationLevel::Deep
+            } else {
+                VerificationLevel::Routine
+            };
+            let report = verify_release_at(&release, limits, level).await?;
+            print_json(
+                &serde_json::json!({"verified": true, "release": release.id, "checks": report}),
+            )?;
         }
         Command::VerifyInputs { coverage } => {
             verify_input_coverage(&read_json::<InputCoverage>(coverage)?, limits).await?;

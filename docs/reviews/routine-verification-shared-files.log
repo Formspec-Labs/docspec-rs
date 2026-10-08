@@ -1,0 +1,22 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.08s
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 14 tests
+test affected_base_with_incompatible_physical_schema_refuses_during_read ... ok
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test routine_verification_inspects_shared_change_files_once ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test update_creation_inspects_only_new_files_without_duplicate_change_checks ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.16s
+

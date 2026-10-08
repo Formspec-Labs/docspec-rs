@@ -4,7 +4,7 @@ use super::*;
 use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter};
 
 impl Engine {
-    /// Streams one independently verified field group from an exact release.
+    /// Streams one retained field group from an exact release.
     ///
     /// # Errors
     /// Refuses unknown groups, invalid retained releases, or exhausted reader capacity.
@@ -29,7 +29,7 @@ impl Engine {
     }
 }
 
-/// Streams an independently verified field group without requiring its producing catalog.
+/// Streams a retained field group without requiring its producing catalog.
 ///
 /// The injected budget shares admission with other readers and application work.
 ///
@@ -43,11 +43,11 @@ pub async fn read_group(
     let pin = release.dataset.groups.get(group).ok_or_else(|| {
         Error::refusal("missing_group", "release lacks the requested field group")
     })?;
-    verify_release_with_budget(release, budget).await?;
+    resolve_release(release, budget).await?;
     read_pin(pin, budget).await
 }
 
-/// Streams independently verified contributor occurrences without the producing catalog.
+/// Streams retained contributor occurrences without the producing catalog.
 ///
 /// # Errors
 /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
@@ -59,7 +59,7 @@ pub async fn read_evidence(
         release.dataset.related.as_ref().ok_or_else(|| {
             Error::refusal("missing_evidence", "release has no contributor relation")
         })?;
-    verify_release_with_budget(release, budget).await?;
+    resolve_release(release, budget).await?;
     read_pin(&related.evidence, budget).await
 }
 

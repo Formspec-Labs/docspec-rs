@@ -1,0 +1,52 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0433]: failed to resolve: could not find `Checks` in `verification`
+   --> src/engine/backfill.rs:789:43
+    |
+789 |                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+    |                                           ^^^^^^ could not find `Checks` in `verification`
+    |
+help: consider importing this struct
+    |
+732 +     use crate::engine::verification::Checks;
+    |
+help: if you import `Checks`, refer to it directly
+    |
+789 -                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+789 +                 &mut Checks::new(VerificationLevel::Routine),
+    |
+
+error[E0433]: failed to resolve: could not find `Checks` in `verification`
+   --> src/engine/backfill.rs:854:43
+    |
+854 |                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+    |                                           ^^^^^^ could not find `Checks` in `verification`
+    |
+help: consider importing this struct
+    |
+732 +     use crate::engine::verification::Checks;
+    |
+help: if you import `Checks`, refer to it directly
+    |
+854 -                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+854 +                 &mut Checks::new(VerificationLevel::Routine),
+    |
+
+error[E0433]: failed to resolve: could not find `Checks` in `verification`
+   --> src/engine/backfill.rs:887:43
+    |
+887 |                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+    |                                           ^^^^^^ could not find `Checks` in `verification`
+    |
+help: consider importing this struct
+    |
+732 +     use crate::engine::verification::Checks;
+    |
+help: if you import `Checks`, refer to it directly
+    |
+887 -                 &mut super::verification::Checks::new(VerificationLevel::Routine),
+887 +                 &mut Checks::new(VerificationLevel::Routine),
+    |
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `docspec` (lib test) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

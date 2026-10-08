@@ -289,7 +289,6 @@ impl Engine {
             replacement_bytes,
         } = request;
         let budget = &self.inner.lifecycle.budget;
-        storage::verify_objects(before.objects.clone(), budget).await?;
         let native = storage::open_pin(before).await?;
         let inventory = storage::snapshot_files(&native, budget).await?;
         storage::check_inventory_files(before, &inventory)?;

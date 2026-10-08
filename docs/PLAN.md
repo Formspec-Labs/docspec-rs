@@ -39,6 +39,31 @@ plan, run, inspect, resume, read, verify, compare, backfill, refresh, publish,
 compact, retention preview/execute and restore-point create/restore. CLI and HTTP
 exchange bounded metadata; bulk reads stream batches.
 
+## Performance and user-value rules
+
+Do work once and retain its useful result. Repeat a read, validation, transfer or
+computation only when a concrete correctness boundary requires it, or avoiding it
+would add more complexity than it removes. Favor immutable selected versions and
+small commit-time authority checks. Ordinary reads resolve a version and stream
+the requested data; they do not revalidate historical inputs or dependency graphs.
+
+Validate new outputs at their creation boundary using schema/field IDs/types,
+file sizes, footer row counts and a bounded native row sample. Final assembly
+checks that the already validated components belong together; readback checks the
+serialized selection, without repeating payload validation. Reuse completed
+validation on resume. Initial admission hashes while copying; a newly written
+durable native file currently needs one digest pass because the maintained writer
+does not return a checksum. Retain that exception until measurement justifies a
+writer adapter.
+
+Diagnostics must serve a real decision: establish that a retained result is
+usable, investigate a reported discrepancy, or explain a failed operation. The
+explicit `verify` command checks routine structure and a small sample;
+`verify --deep` checks full integrity and reconstructs derived results. Deep
+checks and exact independent comparisons remain in qualification tests. Do not
+turn optional diagnostics or comprehensive reports into a normal-path dependency.
+Sampling does not establish exact unsampled values or statistical completeness.
+
 ## Lifecycle
 
 Record completion at useful boundaries: admission/transfer, processing, evidence

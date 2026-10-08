@@ -72,6 +72,211 @@ fn fixture(root: &std::path::Path) -> RunSpec {
 }
 
 #[tokio::test]
+async fn routine_checks_report_scope_and_deep_checks_find_same_size_input_damage() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+    let root = TempDir::new().unwrap();
+    let spec = fixture(root.path());
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let release = engine.run(&spec).await.unwrap();
+    let report = verify_release_at(&release, limits(), VerificationLevel::Routine)
+        .await
+        .unwrap();
+    assert_eq!(report.level, VerificationLevel::Routine);
+    assert_eq!(report.tables_checked, 1);
+    assert_eq!(report.rows_from_metadata, 4);
+    assert!(report.sampled_files > 0 && report.sampled_files <= 3);
+    assert!(report.sampled_rows > 0 && report.sampled_rows <= 24);
+    let input = &release.dataset.inputs["input"];
+    let mut bytes = std::fs::read(&input.path).unwrap();
+    bytes[0] ^= 1;
+    std::fs::write(&input.path, bytes).unwrap();
+    // Routine checks deliberately trust retained identities for unsampled payloads.
+    verify_release_at(&release, limits(), VerificationLevel::Routine)
+        .await
+        .unwrap();
+    assert_eq!(
+        verify_release(&release, limits()).await.unwrap_err().code(),
+        "corrupt_object"
+    );
+    // Serving uses only the selected result; producer inputs need not be re-opened.
+    std::fs::remove_file(&input.path).unwrap();
+    let mut stream = engine.read_group(&release, "source").await.unwrap();
+    let mut rows = 0;
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 4);
+    assert_eq!(
+        verify_release_at(&release, limits(), VerificationLevel::Routine)
+            .await
+            .unwrap_err()
+            .code(),
+        "unavailable_phase"
+    );
+}
+
+#[tokio::test]
+async fn routine_checks_reject_damaged_footer_and_declared_counts() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+    let root = TempDir::new().unwrap();
+    let spec = fixture(root.path());
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let release = engine.run(&spec).await.unwrap();
+    let mut forged = release.clone();
+    forged.dataset.groups.get_mut("source").unwrap().rows += 1;
+    let bytes = serde_json::to_vec(&forged.dataset).unwrap();
+    let path = root.path().join("forged.json");
+    std::fs::write(&path, &bytes).unwrap();
+    forged.manifest.path = path.to_string_lossy().into_owned();
+    forged.manifest.bytes = bytes.len() as u64;
+    forged.manifest.digest = blake3::hash(&bytes).to_hex().to_string();
+    assert_eq!(
+        verify_release_at(&forged, limits(), VerificationLevel::Routine)
+            .await
+            .unwrap_err()
+            .code(),
+        "row_count_mismatch"
+    );
+    let data = release.dataset.groups["source"]
+        .objects
+        .iter()
+        .find(|object| object.path.ends_with(".parquet"))
+        .unwrap();
+    let mut bytes = std::fs::read(&data.path).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    std::fs::write(&data.path, bytes).unwrap();
+    assert_eq!(
+        verify_release_at(&release, limits(), VerificationLevel::Routine)
+            .await
+            .unwrap_err()
+            .code(),
+        "parquet"
+    );
+}
+
+#[tokio::test]
+async fn routine_samples_allow_several_individually_bounded_wide_batches() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+    let root = TempDir::new().unwrap();
+    let mut spec = fixture(root.path());
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "comment",
+        DataType::Utf8,
+        false,
+    )]));
+    let values: Vec<String> = (0..24)
+        .map(|row| {
+            (0..470)
+                .map(|part| {
+                    blake3::hash(format!("{row}:{part}").as_bytes())
+                        .to_hex()
+                        .to_string()
+                })
+                .collect()
+        })
+        .collect();
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(StringArray::from(values))]).unwrap();
+    let properties = parquet::file::properties::WriterProperties::builder()
+        .set_max_row_group_row_count(Some(1))
+        .build();
+    let mut writer =
+        ArrowWriter::try_new(File::create(&spec.input).unwrap(), schema, Some(properties)).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    spec.expected_digest = storage::digest(std::path::Path::new(&spec.input))
+        .unwrap()
+        .0;
+    let profile = Limits {
+        batch_rows: 1,
+        max_batch_bytes: 64 << 10,
+        ..limits()
+    };
+    let engine = Engine::open(root.path().join("workspace"), profile.clone())
+        .await
+        .unwrap();
+    let release = engine.run(&spec).await.unwrap();
+    let report = verify_release_at(&release, profile.clone(), VerificationLevel::Routine)
+        .await
+        .unwrap();
+    assert_eq!(report.sampled_files, 3);
+    assert!(report.sampled_decoded_bytes > profile.max_batch_bytes);
+    assert!(report.sampled_decoded_bytes <= 3 * profile.max_batch_bytes);
+}
+
+#[test]
+#[cfg(feature = "test-util")]
+fn cli_validates_once_then_reads_and_resumes_without_inspection() {
+    let root = TempDir::new().unwrap();
+    let spec = fixture(root.path());
+    let request = root.path().join("request.json");
+    let profile = root.path().join("limits.json");
+    let release_path = root.path().join("release.json");
+    std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
+    std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let run = |args: &[&std::ffi::OsStr]| {
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+            .arg("--workspace")
+            .arg(root.path().join("workspace"))
+            .arg("--limits")
+            .arg(&profile)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result
+    };
+    let created = run(&["run".as_ref(), request.as_os_str()]);
+    std::fs::write(&release_path, &created.stdout).unwrap();
+    let stderr = String::from_utf8(created.stderr).unwrap();
+    assert_eq!(stderr.matches("DOCSPEC_TEST_INSPECT_TABLE").count(), 1);
+    assert!(!stderr.contains("DOCSPEC_TEST_DEEP_TABLE"));
+    for args in [
+        vec!["resume".as_ref(), request.as_os_str()],
+        vec![
+            "read".as_ref(),
+            release_path.as_os_str(),
+            root.path().join("read.arrow").as_os_str(),
+        ],
+    ] {
+        let result = run(&args);
+        let stderr = String::from_utf8(result.stderr).unwrap();
+        assert!(!stderr.contains("DOCSPEC_TEST_INSPECT_TABLE"));
+        assert!(!stderr.contains("DOCSPEC_TEST_DEEP_TABLE"));
+    }
+    let routine = run(&["verify".as_ref(), release_path.as_os_str()]);
+    let report: serde_json::Value = serde_json::from_slice(&routine.stdout).unwrap();
+    assert_eq!(report["checks"]["level"], "routine");
+    assert_eq!(
+        String::from_utf8(routine.stderr)
+            .unwrap()
+            .matches("DOCSPEC_TEST_INSPECT_TABLE")
+            .count(),
+        1
+    );
+    let deep = run(&[
+        "verify".as_ref(),
+        release_path.as_os_str(),
+        "--deep".as_ref(),
+    ]);
+    let report: serde_json::Value = serde_json::from_slice(&deep.stdout).unwrap();
+    assert_eq!(report["checks"]["level"], "deep");
+    assert!(
+        String::from_utf8(deep.stderr)
+            .unwrap()
+            .contains("DOCSPEC_TEST_DEEP_TABLE")
+    );
+}
+
+#[tokio::test]
 async fn exact_readback_idempotency_and_independent_catalog_free_read() {
     let directory = TempDir::new().unwrap();
     let spec = fixture(directory.path());

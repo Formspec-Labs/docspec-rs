@@ -349,8 +349,8 @@ impl Engine {
                 "after release lacks the requested field group",
             )
         })?;
-        verify_release_with_budget(before, &self.inner.lifecycle.budget).await?;
-        verify_release_with_budget(after, &self.inner.lifecycle.budget).await?;
+        resolve_release(before, &self.inner.lifecycle.budget).await?;
+        resolve_release(after, &self.inner.lifecycle.budget).await?;
         let first = storage::open_pin(first).await?;
         let second = storage::open_pin(second).await?;
         let first_schema =
@@ -768,13 +768,35 @@ impl Engine {
         } else {
             None
         };
+        let base = if let Some(base) = spec.base() {
+            Some(self.release(spec.dataset(), base).await?)
+        } else {
+            None
+        };
+        let mut checks = verification::Checks::new(VerificationLevel::Routine);
+        if let Some(base) = &base {
+            checks.trust(base, &lifecycle.budget).await?;
+        }
         if self.phase(spec, &operation, "validation").await?.is_none() {
             #[cfg(feature = "test-util")]
             work_started("validation");
-            verify_table(&table, &lifecycle.budget).await?;
-            verify_changes(spec, &table, processing.changes.as_ref(), &lifecycle.budget).await?;
+            checks.table(&table, &lifecycle.budget).await?;
+            verify_changes(
+                spec,
+                &table,
+                processing.changes.as_ref(),
+                &lifecycle.budget,
+                &mut checks,
+            )
+            .await?;
             if let Some(related) = &related {
-                Box::pin(refresh::verify_related(&table, related, &lifecycle.budget)).await?;
+                Box::pin(refresh::verify_related(
+                    &table,
+                    related,
+                    &lifecycle.budget,
+                    &mut checks,
+                ))
+                .await?;
             }
             let phase = PhaseResult {
                 phase: "validation".into(),
@@ -784,11 +806,6 @@ impl Engine {
         }
         stop_after(stop, "validation")?;
 
-        let base = if let Some(base) = spec.base() {
-            Some(self.release(spec.dataset(), base).await?)
-        } else {
-            None
-        };
         // A full rebuild declares a complete new input. Updates retain the prior
         // source evidence because they only replace a subset of its rows.
         let mut inputs = base
@@ -824,6 +841,7 @@ impl Engine {
                     &previous.definition,
                     Some(&input_fields),
                     None,
+                    &mut checks,
                 ))
                 .await?;
                 groups.insert(name.clone(), prepared.table);
@@ -878,7 +896,14 @@ impl Engine {
             request: captured_request.clone(),
             parent_manifest: base.as_ref().map(|base| base.manifest.clone()),
             processor: PROCESSOR.into(),
+            validation: VerificationLevel::Routine,
         };
+        backfill::verify_groups(
+            &dataset,
+            &lifecycle.budget,
+            &mut verification::Checks::composition(),
+        )
+        .await?;
         // Readback has an operation-specific manifest because coverage can advance
         // while the same expensive materialized values remain reusable.
         let readback_key = format!("readback/{}", spec.operation());
@@ -907,9 +932,20 @@ impl Engine {
                 ));
             }
             storage::write_new(&path, &serialized)?;
-            let manifest = storage::object(spec.dataset(), &path)?;
+            let manifest = ObjectRef {
+                owner: spec.dataset().clone(),
+                path: path.to_string_lossy().into_owned(),
+                digest: blake3::hash(&serialized).to_hex().to_string(),
+                bytes: serialized.len() as u64,
+            };
             // Decode the serialized release independently of the producing context.
-            let decoded: DatasetPin = serde_json::from_reader(std::fs::File::open(&path)?)?;
+            let memory = Arc::new(
+                lifecycle
+                    .budget
+                    .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
+            );
+            let decoded: DatasetPin =
+                inputs::read_manifest(&manifest, &lifecycle.budget, &mut 0, &memory).await?;
             if decoded != dataset {
                 return Err(Error::refusal(
                     "release_mismatch",
@@ -922,7 +958,8 @@ impl Engine {
                 manifest,
                 verified: true,
             };
-            verify_release_with_budget(&release, &lifecycle.budget).await?;
+            // Prepared tables were validated at their durable phase boundaries.
+            // Equality above verifies serialization without scanning them again.
             let _guard = lock.lock().await;
             let view = lifecycle.open(spec.dataset()).await?;
             self.check_completion(&view, &operation).await?;
@@ -1456,6 +1493,8 @@ fn work_started(phase: &str) {
 /// # Errors
 /// Refuses changed bytes, invalid schemas, missing files, or row-count disagreement.
 pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
+    #[cfg(feature = "test-util")]
+    eprintln!("DOCSPEC_TEST_DEEP_TABLE");
     storage::verify_objects(pin.objects.clone(), budget).await?;
     let table = storage::open_pin(pin).await?;
     storage::check_inventory(pin, &table, budget).await?;
@@ -1481,8 +1520,27 @@ pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
 /// # Errors
 /// Refuses modified or missing objects and inconsistent native metadata.
 pub async fn verify_release(release: &ReleasePin, limits: Limits) -> Result<()> {
+    verify_release_at(release, limits, VerificationLevel::Deep)
+        .await
+        .map(|_| ())
+}
+
+/// Checks a release at the requested scope, reporting the bounded sample.
+///
+/// Routine checks read metadata and at most three files' first eight rows across
+/// the request. Deep checks also hash payloads and reconstruct all derived results.
+///
+/// # Errors
+/// Refuses inconsistent references, missing objects, failed checks or exhausted capacity.
+pub async fn verify_release_at(
+    release: &ReleasePin,
+    limits: Limits,
+    level: VerificationLevel,
+) -> Result<VerificationReport> {
     let budget = Budget::new(limits)?;
-    verify_release_with_budget(release, &budget).await
+    let mut checks = verification::Checks::new(level);
+    verification::verify_all(&[release], &budget, &mut checks).await?;
+    Ok(checks.report)
 }
 
 fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
@@ -1535,11 +1593,25 @@ async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Resul
     }
 }
 
-async fn verify_release_with_budget(release: &ReleasePin, budget: &Budget) -> Result<()> {
-    verification::verify_all(&[release], budget).await
+async fn resolve_release(release: &ReleasePin, budget: &Budget) -> Result<()> {
+    // Resolve the immutable selection only. Payloads and dependencies are checked
+    // at creation, or by explicit verification; a read opens its requested data.
+    let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
+    let decoded = refresh::read_release(&release.version_ref(), budget, &mut 0, &memory).await?;
+    if decoded.dataset != release.dataset || !release.verified {
+        return Err(Error::refusal(
+            "release_mismatch",
+            "release differs from its completed selection",
+        ));
+    }
+    Ok(())
 }
 
-async fn verify_local_release(release: &ReleasePin, budget: &Budget) -> Result<()> {
+async fn verify_local_release(
+    release: &ReleasePin,
+    budget: &Budget,
+    checks: &mut verification::Checks,
+) -> Result<()> {
     let decoded = &release.dataset;
     if decoded.format != FORMAT
         || release.id != decoded.version
@@ -1559,13 +1631,24 @@ async fn verify_local_release(release: &ReleasePin, budget: &Budget) -> Result<(
             "release request, version, or input binding differs",
         ));
     }
-    storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
+    if checks.deep() {
+        storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
+    } else if checks.inspects_tables() {
+        storage::check_available(decoded.inputs.values().cloned().collect(), budget).await?;
+    }
     let source = decoded
         .groups
         .get("source")
         .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
-    verify_changes(&decoded.request, source, decoded.changes.as_ref(), budget).await?;
-    verify_table(source, budget).await?;
-    backfill::verify_groups(decoded, budget).await?;
+    checks.table(source, budget).await?;
+    verify_changes(
+        &decoded.request,
+        source,
+        decoded.changes.as_ref(),
+        budget,
+        checks,
+    )
+    .await?;
+    backfill::verify_groups(decoded, budget, checks).await?;
     Ok(())
 }

@@ -46,6 +46,23 @@ target/debug/docspec read release.json comments.arrow
 but do not need the catalog. Files referenced by a release remain local absolute
 paths; the release is not yet a portable or public distribution.
 
+Normal reads resolve the immutable release and stream only the requested data.
+They do not revalidate retained inputs, other field groups or dependency history.
+Creation checks new output shape, field IDs/types, sizes, footer row counts and a
+small decoded sample once. Readback confirms the serialized selection. Reuse
+trusts the retained completion; final selection still checks current authority.
+
+Use `verify release.json` when checking whether retained data is usable. It reports
+the check scope and samples at most three files with up to eight rows each across
+the dependency graph, with the configured byte allowance per batch (at most three
+batch allowances in total). Footer counts
+come from metadata, not a full independent row count. The sample is deterministic,
+not a statistical guarantee. Investigate suspected corruption or incorrect derived
+values with `verify release.json --deep`; that explicitly hashes payloads and
+reconstructs derived values and evidence. The library's `verify_release` remains
+an explicit deep diagnostic for qualification callers; `verify_release_at` selects
+routine or deep scope. Neither diagnostic is a read prerequisite.
+
 Repeat the same operation to recover its original release. Use a new operation ID
 for another captured request. Unchanged admitted input and processing reuse their
 original files. Changing the query can reuse byte admission. Changing an input
@@ -89,10 +106,10 @@ Repeat the same request to resume or recover its already selected release.
 Updates retain typed removed and added rows with exact before/after native
 metadata, the base release and stable native key field IDs. Unaffected source files
 are shared; affected files supply both kept and removed rows in one joined read.
-The independently verified release and old versions remain readable without the
+The selected release and old versions remain readable without the
 catalog. An update automatically refreshes every selected scalar field group,
 reusing computations for unchanged source files. It selects the new source and
-all groups together after independent verification. General incremental SQL
+all groups together after creation checks. General incremental SQL
 remains unfinished. Release format 10 is the current greenfield
 format; there is no reader migration for earlier experiment outputs.
 
@@ -180,9 +197,8 @@ The same `update` request works after group selection; `plan-update` includes gr
 preparation. A no-op update preserves the exact source and group table pins while
 recording its new input coverage and empty source changes. Metadata-only schema
 changes, computed input groups and logical row identity across compaction remain
-unfinished. Full independent
-release verification still reads retained inputs and data; file reuse does not
-establish population-independent backfill latency.
+unfinished. Explicit deep verification reads retained inputs and data; normal reads
+stream the requested result. Complete-path backfill latency remains unmeasured.
 
 ```sh
 target/debug/docspec --workspace workspaces/comments latest comments
@@ -385,7 +401,7 @@ Use a full refresh to change the recipe or native input schema. Both modes use
 the same recovery, eligibility, captured/latest selection and scalar-group refresh.
 Combined reads hide the global key; native reads expose it for evidence matching.
 
-Discovery, contributor processing and independent verification still scan retained
+Discovery and contributor processing still scan retained
 relations. File sharing reduces demonstrated rewrites; complete-path speed and
 10M Comments performance remain unmeasured.
 
