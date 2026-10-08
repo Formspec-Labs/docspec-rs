@@ -12,10 +12,28 @@ use std::{
 pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phase: &str) {
     let spec = root.join("request.json");
     std::fs::write(&spec, serde_json::to_vec(request).unwrap()).unwrap();
+    // These correctness fixtures need bounded scratch, not the production
+    // profile's 32 GiB. Resume uses this same explicit profile after worker loss.
+    let limits = root.join("limits.json");
+    std::fs::write(
+        &limits,
+        serde_json::to_vec(&docspec::budget::Limits {
+            compute_threads: 2,
+            memory_bytes: 512 << 20,
+            scratch_bytes: 16 << 20,
+            max_batch_bytes: 4 << 20,
+            max_metadata_bytes: 16 << 20,
+            ..docspec::budget::Limits::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
     let workspace = root.join("workspace");
     let mut child = Command::new(env!("CARGO_BIN_EXE_docspec"))
         .arg("--workspace")
         .arg(&workspace)
+        .arg("--limits")
+        .arg(limits)
         .arg("pause-after")
         .arg(&spec)
         .arg(phase)
@@ -73,6 +91,8 @@ pub fn resume(root: &Path, command: &str) -> (docspec::model::ReleasePin, Vec<St
     let mut child = Command::new(env!("CARGO_BIN_EXE_docspec"))
         .arg("--workspace")
         .arg(root.join("workspace"))
+        .arg("--limits")
+        .arg(root.join("limits.json"))
         .arg(command)
         .arg(root.join("request.json"))
         .stdout(std::fs::File::create(&stdout_path).unwrap())

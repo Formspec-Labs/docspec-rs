@@ -1,0 +1,70 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 3.70s
+    Finished `test` profile [unoptimized] target(s) in 0.28s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 17 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.30s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b4733b2016bf5a7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test competing_independent_backfills_both_survive_selection ... ok
+test missing_cached_objects_cannot_be_selected_after_readback ... ok
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... FAILED
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+
+failures:
+
+---- killed_backfill_workers_resume_retained_files_validation_and_readback stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+
+thread 'killed_backfill_workers_resume_retained_files_validation_and_readback' (8292299) panicked at tests/support/mod.rs:50:5:
+backfill/files: worker did not acknowledge the handoff: ["DOCSPEC_TEST_WORK backfill-assembly", "DOCSPEC_TEST_WORK backfill-file", "Error: disk_capacity: computed output and scratch do not fit available disk"] (exit status: 1)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    killed_backfill_workers_resume_retained_files_validation_and_readback
+
+test result: FAILED. 14 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.13s
+
+error: test failed, to rerun pass `--test backfill`
