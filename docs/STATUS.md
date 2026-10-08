@@ -107,3 +107,22 @@ validation and readback still hash/read full result inventories and retained
 inputs. Write counters exclude metadata and verification I/O. File-count/history
 scaling and complete-path performance measurements remain required; no speedup is
 claimed for this checkpoint.
+
+## Native query-reader checkpoint
+
+Full comparisons now use [the shared native-reader adapter](../src/query.rs)
+through maintained DataFusion streaming interfaces. The former Iceberg/DataFusion
+provider ignored the configured execution context when opening its native scan.
+The adapter reuses the existing serial reader, byte admission and batch-row limit,
+and preserves native capacity refusal codes through DataFusion context wrappers.
+The unused provider dependency is removed; DataFusion's prior default feature set
+is now enabled directly rather than through dependency feature unification.
+
+Targeted tests verify live-stream admission, competing-reader refusal, release on
+drop/end/error, configured batch rows, duplicate/null values, retained selection,
+filters and empty schemas. See the [consistency review](reviews/query-reader-consistency.md),
+[resource review](reviews/query-reader-resources.md) and [gate output](reviews/query-reader-check.log).
+This closes a reader-control gap. It establishes neither a throughput improvement
+nor a whole-process memory ceiling. Query filters and column selection are applied
+above the native stream. Metadata-only schema evolution still needs its own
+qualification; it is not established by these same-schema reader tests.

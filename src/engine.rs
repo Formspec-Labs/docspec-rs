@@ -309,10 +309,7 @@ impl Engine {
         for (name, table) in [("before", first), ("after", second)] {
             context.register_table(
                 name,
-                Arc::new(
-                    iceberg_datafusion::IcebergStaticTableProvider::try_new_from_table(table)
-                        .await?,
-                ),
+                crate::query::table(table, self.inner.lifecycle.budget.clone())?,
             )?;
         }
         let columns = first_schema

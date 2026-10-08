@@ -144,6 +144,13 @@ no durable index or second source of truth. Warm commits and cold replay enforce
 the same history budget; new work refuses before that bound makes acknowledged
 records unreadable. History compaction remains required for long-running use.
 
+Full comparisons connect DataFusion's maintained `StreamingTable` to the same
+native Iceberg reader used for independent verification. This small adapter
+preserves reader admission through completion or cancellation and enforces the
+configured batch size. DataFusion applies query filters and column selection above
+that stream; this path deliberately makes no source-pushdown performance claim.
+Native capacity refusals keep their structured codes through DataFusion errors.
+
 Owned output directories are protected before writes. Automatic expiration and
 metadata deletion are disabled. Everything remains retained; application-level removal, compaction,
 cross-dataset sharing and restore are not implemented. A native storage probe

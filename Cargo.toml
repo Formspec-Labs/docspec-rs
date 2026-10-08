@@ -16,12 +16,11 @@ async-trait = "0.1"
 axum = "0.8"
 blake3 = "1"
 clap = { version = "4", features = ["derive"] }
-datafusion = { version = "=53.1.0", default-features = false, features = ["parquet", "unicode_expressions"] }
+datafusion = "=53.1.0"
 fs2 = "0.4"
 futures = "0.3"
 iceberg = "=0.10.1"
 iceberg-catalog-sql = "=0.10.1"
-iceberg-datafusion = "=0.10.1"
 mimalloc = "0.1"
 parquet = { version = "58", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }

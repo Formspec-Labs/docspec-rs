@@ -67,8 +67,25 @@ from_error!(serde_json::Error, "invalid_json");
 from_error!(iceberg::Error, "iceberg");
 from_error!(arrow::error::ArrowError, "arrow");
 from_error!(parquet::errors::ParquetError, "parquet");
-from_error!(datafusion::error::DataFusionError, "query");
 from_error!(tokio::task::JoinError, "worker");
+
+impl From<datafusion::error::DataFusionError> for Error {
+    fn from(error: datafusion::error::DataFusionError) -> Self {
+        let mut cause: &dyn std::error::Error = &error;
+        let mut code = "query";
+        loop {
+            if let Some(refusal) = cause.downcast_ref::<Self>() {
+                code = refusal.code;
+                break;
+            }
+            match cause.source() {
+                Some(source) => cause = source,
+                None => break,
+            }
+        }
+        Self::caused(code, error)
+    }
+}
 
 /// A result whose error retains a stable refusal code.
 pub type Result<T> = std::result::Result<T, Error>;

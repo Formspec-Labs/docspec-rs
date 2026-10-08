@@ -1890,7 +1890,6 @@ dependencies = [
  "futures",
  "iceberg",
  "iceberg-catalog-sql",
- "iceberg-datafusion",
  "mimalloc",
  "parquet",
  "serde",
@@ -2551,23 +2550,6 @@ dependencies = [
  "iceberg",
  "sqlx",
  "strum",
-]
-
-[[package]]
-name = "iceberg-datafusion"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "079082486ed6bfc023939d8d4f50c6065d9692dac1f3cc91a73501c6b29c5712"
-dependencies = [
- "anyhow",
- "async-trait",
- "dashmap",
- "datafusion",
- "futures",
- "iceberg",
- "parquet",
- "tokio",
- "uuid",
 ]
 
 [[package]]
