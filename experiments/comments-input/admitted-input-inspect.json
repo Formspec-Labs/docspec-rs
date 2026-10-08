@@ -1,0 +1,92 @@
+{
+  "authority": {
+    "boundary": 1,
+    "definition": "comments-probe-v1",
+    "eligibility": 0,
+    "epoch": 0,
+    "release": null,
+    "selected": null,
+    "selection_revision": null
+  },
+  "operation/fresh": {
+    "base": null,
+    "base_manifest": null,
+    "boundary": 1,
+    "definition": "comments-probe-v1",
+    "eligibility": 0,
+    "epoch": 0,
+    "request_digest": "1d9defcb63d68e53291ee13ae272c76499506db56d29cb24c9991e80ccee9807",
+    "require_current_boundary": false
+  },
+  "phase/input/ef23baf90ca457fa04db8def7d003ce7ecd8eb8eb7a16fcc1cb01255c567ac83/admission": {
+    "changes": null,
+    "coverage": null,
+    "eligibility": 0,
+    "metrics": {
+      "bytes_reused": 0,
+      "bytes_written": 0,
+      "data_files_written": 0,
+      "files_reused": 0,
+      "files_scanned": 0,
+      "rows_added": 0,
+      "rows_removed": 0
+    },
+    "operation": "fresh",
+    "outputs": [
+      {
+        "bytes": 2670490619,
+        "digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+        "owner": "comments",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/cc29f7036d774e619da3b625d8aee07e/input.parquet"
+      }
+    ],
+    "phase": "admission",
+    "request_digest": "1d9defcb63d68e53291ee13ae272c76499506db56d29cb24c9991e80ccee9807",
+    "rows": 0,
+    "table": null
+  },
+  "protection/b3f8a5375fa64a5da4a549be23b0370e": {
+    "consumer": "comments",
+    "id": "b3f8a5375fa64a5da4a549be23b0370e",
+    "paths": [
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/b3f8a5375fa64a5da4a549be23b0370e/"
+    ],
+    "purpose": "fresh/processing",
+    "retired": false
+  },
+  "protection/cc29f7036d774e619da3b625d8aee07e": {
+    "consumer": "comments",
+    "id": "cc29f7036d774e619da3b625d8aee07e",
+    "paths": [
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run-20261008T103609/workspace/objects/comments/cc29f7036d774e619da3b625d8aee07e/"
+    ],
+    "purpose": "fresh/admission",
+    "retired": false
+  },
+  "request/fresh": {
+    "kind": "build",
+    "spec": {
+      "base": null,
+      "dataset": "comments",
+      "definition": "comments-probe-v1",
+      "expected_digest": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+      "input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-10m-20261008/comments.parquet",
+      "operation": "fresh",
+      "relationship": null,
+      "sql": "SELECT * FROM input"
+    }
+  },
+  "runtime/fresh": {
+    "dependency_lock_blake3": "1775cac5afcefcfeb3fb421f6b178dba12065940220c07fedf4cb691adb08879",
+    "limits": {
+      "batch_rows": 4096,
+      "compute_threads": 12,
+      "max_batch_bytes": 67108864,
+      "max_metadata_bytes": 33554432,
+      "memory_bytes": 25769803776,
+      "scratch_bytes": 8589934592
+    },
+    "package_version": "0.1.0",
+    "processor": "docspec.dataset.v10"
+  }
+}
