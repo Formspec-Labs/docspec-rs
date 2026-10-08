@@ -1,5 +1,8 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
+mod occurrences;
+pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
+
 use crate::{
     Error, Result,
     budget::Budget,

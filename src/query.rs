@@ -257,4 +257,27 @@ mod tests {
         );
         drop(budget.reserve(128 << 10).unwrap());
     }
+
+    // Capability probe for the pinned native dependency; see the retained failure log.
+    #[tokio::test]
+    async fn pinned_native_position_column_is_unavailable() {
+        let (_root, _engine, _spec, native) = fixture().await;
+        let mut stream = native
+            .scan()
+            .with_concurrency_limit(1)
+            .select(["id", "_file", "_pos"])
+            .build()
+            .unwrap()
+            .to_arrow()
+            .await
+            .unwrap();
+        assert!(
+            stream
+                .try_next()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("field not found")
+        );
+    }
 }

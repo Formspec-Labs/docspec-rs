@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 8.89s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 1 test
+
+thread 'query::tests::native_occurrence_locator_probe' (7432536) panicked at src/query.rs:266:57:
+called `Result::unwrap()` on an `Err` value: Unexpected => field not found
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test query::tests::native_occurrence_locator_probe ... FAILED
+
+failures:
+
+failures:
+    query::tests::native_occurrence_locator_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.45s
+
+error: test failed, to rerun pass `--lib`

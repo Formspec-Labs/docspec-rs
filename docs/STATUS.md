@@ -126,3 +126,32 @@ This closes a reader-control gap. It establishes neither a throughput improvemen
 nor a whole-process memory ceiling. Query filters and column selection are applied
 above the native stream. Metadata-only schema evolution still needs its own
 qualification; it is not established by these same-schema reader tests.
+
+## Source occurrence checkpoint
+
+`storage::read_occurrences` adds an exact native file path and zero-based physical
+row position before relational processing. Consumers bind that tuple to the
+verified immutable objects in their source pin. Complete coverage requires
+successful consumption through the end of the stream. These locations do not
+promise stable logical identity after rewriting or compaction.
+
+The pinned native reader declares `_pos` but fails to read it; the original
+[capability failure](reviews/native-position-probe.log) is retained. The adapter
+uses the maintained native whole-file reader, visits every live file exactly
+once, and checks every decoded row count. Partial, filtered, delete-bearing,
+missing and repeated tasks refuse. Reserved names and a difference between the
+snapshot schema and current schema also refuse pending separate qualification.
+
+An independent Parquet reader confirms file-relative correspondence across row
+groups and batch sizes, including duplicate/null values and byte-identical files
+at different paths. Tests cover malformed tasks, incorrect counts, empty input,
+oversized batches and reader admission release. See the
+[consistency review](reviews/occurrences-consistency.md),
+[resource review](reviews/occurrences-resources.md) and
+[check output](reviews/occurrences-check.log).
+
+This supplies a prerequisite for independent field groups. Backfill, combined
+consumer reads, durable logical occurrence identity and compaction are still
+unfinished. Native manifest planning may continue briefly after cancellation;
+wrapper permit tests do not establish upstream task quiescence or aggregate RSS.
+No throughput improvement is claimed.
