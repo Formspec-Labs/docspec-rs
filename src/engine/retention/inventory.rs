@@ -1169,6 +1169,9 @@ impl Inventory {
                 .as_ref()
                 .ok_or_else(unknown_dependencies)?;
             self.snapshot(&dependencies.source, origin)?;
+            if let Some(logical) = &dependencies.source_logical_metadata {
+                self.object(logical, origin)?;
+            }
             self.snapshot(&dependencies.output, origin)?;
         } else if key.starts_with("backfill-validation/") {
             let phase: ValidationCompletion = decode(json)?;
@@ -1178,6 +1181,9 @@ impl Inventory {
                 .as_ref()
                 .ok_or_else(unknown_dependencies)?;
             self.snapshot(&dependencies.source, origin)?;
+            if let Some(logical) = &dependencies.source_logical_metadata {
+                self.object(logical, origin)?;
+            }
             self.snapshot(&dependencies.output, origin)?;
         } else if key.starts_with("backfill/") {
             let capture: Capture = decode(json)?;
@@ -1228,6 +1234,9 @@ impl Inventory {
             }
             for object in dependencies.inputs.values() {
                 self.object(object, origin)?;
+            }
+            if let Some(source) = &dependencies.update_source {
+                self.table(source, origin)?;
             }
         } else if key.starts_with("request/") {
             let request: OperationRequest = decode(json)?;

@@ -359,7 +359,10 @@ async fn verify_binding_history(
             {
                 let before = storage::open_pin(before).await?;
                 let after = storage::open_pin(source).await?;
-                if before.metadata().current_schema() != after.metadata().current_schema() {
+                if !storage::identity::preserves_schema(
+                    before.metadata().current_schema(),
+                    after.metadata().current_schema(),
+                )? {
                     return Err(invalid_group());
                 }
             }

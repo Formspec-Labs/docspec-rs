@@ -89,21 +89,34 @@ pub(super) async fn verify_changes(
         })
         .collect();
     if expected_ids.as_ref() != Some(&changes.key_field_ids)
-        || native_before.metadata().current_schema() != native_after.metadata().current_schema()
+        || !storage::identity::preserves_schema(
+            native_before.metadata().current_schema(),
+            native_after.metadata().current_schema(),
+        )?
     {
         return Err(invalid());
     }
     let context = budget.context();
     // Positional aliases keep arbitrary user field names separate from helpers.
-    let fields = iceberg::arrow::schema_to_arrow_schema(native_before.metadata().current_schema())?;
-    let selected = fields
+    let fields = storage::identity::public_schema(&native_before)?;
+    let located = storage::identity::has_origins(native_after.metadata().current_schema())?;
+    let mut names = fields
         .fields()
         .iter()
+        .map(|field| field.name().as_str())
+        .collect::<Vec<_>>();
+    // A rewritten source preserves occurrence membership, not only equal values.
+    // Legacy sources without stored identities retain the value-only check.
+    if located {
+        names.extend([storage::OCCURRENCE_FILE, storage::OCCURRENCE_ROW]);
+    }
+    let selected = names
+        .iter()
         .enumerate()
-        .map(|(index, field)| format!("{} AS c{index}", quote(field.name())))
+        .map(|(index, name)| format!("{} AS c{index}", quote(name)))
         .collect::<Vec<_>>()
         .join(", ");
-    let columns = (0..fields.fields().len())
+    let columns = (0..names.len())
         .map(|index| format!("c{index}"))
         .collect::<Vec<_>>()
         .join(", ");
@@ -117,7 +130,9 @@ pub(super) async fn verify_changes(
             checks.table(pin, budget).await?;
         }
         let native = storage::open_pin(pin).await?;
-        if native.metadata().current_schema() != native_after.metadata().current_schema() {
+        if name != "before"
+            && native.metadata().current_schema() != native_after.metadata().current_schema()
+        {
             return Err(invalid());
         }
         if !checks.deep() {
@@ -125,7 +140,11 @@ pub(super) async fn verify_changes(
         }
         context.register_table(
             format!("raw_{name}"),
-            crate::query::table(native, budget.clone())?,
+            if located {
+                crate::query::occurrences(native, budget.clone())?
+            } else {
+                crate::query::table(native, budget.clone())?
+            },
         )?;
         context.register_table(
             name,

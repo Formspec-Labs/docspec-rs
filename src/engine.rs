@@ -555,10 +555,10 @@ impl Engine {
         resolve_release(after, &self.inner.lifecycle.budget).await?;
         let first = storage::open_pin(first).await?;
         let second = storage::open_pin(second).await?;
-        let first_schema =
-            iceberg::arrow::schema_to_arrow_schema(first.metadata().current_schema())?;
-        let second_schema =
-            iceberg::arrow::schema_to_arrow_schema(second.metadata().current_schema())?;
+        storage::identity::has_origins(first.metadata().current_schema())?;
+        storage::identity::has_origins(second.metadata().current_schema())?;
+        let first_schema = storage::identity::public_schema(&first)?;
+        let second_schema = storage::identity::public_schema(&second)?;
         let same_schema = first_schema == second_schema;
         let mut comparison = Comparison {
             same_schema,
@@ -944,12 +944,25 @@ impl Engine {
                 #[cfg(feature = "test-util")]
                 work_started("processing");
                 let directory = self.reserve_attempt(spec, operation, "processing").await?;
+                let (_capture_memory, update_source) =
+                    if matches!(spec, OperationRequest::Update(_)) {
+                        let view = lifecycle.open(spec.dataset()).await?;
+                        let memory = self.admission_memory(&view, spec.operation()).await?;
+                        let source = self
+                            .admitted_dependencies(&view, spec.operation())
+                            .await?
+                            .and_then(|dependencies| dependencies.update_source);
+                        (Some(memory), source)
+                    } else {
+                        (None, None)
+                    };
                 let prepared = match spec {
                     OperationRequest::Build(build) => {
                         self.process_build(build, &directory, &admission).await?
                     }
                     OperationRequest::Update(update) => {
-                        self.process_update(update, &directory, &admission).await?
+                        self.process_update(update, &directory, &admission, update_source.as_ref())
+                            .await?
                     }
                     OperationRequest::Schema(schema) => {
                         self.process_schema(schema, &directory, operation).await?
@@ -993,7 +1006,11 @@ impl Engine {
                             .collect(),
                         base_manifest: operation.base_manifest.clone(),
                         schema_metadata: prepared.schema_input.into_iter().collect(),
-                        tables: Vec::new(),
+                        tables: update_source
+                            .as_ref()
+                            .map(NativeSnapshotRef::from)
+                            .into_iter()
+                            .collect(),
                     }),
                 };
                 let view = lifecycle.open(spec.dataset()).await?;
@@ -1073,16 +1090,47 @@ impl Engine {
                         // Unbased builds retain only the ordering receipt of the
                         // previous selection; no previous payload is consumed.
                         let base = spec.base().and_then(|_| authority.release.take());
+                        let mut decoding = decoding.expect("new admission reserved decoding");
+                        let update_source = if matches!(spec, OperationRequest::Update(_)) {
+                            let base = base.as_ref().ok_or_else(|| {
+                                Error::refusal("invalid_base", "update has no base result")
+                            })?;
+                            let canonical = base.dataset.groups.get("source").ok_or_else(|| {
+                                Error::refusal("invalid_base", "base has no source table")
+                            })?;
+                            let key = format!(
+                                "representation/{}/source",
+                                canonical.logical_metadata().digest
+                            );
+                            decoding.merge(
+                                lifecycle
+                                    .rows(&view)
+                                    .await?
+                                    .reserve_decoded(&lifecycle.budget, &[&key])?,
+                            );
+                            // The fallback copies the canonical pin; selected records
+                            // have their own decoding allowance above.
+                            decoding.merge(
+                                lifecycle.budget.reserve(
+                                    inputs::metadata_size(
+                                        canonical,
+                                        lifecycle.budget.limits.max_metadata_bytes,
+                                    )?
+                                    .saturating_mul(4),
+                                )?,
+                            );
+                            Some(
+                                self.representation_pin(&view, &base.id, "source", canonical)
+                                    .await?,
+                            )
+                        } else {
+                            None
+                        };
                         let boundary = view.table.metadata_location_result()?.to_owned();
                         drop(guards);
                         prepared = Some(
-                            self.protect_admission(
-                                spec,
-                                boundary,
-                                base,
-                                decoding.expect("new admission reserved decoding"),
-                            )
-                            .await?,
+                            self.protect_admission(spec, boundary, base, update_source, decoding)
+                                .await?,
                         );
                         continue;
                     };

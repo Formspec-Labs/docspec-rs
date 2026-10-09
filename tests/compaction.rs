@@ -7,7 +7,7 @@ use arrow::array::{Int64Array, StringArray};
 use docspec::{
     Engine,
     budget::Budget,
-    model::{CompactionSpec, ReleasePin, TablePin},
+    model::{CompactionSpec, ReleasePin, TablePin, UpdateSpec},
     storage,
 };
 use futures::{StreamExt, TryStreamExt};
@@ -21,6 +21,23 @@ fn request(release: &ReleasePin, operation: &str) -> CompactionSpec {
         group: "source".into(),
         files: vec![],
         target_file_bytes: 16 << 20,
+    }
+}
+
+fn update_request(
+    root: &std::path::Path,
+    release: &ReleasePin,
+    operation: &str,
+    rows: &[scalar::Row],
+) -> UpdateSpec {
+    UpdateSpec {
+        dataset: release.dataset.dataset.clone(),
+        operation: id(operation),
+        definition: release.dataset.definition.clone(),
+        base: release.id.clone(),
+        keys: vec!["id".into()],
+        replacements: scalar::input(&root.join(format!("{operation}.parquet")), rows),
+        deletions: None,
     }
 }
 
@@ -156,6 +173,379 @@ async fn source_compaction_preserves_duplicates_backfill_identity_and_logical_se
     group.group = "length".into();
     engine.compact(&group).await.unwrap();
     assert_eq!(combined(&engine, &release).await, combined_before);
+}
+
+#[tokio::test]
+async fn repeated_compaction_noop_updates_reuse_groups_first_computed_on_a_representation() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, _) = fixture(root.path(), false).await;
+    let expected_occurrences = occurrences(&base.dataset.groups["source"]).await;
+    let first = engine
+        .compact(&request(&base, "first-layout"))
+        .await
+        .unwrap();
+    let adopted = engine
+        .update(&update_request(root.path(), &base, "adopt-first", &[]))
+        .await
+        .unwrap();
+    assert_eq!(adopted.dataset.groups["source"], first.replacement);
+    assert_eq!(
+        adopted.dataset.groups["source"].logical_metadata(),
+        &base.dataset.groups["source"].metadata
+    );
+    assert!(adopted.dataset.computed.is_empty());
+
+    // The first scalar computation consumes C1, while its reusable result key
+    // identifies the original logical source S.
+    let with_group = engine
+        .backfill(&scalar::spec(
+            &adopted,
+            "first-lengths",
+            "length",
+            "text_length",
+            "length(text)",
+        ))
+        .await
+        .unwrap();
+    let expected_values = combined(&engine, &with_group).await;
+    let scalar_records = |records: std::collections::BTreeMap<String, serde_json::Value>| {
+        records
+            .into_iter()
+            .filter(|(key, _)| {
+                key.starts_with("phase/backfill/")
+                    || key.starts_with("backfill-prepared/")
+                    || key.starts_with("backfill-validation/")
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let retained = scalar_records(engine.inspect(&base.dataset.dataset).await.unwrap());
+    assert!(
+        retained
+            .keys()
+            .any(|key| key.starts_with("phase/backfill/"))
+    );
+    for prefix in ["backfill-prepared/", "backfill-validation/"] {
+        let (_, completed) = retained
+            .iter()
+            .find(|(key, _)| key.starts_with(prefix))
+            .unwrap();
+        assert_eq!(
+            completed["dependencies"]["source"]["metadata"],
+            serde_json::to_value(&first.replacement.metadata).unwrap()
+        );
+        assert_eq!(
+            completed["dependencies"]["source_logical_metadata"],
+            serde_json::to_value(&base.dataset.groups["source"].metadata).unwrap()
+        );
+    }
+    let second = engine
+        .compact(&request(&with_group, "second-layout"))
+        .await
+        .unwrap();
+    assert_eq!(second.source, first.replacement);
+    assert_ne!(second.replacement.metadata, first.replacement.metadata);
+    let selected = engine
+        .update(&update_request(
+            root.path(),
+            &with_group,
+            "adopt-second",
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(selected.dataset.groups["source"], second.replacement);
+    assert_eq!(
+        selected.dataset.groups["length"],
+        with_group.dataset.groups["length"]
+    );
+    assert_eq!(
+        scalar_records(engine.inspect(&base.dataset.dataset).await.unwrap()),
+        retained
+    );
+    assert_eq!(
+        occurrences(&selected.dataset.groups["source"]).await,
+        expected_occurrences
+    );
+    assert_eq!(combined(&engine, &selected).await, expected_values);
+    let changes = selected.dataset.changes.as_ref().unwrap();
+    assert_eq!(changes.before_metadata, first.replacement.metadata);
+    assert_eq!(changes.after_metadata, second.replacement.metadata);
+    assert_eq!(changes.removed.rows, 0);
+    assert_eq!(changes.added.rows, 0);
+    docspec::engine::verify_release(&selected, limits())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn updates_share_partial_compaction_and_preserve_surviving_occurrences() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, rows) = fixture(root.path(), false).await;
+    let base = engine
+        .backfill(&scalar::spec(
+            &base,
+            "lengths",
+            "length",
+            "text_length",
+            "length(text)",
+        ))
+        .await
+        .unwrap();
+    let original = occurrences(&base.dataset.groups["source"]).await;
+    let mut compact = request(&base, "partial-before-update");
+    compact.files = base.dataset.groups["source"]
+        .objects
+        .iter()
+        .filter(|object| object.path.ends_with(".parquet"))
+        .take(2)
+        .map(|object| object.path.clone())
+        .collect();
+    let old_key = original
+        .iter()
+        .find(|row| row.2.is_some_and(|key| key > 10) && !compact.files.contains(&row.0))
+        .unwrap()
+        .2;
+    let compacted_key = original
+        .iter()
+        .find(|row| row.2.is_some_and(|key| key > 10) && compact.files.contains(&row.0))
+        .unwrap()
+        .2;
+    let compacted = engine.compact(&compact).await.unwrap();
+    assert!(compacted.output_files.len() < compacted.input_files.len());
+    let first = engine
+        .update(&update_request(
+            root.path(),
+            &base,
+            "replace-original-file",
+            &[(old_key, None)],
+        ))
+        .await
+        .unwrap();
+    let first_source = &first.dataset.groups["source"];
+    assert!(first_source.logical_metadata.is_none());
+    for path in &compacted.output_files {
+        assert!(
+            first_source
+                .objects
+                .iter()
+                .any(|object| &object.path == path)
+        );
+    }
+    assert!(compacted.input_files.iter().all(|path| {
+        !first_source
+            .objects
+            .iter()
+            .any(|object| &object.path == path)
+    }));
+    let changes = first.dataset.changes.as_ref().unwrap();
+    assert_eq!(changes.base_manifest, base.manifest);
+    assert_eq!(
+        changes.before_metadata,
+        base.dataset.groups["source"].metadata
+    );
+    assert_eq!(changes.after_metadata, first_source.metadata);
+    assert_eq!(
+        occurrences(&changes.removed).await,
+        original
+            .iter()
+            .filter(|row| row.2 == old_key)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
+    let first_occurrences = occurrences(first_source).await;
+    assert_eq!(
+        first_occurrences
+            .iter()
+            .filter(|row| row.2 != old_key)
+            .cloned()
+            .collect::<Vec<_>>(),
+        original
+            .iter()
+            .filter(|row| row.2 != old_key)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        occurrences(&changes.added).await,
+        first_occurrences
+            .iter()
+            .filter(|row| row.2 == old_key)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        first_occurrences
+            .iter()
+            .filter(|row| row.2 == old_key)
+            .all(|row| row.0.starts_with("docspec:"))
+    );
+    let comparison = engine.compare(&base, &first, "source").await.unwrap();
+    assert!(comparison.same_schema);
+    assert_eq!(comparison.added_rows, Some(1));
+    assert_eq!(comparison.removed_rows, Some(1));
+    docspec::engine::verify_release(&first, limits())
+        .await
+        .unwrap();
+
+    // This rewrite now reads stored origins from a compacted file. The first
+    // rewrite above read fallback positions from an untouched original file.
+    let second = engine
+        .update(&update_request(
+            root.path(),
+            &first,
+            "replace-compacted-file",
+            &[(compacted_key, Some("changed".into()))],
+        ))
+        .await
+        .unwrap();
+    let surviving = occurrences(&second.dataset.groups["source"]).await;
+    assert_eq!(
+        surviving
+            .iter()
+            .filter(|row| row.2 != compacted_key)
+            .cloned()
+            .collect::<Vec<_>>(),
+        first_occurrences
+            .iter()
+            .filter(|row| row.2 != compacted_key)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
+    let mut expected = rows
+        .into_iter()
+        .map(|(key, text)| {
+            let text = if key == old_key {
+                None
+            } else if key == compacted_key {
+                Some("changed".into())
+            } else {
+                text
+            };
+            let length = text.as_ref().map(|value| value.chars().count() as i64);
+            (key, text, length)
+        })
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(combined(&engine, &second).await, expected);
+    docspec::engine::verify_release(&second, limits())
+        .await
+        .unwrap();
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn admitted_updates_resume_the_captured_representation_after_later_compaction() {
+    use docspec::model::{NativeSnapshotRef, PhaseResult};
+    for stop in ["admission", "processing"] {
+        let root = tempfile::tempdir().unwrap();
+        let (engine, base, _) = fixture(root.path(), false).await;
+        let first = engine
+            .compact(&request(&base, "first-layout"))
+            .await
+            .unwrap();
+        let update = update_request(
+            root.path(),
+            &base,
+            "captured-update",
+            &[(Some(1000), Some("new".into()))],
+        );
+        assert_eq!(
+            engine.update_until(&update, stop).await.unwrap_err().code(),
+            "injected_failure"
+        );
+        let retained = engine.inspect(&update.dataset).await.unwrap();
+        let dependencies = retained["request-dependencies/captured-update"].clone();
+        assert_eq!(
+            serde_json::from_value::<TablePin>(dependencies["update_source"].clone()).unwrap(),
+            first.replacement
+        );
+        // The admission alone must protect its consumed representation, even
+        // without the compaction completion or selection acting as another root.
+        let inspection_root = root.path().join("inspection");
+        let inspector = Engine::open(&inspection_root, limits()).await.unwrap();
+        let lifecycle = docspec::catalog::Lifecycle::new(
+            storage::local_catalog(&inspection_root).await.unwrap(),
+            Budget::new(limits()).unwrap(),
+        );
+        let view = lifecycle.open(&id("isolated")).await.unwrap();
+        lifecycle
+            .commit(
+                &view,
+                vec![
+                    docspec::catalog::record("request-dependencies/captured-update", &dependencies)
+                        .unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+        let protection = inspector
+            .inspect_retention(&first.replacement.objects)
+            .await
+            .unwrap();
+        assert!(protection.objects.iter().all(|object| {
+            object
+                .blocker
+                .as_ref()
+                .is_some_and(|blocker| blocker.key == "request-dependencies/captured-update")
+        }));
+        drop(inspector);
+        let newer = engine
+            .compact(&request(&base, "second-layout"))
+            .await
+            .unwrap();
+        assert_ne!(newer.replacement.metadata, first.replacement.metadata);
+        drop(engine);
+        std::fs::remove_file(&update.replacements.path).unwrap();
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        let selected = engine.update(&update).await.unwrap();
+        let resumed = engine.inspect(&update.dataset).await.unwrap();
+        assert_eq!(
+            resumed["request-dependencies/captured-update"],
+            dependencies
+        );
+        for (key, value) in retained.iter().filter(|(key, _)| key.starts_with("phase/")) {
+            assert_eq!(resumed[key], *value);
+        }
+        let processing = resumed
+            .iter()
+            .filter(|(key, _)| key.starts_with("phase/"))
+            .filter_map(|(_, value)| serde_json::from_value::<PhaseResult>(value.clone()).ok())
+            .find(|phase| phase.phase == "processing" && phase.operation == update.operation)
+            .unwrap();
+        assert_eq!(
+            processing.dependencies.unwrap().tables,
+            vec![NativeSnapshotRef::from(&first.replacement)]
+        );
+        for path in &first.output_files {
+            assert!(
+                selected.dataset.groups["source"]
+                    .objects
+                    .iter()
+                    .any(|object| &object.path == path)
+            );
+        }
+        for path in &newer.output_files {
+            assert!(
+                !selected.dataset.groups["source"]
+                    .objects
+                    .iter()
+                    .any(|object| &object.path == path)
+            );
+        }
+        let actual = occurrences(&selected.dataset.groups["source"]).await;
+        assert_eq!(
+            actual
+                .into_iter()
+                .filter(|row| row.2 != Some(1000))
+                .collect::<Vec<_>>(),
+            occurrences(&base.dataset.groups["source"]).await
+        );
+        docspec::engine::verify_release(&selected, limits())
+            .await
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -327,6 +717,110 @@ async fn schema_defaults_and_supplied_state_remain_native_and_exact() {
         count += batch.num_rows();
     }
     assert_eq!(count as u64, release.dataset.groups["source"].rows);
+    drop(stream);
+    let omitted = engine
+        .update(&update_request(
+            root.path(),
+            &release,
+            "omitted-category",
+            &[(Some(12), Some("omitted".into()))],
+        ))
+        .await
+        .unwrap();
+    use arrow::{
+        array::BooleanArray,
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use std::sync::Arc;
+    let explicit_path = root.path().join("explicit-category.parquet");
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("text", DataType::Utf8, true),
+        Field::new("category", DataType::Utf8, true),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from(vec![Some(13)])),
+            Arc::new(StringArray::from(vec![Some("explicit")])),
+            Arc::new(StringArray::from(vec![None::<&str>])),
+        ],
+    )
+    .unwrap();
+    let mut writer = parquet::arrow::ArrowWriter::try_new(
+        std::fs::File::create(&explicit_path).unwrap(),
+        schema,
+        None,
+    )
+    .unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let explicit = engine
+        .update(&UpdateSpec {
+            dataset: omitted.dataset.dataset.clone(),
+            operation: id("explicit-category"),
+            definition: omitted.dataset.definition.clone(),
+            base: omitted.id.clone(),
+            keys: vec!["id".into()],
+            replacements: docspec::model::InputSpec {
+                path: explicit_path.to_string_lossy().into_owned(),
+                digest: storage::digest(&explicit_path).unwrap().0,
+            },
+            deletions: None,
+        })
+        .await
+        .unwrap();
+    let native = storage::open_pin(&explicit.dataset.groups["source"])
+        .await
+        .unwrap();
+    let category_id = native
+        .metadata()
+        .current_schema()
+        .field_by_name("category")
+        .unwrap()
+        .id;
+    let mut stream = storage::read_batches(&native, &budget)
+        .await
+        .unwrap()
+        .boxed();
+    let mut checked = Vec::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let ids = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let category = batch
+            .column_by_name("category")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let supplied = batch
+            .column_by_name(&format!("__docspec_supplied_{category_id}"))
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        for ((key, category), supplied) in ids.iter().zip(category.iter()).zip(supplied.iter()) {
+            if key == Some(12) || key == Some(13) {
+                checked.push((key.unwrap(), category.map(str::to_owned), supplied));
+            }
+        }
+    }
+    checked.sort();
+    assert_eq!(
+        checked,
+        vec![
+            (12, Some("retained".into()), Some(false)),
+            (13, None, Some(true))
+        ]
+    );
+    docspec::engine::verify_release(&explicit, limits())
+        .await
+        .unwrap();
 }
 
 #[cfg(feature = "test-util")]

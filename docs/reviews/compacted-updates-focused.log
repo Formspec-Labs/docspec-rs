@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/docspec-compaction-checkpoint-atqedgve)
+    Finished `test` profile [unoptimized] target(s) in 13.05s
+     Running tests/compaction.rs (/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/compaction-42e20a2a29841672)
+
+running 13 tests
+test native_nested_decimal_time_and_null_values_survive_typed_rewrite ... ok
+test huge_target_rotates_bounded_footer_windows_without_limiting_total_rows ... ok
+test competing_representation_keeps_stale_completed_work_without_reselection ... ok
+test tiny_targets_refuse_bounded_descriptor_inventory_without_selecting_partial_files ... ok
+test admitted_compaction_survives_retired_historical_result_availability ... ok
+test sibling_backfill_keeps_the_shared_equivalent_source_representation ... ok
+test empty_source_and_partial_file_groups_preserve_exact_membership ... ok
+test source_compaction_preserves_duplicates_backfill_identity_and_logical_selection ... ok
+test saved_rewrites_and_verification_resume_after_reopen_without_replacement ... ok
+test schema_defaults_and_supplied_state_remain_native_and_exact ... ok
+test repeated_compaction_noop_updates_reuse_groups_first_computed_on_a_representation ... ok
+test admitted_updates_resume_the_captured_representation_after_later_compaction ... ok
+test updates_share_partial_compaction_and_preserve_surviving_occurrences ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.36s

@@ -196,6 +196,7 @@ impl Engine {
                 let completed = PreparedCompletion {
                     dependencies: Some(GroupDependencies {
                         source: source.into(),
+                        source_logical_metadata: source.logical_metadata.clone(),
                         output: (&prepared).into(),
                     }),
                     table: prepared,
@@ -251,6 +252,7 @@ impl Engine {
                     output: prepared.metadata.clone(),
                     dependencies: Some(GroupDependencies {
                         source: source.into(),
+                        source_logical_metadata: source.logical_metadata.clone(),
                         output: (&prepared).into(),
                     }),
                 };
@@ -446,19 +448,30 @@ fn check_group_dependencies(
     source: &TablePin,
     output: &TablePin,
 ) -> Result<()> {
-    // The prepared key already binds source metadata for legacy completions.
-    // Known dependencies additionally bind the exact source and output snapshots.
-    if let Some(dependencies) = dependencies
-        && (!((dependencies.source.metadata == source.metadata
-            && dependencies.source.snapshot == source.snapshot
-            && dependencies.source.schema_id == source.schema_id)
-            || (source.logical_metadata.is_some()
-                && &dependencies.source.metadata == source.logical_metadata()))
+    // The key binds the logical source. Retain the exact consumed snapshot for
+    // recovery, and require its captured logical proof before crossing layouts.
+    if let Some(dependencies) = dependencies {
+        let same_source = if dependencies.source.metadata == source.metadata {
+            dependencies.source.snapshot == source.snapshot
+                && dependencies.source.schema_id == source.schema_id
+                && dependencies
+                    .source_logical_metadata
+                    .as_ref()
+                    .is_none_or(|logical| logical == source.logical_metadata())
+        } else {
+            dependencies
+                .source_logical_metadata
+                .as_ref()
+                .unwrap_or(&dependencies.source.metadata)
+                == source.logical_metadata()
+        };
+        if !same_source
             || dependencies.output.metadata != output.metadata
             || dependencies.output.snapshot != output.snapshot
-            || dependencies.output.schema_id != output.schema_id)
-    {
-        return Err(generation_conflict(key));
+            || dependencies.output.schema_id != output.schema_id
+        {
+            return Err(generation_conflict(key));
+        }
     }
     Ok(())
 }

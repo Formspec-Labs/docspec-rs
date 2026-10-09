@@ -14,6 +14,8 @@ pub(in crate::engine) struct AdmissionDependencies {
     pub base: Option<VersionRef>,
     pub coverage: Option<InputCoverage>,
     pub inputs: BTreeMap<String, ObjectRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_source: Option<TablePin>,
 }
 
 pub(super) struct PreparedAdmission {
@@ -118,6 +120,12 @@ impl Engine {
             (OperationRequest::Refresh(_), _) | (_, Some(_)) => return Err(invalid()),
             _ => {}
         }
+        if dependencies.update_source.as_ref().is_some_and(|source| {
+            !matches!(&request, OperationRequest::Update(_))
+                || source.metadata.owner != *request.dataset()
+        }) {
+            return Err(invalid());
+        }
         let inputs = request.inputs();
         if dependencies.inputs.iter().any(|(name, object)| {
             inputs
@@ -140,6 +148,7 @@ impl Engine {
         spec: &OperationRequest,
         boundary: String,
         base: Option<ReleasePin>,
+        update_source: Option<TablePin>,
         mut memory: OwnedSemaphorePermit,
     ) -> Result<PreparedAdmission> {
         let budget = &self.inner.lifecycle.budget;
@@ -157,6 +166,7 @@ impl Engine {
             base: base.as_ref().map(ReleasePin::version_ref),
             coverage,
             inputs: BTreeMap::new(),
+            update_source,
         };
         let mut releases = base.into_iter().collect::<Vec<_>>();
         let mut release_bytes = inputs::metadata_size(&releases, limit)?;
@@ -273,6 +283,12 @@ impl Engine {
         if !dependencies.inputs.is_empty() {
             let objects = dependencies.inputs.values().cloned().collect::<Vec<_>>();
             protections.merge(self.protect_objects(spec.dataset(), &objects).await?)?;
+        }
+        if let Some(source) = &dependencies.update_source {
+            protections.merge(
+                self.protect_objects(spec.dataset(), &source.objects)
+                    .await?,
+            )?;
         }
         Ok(PreparedAdmission {
             boundary,

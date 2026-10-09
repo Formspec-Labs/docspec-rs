@@ -184,14 +184,38 @@ impl Engine {
         spec: &UpdateSpec,
         directory: &Path,
         admission: &PhaseResult,
+        captured_source: Option<&TablePin>,
     ) -> Result<Prepared> {
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
-        let before = base
+        let canonical_before = base
             .dataset
             .groups
             .get("source")
             .ok_or_else(|| Error::refusal("invalid_base", "base has no source table"))?;
+        // Older admissions consume their canonical source; retries never resolve
+        // a newer physical representation after the request has been retained.
+        let before = captured_source.unwrap_or(canonical_before);
+        if before.logical_metadata() != canonical_before.logical_metadata()
+            || before.rows != canonical_before.rows
+        {
+            return Err(Error::refusal(
+                "invalid_admission_dependencies",
+                "captured update source differs from its logical base",
+            ));
+        }
         let native = storage::open_pin(before).await?;
+        if before.metadata != canonical_before.metadata {
+            let canonical = storage::open_pin(canonical_before).await?;
+            if !storage::identity::preserves_schema(
+                canonical.metadata().current_schema(),
+                native.metadata().current_schema(),
+            )? {
+                return Err(Error::refusal(
+                    "invalid_admission_dependencies",
+                    "captured update source changes the logical schema",
+                ));
+            }
+        }
         let context = self.context();
         let request = OperationRequest::Update(spec.clone());
         for ((name, _), object) in request.inputs().iter().zip(&admission.outputs) {
@@ -201,7 +225,9 @@ impl Engine {
         }
         let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
         let mut replacement = context.table("replacements").await?;
-        if storage::defaults::has_supplied(native.metadata().current_schema()) {
+        if storage::defaults::has_supplied(native.metadata().current_schema())
+            || storage::identity::has_origins(native.metadata().current_schema())?
+        {
             replacement = schema::normalize(
                 replacement,
                 native.metadata().current_schema(),
@@ -319,7 +345,7 @@ impl Engine {
         let changes = ChangePin {
             base_version: spec.base.clone(),
             base_manifest: base.manifest,
-            before_metadata: before.metadata.clone(),
+            before_metadata: canonical_before.metadata.clone(),
             after_metadata: table.metadata.clone(),
             key_field_ids: field_ids,
             removed,

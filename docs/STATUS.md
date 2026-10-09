@@ -65,10 +65,11 @@ occurrence identities, multiplicity and order before selecting a physical
 representation. Selection uses the logical source identity, so an independent
 backfill can advance the dataset version without losing the shared representation.
 Existing exact pins stay unchanged. Managed group/combined readers resolve the
-representation through the same host admission as other reads. Normal updates
-still consume canonical files; preserving compaction benefits through those
-writes remains unfinished. Compaction does not reclaim old storage or retire
-obsolete representation recovery records.
+representation through the same host admission as other reads. Source updates
+capture and protect an eligible physical representation at admission, share its
+unaffected files, and retain that capture across retries. Their change endpoints
+still identify the canonical logical base. Compaction does not reclaim old
+storage or retire obsolete representation recovery records.
 
 The maintained native writer now bounds footer accumulation through periodic
 writer closure and separately charges retained file descriptors. A very large
@@ -112,6 +113,21 @@ export disclosure, footer refusal/retry, process-killed export handoffs, native
 registration recovery, repeated/shared checkpoints, interrupted capture and
 explicit retirement. These use temporary fixtures. No corpus was deleted and no
 10-million-row or remote performance acceptance run occurred.
+
+A further [independent review](reviews/compacted-updates-review.md) covers source
+updates that consume compaction. It found a reuse mismatch when repeated
+compactions changed physical layout after a scalar group was first computed.
+Group completions now retain their logical source identity alongside the exact
+physical snapshot; justified reuse survives an equivalent layout change. Missing
+old correspondence proof refuses cross-layout reuse. The [focused tests](reviews/compacted-updates-focused.log)
+cover the original counterexample, partial-file sharing, stable surviving
+occurrences, native defaults and captured-update recovery after later compaction.
+The first real post-compaction update can still recompute scalar groups across
+the population because per-file progress is tied to physical input names; this
+change does not establish a measured speedup.
+The [complete repository gate](reviews/compacted-updates-check.log) passes for
+this isolated increment, including existing schema, backfill, refresh, retention
+and restore behavior.
 
 The expanded writer exposed a default-stack regression in incremental summaries.
 The [backtrace](reviews/native-writer-stack-backtrace.log) and
@@ -1064,7 +1080,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by new logical writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments; bounded local Dagster scheduling with actual Rust build/replay | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; native Dagster lost-response and replacement-worker qualification |
 
 The CLI exposes implemented operations only. Source updates support complete key

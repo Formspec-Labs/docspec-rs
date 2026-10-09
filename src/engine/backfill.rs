@@ -50,6 +50,10 @@ pub(in crate::engine) struct FileCompletion {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::engine) struct GroupDependencies {
     pub(in crate::engine) source: NativeSnapshotRef,
+    /// Verified logical identity when the consumed source is a physical rewrite.
+    /// Without this proof, only the captured native metadata identifies its state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::engine) source_logical_metadata: Option<ObjectRef>,
     pub(in crate::engine) output: NativeSnapshotRef,
 }
 
@@ -529,6 +533,7 @@ impl Engine {
                             &request,
                             boundary,
                             Some(base),
+                            None,
                             decoding.expect("new backfill admission reserved decoding"),
                         )
                         .await?,

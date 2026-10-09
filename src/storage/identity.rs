@@ -66,6 +66,35 @@ pub(crate) fn has_origins(schema: &Schema) -> Result<bool> {
     }
 }
 
+/// Allows adding storage identities without changing any logical field or ID.
+pub(crate) fn preserves_schema(before: &Schema, after: &Schema) -> Result<bool> {
+    let before_origins = has_origins(before)?;
+    let after_origins = has_origins(after)?;
+    if before_origins
+        && (!after_origins
+            || before.field_by_name(ORIGIN_FILE) != after.field_by_name(ORIGIN_FILE)
+            || before.field_by_name(ORIGIN_ROW) != after.field_by_name(ORIGIN_ROW))
+    {
+        return Ok(false);
+    }
+    Ok(before
+        .as_struct()
+        .fields()
+        .iter()
+        .filter(|field| !hidden(&field.name))
+        .eq(after
+            .as_struct()
+            .fields()
+            .iter()
+            .filter(|field| !hidden(&field.name)))
+        && before
+            .identifier_field_ids()
+            .collect::<std::collections::BTreeSet<_>>()
+            == after
+                .identifier_field_ids()
+                .collect::<std::collections::BTreeSet<_>>())
+}
+
 pub(crate) fn with_origins(metadata: &TableMetadata) -> Result<Schema> {
     let schema = metadata.current_schema();
     if has_origins(schema)? {
