@@ -1,0 +1,474 @@
+{
+  "format": "docspec-release-build-v1",
+  "source_commit": "a903c7504d4147e132879c05409f6c440e74e11e",
+  "source_directory": "/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/docspec-compaction-checkpoint-atqedgve",
+  "source_files": [
+    {
+      "path": ".cargo/config.toml",
+      "git_blob": "74ffb8e5d9ea5ecef8b0e635c10b5939b247db8f"
+    },
+    {
+      "path": "Cargo.lock",
+      "git_blob": "1d6a6885e81985eace96c0f00269e8c994876c04"
+    },
+    {
+      "path": "Cargo.toml",
+      "git_blob": "4216cce0a727b77aa4a3c30ff7e4d1e7f1e66237"
+    },
+    {
+      "path": "examples/comments_codec.rs",
+      "git_blob": "839d10790b1d3d11757e6431ec8a9801b8a6739f"
+    },
+    {
+      "path": "examples/comments_scan.rs",
+      "git_blob": "6fe545d60b8356a0ad9d318569900255e77c6327"
+    },
+    {
+      "path": "examples/layout_probe.rs",
+      "git_blob": "af55b327d9acc1eec276f2d4a927bff210387163"
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "git_blob": "e77cababdc403c5eb556c06240fe73710627d4a9"
+    },
+    {
+      "path": "src/budget.rs",
+      "git_blob": "cf95dd7e9ad82f880f1e140ed94da03d0206c551"
+    },
+    {
+      "path": "src/catalog.rs",
+      "git_blob": "791b93152791cd26397a23064d0247bee4b735cb"
+    },
+    {
+      "path": "src/engine.rs",
+      "git_blob": "cb1ca5850602dea35033fef53fb4d5bb8e7ae88c"
+    },
+    {
+      "path": "src/engine/admission.rs",
+      "git_blob": "1a9d592ed31a499eebc0e17045238599462e4a2d"
+    },
+    {
+      "path": "src/engine/admission/tests.rs",
+      "git_blob": "fd920f0631080f577ca1d86deee790773013a782"
+    },
+    {
+      "path": "src/engine/aggregation.rs",
+      "git_blob": "7f7aba20423f599f33077af066a34210ddacabf4"
+    },
+    {
+      "path": "src/engine/backfill.rs",
+      "git_blob": "54bd3313927d569ecd638fc39954d7ffb41f76b2"
+    },
+    {
+      "path": "src/engine/backfill/expressions.rs",
+      "git_blob": "4033dffd1faede8b5bf66c0343ff62186a275f23"
+    },
+    {
+      "path": "src/engine/backfill/expressions/tests.rs",
+      "git_blob": "3785d6c8c1b5cc0636f040bb9100a43fbc146279"
+    },
+    {
+      "path": "src/engine/backfill/preparation.rs",
+      "git_blob": "2f7c8c23837e1e9bc80041aa4d37f931dc0576fc"
+    },
+    {
+      "path": "src/engine/backfill/protection_tests.rs",
+      "git_blob": "e584a3304534c79bee6e601640432966bd4a1044"
+    },
+    {
+      "path": "src/engine/backfill/verification.rs",
+      "git_blob": "de5ec05ad20e447bcc9287b3d04b451f6457f0b7"
+    },
+    {
+      "path": "src/engine/changes.rs",
+      "git_blob": "dac1348df2a5683a75be76b22fb5577d879d72ca"
+    },
+    {
+      "path": "src/engine/compaction.rs",
+      "git_blob": "c3a44e113e704e05cba10054e72d89d33d0d2c61"
+    },
+    {
+      "path": "src/engine/export.rs",
+      "git_blob": "f427c8d971ca3dbe8e046440f571df622f5b1d30"
+    },
+    {
+      "path": "src/engine/history.rs",
+      "git_blob": "299a7b684f4748e1764394a9fc6e6994673f8edb"
+    },
+    {
+      "path": "src/engine/incremental.rs",
+      "git_blob": "c7716dc43db897fc0535d0f5bfd8dc7af7dccd95"
+    },
+    {
+      "path": "src/engine/inputs.rs",
+      "git_blob": "2768274b5ef73cd042fe1915aff38bc155869d60"
+    },
+    {
+      "path": "src/engine/read.rs",
+      "git_blob": "b7cd07079cf16ef55f3f5e29db36b349ddac08d1"
+    },
+    {
+      "path": "src/engine/refresh.rs",
+      "git_blob": "c045bc123c6eae99faef778fe91f858dea75ed9e"
+    },
+    {
+      "path": "src/engine/restore.rs",
+      "git_blob": "2e51a20730964bce55720dc676c0f465fade944d"
+    },
+    {
+      "path": "src/engine/retention.rs",
+      "git_blob": "470c61a18a1c19af5a401e0b6b6303a5eaf95e50"
+    },
+    {
+      "path": "src/engine/retention/availability.rs",
+      "git_blob": "b2a50a29f70e840467a52e259f85504a76a87590"
+    },
+    {
+      "path": "src/engine/retention/availability/tests.rs",
+      "git_blob": "d81b39f951aac9d4c04bd1d5a0a4bbe3640d104f"
+    },
+    {
+      "path": "src/engine/retention/grants.rs",
+      "git_blob": "60a65f0d70ad3235d2fb082061f5900c120c059b"
+    },
+    {
+      "path": "src/engine/retention/grants/tests.rs",
+      "git_blob": "e7fbc8fa8b44b74687eb91a08ec602152b516864"
+    },
+    {
+      "path": "src/engine/retention/inventory.rs",
+      "git_blob": "835acb447ad2dbc12d30ef3bb1bb2d0a1f6fbe51"
+    },
+    {
+      "path": "src/engine/retention/inventory/collector_tests.rs",
+      "git_blob": "49487efe764c23ec1c4a6b8173ffd54981426532"
+    },
+    {
+      "path": "src/engine/retention/inventory/history_tests.rs",
+      "git_blob": "3ec10389dbbb6f9d70da81bef3c4913374b4dc28"
+    },
+    {
+      "path": "src/engine/retention/owners.rs",
+      "git_blob": "c2fa691a82fcab98fa79eaa296fe72a0aea14788"
+    },
+    {
+      "path": "src/engine/retention/owners/phase_tests.rs",
+      "git_blob": "87f29fe53864816b20077d92b532356dd5a79cd7"
+    },
+    {
+      "path": "src/engine/retention/owners/tests.rs",
+      "git_blob": "aac090cb67af572625f271670e1abd7d811a5873"
+    },
+    {
+      "path": "src/engine/retention/recovery.rs",
+      "git_blob": "9bf2783d46f403c5ae68b09e3682a66d1d534208"
+    },
+    {
+      "path": "src/engine/retention/recovery/tests.rs",
+      "git_blob": "9d5f74d917b5347d2330d8c015149d66bd41b709"
+    },
+    {
+      "path": "src/engine/retention/removal.rs",
+      "git_blob": "a64de974745a9f17cefd9804fd39b2a4f9874fd8"
+    },
+    {
+      "path": "src/engine/retention/removal/fault_tests.rs",
+      "git_blob": "7733745d57cacfdd935ec1cc016956d086081c40"
+    },
+    {
+      "path": "src/engine/retention/removal/native_tests.rs",
+      "git_blob": "1289b162db9fc6cdeffab04fe7bcc708ea8789cf"
+    },
+    {
+      "path": "src/engine/retention/removal/tests.rs",
+      "git_blob": "840565bba2d2568f6903206774cab8e0c8ce69bb"
+    },
+    {
+      "path": "src/engine/retention/retirement.rs",
+      "git_blob": "47b7e202eaf665e3b6f6232001265ecd30dff32e"
+    },
+    {
+      "path": "src/engine/retention/retirement/tests.rs",
+      "git_blob": "951e5cee11d5be4b3784bc846dadcb7e7067717d"
+    },
+    {
+      "path": "src/engine/schema.rs",
+      "git_blob": "2250cc4512a6c9ed470eec9ec666a901b8b1ec45"
+    },
+    {
+      "path": "src/engine/verification.rs",
+      "git_blob": "dee8e4f0c657e7a6e5e85f180022d19842d2d066"
+    },
+    {
+      "path": "src/engine/worker.rs",
+      "git_blob": "1126dcaa4d27a4c57eca0646ac8b55e60c09b988"
+    },
+    {
+      "path": "src/engine/worker/tests.rs",
+      "git_blob": "5c8457b2607026f2135070d798d8b4098c1ec036"
+    },
+    {
+      "path": "src/engine/write.rs",
+      "git_blob": "379676fcc6f3cd14ca4b8e1bbc7b8a215a42436d"
+    },
+    {
+      "path": "src/engine/write/tests.rs",
+      "git_blob": "3858f551d41c8db492ccd328508950b09d5d3219"
+    },
+    {
+      "path": "src/error.rs",
+      "git_blob": "f8150224f3627ea74205aee062340401c4107dad"
+    },
+    {
+      "path": "src/export.rs",
+      "git_blob": "a8c2f153e11ece14dd868a4387a8b8640ab845c2"
+    },
+    {
+      "path": "src/http.rs",
+      "git_blob": "5667c5e1e41600410c963a0bc922ba30ab37013b"
+    },
+    {
+      "path": "src/http/ipc.rs",
+      "git_blob": "04e69cc44b6dc171736d24f7a5770e54ffca4091"
+    },
+    {
+      "path": "src/lib.rs",
+      "git_blob": "2ed43d28874dc05b131b101dcebf33965aed985d"
+    },
+    {
+      "path": "src/main.rs",
+      "git_blob": "748871fed25fd68b17296d0dff1d4fc9b1f6d2cf"
+    },
+    {
+      "path": "src/model.rs",
+      "git_blob": "899c7f792b3e589f0117dfdbb974caa89ef14fdd"
+    },
+    {
+      "path": "src/query.rs",
+      "git_blob": "60faa9c0b9bfa0c290abaa2c2c862135e019e833"
+    },
+    {
+      "path": "src/restore.rs",
+      "git_blob": "8830cbf567e67f2251dc57213473a0a6bf420774"
+    },
+    {
+      "path": "src/storage.rs",
+      "git_blob": "db279261afe8fd30b53434f713e02a6394b999f5"
+    },
+    {
+      "path": "src/storage/defaults.rs",
+      "git_blob": "bf8b3c0b1948d4883ecdd7b1979dac4ad3fd9679"
+    },
+    {
+      "path": "src/storage/identity.rs",
+      "git_blob": "969cd981e60e0e0d68678643fde33e079fa080f9"
+    },
+    {
+      "path": "src/storage/inspection.rs",
+      "git_blob": "d7bf6bc68491e7bebcca279c97731ea415065278"
+    },
+    {
+      "path": "src/storage/occurrences.rs",
+      "git_blob": "999bcc49d488d0f0d62e9e80fc6821de6e9c6577"
+    },
+    {
+      "path": "src/storage/occurrences/tests.rs",
+      "git_blob": "44cc05fea68580e6999ce5460f09a2d2a843c3f6"
+    },
+    {
+      "path": "src/storage/occurrences/tests/defaults.rs",
+      "git_blob": "d0f2af4f6569441ed2d0d85151379633fcde6bc0"
+    },
+    {
+      "path": "src/storage/occurrences/tests/schema.rs",
+      "git_blob": "a34a01d141766e2227b26650aab67e11ecec836c"
+    },
+    {
+      "path": "src/storage/removal.rs",
+      "git_blob": "aa6b16455f86e54bffee6071940320e4b8e8f59f"
+    },
+    {
+      "path": "src/storage/schema.rs",
+      "git_blob": "8c8b4924201594f8dee8bbf98e91eaff3ba57550"
+    },
+    {
+      "path": "src/storage/tables.rs",
+      "git_blob": "8b6ac24fda44c99d02b1c725a7e43371e7550189"
+    },
+    {
+      "path": "tests/abandonment.rs",
+      "git_blob": "4e38e8a2f18b8bdd90cb9deb07f05ad45766aa31"
+    },
+    {
+      "path": "tests/admission_formats.rs",
+      "git_blob": "93c9e75abf5a6e617299e0c0e133f4463dcc96ee"
+    },
+    {
+      "path": "tests/availability_retirement.rs",
+      "git_blob": "1b18a24494782e5a9103bb6cb8ce57ac60ac5449"
+    },
+    {
+      "path": "tests/backfill.rs",
+      "git_blob": "b6883ec53bde233d7a41aa5ac734f931a09e8567"
+    },
+    {
+      "path": "tests/backfill_dependencies.rs",
+      "git_blob": "707bb1acf2f7af5df0ffd1e491bc30fb6810042f"
+    },
+    {
+      "path": "tests/compaction.rs",
+      "git_blob": "3c59dd86a1d1d4e34a644b866f31375a8ea2994c"
+    },
+    {
+      "path": "tests/completed_backfill_plan.rs",
+      "git_blob": "063ad27a83a2bb0b13fbb3a266f4f6374c460ce1"
+    },
+    {
+      "path": "tests/defaults.rs",
+      "git_blob": "61a7b8334e8043162298313e754497894931dcb1"
+    },
+    {
+      "path": "tests/exports.rs",
+      "git_blob": "0dbf8ca1a9a43603a23c2743f70feea8db72339d"
+    },
+    {
+      "path": "tests/grant_retirement_transport.rs",
+      "git_blob": "8b99337e96b5fb2cf48bb5cefb2080049ae108f4"
+    },
+    {
+      "path": "tests/http_read.rs",
+      "git_blob": "8e82410b4699a5daa36d3790269564af6975d27b"
+    },
+    {
+      "path": "tests/input_generations.rs",
+      "git_blob": "b43c8b298eed1e598ea25a683f16339d3a2807ae"
+    },
+    {
+      "path": "tests/lifecycle.rs",
+      "git_blob": "56f891df4d58543663f57d81e90dbc281098a2d4"
+    },
+    {
+      "path": "tests/operation_retirement.rs",
+      "git_blob": "8478533f116963326eee01257c7726c3ee4f5730"
+    },
+    {
+      "path": "tests/operation_retirement_transport.rs",
+      "git_blob": "230264155a88583071b4715665d2489de440846e"
+    },
+    {
+      "path": "tests/phase_dependencies.rs",
+      "git_blob": "4ce9f8d50caff75751551dbb6db567df7f4e866a"
+    },
+    {
+      "path": "tests/phase_retirement.rs",
+      "git_blob": "a3cbb3577d0a83997bbc3a8f495488f3776ef37d"
+    },
+    {
+      "path": "tests/phase_retirement_transport.rs",
+      "git_blob": "08f4d31f68a02cd63dd50df01bf6f8f7dbbe2eba"
+    },
+    {
+      "path": "tests/physical_removal_process.rs",
+      "git_blob": "4cf6a3abda7dc7f280ab499e87e7d57a7654b2e5"
+    },
+    {
+      "path": "tests/physical_removal_transport.rs",
+      "git_blob": "23b28bf0b524b039a02fced058c675d148181b3e"
+    },
+    {
+      "path": "tests/rebuild.rs",
+      "git_blob": "bbdbef3c01e6aacb1337e2dfd03a8acc783d3cc5"
+    },
+    {
+      "path": "tests/rebuild_completion.rs",
+      "git_blob": "5c1e8591e70abf819b66a28fd7b82379798b8cc0"
+    },
+    {
+      "path": "tests/refresh.rs",
+      "git_blob": "5e0613498ce753daa7c2aa3c27b69ecc4ccea6de"
+    },
+    {
+      "path": "tests/related_refresh.rs",
+      "git_blob": "7239a14931a89b2e2fc54d198a5c9b28ae9c771f"
+    },
+    {
+      "path": "tests/related_refresh/aggregation.rs",
+      "git_blob": "aeeef39b4689ccb0243c28c7d529d2e72072fc9f"
+    },
+    {
+      "path": "tests/related_refresh/aggregation_types.rs",
+      "git_blob": "bbf71ee66eaa58b6535f3f192e400c4a07a436f8"
+    },
+    {
+      "path": "tests/related_refresh/incremental.rs",
+      "git_blob": "cff817fc6fd8cc69877fc3e423f706d8086a3283"
+    },
+    {
+      "path": "tests/restore.rs",
+      "git_blob": "ebdc97a5ea08a320e547fa5fa70b954181994e73"
+    },
+    {
+      "path": "tests/restore_catalog.rs",
+      "git_blob": "613e55fa6ba8a5c68918b9039d8f6e229c4cb096"
+    },
+    {
+      "path": "tests/retention_inspection.rs",
+      "git_blob": "e24cc0ce31d84791845e3975a9a5ba65939f0457"
+    },
+    {
+      "path": "tests/scalar_bindings.rs",
+      "git_blob": "d61e6fe6dbb73e945aab0db847e9c173d9945e80"
+    },
+    {
+      "path": "tests/schema.rs",
+      "git_blob": "85e8da063a49a89da50d36381aab12681ba60adc"
+    },
+    {
+      "path": "tests/succession.rs",
+      "git_blob": "de2ab840d3b2436b9ca1e820206a2633a7a07a9b"
+    },
+    {
+      "path": "tests/support/enriched.rs",
+      "git_blob": "2f37af1ea124d12e7b9e879467dafcd5427472a7"
+    },
+    {
+      "path": "tests/support/mod.rs",
+      "git_blob": "9f492a041f4053a4472a6834dd66b5e2e9a98c5c"
+    },
+    {
+      "path": "tests/support/scalar.rs",
+      "git_blob": "592a05cf4b5e4b7e622d1d29f7314041fec9e11a"
+    },
+    {
+      "path": "tests/updates.rs",
+      "git_blob": "86d601107eb3597a5197f4b564062f4ddf5430f0"
+    },
+    {
+      "path": "tests/worker_initialization.rs",
+      "git_blob": "afc425ef543719c111c9addf863b578cf0c8e2cf"
+    }
+  ],
+  "argv": [
+    "cargo",
+    "build",
+    "--locked",
+    "--release",
+    "--bin",
+    "docspec",
+    "--jobs",
+    "8"
+  ],
+  "started_at": "2026-10-09T23:13:22.804281+00:00",
+  "free_volume_bytes_before": 144073539584,
+  "complete": true,
+  "scope": "Compilation is outside performance measurement. Snapshot Rust and Cargo sources match the recorded commit.",
+  "exit_code": 0,
+  "binary": {
+    "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec",
+    "bytes": 181118216,
+    "sha256": "0060f5be2c2953d3fe3ab55a3ca55618567cea0e9b17c3497f3d7d7b6e09f499"
+  },
+  "elapsed_seconds": 265.09676879199105,
+  "finished_at": "2026-10-09T23:17:47.899656+00:00",
+  "free_volume_bytes_after": 139345403904
+}
