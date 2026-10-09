@@ -1,0 +1,8 @@
+{
+  "observed_at": "2026-10-09T06:05:11.160479+00:00",
+  "debug_cache_allocated_bytes": 8479830016,
+  "shared_volume_free_bytes": 5624852480,
+  "scope": "Point-in-time allocated build cache and whole-volume free space after the corrected gate; not dataset storage, peak usage, or reclaimed bytes.",
+  "cleanup_performed": false,
+  "corpus_benchmark_performed": false
+}

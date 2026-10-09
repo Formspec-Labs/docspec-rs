@@ -9,8 +9,8 @@ use docspec::{
     engine::verify_release,
     model::{
         Id, JoinCardinality, JoinDefinition, JoinField, JoinKey, JoinKind, JoinSide, JoinTransform,
-        NullMatching, PhaseResult, PhaseRetirement, RefreshMode, RefreshPolicy, RefreshSpec,
-        RefreshTransform, ReleasePin, RunSpec, TablePin,
+        NullMatching, PhaseResult, RefreshMode, RefreshPolicy, RefreshSpec, RefreshTransform,
+        ReleasePin, Retirement, RunSpec, TablePin,
     },
 };
 use scalar::{fixture, id, input, limits, spec};
@@ -64,7 +64,7 @@ fn key_with_prefix(records: &BTreeMap<String, Value>, prefix: &str) -> String {
         .clone()
 }
 
-async fn retire(engine: &Engine, dataset: &Id, name: &str, keys: &[String]) -> PhaseRetirement {
+async fn retire(engine: &Engine, dataset: &Id, name: &str, keys: &[String]) -> Retirement {
     let plan = engine
         .plan_phase_retirement(dataset, &id(name), keys, "discard this recovery generation")
         .await
@@ -132,7 +132,7 @@ async fn processing_recovers_after_admission_retirement_and_restart() {
     assert_eq!(after[&admission_key], before[&admission_key]);
     assert_eq!(after[&processing_key], before[&processing_key]);
     assert_eq!(
-        after["phase-retirement/admission"],
+        after["retirement/admission"],
         serde_json::to_value(&decision).unwrap()
     );
     for (key, value) in before
@@ -239,8 +239,8 @@ async fn exact_generation_retries_do_not_retire_recomputed_work() {
         )
         .await
         .unwrap();
-    assert!(fresh.phases[0].revision > retired.plan.phases[0].revision);
-    assert_eq!(fresh.phases[0].key, key);
+    assert!(fresh.records[0].revision > retired.plan.records[0].revision);
+    assert_eq!(fresh.records[0].key, key);
     assert_eq!(
         engine.retire_phases(&stale).await.unwrap_err().code(),
         "stale_retirement"

@@ -8,10 +8,10 @@ use super::*;
 use crate::catalog::View;
 use std::collections::BTreeSet;
 
+mod availability;
 mod inventory;
 pub(super) mod owners;
-mod phases;
-pub(super) use phases::completion_key;
+mod retirement;
 
 impl Engine {
     /// Proves that every unselected admission in a captured interval was abandoned.

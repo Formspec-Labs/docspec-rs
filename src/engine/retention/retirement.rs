@@ -1,4 +1,4 @@
-//! Exact native-revision retirement of independently reusable phase promises.
+//! Guarded retirement of exact recovery and result-availability promises.
 
 use super::*;
 use crate::catalog::SnapshotRows;
@@ -9,10 +9,10 @@ mod tests;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RetiredPhase {
+pub(super) struct RetiredRecord {
     pub dataset: Id,
     pub table_uuid: String,
-    pub phase: PhaseGeneration,
+    pub record: RetainedGeneration,
     pub retirement: Id,
 }
 
@@ -27,15 +27,37 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
         || key.starts_with("groups/")
 }
 
-pub(super) fn marker_key(phase: &PhaseGeneration) -> String {
+pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
+    match scope {
+        RetirementScope::PhaseRecovery => completion_key(key),
+        RetirementScope::ResultAvailability { operation } => {
+            key == format!("result/{operation}")
+                || key == format!("readback/{operation}")
+                || key
+                    .strip_prefix(&format!("backfill-readback/{operation}/"))
+                    .is_some_and(|digest| {
+                        digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+        }
+    }
+}
+
+pub(super) fn retained_key(key: &str) -> bool {
+    completion_key(key)
+        || key.starts_with("result/")
+        || key.starts_with("readback/")
+        || key.starts_with("backfill-readback/")
+}
+
+pub(super) fn marker_key(phase: &RetainedGeneration) -> String {
     format!(
-        "phase-retired/{}/{}",
+        "retired/{}/{}",
         blake3::hash(phase.key.as_bytes()).to_hex(),
         phase.revision
     )
 }
 
-pub(in crate::engine) fn phase_retired(
+pub(in crate::engine) fn record_retired(
     rows: &SnapshotRows,
     view: &View,
     key: &str,
@@ -44,25 +66,25 @@ pub(in crate::engine) fn phase_retired(
     let Some((retired_revision, marker)) = retirement_marker(rows, view, key, revision)? else {
         return Ok(false);
     };
-    let receipt_key = format!("phase-retirement/{}", marker.retirement);
+    let receipt_key = format!("retirement/{}", marker.retirement);
     let (_, _, receipt) = rows
-        .get_record::<PhaseRetirement>(&receipt_key)?
+        .get_record::<Retirement>(&receipt_key)?
         .ok_or_else(invalid_retirement)?;
     validate_receipt(&receipt, view, &receipt_key, retired_revision)?;
-    if receipt.plan.phases.binary_search(&marker.phase).is_err() {
+    if receipt.plan.records.binary_search(&marker.record).is_err() {
         return Err(invalid_retirement());
     }
     Ok(true)
 }
 
 pub(super) fn validate_receipt(
-    receipt: &PhaseRetirement,
+    receipt: &Retirement,
     view: &View,
     key: &str,
     revision: i64,
 ) -> Result<()> {
     let plan = &receipt.plan;
-    if key != format!("phase-retirement/{}", plan.retirement)
+    if key != format!("retirement/{}", plan.retirement)
         || receipt.revision != revision
         || revision > view.revision
         || plan.revision <= 0
@@ -70,13 +92,15 @@ pub(super) fn validate_receipt(
         || plan.table_uuid != view.table.metadata().uuid().to_string()
         || &crate::catalog::lifecycle_ident(&plan.dataset) != view.table.identifier()
         || plan.reason.trim().is_empty()
-        || plan.phases.is_empty()
+        || plan.records.is_empty()
         || plan
-            .phases
+            .records
             .windows(2)
             .any(|pair| pair[0].key >= pair[1].key)
-        || plan.phases.iter().any(|phase| {
-            !completion_key(&phase.key) || phase.revision <= 0 || phase.revision > plan.revision
+        || plan.records.iter().any(|phase| {
+            !scope_key(&plan.scope, &phase.key)
+                || phase.revision <= 0
+                || phase.revision > plan.revision
         })
     {
         return Err(invalid_retirement());
@@ -86,13 +110,13 @@ pub(super) fn validate_receipt(
 
 pub(super) fn validate_markers(
     rows: &SnapshotRows,
-    receipt: &PhaseRetirement,
+    receipt: &Retirement,
     view: &View,
     key: &str,
     revision: i64,
 ) -> Result<()> {
     validate_receipt(receipt, view, key, revision)?;
-    for phase in &receipt.plan.phases {
+    for phase in &receipt.plan.records {
         let (marker_revision, marker) = retirement_marker(rows, view, &phase.key, phase.revision)?
             .ok_or_else(invalid_retirement)?;
         if marker_revision != revision
@@ -103,6 +127,7 @@ pub(super) fn validate_markers(
             return Err(invalid_retirement());
         }
     }
+    super::availability::validate_pointer(rows, view, receipt, revision)?;
     Ok(())
 }
 
@@ -113,25 +138,24 @@ pub(super) fn retirement_marker(
     view: &View,
     key: &str,
     revision: i64,
-) -> Result<Option<(i64, RetiredPhase)>> {
-    let phase = PhaseGeneration {
+) -> Result<Option<(i64, RetiredRecord)>> {
+    let phase = RetainedGeneration {
         key: key.into(),
         revision,
     };
     let Some((retired_revision, _, marker)) =
-        rows.get_record::<RetiredPhase>(&marker_key(&phase))?
+        rows.get_record::<RetiredRecord>(&marker_key(&phase))?
     else {
         return Ok(None);
     };
-    if marker.phase != phase
-        || !completion_key(key)
+    if marker.record != phase
+        || !retained_key(key)
         || marker.table_uuid != view.table.metadata().uuid().to_string()
         || &crate::catalog::lifecycle_ident(&marker.dataset) != view.table.identifier()
         || revision <= 0
         || retired_revision <= revision
         || retired_revision > view.revision
-        || rows.revision(&format!("phase-retirement/{}", marker.retirement))
-            != Some(retired_revision)
+        || rows.revision(&format!("retirement/{}", marker.retirement)) != Some(retired_revision)
     {
         return Err(invalid_retirement());
     }
@@ -158,7 +182,7 @@ impl Engine {
         let Some(revision) = rows.revision(key) else {
             return Ok(None);
         };
-        if phase_retired(&rows, view, key, revision)? {
+        if record_retired(&rows, view, key, revision)? {
             return Ok(None);
         }
         Ok(rows.get_record::<T>(key)?.map(|(_, _, value)| value))
@@ -179,7 +203,7 @@ impl Engine {
         retirement: &Id,
         keys: &[String],
         reason: &str,
-    ) -> Result<PhaseRetirementPlan> {
+    ) -> Result<RetentionPlan> {
         let memory = self.request_memory(&(dataset, retirement, keys, reason))?;
         let dataset = dataset.clone();
         let retirement = retirement.clone();
@@ -199,7 +223,7 @@ impl Engine {
         retirement: Id,
         mut keys: Vec<String>,
         reason: String,
-    ) -> Result<PhaseRetirementPlan> {
+    ) -> Result<RetentionPlan> {
         self.retirement_catalog()?;
         keys.sort();
         if reason.trim().is_empty()
@@ -218,19 +242,20 @@ impl Engine {
             let revision = rows
                 .revision(&key)
                 .ok_or_else(|| Error::refusal("no_phase", "requested completion is unavailable"))?;
-            if phase_retired(&rows, &view, &key, revision)? {
+            if record_retired(&rows, &view, &key, revision)? {
                 return Err(Error::refusal(
                     "phase_retired",
                     "requested completion is already retired",
                 ));
             }
-            phases.push(PhaseGeneration { key, revision });
+            phases.push(RetainedGeneration { key, revision });
         }
-        Ok(PhaseRetirementPlan {
+        Ok(RetentionPlan {
             dataset,
             retirement,
+            scope: RetirementScope::PhaseRecovery,
             reason,
-            phases,
+            records: phases,
             table_uuid: view.table.metadata().uuid().to_string(),
             metadata: view.table.metadata_location_result()?.to_owned(),
             snapshot_id: view
@@ -252,24 +277,31 @@ impl Engine {
     /// # Errors
     /// Refuses changed generations, conflicting retry identities, unknown native
     /// boundaries, unqualified catalogs, or exhausted capacity. No objects are deleted.
-    pub async fn retire_phases(&self, plan: &PhaseRetirementPlan) -> Result<PhaseRetirement> {
+    pub async fn retire_phases(&self, plan: &RetentionPlan) -> Result<Retirement> {
+        if plan.scope != RetirementScope::PhaseRecovery {
+            return Err(invalid_retirement());
+        }
+        self.retire_retained(plan).await
+    }
+
+    pub(super) async fn retire_retained(&self, plan: &RetentionPlan) -> Result<Retirement> {
         let memory = self.request_memory(plan)?;
         let plan = plan.clone();
         self.maintain_work(memory, move |engine| async move {
-            engine.retire_phases_admitted(&plan).await
+            engine.retire_retained_admitted(&plan).await
         })
         .await
     }
 
-    async fn retire_phases_admitted(&self, plan: &PhaseRetirementPlan) -> Result<PhaseRetirement> {
+    async fn retire_retained_admitted(&self, plan: &RetentionPlan) -> Result<Retirement> {
         self.retirement_catalog()?;
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&plan.dataset).await;
         let _guard = lock.lock().await;
         let view = lifecycle.open(&plan.dataset).await?;
         let rows = lifecycle.rows(&view).await?;
-        let key = format!("phase-retirement/{}", plan.retirement);
-        if let Some((revision, _, previous)) = rows.get_record::<PhaseRetirement>(&key)? {
+        let key = format!("retirement/{}", plan.retirement);
+        if let Some((revision, _, previous)) = rows.get_record::<Retirement>(&key)? {
             if previous.plan != *plan || previous.revision != revision {
                 return Err(Error::refusal(
                     "retirement_conflict",
@@ -281,9 +313,9 @@ impl Engine {
         }
         let metadata = view.table.metadata();
         if plan.reason.trim().is_empty()
-            || plan.phases.is_empty()
+            || plan.records.is_empty()
             || plan
-                .phases
+                .records
                 .windows(2)
                 .any(|pair| pair[0].key >= pair[1].key)
             || plan.table_uuid != metadata.uuid().to_string()
@@ -298,14 +330,26 @@ impl Engine {
         {
             return Err(invalid_retirement());
         }
-        let mut records = Vec::with_capacity(plan.phases.len() + 1);
-        for phase in &plan.phases {
-            if !completion_key(&phase.key) || phase.revision <= 0 || phase.revision > plan.revision
+        if let RetirementScope::ResultAvailability { operation } = &plan.scope {
+            self.check_operation_available(&view, operation).await?;
+            let current = super::availability::collect(&rows, &view, operation, &lifecycle.budget)?;
+            if current != plan.records {
+                return Err(Error::refusal(
+                    "stale_retirement",
+                    "result or readback generations changed; capture a fresh plan",
+                ));
+            }
+        }
+        let mut records = Vec::with_capacity(plan.records.len() + 1);
+        for phase in &plan.records {
+            if !scope_key(&plan.scope, &phase.key)
+                || phase.revision <= 0
+                || phase.revision > plan.revision
             {
                 return Err(invalid_retirement());
             }
             if rows.revision(&phase.key) != Some(phase.revision)
-                || phase_retired(&rows, &view, &phase.key, phase.revision)?
+                || record_retired(&rows, &view, &phase.key, phase.revision)?
             {
                 return Err(Error::refusal(
                     "stale_retirement",
@@ -314,15 +358,15 @@ impl Engine {
             }
             records.push(record(
                 marker_key(phase),
-                RetiredPhase {
+                RetiredRecord {
                     dataset: plan.dataset.clone(),
                     table_uuid: plan.table_uuid.clone(),
-                    phase: phase.clone(),
+                    record: phase.clone(),
                     retirement: plan.retirement.clone(),
                 },
             )?);
         }
-        let result = PhaseRetirement {
+        let result = Retirement {
             plan: plan.clone(),
             revision: view
                 .revision
@@ -330,10 +374,13 @@ impl Engine {
                 .ok_or_else(invalid_retirement)?,
         };
         records.push(record(&key, &result)?);
+        if let RetirementScope::ResultAvailability { operation } = &plan.scope {
+            records.push(super::availability::pointer_record(plan, operation)?);
+        }
         if let Err(error) = lifecycle.commit(&view, records).await {
             let after = lifecycle.open(&plan.dataset).await?;
             let rows = lifecycle.rows(&after).await?;
-            if let Some((revision, _, previous)) = rows.get_record::<PhaseRetirement>(&key)? {
+            if let Some((revision, _, previous)) = rows.get_record::<Retirement>(&key)? {
                 if previous == result {
                     validate_markers(&rows, &previous, &after, &key, revision)?;
                     return Ok(previous);
@@ -348,11 +395,11 @@ impl Engine {
         Ok(result)
     }
 
-    fn retirement_catalog(&self) -> Result<()> {
+    pub(super) fn retirement_catalog(&self) -> Result<()> {
         if !self.inner.owned_catalog {
             return Err(Error::refusal(
                 "retention_catalog_unqualified",
-                "phase retirement requires the owned embedded catalog",
+                "retirement requires the owned embedded catalog",
             ));
         }
         Ok(())

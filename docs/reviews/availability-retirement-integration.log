@@ -1,0 +1,32 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.84s
+     Running tests/availability_retirement.rs (target/debug/deps/availability_retirement-0dc8835d321f97da)
+
+running 3 tests
+test retired_historical_build_refuses_lookup_and_own_retries_but_keeps_history_and_files ... ok
+test abandoned_backfill_retires_every_saved_composition_without_recomputing_on_retry ... ok
+test retained_dependent_refresh_resumes_after_source_retirement_while_fresh_capture_refuses ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.14s
+
+     Running tests/phase_retirement.rs (target/debug/deps/phase_retirement-ba03eff11568c106)
+
+running 7 tests
+test processing_recovers_after_admission_retirement_and_restart ... ok
+test retained_readback_selects_after_upstream_retirement_without_source ... ok
+test exact_generation_retries_do_not_retire_recomputed_work ... ok
+test validation_requires_explicit_retirement_after_processing_replacement ... ok
+test scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test evidence_requires_explicit_retirement_after_source_replacement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.81s
+
+     Running tests/phase_retirement_transport.rs (target/debug/deps/phase_retirement_transport-d54b0438f0857867)
+
+running 2 tests
+test availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.03s
+

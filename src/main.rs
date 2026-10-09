@@ -6,8 +6,8 @@ use docspec::{
     budget::{Budget, Limits},
     engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, PhaseRetirementPlan,
-        RefreshSpec, ReleasePin, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin,
+        RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     storage,
 };
@@ -72,6 +72,15 @@ enum Command {
     },
     /// Retire the phase generations in a saved plan; preserve files and releases.
     RetirePhases { plan: PathBuf },
+    /// Capture a non-current result and all saved readbacks for logical retirement.
+    PlanAvailabilityRetirement {
+        dataset: String,
+        retirement: String,
+        operation: String,
+        reason: String,
+    },
+    /// End standalone availability from a saved plan; preserve dependent data and files.
+    RetireAvailability { plan: PathBuf },
     /// Stop an unfinished operation; preserve its completed phases and retained files.
     Abandon {
         dataset: String,
@@ -288,7 +297,27 @@ async fn main() -> anyhow::Result<()> {
                 )?,
                 Command::RetirePhases { plan } => print_json(
                     &engine
-                        .retire_phases(&read_json::<PhaseRetirementPlan>(plan)?)
+                        .retire_phases(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanAvailabilityRetirement {
+                    dataset,
+                    retirement,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_availability_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &Id::new(operation)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireAvailability { plan } => print_json(
+                    &engine
+                        .retire_availability(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::Abandon {

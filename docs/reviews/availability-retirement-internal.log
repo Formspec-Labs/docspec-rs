@@ -1,0 +1,67 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.91s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 44 tests
+test engine::retention::inventory::collector_tests::native_paths_require_exact_identities_discovered_anywhere_in_the_closure ... ok
+test engine::retention::inventory::collector_tests::conflicts_refuse_and_duplicate_references_do_not_consume_more_capacity ... ok
+test engine::retention::inventory::collector_tests::native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar ... ok
+test engine::retention::inventory::collector_tests::closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads ... ok
+test engine::retention::inventory::collector_tests::oversized_roots_refuse_before_following_missing_metadata ... ok
+test engine::retention::inventory::collector_tests::empty_authority_has_no_selected_result_or_protection_claim ... ok
+test engine::retention::inventory::collector_tests::repeated_bindings_share_claim_memory_and_owner_changes_refuse_inspection ... ok
+test engine::retention::inventory::history_tests::history_receipts_do_not_expand_unavailable_endpoints_but_results_keep_captured_inputs ... ok
+test engine::retention::inventory::collector_tests::authority_reuses_its_result_identity_without_lending_protection_to_unknown_results ... ok
+test engine::retention::inventory::history_tests::existing_succession_bindings_and_owner_grants_remain_enforced ... ok
+test engine::retention::availability::tests::lost_reply_and_concurrent_retry_preserve_one_availability_decision ... ok
+test engine::retention::inventory::history_tests::succession_roots_refuse_unanchored_or_malformed_ordering_receipts ... ok
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test engine::retention::availability::tests::inconsistent_current_authority_cannot_authorize_retirement ... ok
+test engine::retention::owners::tests::a_reserved_path_without_completed_identity_cannot_grant_a_reference ... ok
+test engine::retention::owners::tests::a_family_that_owns_a_member_needs_no_foreign_grant_for_its_own_objects ... ok
+test engine::retention::owners::phase_tests::an_earlier_binding_requires_retirement_of_its_exact_native_generation ... ok
+test engine::retention::inventory::history_tests::progress_roots_refuse_wrong_receipts_endpoints_and_coverage ... ok
+test engine::retention::owners::tests::forged_object_identities_cannot_acquire_owner_protection ... ok
+test engine::retention::owners::phase_tests::material_reuse_carries_original_owner_scope_into_validation_and_readback ... ok
+test engine::retention::owners::phase_tests::retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation ... ok
+test engine::retention::owners::phase_tests::refresh_evidence_inherits_the_exact_captured_producer_scope ... ok
+test engine::retention::owners::tests::lost_native_owner_reply_reconciles_without_another_commit ... ok
+test engine::retention::owners::tests::owner_availability_and_grants_conflict_at_the_native_boundary ... ok
+test engine::retention::owners::tests::owner_grant_retry_and_reopen_reuse_one_native_commit ... ok
+test engine::retention::owners::phase_tests::succession_keeps_actual_predecessor_without_inheriting_its_payload_scope ... ok
+test engine::retention::retirement::tests::lost_native_reply_and_concurrent_retry_record_one_retirement ... ok
+test engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required ... FAILED
+test engine::retention::owners::tests::failed_consumer_handoff_keeps_grants_for_a_successful_retry ... ok
+test engine::retention::owners::phase_tests::unknown_predecessor_scope_does_not_erase_the_selected_results_known_scope ... ok
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::retention::owners::tests::shared_owner_grant_survives_retirement_of_its_creation_phase ... ok
+test engine::retention::owners::tests::lost_consumer_seal_reply_reuses_the_committed_binding_and_owner_grants ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test engine::retention::retirement::tests::legacy_processing_cannot_adopt_a_replacement_admission ... ok
+test engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope ... ok
+test engine::retention::owners::tests::partial_owner_handoff_refuses_sealing_and_reuses_prior_protection_on_retry ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test engine::retention::availability::tests::pointer_receipt_and_marker_must_form_one_native_decision ... ok
+test engine::retention::owners::tests::sealing_binds_exact_owner_grants_in_the_same_native_consumer_commit ... ok
+test engine::retention::owners::tests::retained_seal_refuses_forged_binding_or_missing_owner_token ... ok
+test engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+
+failures:
+
+---- engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required stdout ----
+
+thread 'engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required' (17753291) panicked at src/engine/retention/retirement/tests.rs:137:9:
+assertion `left == right` failed
+  left: "invalid_json"
+ right: "invalid_retirement"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required
+
+test result: FAILED. 43 passed; 1 failed; 0 ignored; 0 measured; 63 filtered out; finished in 11.04s
+
+error: test failed, to rerun pass `--lib`

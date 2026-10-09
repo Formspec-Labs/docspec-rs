@@ -65,7 +65,7 @@ impl Engine {
         };
         for version in seal.members.values() {
             let release = self
-                .release_admitted(&version.dataset, &version.version)
+                .available_release_admitted(&version.dataset, &version.version)
                 .await?;
             if release.version_ref() != *version || release.dataset.relationship != expected {
                 return Err(invalid_relationship());
@@ -154,7 +154,7 @@ impl Engine {
         let memory = self.request_memory(inputs)?;
         let inputs = inputs.clone();
         self.admit_work(memory, move |engine| async move {
-            engine.capture_inputs_admitted(&inputs).await
+            engine.capture_inputs_admitted(&inputs, true).await
         })
         .await
     }
@@ -162,13 +162,18 @@ impl Engine {
     pub(super) async fn capture_inputs_admitted(
         &self,
         inputs: &BTreeMap<Id, VersionRef>,
+        require_available: bool,
     ) -> Result<InputCoverage> {
-        Ok(self.capture_inputs_with_memory(inputs).await?.0)
+        Ok(self
+            .capture_inputs_with_memory(inputs, require_available)
+            .await?
+            .0)
     }
 
     pub(super) async fn capture_inputs_with_memory(
         &self,
         inputs: &BTreeMap<Id, VersionRef>,
+        require_available: bool,
     ) -> Result<(InputCoverage, tokio::sync::OwnedSemaphorePermit)> {
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
@@ -190,6 +195,11 @@ impl Engine {
         let mut generations = BTreeMap::new();
         let mut families = BTreeMap::new();
         for (dataset, version) in inputs {
+            if require_available {
+                let view = lifecycle.open(dataset).await?;
+                self.check_operation_available(&view, &version.version)
+                    .await?;
+            }
             if self.qualify_input(version).await? != relationships[dataset] {
                 return Err(invalid_relationship());
             }

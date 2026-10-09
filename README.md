@@ -108,6 +108,28 @@ reusable. Retirement changes recovery promises: it preserves files, attempt
 protections, issued readbacks and selected releases. It does not delete objects
 or establish reclaimable space.
 
+To stop offering an old result through catalog lookup, retire its standalone
+availability together with every saved readback for that operation:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-availability-retirement comments retired-version old-operation "historical lookup no longer needed" > availability-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-availability availability-retirement.json
+```
+
+HTTP uses `POST /retention/availability/plan` with `dataset`, `retirement`,
+`operation` and `reason`, then `POST /retention/availability/retire` with the
+returned plan. The library methods are `Engine::plan_availability_retirement`
+and `Engine::retire_availability`. The current selection cannot retire. An
+unfinished operation must first be abandoned. Execution checks that the complete
+saved result/readback set still matches the plan; it never expands a stale plan.
+
+Historical lookup, replay under that operation ID and fresh dependency admission
+then return `availability_retired` (HTTP 410). Already admitted consumers retain
+their inputs and can resume; succession receipts and completed phases remain.
+Existing immutable pins still refer to the same objects. This is logical
+availability retirement, not access revocation or permission to delete bytes.
+Both retirement services use one scoped `RetentionPlan` and durable decision.
+
 Catalog work keeps running after a caller disconnects or drops its future. The
 owned task retains workspace ownership, shared maintenance admission and its
 request/task memory reservation until the existing operation finishes. Unrelated

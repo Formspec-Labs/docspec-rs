@@ -1,5 +1,64 @@
 # Implementation and qualification status
 
+## Explicit historical availability retirement
+
+An operator can now retire a non-current result together with all saved readbacks
+for its operation. Planning captures exact native generations; execution checks
+the complete set again under local maintenance ownership. A changed set refuses
+without expanding the plan. Unfinished work must first be abandoned, and the
+current selection cannot retire. CLI, HTTP and library calls share the existing
+retirement commit and lost-response reconciliation service.
+
+After retirement, catalog lookup, own-operation replay and fresh dependency
+admission refuse with `availability_retired` (HTTP 410). An independently admitted
+consumer can still resume from its retained inputs. Result and succession receipts
+keep their original values and native revisions, so ordering remains provable.
+Retiring availability does not revoke already held immutable pins. Completed
+phases, owner grants and other dependent roots remain protected; physical objects
+are unchanged.
+
+One shared scoped `RetentionPlan` now represents phase recovery or result
+availability. Its generation records, decision receipts and markers replace the
+earlier phase-only greenfield representation; no released-format compatibility or
+migration is claimed. Ordinary available operations check a cached metadata key
+inside admitted work. Retirement checks its pointer, receipt and markers only
+when that pointer exists; ordinary payload reads gain no validation scans.
+Retention inspection validates each decision once, reuses its exact generation
+and operation sets, and ignores only the retired independent roots and bindings.
+
+The [independent review](reviews/availability-retirement-review.md) approves the
+scoped implementation. Its authority-identity finding led to one shared check
+that the current selection matches its immutable result and original revision.
+An otherwise consistent alias cannot select retired availability. The initial
+[internal run](reviews/availability-retirement-internal.log) exposed a marker
+failure that depended on key ordering; marker membership now validates before
+active roots. The [corrected run](reviews/availability-retirement-internal-corrected.log)
+and [integration/transport checks](reviews/availability-retirement-integration.log)
+passed, covering cold dependent recovery, full Backfill readback membership,
+concurrent retries, uncertain commits, malformed records and unchanged files.
+The initial [repository gate](reviews/availability-retirement-check.log) caught a
+fresh-dataset race introduced by the entry check: simultaneous retries could open
+the native namespace before taking the dataset lock. Both run paths now use one
+shared locked entry check. The existing [concurrent-retry test](reviews/availability-retirement-concurrency.log)
+passed after correction. The [corrected complete repository gate](reviews/availability-retirement-check-corrected.log)
+passed formatting, strict linting and all library, integration and documentation
+tests.
+
+Unbased Build admission also stops acquiring the previous selection's payload
+solely to record ordering. Explicit bases keep their existing protections. This
+removes unnecessary dependency traversal and new retained state; it is not a
+measured throughput or storage-reclamation result.
+
+Owner-grant and operation/attempt retirement, physical removal, compaction,
+restore, hosted adapters and full performance qualification remain unfinished.
+The [next-step review](reviews/retention-next-step-review.md) identifies terminal
+operation recovery and attempt closure as the next necessary extension, while
+preserving independent phases and results. The [resource snapshot](reviews/availability-retirement-resources.json)
+separates reusable build-cache allocation from shared-volume free space; it is
+not a peak measurement. This checkpoint adds metadata and ends one availability
+promise; it reclaims no bytes and does not establish the 10M Comments acceptance
+target.
+
 ## Ordering evidence and retained content have separate lifetimes
 
 Selection retains succession and input-progress as catalog evidence without

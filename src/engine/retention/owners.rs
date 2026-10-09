@@ -311,7 +311,7 @@ pub(super) fn earlier_binding(
         return Err(invalid());
     }
     let (retirement_revision, _) =
-        super::phases::retirement_marker(rows, view, &binding.key, revision)?
+        super::retirement::retirement_marker(rows, view, &binding.key, revision)?
             .ok_or_else(invalid)?;
     if retirement_revision >= claim_revision {
         return Err(invalid());
@@ -454,7 +454,7 @@ impl Engine {
             return Err(invalid());
         }
         if earlier_binding(&rows, view, &key, revision, &binding)? {
-            if !super::phases::phase_retired(&rows, view, claim, revision)? {
+            if !super::retirement::record_retired(&rows, view, claim, revision)? {
                 return Err(invalid());
             }
             return Ok(None);

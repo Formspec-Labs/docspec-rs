@@ -197,7 +197,16 @@ impl Engine {
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
+        self.check_operation_available(&view, &spec.operation)
+            .await?;
         self.check_not_abandoned(&view, &spec.operation).await?;
+        if !lifecycle
+            .rows(&view)
+            .await?
+            .contains_key(&format!("operation/{}", spec.operation))
+        {
+            self.check_operation_available(&view, &spec.base).await?;
+        }
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         let native = storage::open_pin(&base.dataset.groups["source"]).await?;
         let expressions = Expressions::compile(
@@ -353,6 +362,8 @@ impl Engine {
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
         validate(spec)?;
+        self.check_operation_entry(&spec.dataset, &spec.operation)
+            .await?;
         let digest = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         // Native preparation has a large async state. Keep it on the heap rather
         // than nesting another copy in the reconciliation future's stack frame.
@@ -406,6 +417,9 @@ impl Engine {
                 return Ok(result);
             }
             self.check_not_abandoned(&view, &spec.operation).await?;
+            if old.is_none() {
+                self.check_operation_available(&view, &spec.base).await?;
+            }
             let decoding = if old.is_none() {
                 Some(lifecycle.rows(&view).await?.reserve_decoded(
                     &lifecycle.budget,

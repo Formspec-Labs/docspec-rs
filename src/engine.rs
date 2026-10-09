@@ -277,6 +277,8 @@ impl Engine {
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(spec.dataset()).await?;
+        self.check_operation_available(&view, spec.operation())
+            .await?;
         self.check_not_abandoned(&view, spec.operation()).await?;
         let request = fingerprint(spec)?;
         let operation: Option<Operation> = lifecycle
@@ -455,7 +457,7 @@ impl Engine {
         let dataset = dataset.clone();
         let version = version.clone();
         self.admit_work(memory, move |engine| async move {
-            engine.release_admitted(&dataset, &version).await
+            engine.available_release_admitted(&dataset, &version).await
         })
         .await
     }
@@ -464,6 +466,14 @@ impl Engine {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
+        self.resolve_release(&view, dataset, version).await
+    }
+
+    async fn available_release_admitted(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
+        let lock = self.lock(dataset).await;
+        let _guard = lock.lock().await;
+        let view = self.inner.lifecycle.open(dataset).await?;
+        self.check_operation_available(&view, version).await?;
         self.resolve_release(&view, dataset, version).await
     }
 
@@ -746,6 +756,10 @@ impl Engine {
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
         validate_request(spec)?;
+        // Owned-host maintenance waits for this admitted worker. One check before
+        // preparation and error reconciliation covers the complete operation.
+        self.check_operation_entry(spec.dataset(), spec.operation())
+            .await?;
         let request = fingerprint(spec)?;
         let result = self.prepare_and_select(spec, stop).await;
         if result
@@ -1033,9 +1047,9 @@ impl Engine {
                     break old;
                 } else {
                     let Some(protected) = &prepared else {
-                        // Protect the currently selected predecessor even for an
-                        // unbased rebuild: selection retains that history edge.
-                        let base = authority.release.take();
+                        // Unbased builds retain only the ordering receipt of the
+                        // previous selection; no previous payload is consumed.
+                        let base = spec.base().and_then(|_| authority.release.take());
                         let boundary = view.table.metadata_location_result()?.to_owned();
                         drop(guards);
                         prepared = Some(

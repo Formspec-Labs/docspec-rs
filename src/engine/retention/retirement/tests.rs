@@ -91,26 +91,26 @@ async fn receipt_membership_and_marker_presence_are_required() {
             )
             .await
             .unwrap();
-        let receipt = PhaseRetirement {
+        let receipt = Retirement {
             plan: plan.clone(),
             revision: view.revision + 1,
         };
-        let mut records = vec![record("phase-retirement/retire", &receipt).unwrap()];
+        let mut records = vec![record("retirement/retire", &receipt).unwrap()];
         if extra_marker {
             // The native transaction is atomic, but its second marker was never
             // authorized by the retained retirement decision.
             for key in [first, second.clone()] {
-                let phase = PhaseGeneration {
+                let phase = RetainedGeneration {
                     key,
                     revision: view.revision,
                 };
                 records.push(
                     record(
                         marker_key(&phase),
-                        RetiredPhase {
+                        RetiredRecord {
                             dataset: dataset.clone(),
                             table_uuid: plan.table_uuid.clone(),
-                            phase,
+                            record: phase,
                             retirement: plan.retirement.clone(),
                         },
                     )

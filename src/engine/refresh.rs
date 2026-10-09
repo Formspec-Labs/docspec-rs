@@ -67,7 +67,7 @@ impl Engine {
             } else {
                 // Earlier requests predate protected admission and retain their
                 // existing capture behavior while physical cleanup stays disabled.
-                self.capture_inputs_admitted(&spec.inputs()).await?
+                self.capture_inputs_admitted(&spec.inputs(), false).await?
             };
         let loaded = load_inputs(&coverage, budget).await?;
         if let RefreshTransform::Aggregate(aggregate) = &spec.transform {

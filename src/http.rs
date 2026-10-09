@@ -6,8 +6,8 @@
 use crate::{
     Engine, Error,
     model::{
-        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, PhaseRetirement,
-        PhaseRetirementPlan, RefreshSpec, ReleasePin, RetentionInspection, RunSpec, SchemaSpec,
+        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
+        ReleasePin, RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec,
         SuccessionProof, UpdateSpec, VersionRef,
     },
 };
@@ -42,6 +42,11 @@ pub fn router(engine: Engine) -> Router {
         .route("/retention/inspect", post(inspect_retention))
         .route("/retention/phases/plan", post(plan_phase_retirement))
         .route("/retention/phases/retire", post(retire_phases))
+        .route(
+            "/retention/availability/plan",
+            post(plan_availability_retirement),
+        )
+        .route("/retention/availability/retire", post(retire_availability))
         .route("/datasets/{dataset}", get(inspect))
         .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
@@ -86,7 +91,7 @@ struct PhaseRetirementRequest {
 async fn plan_phase_retirement(
     State(engine): State<Engine>,
     Json(request): Json<PhaseRetirementRequest>,
-) -> Result<Json<PhaseRetirementPlan>, HttpError> {
+) -> Result<Json<RetentionPlan>, HttpError> {
     Ok(Json(
         engine
             .plan_phase_retirement(
@@ -101,9 +106,41 @@ async fn plan_phase_retirement(
 
 async fn retire_phases(
     State(engine): State<Engine>,
-    Json(plan): Json<PhaseRetirementPlan>,
-) -> Result<Json<PhaseRetirement>, HttpError> {
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
     Ok(Json(engine.retire_phases(&plan).await?))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AvailabilityRetirementRequest {
+    dataset: Id,
+    retirement: Id,
+    operation: Id,
+    reason: String,
+}
+
+async fn plan_availability_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<AvailabilityRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_availability_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.operation,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_availability(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_availability(&plan).await?))
 }
 
 impl From<Error> for HttpError {
@@ -114,10 +151,13 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
+            "availability_retired" => StatusCode::GONE,
             "no_release" | "no_operation" | "no_phase" | "missing_group" | "missing_evidence" => {
                 StatusCode::NOT_FOUND
             }
             "operation_conflict"
+            | "selected_result"
+            | "operation_active"
             | "operation_completed"
             | "operation_abandoned"
             | "abandonment_conflict"

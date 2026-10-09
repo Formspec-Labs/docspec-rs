@@ -146,15 +146,32 @@ impl Engine {
             let rows = lifecycle.rows(&view).await?;
             // Decode each retirement batch once. The bounded set lets both marker
             // validation and completion filtering share its exact authorization.
-            let mut retired_phases = BTreeSet::new();
-            for (key, revision, json) in rows.prefix("phase-retirement/") {
-                let retired: PhaseRetirement = decode(json)?;
-                super::phases::validate_markers(&rows, &retired, &view, key, revision)?;
-                for phase in retired.plan.phases {
-                    inventory.charge(phase.key.len().saturating_add(128))?;
-                    if !retired_phases.insert(phase) {
-                        return Err(super::phases::invalid_retirement());
+            let mut retired_records = BTreeSet::new();
+            let mut retired_operations = BTreeSet::new();
+            for (key, revision, json) in rows.prefix("retirement/") {
+                let retired: Retirement = decode(json)?;
+                super::retirement::validate_markers(&rows, &retired, &view, key, revision)?;
+                if let RetirementScope::ResultAvailability { operation } = retired.plan.scope {
+                    inventory.charge(operation.as_str().len().saturating_add(128))?;
+                    if !retired_operations.insert(operation) {
+                        return Err(super::retirement::invalid_retirement());
                     }
+                }
+                for phase in retired.plan.records {
+                    inventory.charge(phase.key.len().saturating_add(128))?;
+                    if !retired_records.insert(phase) {
+                        return Err(super::retirement::invalid_retirement());
+                    }
+                }
+            }
+            // Reject orphan markers before interpreting any active roots. Key
+            // sort order must not decide which retirement failures are detected.
+            for (key, _, json) in rows.prefix("retired/") {
+                let marker: super::retirement::RetiredRecord = decode(json)?;
+                if key != super::retirement::marker_key(&marker.record)
+                    || !retired_records.contains(&marker.record)
+                {
+                    return Err(super::retirement::invalid_retirement());
                 }
             }
             for (key, revision, json) in rows.prefix("") {
@@ -179,7 +196,7 @@ impl Engine {
                 if key.starts_with("reference-binding/") {
                     let binding: super::owners::ReferenceBinding = decode(json)?;
                     if super::owners::earlier_binding(&rows, &view, key, revision, &binding)? {
-                        if !retired_phases.contains(&PhaseGeneration {
+                        if !retired_records.contains(&RetainedGeneration {
                             key: binding.key,
                             revision,
                         }) {
@@ -192,7 +209,12 @@ impl Engine {
                     let required = super::owners::validate_binding(
                         &rows, &view, key, revision, &binding, limit,
                     )?;
-                    inventory.binding(binding, required)?;
+                    if !retired_records.contains(&RetainedGeneration {
+                        key: binding.key.clone(),
+                        revision,
+                    }) {
+                        inventory.binding(binding, required)?;
+                    }
                     continue;
                 }
                 if key.starts_with("object-unavailable/") {
@@ -207,20 +229,24 @@ impl Engine {
                     validate_object(&unavailable.object)?;
                     continue;
                 }
-                if key.starts_with("phase-retirement/") {
+                if key.starts_with("retirement/") {
                     continue;
                 }
-                if key.starts_with("phase-retired/") {
-                    let marker: super::phases::RetiredPhase = decode(json)?;
-                    if key != super::phases::marker_key(&marker.phase)
-                        || !retired_phases.contains(&marker.phase)
-                    {
-                        return Err(super::phases::invalid_retirement());
+                if let Some(operation) = key.strip_prefix("availability-retired/") {
+                    let operation = Id::new(operation)?;
+                    // The receipt pass already checked this exact pointer and
+                    // all of its markers. Reject orphan pointers without decoding
+                    // the same retirement batch again.
+                    if !retired_operations.contains(&operation) {
+                        return Err(super::retirement::invalid_retirement());
                     }
                     continue;
                 }
-                if completion_key(key)
-                    && retired_phases.contains(&PhaseGeneration {
+                if key.starts_with("retired/") {
+                    continue;
+                }
+                if super::retirement::retained_key(key)
+                    && retired_records.contains(&RetainedGeneration {
                         key: key.into(),
                         revision,
                     })
@@ -253,6 +279,53 @@ impl Engine {
             unmatched_bytes,
             metadata_objects_read: inventory.metadata_objects_read,
         })
+    }
+}
+
+/// Checks the mutable selection's exact immutable receipt without external reads.
+/// The caller admits both decoded authority and result metadata.
+pub(super) fn validate_selection(
+    rows: &crate::catalog::SnapshotRows,
+    authority: &Authority,
+    authority_revision: i64,
+    table: &str,
+    limit: usize,
+) -> Result<()> {
+    if authority.selected.as_ref() != authority.release.as_ref().map(|release| &release.dataset) {
+        return Err(invalid_inventory("selected dataset and release disagree"));
+    }
+    match (&authority.release, authority.selection_revision) {
+        (None, None) => Ok(()),
+        (Some(release), Some(selection_revision)) => {
+            if selection_revision <= 0
+                || selection_revision > authority_revision
+                || !release.verified
+                || release.id != release.dataset.version
+                || release.manifest.owner != release.dataset.dataset
+                || crate::catalog::lifecycle_ident(&release.dataset.dataset).to_string() != table
+                || rows.contains_key(&super::availability::pointer_key(&release.id))
+            {
+                return Err(invalid_inventory(
+                    "selected authority identity or availability differs",
+                ));
+            }
+            let result_key = format!("result/{}", release.id);
+            let (_, result_revision, result_json) = rows
+                .prefix(&result_key)
+                .find(|(key, _, _)| *key == result_key)
+                .ok_or_else(|| invalid_inventory("selected result is missing"))?;
+            if result_json.len() > limit {
+                return Err(capacity());
+            }
+            let result: ReleasePin = decode(result_json)?;
+            if result_revision != selection_revision || &result != release {
+                return Err(invalid_inventory(
+                    "selected authority differs from its result",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(invalid_inventory("selected authority is incomplete")),
     }
 }
 
@@ -878,43 +951,11 @@ impl Inventory {
             self.release_pin(&decode(json)?, origin)?;
         } else if key == "authority" {
             let authority: Authority = decode(json)?;
-            if authority.selected.as_ref()
-                != authority.release.as_ref().map(|release| &release.dataset)
-            {
-                return Err(invalid_inventory("selected dataset and release disagree"));
-            }
-            match (&authority.release, authority.selection_revision) {
-                (None, None) => {}
-                (Some(release), Some(selection_revision)) => {
-                    if selection_revision <= 0
-                        || selection_revision > origin.revision
-                        || !release.verified
-                        || crate::catalog::lifecycle_ident(&release.dataset.dataset).to_string()
-                            != origin.table
-                    {
-                        return Err(invalid_inventory("selected authority identity differs"));
-                    }
-                    let result_key = format!("result/{}", release.id);
-                    let (_, result_revision, result_json) = rows
-                        .prefix(&result_key)
-                        .find(|(key, _, _)| *key == result_key)
-                        .ok_or_else(|| invalid_inventory("selected result is missing"))?;
-                    if result_json.len() > self.limit {
-                        return Err(capacity());
-                    }
-                    let result: ReleasePin = decode(result_json)?;
-                    if result_revision != selection_revision || &result != release {
-                        return Err(invalid_inventory(
-                            "selected authority differs from its result",
-                        ));
-                    }
-                    // Authority adds no dependency to its exact immutable result.
-                    // Its binding is inspected once through the result record;
-                    // an unbound result remains unknown, not an empty scope.
-                    // Callers already bound origin.revision to their exact view.
-                    self.release_pin(release, origin)?;
-                }
-                _ => return Err(invalid_inventory("selected authority is incomplete")),
+            validate_selection(rows, &authority, origin.revision, &origin.table, self.limit)?;
+            if let Some(release) = &authority.release {
+                // Authority adds no dependency to its exact immutable result.
+                // Its binding is inspected once through that result record.
+                self.release_pin(release, origin)?;
             }
         } else if key.starts_with("operation/") {
             let operation: Operation = decode(json)?;

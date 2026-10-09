@@ -493,33 +493,42 @@ pub struct RetentionBoundary {
     pub revision: i64,
 }
 
-/// One explicitly selected generation of a reusable completion.
+/// One exact native generation of a retained lifecycle record.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PhaseGeneration {
+pub struct RetainedGeneration {
     pub key: String,
     pub revision: i64,
 }
 
-/// Explicit retirement of recovery promises, without deleting physical objects.
+/// The independent availability promise ended by a retirement decision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RetirementScope {
+    PhaseRecovery,
+    ResultAvailability { operation: OperationId },
+}
+
+/// Explicit retirement of retained promises, without deleting physical objects.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PhaseRetirementPlan {
+pub struct RetentionPlan {
     pub dataset: Id,
     pub retirement: Id,
+    pub scope: RetirementScope,
     pub reason: String,
     pub table_uuid: String,
     pub metadata: String,
     pub snapshot_id: i64,
     pub revision: i64,
-    pub phases: Vec<PhaseGeneration>,
+    pub records: Vec<RetainedGeneration>,
 }
 
 /// A durable retirement decision and its native lifecycle revision.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PhaseRetirement {
-    pub plan: PhaseRetirementPlan,
+pub struct Retirement {
+    pub plan: RetentionPlan,
     pub revision: i64,
 }
 

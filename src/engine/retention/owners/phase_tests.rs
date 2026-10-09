@@ -653,7 +653,7 @@ async fn an_earlier_binding_requires_retirement_of_its_exact_native_generation()
         )
         .await
         .unwrap();
-    assert_ne!(plan.phases[0].revision, original.1);
+    assert_ne!(plan.records[0].revision, original.1);
     engine.retire_phases(&plan).await.unwrap();
     let view = lifecycle.open(&build.dataset).await.unwrap();
     let newer = lifecycle

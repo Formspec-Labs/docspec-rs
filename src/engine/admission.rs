@@ -145,8 +145,9 @@ impl Engine {
         let budget = &self.inner.lifecycle.budget;
         let limit = budget.limits.max_metadata_bytes;
         let coverage = if let OperationRequest::Refresh(refresh) = spec {
-            let (coverage, capture_memory) =
-                self.capture_inputs_with_memory(&refresh.inputs()).await?;
+            let (coverage, capture_memory) = self
+                .capture_inputs_with_memory(&refresh.inputs(), true)
+                .await?;
             memory.merge(capture_memory);
             Some(coverage)
         } else {
@@ -185,6 +186,8 @@ impl Engine {
                 let lock = self.lock(&version.dataset).await;
                 let _guard = lock.lock().await;
                 let view = self.inner.lifecycle.open(&version.dataset).await?;
+                self.check_operation_available(&view, &version.version)
+                    .await?;
                 let charge = self
                     .inner
                     .lifecycle
