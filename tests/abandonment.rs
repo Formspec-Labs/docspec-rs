@@ -180,8 +180,8 @@ async fn abandoned_backfill_preserves_file_reuse_and_refuses_every_retry() {
     );
     request.operation = id("replacement");
     let plan = engine.plan_backfill(&request).await.unwrap();
-    assert_eq!(plan.files_pending, 0);
-    assert!(plan.files_completed > 0);
+    assert_eq!(plan.files_pending, Some(0));
+    assert!(plan.files_completed.is_some_and(|files| files > 0));
     let release = engine.backfill(&request).await.unwrap();
     assert!(release.dataset.groups.contains_key("lengths"));
     let after = engine.inspect(&request.dataset).await.unwrap();
@@ -342,7 +342,7 @@ async fn backfill_prepares_during_pending_input_and_selects_after_its_abandonmen
         .unwrap();
     let plan = engine.plan_backfill(&request).await.unwrap();
     assert_eq!(plan.promotion_refusal, None);
-    assert_eq!(plan.files_pending, 0);
+    assert_eq!(plan.files_pending, Some(0));
     let release = engine.backfill(&request).await.unwrap();
     assert_eq!(release.dataset.boundary, base.dataset.boundary);
     assert_eq!(
@@ -402,7 +402,7 @@ async fn abandoning_a_later_admission_does_not_revive_an_old_cutover_capture() {
         } else {
             assert_eq!(
                 engine.plan_backfill(&backfill).await.unwrap().files_pending,
-                0
+                Some(0)
             );
             engine.backfill(&backfill).await.unwrap()
         };

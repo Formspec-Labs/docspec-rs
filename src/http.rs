@@ -47,6 +47,11 @@ pub fn router(engine: Engine) -> Router {
             post(plan_availability_retirement),
         )
         .route("/retention/availability/retire", post(retire_availability))
+        .route(
+            "/retention/operations/plan",
+            post(plan_operation_retirement),
+        )
+        .route("/retention/operations/retire", post(retire_operation))
         .route("/datasets/{dataset}", get(inspect))
         .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
@@ -113,7 +118,7 @@ async fn retire_phases(
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AvailabilityRetirementRequest {
+struct OperationRetirementRequest {
     dataset: Id,
     retirement: Id,
     operation: Id,
@@ -122,7 +127,7 @@ struct AvailabilityRetirementRequest {
 
 async fn plan_availability_retirement(
     State(engine): State<Engine>,
-    Json(request): Json<AvailabilityRetirementRequest>,
+    Json(request): Json<OperationRetirementRequest>,
 ) -> Result<Json<RetentionPlan>, HttpError> {
     Ok(Json(
         engine
@@ -141,6 +146,29 @@ async fn retire_availability(
     Json(plan): Json<RetentionPlan>,
 ) -> Result<Json<Retirement>, HttpError> {
     Ok(Json(engine.retire_availability(&plan).await?))
+}
+
+async fn plan_operation_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<OperationRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_operation_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.operation,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_operation(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_operation(&plan).await?))
 }
 
 impl From<Error> for HttpError {
@@ -164,6 +192,7 @@ impl IntoResponse for HttpError {
             | "generation_conflict"
             | "phase_generation_conflict"
             | "phase_retired"
+            | "recovery_retired"
             | "retirement_conflict"
             | "stale_retirement"
             | "stale_definition"

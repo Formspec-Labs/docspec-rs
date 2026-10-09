@@ -81,6 +81,15 @@ enum Command {
     },
     /// End standalone availability from a saved plan; preserve dependent data and files.
     RetireAvailability { plan: PathBuf },
+    /// Capture a terminal operation's recovery records for logical retirement.
+    PlanOperationRetirement {
+        dataset: String,
+        retirement: String,
+        operation: String,
+        reason: String,
+    },
+    /// End terminal operation recovery; preserve completed phases and available results.
+    RetireOperation { plan: PathBuf },
     /// Stop an unfinished operation; preserve its completed phases and retained files.
     Abandon {
         dataset: String,
@@ -318,6 +327,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetireAvailability { plan } => print_json(
                     &engine
                         .retire_availability(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanOperationRetirement {
+                    dataset,
+                    retirement,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_operation_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &Id::new(operation)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireOperation { plan } => print_json(
+                    &engine
+                        .retire_operation(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::Abandon {

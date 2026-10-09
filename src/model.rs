@@ -507,6 +507,7 @@ pub struct RetainedGeneration {
 pub enum RetirementScope {
     PhaseRecovery,
     ResultAvailability { operation: OperationId },
+    OperationRecovery { operation: OperationId },
 }
 
 /// Explicit retirement of retained promises, without deleting physical objects.

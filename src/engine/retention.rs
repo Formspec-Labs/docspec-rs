@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 mod availability;
 mod inventory;
 pub(super) mod owners;
+mod recovery;
 mod retirement;
 
 impl Engine {

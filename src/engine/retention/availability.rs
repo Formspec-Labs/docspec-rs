@@ -60,12 +60,13 @@ pub(super) fn validate_retired_operation(
     rows: &SnapshotRows,
     view: &View,
     operation: &Id,
-    budget: &Budget,
+    engine: &Engine,
 ) -> Result<bool> {
     let pointer_key = pointer_key(operation);
     if !rows.contains_key(&pointer_key) {
         return Ok(false);
     }
+    let budget = &engine.inner.lifecycle.budget;
     let _pointer_memory = rows.reserve_decoded(budget, &[&pointer_key])?;
     let Some((revision, _, pointer)): Option<(_, _, RetiredAvailability)> =
         rows.get_record(&pointer_key)?
@@ -85,7 +86,7 @@ pub(super) fn validate_retired_operation(
     {
         return Err(invalid_retirement());
     }
-    retirement::validate_markers(rows, &receipt, view, &key, revision)?;
+    retirement::validate_markers(rows, &receipt, view, &key, revision, engine)?;
     Ok(true)
 }
 
@@ -284,22 +285,14 @@ impl Engine {
             engine.check_operation_available(&view, &operation).await?;
             let rows = engine.inner.lifecycle.rows(&view).await?;
             let records = collect(&rows, &view, &operation, &engine.inner.lifecycle.budget)?;
-            Ok(RetentionPlan {
+            retirement::plan(
+                &view,
                 dataset,
                 retirement,
-                scope: RetirementScope::ResultAvailability { operation },
+                RetirementScope::ResultAvailability { operation },
                 reason,
-                table_uuid: view.table.metadata().uuid().to_string(),
-                metadata: view.table.metadata_location_result()?.to_owned(),
-                snapshot_id: view
-                    .table
-                    .metadata()
-                    .current_snapshot()
-                    .ok_or_else(invalid_retirement)?
-                    .snapshot_id(),
-                revision: view.revision,
                 records,
-            })
+            )
         })
         .await
     }
@@ -325,7 +318,7 @@ impl Engine {
         operation: &Id,
     ) -> Result<()> {
         let rows = self.inner.lifecycle.rows(view).await?;
-        if validate_retired_operation(&rows, view, operation, &self.inner.lifecycle.budget)? {
+        if validate_retired_operation(&rows, view, operation, self)? {
             return Err(Error::refusal(
                 "availability_retired",
                 "this operation's standalone result and readback availability was explicitly retired",

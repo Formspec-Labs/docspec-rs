@@ -549,7 +549,7 @@ async fn retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement
     let engine = open(root.path()).await;
     assert_eq!(
         engine.plan_backfill(&target).await.unwrap().files_pending,
-        0
+        Some(0)
     );
     let completed = engine.backfill(&target).await.unwrap();
     assert_eq!(

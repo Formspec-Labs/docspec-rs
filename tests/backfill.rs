@@ -57,8 +57,8 @@ async fn combined_values_preserve_duplicate_null_empty_and_unicode_occurrences()
     let (engine, base, rows) = fixture(root.path(), false).await;
     let request = spec(&base, "lengths", "length", "text_length", "length(text)");
     let plan = engine.plan_backfill(&request).await.unwrap();
-    assert!(plan.files_pending > 1);
-    assert_eq!(plan.files_completed, 0);
+    assert!(plan.files_pending.is_some_and(|files| files > 1));
+    assert_eq!(plan.files_completed, Some(0));
     let release = engine.backfill(&request).await.unwrap();
     assert_eq!(
         base.dataset.groups["source"],
@@ -78,7 +78,8 @@ async fn combined_values_preserve_duplicate_null_empty_and_unicode_occurrences()
     assert_eq!(engine.backfill(&request).await.unwrap(), release);
     let done = engine.plan_backfill(&request).await.unwrap();
     assert!(done.completed);
-    assert_eq!(done.files_pending, 0);
+    assert_eq!(done.files_pending, None);
+    assert_eq!(done.files_completed, None);
     let native = storage::open_pin(&release.dataset.groups["length"])
         .await
         .unwrap();
@@ -186,7 +187,7 @@ async fn killed_backfill_workers_resume_retained_files_validation_and_readback()
         let before = engine.inspect(&request.dataset).await.unwrap();
         assert_eq!(
             engine.plan_backfill(&request).await.unwrap().files_pending,
-            0
+            if phase == "selection" { None } else { Some(0) }
         );
         let completed: Vec<_> = before
             .iter()
@@ -312,8 +313,8 @@ async fn stale_source_retains_files_and_catchup_reuses_unchanged_objects() {
     );
     let catchup = spec(&latest, "catchup", "length", "text_length", "length(text)");
     let plan = engine.plan_backfill(&catchup).await.unwrap();
-    assert!(plan.files_completed > 0);
-    assert!(plan.files_pending > 0);
+    assert!(plan.files_completed.is_some_and(|files| files > 0));
+    assert!(plan.files_pending.is_some_and(|files| files > 0));
     let release = engine.backfill(&catchup).await.unwrap();
     let mut expected: Vec<_> = rows
         .into_iter()
@@ -827,8 +828,8 @@ async fn failed_files_remain_distinct_from_successful_nulls_and_completed_files_
     let request = spec(&base, "failure", "parse", "parsed", &expression);
     assert!(engine.backfill(&request).await.is_err());
     let plan = engine.plan_backfill(&request).await.unwrap();
-    assert!(plan.files_completed > 0);
-    assert!(plan.files_pending > 0);
+    assert!(plan.files_completed.is_some_and(|files| files > 0));
+    assert!(plan.files_pending.is_some_and(|files| files > 0));
     assert_eq!(plan.failures.len(), 1);
     assert_eq!(engine.latest(&request.dataset).await.unwrap(), base);
     let correction = input(

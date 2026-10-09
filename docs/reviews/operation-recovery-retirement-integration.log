@@ -1,0 +1,25 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 8.82s
+     Running tests/completed_backfill_plan.rs (target/debug/deps/completed_backfill_plan-867000e51f69a233)
+
+running 2 tests
+test completed_retries_skip_unavailable_recovery_inputs_and_preserve_identity ... ok
+test completed_plan_honors_own_availability_independently_of_base_availability ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.36s
+
+     Running tests/operation_retirement.rs (target/debug/deps/operation_retirement-30ad0f77da721e71)
+
+running 3 tests
+test active_operation_must_be_abandoned_and_its_phases_remain_independent ... ok
+test completed_recovery_retirement_keeps_phases_reusable_and_creator_evidence_readable ... ok
+test all_explicit_a_promises_retire_while_independent_selected_b_stays_protected ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.34s
+
+     Running tests/operation_retirement_transport.rs (target/debug/deps/operation_retirement_transport-13684c17f1b548ac)
+
+running 1 test
+test cli_http_retirement_preserves_selected_values_and_reconciles_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.99s

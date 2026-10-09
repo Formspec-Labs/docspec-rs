@@ -222,7 +222,10 @@ async fn evolved_build_keeps_exact_consumed_schema_metadata() {
     group.operation = id("new-group");
     group.base = reordered.id;
     group.definition = "v3".into();
-    assert_eq!(engine.plan_backfill(&group).await.unwrap().files_pending, 0);
+    assert_eq!(
+        engine.plan_backfill(&group).await.unwrap().files_pending,
+        Some(0)
+    );
     let parent = engine.backfill(&group).await.unwrap();
     let after = engine.inspect(&group.dataset).await.unwrap();
     for (key, file) in files {

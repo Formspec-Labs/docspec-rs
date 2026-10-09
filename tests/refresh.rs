@@ -533,7 +533,7 @@ async fn refresh_and_backfill_races_preserve_captured_source_and_selected_groups
             .await
             .unwrap()
             .files_completed
-            > 0
+            .is_some_and(|files| files > 0)
     );
     let complete = engine.backfill(&new_group).await.unwrap();
     assert_eq!(complete.dataset.groups.len(), 4);

@@ -211,7 +211,7 @@ async fn original_backfill_does_not_silently_adopt_new_gap_rules() {
     request.operation = id("new-backfill");
     assert_eq!(
         engine.plan_backfill(&request).await.unwrap().files_pending,
-        0
+        Some(0)
     );
     let release = engine.backfill(&request).await.unwrap();
     assert_eq!(release.dataset.format, 11);

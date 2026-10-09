@@ -1,5 +1,62 @@
 # Implementation and qualification status
 
+## Plan completion
+
+The full [implementation plan](PLAN.md) remains **incomplete**. Local processing,
+recovery, incremental joins/summaries, scalar backfills, schema operations and
+historical reads are implemented. The requirements table below records their
+specific limits. Remaining delivery includes evidence-only changes and broader
+schema/cutover behavior; grant retirement, guarded physical cleanup, compaction
+and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
+10-million-Comments qualification. The 1,800-second full-path target has not been
+measured.
+
+Earlier checkpoint notes retain the limitations known at their completion. Use
+this summary and the requirements table for the current overall status.
+
+## Terminal-operation recovery retirement
+
+A completed or explicitly abandoned operation can now end its recovery roots and
+owned attempt-directory protections through the shared scoped retirement service.
+Planning captures exact operation, request, dependency, Backfill-capture and
+attempt generations. Execution waits for admitted workers, checks the full set
+again under dataset ownership, and appends one durable decision. Changed sets
+refuse; uncertain responses and identical retries reconcile that same decision.
+Original receipts and their native revisions remain available as identity and
+creation evidence.
+
+Results and completed phases retain independent availability. An available
+completed result still supports lookup and exact run/plan retries; an abandoned
+operation remains abandoned. Retired recovery bindings cannot provide protection
+to new work. Saved retirement validation visits its named records rather than
+rescanning every attempt for each historical decision. Decoding reservations
+cover the original request, result and captured attempts, including retry paths.
+
+Completed Backfill planning now returns saved result metadata before opening old
+bases, native snapshots or source files. Historical file counters are `null` for
+a completed plan; unfinished plans retain exact recovery counters. Identity and
+availability checks remain enforced. This removes unnecessary recovery reads;
+it is not a measured throughput claim.
+
+The [focused internal checks](reviews/operation-recovery-retirement-internal-corrected.log)
+and [integration/transport checks](reviews/operation-recovery-retirement-integration.log)
+pass. They cover mismatched requests, canonical attempt ownership, stale plans,
+lost responses, concurrent/cold retry, unavailable recovery inputs, exact selected
+values, and completed-phase reuse after parent retirement. The positive retention
+case now makes an actually unused old output unblocked after its explicitly
+chosen promises retire, while the independent replacement stays protected and
+readable. No files are deleted and no reclaimed bytes are claimed.
+
+The [independent review](reviews/operation-recovery-retirement-review.md) approves
+this scope after corrections to terminal-request identity, Backfill completion
+checks and decoded-metadata accounting. The [complete repository gate](reviews/operation-recovery-retirement-check.log)
+passes formatting, strict linting and all library, integration and documentation
+tests. The [initial test-build failure](reviews/operation-recovery-retirement-internal.log)
+is retained alongside the corrected run. The [resource snapshot](reviews/operation-recovery-retirement-resources.json)
+separates the rebuilt development cache from shared-volume free space; it is not
+a peak measurement or dataset-storage result. Owner grants, seals, physical
+removal and the rest of the full plan remain unfinished.
+
 ## Explicit historical availability retirement
 
 An operator can now retire a non-current result together with all saved readbacks
@@ -677,7 +734,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; protection before preparation; explicit logical operation abandonment; exact general/scalar/group completion dependencies; read-only shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; all cleanup disabled | Destructive inventory/worker qualification; reader/release/phase retirement; compaction; retention preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability and terminal-operation recovery retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; physical cleanup disabled | Owner-grant and seal lifetimes; reader protection; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

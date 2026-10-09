@@ -454,10 +454,17 @@ impl Engine {
             return Err(invalid());
         }
         if earlier_binding(&rows, view, &key, revision, &binding)? {
-            if !super::retirement::record_retired(&rows, view, claim, revision)? {
+            if !super::retirement::record_retired(&rows, view, claim, revision, &lifecycle.budget)?
+            {
                 return Err(invalid());
             }
             return Ok(None);
+        }
+        if super::retirement::record_retired(&rows, view, claim, revision, &lifecycle.budget)? {
+            return Err(Error::refusal(
+                "retained_claim_retired",
+                "retired recovery cannot provide protection to new work",
+            ));
         }
         let required = validate_binding(&rows, view, &key, revision, &binding, limit)?;
         Ok(Some((binding, required, memory)))

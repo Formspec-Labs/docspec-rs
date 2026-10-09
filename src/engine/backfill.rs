@@ -79,8 +79,10 @@ pub(in crate::engine) struct ValidationCompletion {
 #[derive(Clone, Debug, Serialize)]
 pub struct BackfillPlan {
     pub completed: bool,
-    pub files_completed: usize,
-    pub files_pending: usize,
+    /// Exact recovery diagnostics; absent when the completed result needs no file scan.
+    pub files_completed: Option<usize>,
+    /// Exact recovery diagnostics; absent when the completed result needs no file scan.
+    pub files_pending: Option<usize>,
     pub rows: u64,
     pub failures: BTreeMap<String, String>,
     pub promotion_refusal: Option<String>,
@@ -200,11 +202,46 @@ impl Engine {
         self.check_operation_available(&view, &spec.operation)
             .await?;
         self.check_not_abandoned(&view, &spec.operation).await?;
-        if !lifecycle
-            .rows(&view)
-            .await?
-            .contains_key(&format!("operation/{}", spec.operation))
+        let old: Option<Operation> = lifecycle
+            .get(&view, &format!("operation/{}", spec.operation))
+            .await?;
+        if old
+            .as_ref()
+            .is_some_and(|old| old.request_digest != request)
         {
+            return Err(conflicting_operation());
+        }
+        if let Some(result) = lifecycle
+            .get::<ReleasePin>(&view, &format!("result/{}", spec.operation))
+            .await?
+        {
+            if old.is_none()
+                || result.dataset.dataset != spec.dataset
+                || result.id != spec.operation
+                || result.dataset.version != spec.operation
+                || !matches!(&result.dataset.request, OperationRequest::Backfill(recorded) if recorded == spec)
+                || !result.verified
+            {
+                return Err(Error::refusal(
+                    "release_mismatch",
+                    "completed Backfill lacks matching admission or result identity",
+                ));
+            }
+            let source = result.dataset.groups.get("source").ok_or_else(|| {
+                Error::refusal("release_mismatch", "completed Backfill has no source group")
+            })?;
+            // Completion preserves row metadata, not historical file diagnostics.
+            // Recovery inputs may have independently ended their availability.
+            return Ok(BackfillPlan {
+                completed: true,
+                files_completed: None,
+                files_pending: None,
+                rows: source.rows,
+                failures: BTreeMap::new(),
+                promotion_refusal: None,
+            });
+        }
+        if old.is_none() {
             self.check_operation_available(&view, &spec.base).await?;
         }
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
@@ -215,93 +252,81 @@ impl Engine {
             &spec.group_definition(),
             None,
         )?;
-        let old: Option<Operation> = lifecycle
-            .get(&view, &format!("operation/{}", spec.operation))
-            .await?;
-        if old
-            .as_ref()
-            .is_some_and(|old| old.request_digest != request)
-        {
-            return Err(conflicting_operation());
-        }
         let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
         let eligibility = old
             .as_ref()
             .map_or(authority.eligibility, |old| old.eligibility);
         let scan = storage::OccurrenceScan::open(&native, &lifecycle.budget).await?;
         let mut plan = BackfillPlan {
-            completed: lifecycle
-                .get::<ReleasePin>(&view, &format!("result/{}", spec.operation))
-                .await?
-                .is_some(),
-            files_completed: 0,
-            files_pending: 0,
+            completed: false,
+            files_completed: Some(0),
+            files_pending: Some(0),
             rows: base.dataset.groups["source"].rows,
             failures: BTreeMap::new(),
             promotion_refusal: None,
         };
-        let mut retained_target = plan.completed;
-        if !plan.completed {
-            let operation = old.clone().unwrap_or(Operation {
-                request_digest: request,
-                eligibility,
-                epoch: authority.epoch,
-                boundary: base.dataset.boundary,
-                admission_fence: None,
-                result_format: FORMAT,
-                definition: spec.definition.clone(),
-                base: Some(spec.base.clone()),
-                base_manifest: None,
-                schema_key: None,
-                require_current_boundary: false,
+        let mut retained_target = false;
+        let operation = old.clone().unwrap_or(Operation {
+            request_digest: request,
+            eligibility,
+            epoch: authority.epoch,
+            boundary: base.dataset.boundary,
+            admission_fence: None,
+            result_format: FORMAT,
+            definition: spec.definition.clone(),
+            base: Some(spec.base.clone()),
+            base_manifest: None,
+            schema_key: None,
+            require_current_boundary: false,
+        });
+        let capture = lifecycle
+            .get::<Capture>(&view, &format!("backfill/{}", spec.operation))
+            .await?
+            .unwrap_or(Capture {
+                admission_fence: authority.boundary,
+                target: base
+                    .dataset
+                    .groups
+                    .get(spec.group.as_str())
+                    .map(|pin| pin.metadata.clone()),
+                target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
+                base_manifest: base.manifest.clone(),
+                related: base.dataset.related.clone(),
             });
-            let capture = lifecycle
-                .get::<Capture>(&view, &format!("backfill/{}", spec.operation))
+        if old.is_some() {
+            retained_target = self
+                .retained_backfill_readback(spec, &operation, &capture, &base)
                 .await?
-                .unwrap_or(Capture {
-                    admission_fence: authority.boundary,
-                    target: base
-                        .dataset
-                        .groups
-                        .get(spec.group.as_str())
-                        .map(|pin| pin.metadata.clone()),
-                    target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
-                    base_manifest: base.manifest.clone(),
-                    related: base.dataset.related.clone(),
-                });
-            if old.is_some() {
-                retained_target = self
-                    .retained_backfill_readback(spec, &operation, &capture, &base)
-                    .await?
-                    .is_some();
-            }
-            plan.promotion_refusal =
-                check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
-                    .and_then(|()| {
-                        promotion(
-                            &authority,
-                            &operation,
-                            &capture,
-                            &base.dataset.groups["source"],
-                            spec,
-                        )
-                    })
-                    .err()
-                    .map(|error| error.code().to_owned());
-            if plan.promotion_refusal.is_none() && operation.result_format == FORMAT {
-                plan.promotion_refusal = self
-                    .check_abandoned_gap(
-                        &view,
-                        &spec.dataset,
-                        operation.boundary,
-                        capture.admission_fence,
+                .is_some();
+        }
+        plan.promotion_refusal =
+            check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
+                .and_then(|()| {
+                    promotion(
+                        &authority,
+                        &operation,
+                        &capture,
+                        &base.dataset.groups["source"],
+                        spec,
                     )
-                    .await
-                    .err()
-                    .map(|error| error.code().to_owned());
-            }
+                })
+                .err()
+                .map(|error| error.code().to_owned());
+        if plan.promotion_refusal.is_none() && operation.result_format == FORMAT {
+            plan.promotion_refusal = self
+                .check_abandoned_gap(
+                    &view,
+                    &spec.dataset,
+                    operation.boundary,
+                    capture.admission_fence,
+                )
+                .await
+                .err()
+                .map(|error| error.code().to_owned());
         }
         let objects = source_objects(&base.dataset.groups["source"]);
+        let mut files_completed = 0;
+        let mut files_pending = 0;
         for file in scan.files() {
             let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
             let key = file_key(object, &expressions, eligibility)?;
@@ -311,9 +336,9 @@ impl Engine {
                     .await?
                     .is_some()
             {
-                plan.files_completed += 1;
+                files_completed += 1;
             } else {
-                plan.files_pending += 1;
+                files_pending += 1;
                 if let Some(error) = lifecycle
                     .get::<String>(&view, &format!("failure/{}/{key}", spec.operation))
                     .await?
@@ -322,6 +347,8 @@ impl Engine {
                 }
             }
         }
+        plan.files_completed = Some(files_completed);
+        plan.files_pending = Some(files_pending);
         Ok(plan)
     }
 
@@ -1047,6 +1074,139 @@ fn charge_assembly(bytes: usize, completion: &FileCompletion, limit: usize) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn completed_plan_qualifies_admission_and_result_without_opening_inputs() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        for fault in [
+            "none",
+            "missing-admission",
+            "conflicting-admission",
+            "dataset",
+            "id",
+            "version",
+            "request",
+            "unverified",
+            "missing-source",
+        ] {
+            let spec = BackfillSpec {
+                dataset: Id::new(fault).unwrap(),
+                operation: Id::new("derived").unwrap(),
+                base: Id::new("base").unwrap(),
+                definition: "v1".into(),
+                group: Id::new("length").unwrap(),
+                group_definition: "scalar-v1".into(),
+                fields: vec![ComputedField {
+                    id: 10,
+                    name: "text_length".into(),
+                    expression: "length(text)".into(),
+                }],
+            };
+            let request = OperationRequest::Backfill(spec.clone());
+            let operation = Operation {
+                request_digest: if fault == "conflicting-admission" {
+                    "another-request".into()
+                } else {
+                    fingerprint(&request).unwrap()
+                },
+                eligibility: 0,
+                epoch: 0,
+                boundary: 0,
+                admission_fence: None,
+                result_format: FORMAT,
+                definition: spec.definition.clone(),
+                base: Some(spec.base.clone()),
+                base_manifest: None,
+                schema_key: None,
+                require_current_boundary: false,
+            };
+            // No source, manifest or native metadata objects exist. Only the
+            // lifecycle receipt is needed to report a completed plan.
+            let missing = ObjectRef {
+                owner: spec.dataset.clone(),
+                path: root.path().join("absent").to_string_lossy().into_owned(),
+                digest: "a".repeat(64),
+                bytes: 0,
+            };
+            let mut result = ReleasePin {
+                id: spec.operation.clone(),
+                dataset: DatasetPin {
+                    format: FORMAT,
+                    dataset: spec.dataset.clone(),
+                    version: spec.operation.clone(),
+                    groups: BTreeMap::from([(
+                        "source".into(),
+                        TablePin {
+                            table: "source".into(),
+                            metadata: missing.clone(),
+                            snapshot: None,
+                            schema_id: 0,
+                            objects: vec![],
+                            rows: 7,
+                        },
+                    )]),
+                    computed: BTreeMap::new(),
+                    inputs: BTreeMap::new(),
+                    relationship: SourceRelationship::Independent,
+                    related: None,
+                    definition: spec.definition.clone(),
+                    eligibility: 0,
+                    boundary: 0,
+                    request,
+                    parent_manifest: None,
+                    changes: None,
+                    processor: PROCESSOR.into(),
+                    validation: VerificationLevel::Routine,
+                },
+                manifest: missing,
+                verified: true,
+            };
+            match fault {
+                "dataset" => result.dataset.dataset = Id::new("other").unwrap(),
+                "id" => result.id = Id::new("other").unwrap(),
+                "version" => result.dataset.version = Id::new("other").unwrap(),
+                "request" => {
+                    let OperationRequest::Backfill(ref mut stored) = result.dataset.request else {
+                        unreachable!()
+                    };
+                    stored.group_definition = "different".into();
+                }
+                "unverified" => result.verified = false,
+                "missing-source" => result.dataset.groups.clear(),
+                _ => {}
+            }
+            let lifecycle = &engine.inner.lifecycle;
+            let view = lifecycle.open(&spec.dataset).await.unwrap();
+            let mut changes = vec![record(format!("result/{}", spec.operation), result).unwrap()];
+            if fault != "missing-admission" {
+                changes.push(record(format!("operation/{}", spec.operation), operation).unwrap());
+            }
+            lifecycle.commit(&view, changes).await.unwrap();
+            let plan = engine.plan_backfill(&spec).await;
+            match fault {
+                "none" => {
+                    let plan = plan.unwrap();
+                    assert!(plan.completed);
+                    assert_eq!(plan.rows, 7);
+                    assert_eq!(plan.files_completed, None);
+                    assert_eq!(plan.files_pending, None);
+                }
+                "conflicting-admission" => {
+                    assert_eq!(plan.unwrap_err().code(), "operation_conflict");
+                }
+                _ => assert_eq!(plan.unwrap_err().code(), "release_mismatch"),
+            }
+        }
+    }
 
     #[tokio::test]
     async fn native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning() {

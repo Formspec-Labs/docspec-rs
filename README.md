@@ -128,7 +128,29 @@ then return `availability_retired` (HTTP 410). Already admitted consumers retain
 their inputs and can resume; succession receipts and completed phases remain.
 Existing immutable pins still refer to the same objects. This is logical
 availability retirement, not access revocation or permission to delete bytes.
-Both retirement services use one scoped `RetentionPlan` and durable decision.
+All retirement services use one scoped `RetentionPlan` and durable decision.
+
+To end recovery for a completed or explicitly abandoned operation, capture and
+apply its recovery retirement plan:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-operation-retirement comments retired-recovery old-operation "operation recovery no longer needed" > operation-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-operation operation-retirement.json
+```
+
+HTTP uses `POST /retention/operations/plan` with `dataset`, `retirement`,
+`operation` and `reason`, then `POST /retention/operations/retire` with the
+returned plan. These call `Engine::plan_operation_retirement` and
+`Engine::retire_operation`. An unfinished active operation refuses with
+`operation_active` (HTTP 409). Execution retires the captured operation, request,
+dependency and backfill-capture recovery records and owned attempt protections.
+Completed phases and available results remain independently retained and readable;
+retiring operation recovery does not delete objects or establish reclaimable space.
+Identical execution retries return the original durable decision, including after
+reopening the workspace. Fresh operation-retirement planning returns
+`recovery_retired` (HTTP 409). Available completed results still support lookup
+and run/plan retries. Abandoned operations still refuse with `operation_abandoned`;
+retirement ends their recovery protections without changing their terminal state.
 
 Catalog work keeps running after a caller disconnects or drops its future. The
 owned task retains workspace ownership, shared maintenance admission and its
@@ -319,8 +341,10 @@ of the group; inspection distinguishes it from pending work and successful nulls
 
 Backfill preserves the source files and retains completed file computations,
 validation and independent readback. Retrying the request resumes those handoffs.
-The plan reports completed and pending files, failures and any reason selection
-would refuse. If ingestion advances before selection, a new request against the
+An unfinished plan reports completed and pending files, failures and any reason
+selection would refuse. A completed plan returns saved row metadata immediately;
+its file counters are `null` because reporting completion requires no historical
+file scan. If ingestion advances before selection, a new request against the
 new source can reuse unchanged file computations. Independent groups merge into
 the latest selection; competing replacements of one group reject a stale target.
 Combined reads join group values to exact source-file row positions.

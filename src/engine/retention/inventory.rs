@@ -150,7 +150,7 @@ impl Engine {
             let mut retired_operations = BTreeSet::new();
             for (key, revision, json) in rows.prefix("retirement/") {
                 let retired: Retirement = decode(json)?;
-                super::retirement::validate_markers(&rows, &retired, &view, key, revision)?;
+                super::retirement::validate_markers(&rows, &retired, &view, key, revision, self)?;
                 if let RetirementScope::ResultAvailability { operation } = retired.plan.scope {
                     inventory.charge(operation.as_str().len().saturating_add(128))?;
                     if !retired_operations.insert(operation) {
