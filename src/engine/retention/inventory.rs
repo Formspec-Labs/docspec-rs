@@ -320,6 +320,33 @@ struct BindingClaim {
     required: BTreeMap<String, (ObjectRef, bool)>,
 }
 
+// Lag checks need identity and captured inputs, not another copy of the result's
+// file inventories, recipes, or evidence tables. Decode only those fields.
+#[derive(Deserialize)]
+struct ProgressResult {
+    id: Id,
+    dataset: ProgressDataset,
+    manifest: ObjectRef,
+    verified: bool,
+}
+
+#[derive(Deserialize)]
+struct ProgressDataset {
+    dataset: Id,
+    version: Id,
+    related: Option<ProgressRelated>,
+}
+
+#[derive(Deserialize)]
+struct ProgressRelated {
+    coverage: ProgressCoverage,
+}
+
+#[derive(Deserialize)]
+struct ProgressCoverage {
+    inputs: BTreeMap<Id, VersionRef>,
+}
+
 struct Inventory {
     candidates: BTreeMap<String, ObjectProtection>,
     // Some selects explicit-root collection. Native files only provide paths;
@@ -856,8 +883,38 @@ impl Inventory {
             {
                 return Err(invalid_inventory("selected dataset and release disagree"));
             }
-            if let Some(release) = &authority.release {
-                self.release_pin(release, origin)?;
+            match (&authority.release, authority.selection_revision) {
+                (None, None) => {}
+                (Some(release), Some(selection_revision)) => {
+                    if selection_revision <= 0
+                        || selection_revision > origin.revision
+                        || !release.verified
+                        || crate::catalog::lifecycle_ident(&release.dataset.dataset).to_string()
+                            != origin.table
+                    {
+                        return Err(invalid_inventory("selected authority identity differs"));
+                    }
+                    let result_key = format!("result/{}", release.id);
+                    let (_, result_revision, result_json) = rows
+                        .prefix(&result_key)
+                        .find(|(key, _, _)| *key == result_key)
+                        .ok_or_else(|| invalid_inventory("selected result is missing"))?;
+                    if result_json.len() > self.limit {
+                        return Err(capacity());
+                    }
+                    let result: ReleasePin = decode(result_json)?;
+                    if result_revision != selection_revision || &result != release {
+                        return Err(invalid_inventory(
+                            "selected authority differs from its result",
+                        ));
+                    }
+                    // Authority adds no dependency to its exact immutable result.
+                    // Its binding is inspected once through the result record;
+                    // an unbound result remains unknown, not an empty scope.
+                    // Callers already bound origin.revision to their exact view.
+                    self.release_pin(release, origin)?;
+                }
+                _ => return Err(invalid_inventory("selected authority is incomplete")),
             }
         } else if key.starts_with("operation/") {
             let operation: Operation = decode(json)?;
@@ -925,17 +982,65 @@ impl Inventory {
             let _: BTreeSet<Id> = decode(json)?;
         } else if key.starts_with("succession/") {
             let succession: Succession = decode(json)?;
-            self.release(&succession.selected.manifest, origin)?;
-            if let Some(previous) = &succession.predecessor {
-                self.release(&previous.manifest, origin)?;
+            if key != format!("succession/{}", succession.selected.version)
+                || crate::catalog::lifecycle_ident(&succession.selected.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory("succession receipt identity differs"));
             }
-        } else if key.starts_with("input-progress/") {
+            super::super::history::check_link_receipt(rows, origin.revision, &succession)?;
+            validate_object(&succession.selected.manifest)?;
+            if let Some(previous) = &succession.predecessor {
+                validate_object(&previous.manifest)?;
+            }
+        } else if let Some(version) = key.strip_prefix("input-progress/") {
             let progress: BTreeMap<Id, SuccessionProof> = decode(json)?;
-            for proof in progress.values() {
+            let (revision, _, result): (_, _, ProgressResult) = rows
+                .get_record(&format!("result/{version}"))?
+                .ok_or_else(|| invalid_inventory("progress result is missing"))?;
+            let related = result
+                .dataset
+                .related
+                .as_ref()
+                .ok_or_else(|| invalid_inventory("progress result has no input coverage"))?;
+            if revision != origin.revision
+                || result.id.as_str() != version
+                || result.dataset.version != result.id
+                || result.manifest.owner != result.dataset.dataset
+                || !result.verified
+                || crate::catalog::lifecycle_ident(&result.dataset.dataset).to_string()
+                    != origin.table
+                || !progress.keys().eq(related.coverage.inputs.keys())
+            {
+                return Err(invalid_inventory("progress receipt identity differs"));
+            }
+            for (dataset, proof) in &progress {
+                if related.coverage.inputs.get(dataset) != Some(&proof.target)
+                    || proof.observed_revision <= 0
+                    || (proof.selections_advanced == 0) != (proof.prior == proof.target)
+                    || (proof.selections_behind == 0) != (proof.target == proof.observed_head)
+                {
+                    return Err(invalid_inventory("progress receipt coverage differs"));
+                }
                 for version in [&proof.prior, &proof.target, &proof.observed_head] {
-                    self.release(&version.manifest, origin)?;
+                    if &version.dataset != dataset || version.manifest.owner != *dataset {
+                        return Err(invalid_inventory("progress endpoint identity differs"));
+                    }
+                    validate_object(&version.manifest)?;
+                }
+                for (left, right) in [
+                    (&proof.prior, &proof.target),
+                    (&proof.target, &proof.observed_head),
+                    (&proof.prior, &proof.observed_head),
+                ] {
+                    if left.version == right.version && left != right {
+                        return Err(invalid_inventory("progress version identity conflicts"));
+                    }
                 }
             }
+            // Order and lag are catalog evidence. Availability promises come
+            // from actual results/phases, not merely observing these identities.
+            // Existing owner grants remain independent roots until retired.
         } else if key.starts_with("protection/") {
             let protection: Protection = decode(json)?;
             if !protection.retired {
@@ -1159,3 +1264,5 @@ fn capacity() -> Error {
 
 #[cfg(test)]
 mod collector_tests;
+#[cfg(test)]
+mod history_tests;

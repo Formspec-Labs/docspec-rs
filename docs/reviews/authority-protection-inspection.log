@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.98s
+     Running tests/retention_inspection.rs (target/debug/deps/retention_inspection-a93ba5b57e41f0bf)
+
+running 7 tests
+test family_only_namespace_retains_external_release_dependencies_once ... ok
+test admitted_refresh_request_protects_inputs_before_any_phase_completes ... ok
+test unknown_and_legacy_roots_refuse_instead_of_reporting_unprotected ... ok
+test completed_and_interrupted_roots_protect_without_opening_payloads ... ok
+test each_backfill_completion_independently_protects_its_consumed_source ... ok
+test schema_admission_and_evolved_group_metadata_preserve_native_interpretation ... ok
+test candidate_identity_capacity_and_transport_boundaries_are_explicit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.09s
+

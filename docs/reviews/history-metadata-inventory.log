@@ -1,0 +1,21 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 51.02s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 13 tests
+test engine::retention::inventory::collector_tests::native_paths_require_exact_identities_discovered_anywhere_in_the_closure ... ok
+test engine::retention::inventory::collector_tests::conflicts_refuse_and_duplicate_references_do_not_consume_more_capacity ... ok
+test engine::retention::inventory::collector_tests::native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar ... ok
+test engine::retention::inventory::collector_tests::closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads ... ok
+test engine::retention::inventory::collector_tests::oversized_roots_refuse_before_following_missing_metadata ... ok
+test engine::retention::inventory::collector_tests::empty_authority_has_no_selected_result_or_protection_claim ... ok
+test engine::retention::inventory::collector_tests::repeated_bindings_share_claim_memory_and_owner_changes_refuse_inspection ... ok
+test engine::retention::inventory::history_tests::history_receipts_do_not_expand_unavailable_endpoints_but_results_keep_captured_inputs ... ok
+test engine::retention::inventory::collector_tests::authority_reuses_its_result_identity_without_lending_protection_to_unknown_results ... ok
+test engine::retention::inventory::history_tests::existing_succession_bindings_and_owner_grants_remain_enforced ... ok
+test engine::retention::inventory::history_tests::succession_roots_refuse_unanchored_or_malformed_ordering_receipts ... ok
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test engine::retention::inventory::history_tests::progress_roots_refuse_wrong_receipts_endpoints_and_coverage ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 1.65s
+

@@ -47,7 +47,36 @@ async fn completed_and_interrupted_roots_protect_without_opening_payloads() {
                 .code(),
             "injected_failure"
         );
+        // Admission and invalidation rewrite authority without selecting another
+        // result. Retention must resolve the original immutable selection after
+        // both rewrites, without a second persisted authority binding.
+        let docspec::model::OperationRequest::Build(mut pending) = base.dataset.request.clone()
+        else {
+            panic!("fixture must build its initial selection");
+        };
+        pending.operation = id("pending-input");
+        assert_eq!(
+            engine
+                .run_until(&pending, "admission")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        engine
+            .invalidate(&request.dataset, "new qualification required", None)
+            .await
+            .unwrap();
         let records = engine.inspect(&request.dataset).await.unwrap();
+        let authority: docspec::model::Authority =
+            serde_json::from_value(records["authority"].clone()).unwrap();
+        assert_eq!(authority.release.as_ref(), Some(&base));
+        let view = lifecycle(root.path())
+            .await
+            .open(&request.dataset)
+            .await
+            .unwrap();
+        assert!(authority.selection_revision.unwrap() < view.revision);
         let prepared: docspec::model::TablePin = serde_json::from_value(
             records
                 .iter()

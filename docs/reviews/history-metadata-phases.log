@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 53.76s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 7 tests
+test engine::retention::owners::phase_tests::an_earlier_binding_requires_retirement_of_its_exact_native_generation ... ok
+test engine::retention::owners::phase_tests::retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation ... ok
+test engine::retention::owners::phase_tests::material_reuse_carries_original_owner_scope_into_validation_and_readback ... ok
+test engine::retention::owners::phase_tests::succession_keeps_actual_predecessor_without_inheriting_its_payload_scope ... ok
+test engine::retention::owners::phase_tests::unknown_predecessor_scope_does_not_erase_the_selected_results_known_scope ... ok
+test engine::retention::owners::phase_tests::refresh_evidence_inherits_the_exact_captured_producer_scope ... ok
+test engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 93 filtered out; finished in 15.69s
+

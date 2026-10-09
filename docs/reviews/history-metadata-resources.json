@@ -1,0 +1,6 @@
+{
+  "observed_at_utc": "2026-10-09T05:33:28.791310+00:00",
+  "debug_cache_allocated_bytes": 8229040128,
+  "shared_volume_available_bytes": 8747569152,
+  "scope": "Post-gate snapshot, not peak measurement. Active reusable build cache, not dataset storage. No corpus run or cleanup."
+}

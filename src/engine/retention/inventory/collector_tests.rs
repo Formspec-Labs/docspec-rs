@@ -99,6 +99,170 @@ fn direct_objects(release: &ReleasePin) -> Vec<ObjectRef> {
         .collect()
 }
 
+fn selected_authority(release: &ReleasePin, revision: i64) -> Authority {
+    Authority {
+        definition: release.dataset.definition.clone(),
+        eligibility: release.dataset.eligibility,
+        boundary: release.dataset.boundary,
+        selected: Some(release.dataset.clone()),
+        release: Some(release.clone()),
+        selection_revision: Some(revision),
+        ..Authority::default()
+    }
+}
+
+#[tokio::test]
+async fn authority_reuses_its_result_identity_without_lending_protection_to_unknown_results() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let lifecycle = &engine.inner.lifecycle;
+    let dataset = id("consumer");
+    let mut view = lifecycle.open(&dataset).await.unwrap();
+    for (version, known) in [("known", true), ("unknown", false)] {
+        let release = release(root.path(), dataset.as_str(), version);
+        let key = format!("result/{version}");
+        let authority = selected_authority(&release, view.revision + 1);
+        let scope =
+            known.then(|| ReferenceProtections::empty(&dataset, &lifecycle.budget).unwrap());
+        let mut records =
+            completion_records(&dataset, &view, &key, &release, scope.as_ref()).unwrap();
+        records.push(record("authority", authority).unwrap());
+        view = lifecycle.commit(&view, records).await.unwrap();
+
+        let rows = lifecycle.rows(&view).await.unwrap();
+        assert!(!rows.contains_key(&super::super::owners::binding_key("authority")));
+        assert_eq!(
+            engine
+                .retained_protections(&view, &key)
+                .await
+                .unwrap()
+                .is_some(),
+            known,
+        );
+        let objects = direct_objects(&release);
+        assert!(
+            objects
+                .iter()
+                .all(|object| !Path::new(&object.path).exists())
+        );
+        let inspected = engine.inspect_retention(&objects).await.unwrap();
+        assert_eq!(inspected.unmatched_bytes, 0);
+        assert_eq!(inspected.metadata_objects_read, 0);
+        assert!(
+            inspected
+                .objects
+                .iter()
+                .all(|object| object.blocker.is_some())
+        );
+    }
+}
+
+#[tokio::test]
+async fn authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let lifecycle = &engine.inner.lifecycle;
+    for case in [
+        "missing-result",
+        "different-result",
+        "result-revision",
+        "future-selection",
+        "zero-selection",
+        "wrong-dataset",
+        "wrong-version",
+        "wrong-owner",
+        "unverified",
+        "empty-with-revision",
+        "selected-only",
+        "release-only",
+    ] {
+        let dataset = id(case);
+        let view = lifecycle.open(&dataset).await.unwrap();
+        let mut release = release(root.path(), case, "selected");
+        match case {
+            "wrong-dataset" => release.dataset.dataset = id("other"),
+            "wrong-version" => release.dataset.version = id("other"),
+            "wrong-owner" => release.manifest.owner = id("other"),
+            "unverified" => release.verified = false,
+            _ => {}
+        }
+        let mut authority = selected_authority(&release, view.revision + 1);
+        match case {
+            "future-selection" => authority.selection_revision = Some(view.revision + 2),
+            "zero-selection" => authority.selection_revision = Some(0),
+            "empty-with-revision" => {
+                authority.selected = None;
+                authority.release = None;
+            }
+            "selected-only" => authority.release = None,
+            "release-only" => authority.selected = None,
+            _ => {}
+        }
+        let mut result = release;
+        if case == "different-result" {
+            result.dataset.definition = "different".into();
+        }
+        let mut records = vec![record("authority", &authority).unwrap()];
+        if case != "missing-result" {
+            records.push(record("result/selected", &result).unwrap());
+        }
+        let mut view = lifecycle.commit(&view, records).await.unwrap();
+        if case == "result-revision" {
+            view = lifecycle
+                .commit(&view, vec![record("result/selected", &result).unwrap()])
+                .await
+                .unwrap();
+        }
+        let rows = lifecycle.rows(&view).await.unwrap();
+        let (_, revision, json) = rows
+            .prefix("authority")
+            .find(|(key, _, _)| *key == "authority")
+            .unwrap();
+        let origin = RetentionBlocker {
+            table: view.table.identifier().to_string(),
+            key: "authority".into(),
+            revision,
+        };
+        assert_eq!(
+            reference_roots(
+                &rows,
+                "authority",
+                json,
+                &origin,
+                limits().max_metadata_bytes
+            )
+            .unwrap_err()
+            .code(),
+            "retention_inventory",
+            "{case}",
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_authority_has_no_selected_result_or_protection_claim() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let lifecycle = &engine.inner.lifecycle;
+    let view = lifecycle.open(&id("consumer")).await.unwrap();
+    lifecycle
+        .commit(
+            &view,
+            vec![record("authority", Authority::default()).unwrap()],
+        )
+        .await
+        .unwrap();
+    let inspected = engine.inspect_retention(&[]).await.unwrap();
+    assert!(inspected.objects.is_empty());
+    assert_eq!(inspected.metadata_objects_read, 0);
+}
+
 #[tokio::test]
 async fn closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads() {
     let root = tempfile::tempdir().unwrap();

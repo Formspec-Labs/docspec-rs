@@ -193,30 +193,6 @@ impl Engine {
             let (revision, _, link) = read_link(&rows, view.revision, &previous)?;
             check_selected_link(selected_revision, &head, revision, &link)?;
         }
-        // The accepted predecessor may have changed since this request was
-        // admitted. Inherit its exact retained scope from this guarded view.
-        // Unknown older provenance must not borrow the candidate's protection.
-        let mut succession_protections = release
-            .protections
-            .as_ref()
-            .map(ReferenceProtections::duplicate)
-            .transpose()?;
-        if let Some(previous) = &authority.release {
-            let previous_key = format!("result/{}", previous.id);
-            let previous_scope = self.retained_protections(view, &previous_key).await?;
-            if previous_scope.is_some() {
-                let _memory = rows.reserve_decoded(&lifecycle.budget, &[&previous_key])?;
-                if rows
-                    .get_record::<ReleasePin>(&previous_key)?
-                    .map(|(_, _, value)| value)
-                    .as_ref()
-                    != Some(previous)
-                {
-                    return Err(invalid("selected release differs from its retained result"));
-                }
-            }
-            ReferenceProtections::inherit(&mut succession_protections, previous_scope.as_ref())?;
-        }
         let link = Succession {
             selected: release.version_ref(),
             predecessor,
@@ -248,13 +224,9 @@ impl Engine {
             &release.value,
             release.protections.as_ref(),
         )?);
-        records.extend(completion_records(
-            &release.dataset.dataset,
-            view,
-            &key,
-            &link,
-            succession_protections.as_ref(),
-        )?);
+        // Ordering and observed lag retain inline evidence, not another promise
+        // to keep every endpoint's payload. Actual results carry that protection.
+        records.push(record(&key, &link)?);
         if let Some(progress) = progress {
             records.push(record(format!("input-progress/{}", release.id), progress)?);
         }
@@ -338,27 +310,47 @@ fn read_link(
         .ok_or_else(missing)?;
     let link: Succession = serde_json::from_value(value)
         .map_err(|_| invalid("accepted-history record is malformed"))?;
+    if revision <= 0 || revision > observed_revision || link.selected != *expected {
+        return Err(invalid("accepted-history identity or revision differs"));
+    }
+    let result_bytes = check_link_receipt(rows, revision, &link)?;
+    Ok((revision, bytes.saturating_add(result_bytes), link))
+}
+
+/// Checks one ordering receipt against its co-committed result, without external reads.
+pub(super) fn check_link_receipt(
+    rows: &SnapshotRows,
+    revision: i64,
+    link: &Succession,
+) -> Result<usize> {
+    let expected = &link.selected;
     let (result_revision, result_bytes, result): (_, _, SelectedRelease) = rows
         .get_record(&format!("result/{}", expected.version))?
-        .ok_or_else(missing)?;
+        .ok_or_else(|| {
+            Error::refusal(
+                "unavailable_succession",
+                "accepted result receipt is missing",
+            )
+        })?;
     if revision <= 0
-        || revision > observed_revision
         || result_revision != revision
-        || link.selected != *expected
         || result.version_ref() != *expected
         || result.dataset.version != expected.version
+        || expected.manifest.owner != expected.dataset
         || !result.verified
         || link.boundary != result.dataset.boundary
         || link.eligibility != result.dataset.eligibility
         || link.predecessor.as_ref().is_some_and(|previous| {
-            previous.dataset != expected.dataset || previous.version == expected.version
+            previous.dataset != expected.dataset
+                || previous.manifest.owner != previous.dataset
+                || previous.version == expected.version
         })
     {
         return Err(invalid(
             "accepted-history record differs from its selection commit",
         ));
     }
-    Ok((revision, bytes.saturating_add(result_bytes), link))
+    Ok(result_bytes)
 }
 
 fn check_selected_link(

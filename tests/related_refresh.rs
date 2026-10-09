@@ -559,6 +559,14 @@ async fn captured_selection_records_lag_latest_refuses_and_coverage_cannot_regre
         &rows().0,
     )
     .await;
+    // Observing a newer head reports lag; it does not consume that head's
+    // content. A cold selection must work with only its catalog receipt.
+    let hidden = root.path().join("unavailable-observed-head.json");
+    std::fs::rename(&newer.manifest.path, &hidden).unwrap();
+    drop(engine);
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
     let result = engine.refresh(&captured).await.unwrap();
     let rows = engine.inspect(&captured.dataset).await.unwrap();
     let progress: BTreeMap<Id, SuccessionProof> =
@@ -569,6 +577,8 @@ async fn captured_selection_records_lag_latest_refuses_and_coverage_cannot_regre
         engine.refresh(&latest).await.unwrap_err().code(),
         "stale_input"
     );
+    assert_eq!(engine.refresh(&captured).await.unwrap(), result);
+    std::fs::rename(hidden, &newer.manifest.path).unwrap();
     captured.operation = id("advance");
     captured.base = Some(result.id.clone());
     join_mut(&mut captured).left = newer.version_ref();

@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized] target(s) in 0.40s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test engine::retention::inventory::collector_tests::empty_authority_has_no_selected_result_or_protection_claim ... ok
+test engine::retention::inventory::collector_tests::authority_reuses_its_result_identity_without_lending_protection_to_unknown_results ... ok
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 0.33s
+

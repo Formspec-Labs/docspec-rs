@@ -284,7 +284,7 @@ async fn scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen() {
     );
     assert_eq!(
         release.dataset.parent_manifest,
-        Some(sibling_release.manifest)
+        Some(sibling_release.manifest.clone())
     );
     assert_ne!(release.manifest, retained_readback.manifest);
     assert_eq!(
@@ -298,13 +298,19 @@ async fn scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen() {
     let saved: ReleasePin = rows.get_record(&retained_key).unwrap().unwrap().2;
     assert_eq!(saved, retained_readback);
     let result_revision = rows.revision("result/derived").unwrap();
-    for claim in ["result/derived", "succession/derived"] {
-        let (_, revision, scope) = binding(&rows, claim).unwrap();
-        assert_eq!(Some(revision), rows.revision(claim));
-        assert_eq!(revision, result_revision);
-        assert_eq!(scope["protections"], original_tokens);
-        engine.check_reference_binding(&view, claim).await.unwrap();
-    }
+    let (_, revision, scope) = binding(&rows, "result/derived").unwrap();
+    assert_eq!(revision, result_revision);
+    assert_eq!(scope["protections"], original_tokens);
+    engine
+        .check_reference_binding(&view, "result/derived")
+        .await
+        .unwrap();
+    assert!(binding(&rows, "succession/derived").is_none());
+    let (revision, _, succession): (_, _, Succession) =
+        rows.get_record("succession/derived").unwrap().unwrap();
+    assert_eq!(revision, result_revision);
+    assert_eq!(succession.predecessor, Some(sibling_release.version_ref()));
+    assert_eq!(succession.selected, release.version_ref());
     let mut selected_readback_found = false;
     for (key, revision, json) in rows.prefix("backfill-readback/derived/") {
         let candidate: ReleasePin = serde_json::from_str(json).unwrap();

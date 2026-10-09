@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 40.12s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 1 test
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 10.69s
+

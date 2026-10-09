@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.51s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test engine::progress::tests::latest_selection_reuses_the_exact_target_scope_without_owner_commits ... ok
+test engine::progress::tests::unknown_candidate_scope_can_qualify_progress_without_upgrading_the_result ... ok
+test engine::progress::tests::captured_selection_protects_the_final_observed_head_and_reconciles_interrupted_grants ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 3.07s
+

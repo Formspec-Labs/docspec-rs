@@ -148,6 +148,20 @@ async fn binding(engine: &Engine, dataset: &Id, key: &str) -> ReferenceBinding {
     binding
 }
 
+async fn succession(engine: &Engine, dataset: &Id, operation: &Id) -> (i64, Succession) {
+    let view = engine.inner.lifecycle.open(dataset).await.unwrap();
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    let key = format!("succession/{operation}");
+    assert!(
+        rows.get_record::<ReferenceBinding>(&binding_key(&key))
+            .unwrap()
+            .is_none(),
+        "accepted order does not create a payload-retention binding"
+    );
+    let (revision, _, link) = rows.get_record(&key).unwrap().unwrap();
+    (revision, link)
+}
+
 #[tokio::test]
 async fn material_reuse_carries_original_owner_scope_into_validation_and_readback() {
     let (_root, engine, input_a, input_b) = fixture().await;
@@ -250,10 +264,11 @@ async fn material_reuse_carries_original_owner_scope_into_validation_and_readbac
     let selected = engine.run(&second).await.unwrap();
     assert_eq!(selected, readback);
     let result_binding = binding(&engine, &second.dataset, "result/b").await;
-    let succession_binding = binding(&engine, &second.dataset, "succession/b").await;
+    let (succession_revision, link) = succession(&engine, &second.dataset, &second.operation).await;
     assert_eq!(result_binding.protections, readback_binding.protections);
-    assert_eq!(succession_binding.protections, readback_binding.protections);
-    assert_eq!(result_binding.revision, succession_binding.revision);
+    assert_eq!(result_binding.revision, succession_revision);
+    assert_eq!(link.selected, selected.version_ref());
+    assert!(link.predecessor.is_none());
     let selection_revision = engine
         .inner
         .lifecycle
@@ -284,8 +299,8 @@ async fn material_reuse_carries_original_owner_scope_into_validation_and_readbac
 }
 
 #[tokio::test]
-async fn succession_inherits_the_actual_predecessor_after_overlapping_unbased_builds() {
-    let (_root, engine, input_a, input_b) = fixture_with_values(limits(), &[10, 20]).await;
+async fn succession_keeps_actual_predecessor_without_inheriting_its_payload_scope() {
+    let (root, engine, input_a, input_b) = fixture_with_values(limits(), &[10, 20]).await;
     assert_ne!(input_a.digest, input_b.digest);
     let first = request("consumer", "a", &input_a);
     let mut second = request("consumer", "b", &input_b);
@@ -318,33 +333,51 @@ async fn succession_inherits_the_actual_predecessor_after_overlapping_unbased_bu
     assert!(selected.dataset.parent_manifest.is_none());
     let result_scope = binding(&engine, &second.dataset, "result/b").await;
     assert_eq!(result_scope.protections, second_scope.protections);
-    let succession_scope = binding(&engine, &second.dataset, "succession/b").await;
-    assert_eq!(succession_scope.revision, result_scope.revision);
-    let mut expected_scope = first_scope.protections;
-    expected_scope.extend(second_scope.protections);
-    expected_scope
-        .sort_by(|left, right| (&left.owner, &left.token).cmp(&(&right.owner, &right.token)));
-    assert_eq!(succession_scope.protections, expected_scope);
-    let view = engine.inner.lifecycle.open(&second.dataset).await.unwrap();
-    let succession: Succession = engine
-        .inner
-        .lifecycle
-        .get(&view, "succession/b")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(succession.predecessor, Some(prior.version_ref()));
-    assert_eq!(succession.selected, selected.version_ref());
+    let accepted = succession(&engine, &second.dataset, &second.operation).await;
+    assert_eq!(accepted.0, result_scope.revision);
+    assert_eq!(accepted.1.predecessor, Some(prior.version_ref()));
+    assert_eq!(accepted.1.selected, selected.version_ref());
     assert_eq!(engine.run(&second).await.unwrap(), selected);
     assert_eq!(
-        binding(&engine, &second.dataset, "succession/b").await,
-        succession_scope
+        succession(&engine, &second.dataset, &second.operation).await,
+        accepted
+    );
+    // Model unavailable old content in this private fixture. Accepted ordering
+    // remains provable from the catalog even after a cold engine reopen.
+    let old_payload = prior.dataset.groups["source"]
+        .objects
+        .iter()
+        .find(|object| object.path.ends_with(".parquet"))
+        .unwrap();
+    assert!(
+        !selected.dataset.groups["source"]
+            .objects
+            .contains(old_payload)
+    );
+    std::fs::remove_file(&prior.manifest.path).unwrap();
+    std::fs::remove_file(&old_payload.path).unwrap();
+    drop(engine);
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let proof = engine
+        .prove_succession(&prior.version_ref(), &selected.version_ref())
+        .await
+        .unwrap();
+    assert_eq!(proof.prior, prior.version_ref());
+    assert_eq!(proof.target, selected.version_ref());
+    assert_eq!(proof.observed_head, selected.version_ref());
+    assert_eq!(proof.selections_advanced, 1);
+    assert_eq!(proof.selections_behind, 0);
+    assert_eq!(
+        succession(&engine, &second.dataset, &second.operation).await,
+        accepted
     );
     for (owner, revision) in owner_revisions {
         assert_eq!(
             engine.inner.lifecycle.open(&owner).await.unwrap().revision,
             revision,
-            "selection reuses actual predecessor grants without reopening acquisition"
+            "selection and history proof do not acquire predecessor payload protection"
         );
     }
 }
@@ -731,10 +764,21 @@ async fn refresh_evidence_inherits_the_exact_captured_producer_scope() {
     assert_eq!(readback_binding.protections, evidence_binding.protections);
     let selected = engine.refresh(&refresh).await.unwrap();
     let result_binding = binding(&engine, &refresh.dataset, "result/initial").await;
-    let succession_binding = binding(&engine, &refresh.dataset, "succession/initial").await;
+    let (succession_revision, link) =
+        succession(&engine, &refresh.dataset, &refresh.operation).await;
     assert_eq!(result_binding.protections, readback_binding.protections);
-    assert_eq!(succession_binding.protections, readback_binding.protections);
-    assert_eq!(succession_binding.revision, result_binding.revision);
+    assert_eq!(succession_revision, result_binding.revision);
+    assert_eq!(link.selected, selected.version_ref());
+    let view = engine.inner.lifecycle.open(&refresh.dataset).await.unwrap();
+    assert!(
+        engine
+            .inner
+            .lifecycle
+            .get::<ReferenceBinding>(&view, &binding_key("input-progress/initial"))
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(engine.refresh(&refresh).await.unwrap(), selected);
     for (owner, revision) in owner_revisions {
         assert_eq!(
