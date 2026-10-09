@@ -1,0 +1,30 @@
+{
+  "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release",
+  "checked_at_utc": "2026-10-09T06:15:51.269642+00:00",
+  "canonical_directory_no_symlink": true,
+  "device": 16777233,
+  "inode": 759369788,
+  "allocated_bytes_before": 4826370048,
+  "no_reader_check": {
+    "command": [
+      "lsof",
+      "-nP",
+      "+D",
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release"
+    ],
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": ""
+  },
+  "reason": "Inactive reproducible release build cache; source, lockfiles, debug cache and retained experiment evidence are outside this exact path.",
+  "deletion_completed": true,
+  "volume_free_bytes_before": 12722581504,
+  "deletion_started_at_utc": "2026-10-09T06:16:18.803237+00:00",
+  "observed_at_utc": "2026-10-09T06:16:21.769250+00:00",
+  "path_absent": true,
+  "volume_free_bytes_after": 17090461696,
+  "volume_free_delta_bytes": 4367880192,
+  "startup_guard_bytes": 17179869184,
+  "startup_guard_met_at_observation": false,
+  "volume_observation_note": "Whole-volume free-space change includes concurrent workstation activity and APFS allocation behavior; startup must recheck fresh capacity."
+}
