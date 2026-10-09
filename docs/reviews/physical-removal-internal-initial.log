@@ -1,0 +1,19 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.94s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 12 tests
+test storage::removal::tests::refuses_same_size_changed_bytes ... ok
+test storage::removal::tests::refuses_ancestor_symlink ... ok
+test storage::removal::tests::refuses_escaped_paths_and_wrong_owner ... ok
+test storage::removal::tests::refuses_directory_and_leaf_symlink ... ok
+test storage::removal::tests::deletes_exact_file_and_reconciles_absence ... ok
+test storage::removal::tests::absence_reconciliation_skips_present_bytes_and_rejects_unsafe_types ... ok
+test catalog::tests::invalid_removal_references_refuse_before_native_commit ... ok
+test storage::occurrences::tests::schema::transient_native_column_is_validated_and_charged_before_removal ... ok
+test engine::retention::removal::tests::fresh_owner_protection_shrinks_a_stale_preview_without_deletion ... ok
+test engine::retention::removal::tests::already_absent_target_reports_absence_without_newly_unlinked_bytes ... ok
+test engine::retention::removal::tests::exact_deletion_preserves_selected_values_and_completed_cold_retries_skip_effects ... ok
+test engine::retention::removal::tests::same_size_corruption_retains_failure_and_unavailability_until_exact_resume ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 2.17s

@@ -3,6 +3,7 @@
 pub(crate) mod defaults;
 mod inspection;
 mod occurrences;
+pub(crate) mod removal;
 mod schema;
 mod tables;
 pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};

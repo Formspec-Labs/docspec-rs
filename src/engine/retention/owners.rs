@@ -712,7 +712,7 @@ impl Engine {
         Ok(reference(&key, &grant))
     }
 
-    fn check_object_owner(
+    pub(super) fn check_object_owner(
         &self,
         rows: &SnapshotRows,
         owner: &Id,
@@ -765,7 +765,7 @@ fn reference(key: &str, grant: &OwnerProtection) -> OwnerProtectionRef {
 
 // Only retained typed creation evidence or a prior owner grant qualifies a new
 // reference. This scans one owner's cached rows, not every catalog namespace.
-async fn confirm_creation(
+pub(super) async fn confirm_creation(
     rows: &SnapshotRows,
     view: &View,
     objects: &[ObjectRef],

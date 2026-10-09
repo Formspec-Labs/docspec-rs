@@ -7,7 +7,7 @@ use docspec::{
     engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
     model::{
         BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin,
-        RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        RemovalPlan, RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     storage,
 };
@@ -62,6 +62,37 @@ enum Command {
     Inspect { dataset: String },
     /// Explain protection for exact objects; this does not authorize removal.
     InspectRetention { objects: PathBuf },
+    /// Preview exact owned file removal and its retained protection blockers.
+    PlanRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+        /// JSON array of exact object references.
+        #[arg(long)]
+        objects: PathBuf,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Execute only freshly eligible targets from a saved removal plan.
+    RemoveObjects {
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Inspect an exact saved removal and its effect acknowledgments.
+    InspectRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+    },
+    /// Resume the exact pending effects of a saved removal.
+    ResumeRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+    },
     /// Capture exact phase generations for logical retirement; change no recovery promise.
     PlanPhaseRetirement {
         dataset: String,
@@ -297,6 +328,36 @@ async fn main() -> anyhow::Result<()> {
                 Command::InspectRetention { objects } => print_json(
                     &engine
                         .inspect_retention(&read_json::<Vec<ObjectRef>>(objects)?)
+                        .await?,
+                )?,
+                Command::PlanRemoval {
+                    dataset,
+                    removal,
+                    objects,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_removal(
+                            &Id::new(dataset)?,
+                            &Id::new(removal)?,
+                            &read_json::<Vec<ObjectRef>>(objects)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RemoveObjects { plan } => print_json(
+                    &engine
+                        .remove_objects(&read_json::<RemovalPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::InspectRemoval { dataset, removal } => print_json(
+                    &engine
+                        .inspect_removal(&Id::new(dataset)?, &Id::new(removal)?)
+                        .await?,
+                )?,
+                Command::ResumeRemoval { dataset, removal } => print_json(
+                    &engine
+                        .resume_removal(&Id::new(dataset)?, &Id::new(removal)?)
                         .await?,
                 )?,
                 Command::PlanPhaseRetirement {

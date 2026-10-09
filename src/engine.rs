@@ -38,7 +38,7 @@ pub use read::{read_evidence, read_group};
 mod aggregation;
 mod incremental;
 mod refresh;
-mod retention;
+pub(crate) mod retention;
 use retention::owners::ReferenceProtections;
 mod schema;
 mod verification;

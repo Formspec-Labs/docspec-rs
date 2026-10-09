@@ -7,8 +7,8 @@ use crate::{
     Engine, Error,
     model::{
         Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
-        ReleasePin, RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec,
-        SuccessionProof, UpdateSpec, VersionRef,
+        ReleasePin, RemovalPlan, RemovalStatus, RetentionInspection, RetentionPlan, Retirement,
+        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
     },
 };
 use axum::{
@@ -40,6 +40,16 @@ pub fn router(engine: Engine) -> Router {
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
         .route("/retention/inspect", post(inspect_retention))
+        .route("/retention/removal/plan", post(plan_removal))
+        .route("/retention/removal/execute", post(remove_objects))
+        .route(
+            "/datasets/{dataset}/removals/{removal}",
+            get(inspect_removal),
+        )
+        .route(
+            "/datasets/{dataset}/removals/{removal}/resume",
+            post(resume_removal),
+        )
         .route("/retention/phases/plan", post(plan_phase_retirement))
         .route("/retention/phases/retire", post(retire_phases))
         .route("/retention/grants/plan", post(plan_grant_retirement))
@@ -78,6 +88,60 @@ pub fn router(engine: Engine) -> Router {
 }
 
 struct HttpError(Error);
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemovalRequest {
+    dataset: Id,
+    removal: Id,
+    objects: Vec<ObjectRef>,
+    reason: String,
+}
+
+async fn plan_removal(
+    State(engine): State<Engine>,
+    Json(request): Json<RemovalRequest>,
+) -> Result<Json<RemovalPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_removal(
+                &request.dataset,
+                &request.removal,
+                &request.objects,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn remove_objects(
+    State(engine): State<Engine>,
+    Json(plan): Json<RemovalPlan>,
+) -> Result<Json<RemovalStatus>, HttpError> {
+    Ok(Json(engine.remove_objects(&plan).await?))
+}
+
+async fn inspect_removal(
+    State(engine): State<Engine>,
+    Path((dataset, removal)): Path<(String, String)>,
+) -> Result<Json<RemovalStatus>, HttpError> {
+    Ok(Json(
+        engine
+            .inspect_removal(&Id::new(dataset)?, &Id::new(removal)?)
+            .await?,
+    ))
+}
+
+async fn resume_removal(
+    State(engine): State<Engine>,
+    Path((dataset, removal)): Path<(String, String)>,
+) -> Result<Json<RemovalStatus>, HttpError> {
+    Ok(Json(
+        engine
+            .resume_removal(&Id::new(dataset)?, &Id::new(removal)?)
+            .await?,
+    ))
+}
 
 async fn inspect_retention(
     State(engine): State<Engine>,
@@ -205,9 +269,8 @@ impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
             "availability_retired" => StatusCode::GONE,
-            "no_release" | "no_operation" | "no_phase" | "missing_group" | "missing_evidence" => {
-                StatusCode::NOT_FOUND
-            }
+            "no_release" | "no_operation" | "no_phase" | "no_removal" | "missing_group"
+            | "missing_evidence" => StatusCode::NOT_FOUND,
             "operation_conflict"
             | "selected_result"
             | "operation_active"
@@ -221,6 +284,8 @@ impl IntoResponse for HttpError {
             | "grant_retired"
             | "recovery_retired"
             | "retirement_conflict"
+            | "removal_conflict"
+            | "stale_removal"
             | "stale_retirement"
             | "stale_definition"
             | "stale_eligibility"

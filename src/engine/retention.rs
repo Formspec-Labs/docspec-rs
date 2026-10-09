@@ -13,6 +13,7 @@ mod grants;
 mod inventory;
 pub(super) mod owners;
 mod recovery;
+pub(crate) mod removal;
 mod retirement;
 
 impl Engine {

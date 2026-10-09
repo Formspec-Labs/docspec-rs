@@ -91,7 +91,7 @@ impl Engine {
         .await
     }
 
-    async fn inspect_retention_admitted(
+    pub(super) async fn inspect_retention_admitted(
         &self,
         objects: &[ObjectRef],
     ) -> Result<RetentionInspection> {
@@ -144,6 +144,7 @@ impl Engine {
             inventory.charge(boundary.table.len() + boundary.metadata.len() + 128)?;
             boundaries.push(boundary);
             let rows = lifecycle.rows(&view).await?;
+            let removal_markers = self.validate_removal_records(&rows, &view)?;
             let retired = super::retirement::retired_records(&rows, &view, self, |bytes| {
                 inventory.charge(bytes)
             })?;
@@ -199,7 +200,8 @@ impl Engine {
                 }
                 if key.starts_with("object-unavailable/") {
                     let unavailable: super::owners::UnavailableObject = decode(json)?;
-                    if key != super::owners::unavailable_key(&unavailable.object.path)
+                    if !removal_markers.contains(key)
+                        || key != super::owners::unavailable_key(&unavailable.object.path)
                         || unavailable.revision != revision
                         || &crate::catalog::lifecycle_ident(&unavailable.object.owner)
                             != view.table.identifier()
@@ -207,6 +209,9 @@ impl Engine {
                         return Err(invalid_inventory("object unavailability identity differs"));
                     }
                     validate_object(&unavailable.object)?;
+                    continue;
+                }
+                if key.starts_with("removal-intent/") || key.starts_with("removal-state/") {
                     continue;
                 }
                 if key.starts_with("retirement/") {

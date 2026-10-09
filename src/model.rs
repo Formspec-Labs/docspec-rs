@@ -564,6 +564,85 @@ pub struct RetentionInspection {
     pub metadata_objects_read: usize,
 }
 
+/// One exact owned native registration, detached without purging its files.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovalRegistration {
+    pub namespace: String,
+    pub name: String,
+    pub table_uuid: String,
+    pub metadata: String,
+}
+
+/// Bounded explicit removal candidates and their observed protection boundaries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovalPlan {
+    pub dataset: Id,
+    pub removal: Id,
+    pub reason: String,
+    pub table_uuid: String,
+    pub inspection: RetentionInspection,
+    pub registrations: Vec<RemovalRegistration>,
+}
+
+/// Immutable removal scope chosen from a preview by fresh eligibility checks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovalIntent {
+    pub plan: RemovalPlan,
+    pub revision: i64,
+    /// Fresh inventory boundaries captured before reserving effects.
+    pub boundaries: Vec<RetentionBoundary>,
+    /// Originally eligible objects excluded by new protections.
+    pub blocked: Vec<ObjectProtection>,
+    /// Indices into the preview's candidates; no later attempt may expand these.
+    pub objects: Vec<usize>,
+    /// Indices into the preview's exact native registrations.
+    pub registrations: Vec<usize>,
+}
+
+/// A durable effect acknowledgment; unresolved or failed effects may already have occurred.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemovalOutcome {
+    Unresolved,
+    Removed,
+    Absent,
+    Failed { code: String },
+}
+
+impl RemovalOutcome {
+    pub(crate) fn finished(&self) -> bool {
+        matches!(self, Self::Removed | Self::Absent)
+    }
+}
+
+/// Current acknowledgments and reserved capacity for an immutable removal intent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovalProgress {
+    pub intent_revision: i64,
+    /// Lifecycle replay-accounting bytes, not filesystem storage or memory usage.
+    pub reserved_future_bytes: u64,
+    /// Positions correspond to the intent's registration indices.
+    pub registrations: Vec<RemovalOutcome>,
+    /// Positions correspond to the intent's object indices.
+    pub objects: Vec<RemovalOutcome>,
+}
+
+/// Exact saved removal decisions, acknowledgments and cumulative logical byte outcomes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovalStatus {
+    pub intent: RemovalIntent,
+    pub progress: RemovalProgress,
+    pub complete: bool,
+    /// Logical file sizes with acknowledged unlink, not reclaimed allocated blocks.
+    pub confirmed_unlinked_bytes: u64,
+    /// Logical file sizes reconciled absent; no new unlink is claimed for them.
+    pub reconciled_absent_bytes: u64,
+}
+
 /// Full multiset comparison of one field group; duplicate observations count separately.
 #[derive(Clone, Debug, Serialize)]
 pub struct Comparison {

@@ -3,7 +3,12 @@
 //! The initial layout appends bounded key/value changes. It is deliberately small;
 //! metadata-growth qualification must precede adopting it for large histories.
 
-use crate::{Error, Result, budget::Budget, model::Id, storage};
+use crate::{
+    Error, Result,
+    budget::Budget,
+    model::{Id, RemovalIntent, RemovalProgress},
+    storage,
+};
 use arrow::{
     array::{Array, Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},
@@ -35,10 +40,16 @@ pub(crate) struct SnapshotRows {
     metadata: String,
     values: BTreeMap<String, (i64, String)>,
     history_bytes: usize,
+    reserved_future_bytes: usize,
     _reservation: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl SnapshotRows {
+    #[cfg(test)]
+    pub(crate) fn history_bytes(&self) -> usize {
+        self.history_bytes
+    }
+
     pub(crate) fn revision(&self, key: &str) -> Option<i64> {
         self.values.get(key).map(|(revision, _)| *revision)
     }
@@ -208,6 +219,7 @@ impl Lifecycle {
                 metadata,
                 values: current,
                 history_bytes: 0,
+                reserved_future_bytes: 0,
                 _reservation: reservation,
             });
             *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
@@ -239,11 +251,30 @@ impl Lifecycle {
                 }
             }
         }
+        for (key, _) in current
+            .range("removal-intent/".to_owned()..)
+            .take_while(|(key, _)| key.starts_with("removal-intent/"))
+        {
+            check_removal_state_exists(&current, key)?;
+        }
+        let reserved_future_bytes = current
+            .range("removal-state/".to_owned()..)
+            .take_while(|(key, _)| key.starts_with("removal-state/"))
+            .try_fold(0_usize, |total, (key, (revision, value))| {
+                let reserved = removal_reservation(&current, key, *revision, value)?;
+                total.checked_add(reserved).ok_or_else(reservation_overflow)
+            })?;
+        check_history_reservation(
+            bytes,
+            reserved_future_bytes,
+            self.budget.limits.max_metadata_bytes,
+        )?;
         check_cache_size(&current, self.budget.limits.max_metadata_bytes)?;
         let entry = Arc::new(SnapshotRows {
             metadata,
             values: current,
             history_bytes: bytes,
+            reserved_future_bytes,
             _reservation: reservation,
         });
         *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
@@ -320,11 +351,48 @@ impl Lifecycle {
             });
         // Warm and cold paths apply the same bound before acknowledging a commit.
         // Obsolete appended versions still count until compaction removes them.
-        check_history_size(history_bytes, self.budget.limits.max_metadata_bytes)?;
         let mut next_values = previous.values.clone();
         for ((key, _), value) in changes.iter().zip(values) {
+            if let Some(id) = key.strip_prefix("removal-intent/") {
+                validate_removal_id(id)?;
+                if previous.contains_key(key) {
+                    return Err(Error::refusal(
+                        "corrupt_metadata",
+                        "removal intents are immutable",
+                    ));
+                }
+            }
             next_values.insert(key.clone(), (revision, value));
         }
+        let mut reserved_future_bytes = previous.reserved_future_bytes;
+        for (key, _) in &changes {
+            if key.starts_with("removal-intent/") {
+                check_removal_state_exists(&next_values, key)?;
+            }
+            if !key.starts_with("removal-state/") {
+                continue;
+            }
+            if let Some((old_revision, old_value)) = previous.values.get(key) {
+                reserved_future_bytes = reserved_future_bytes
+                    .checked_sub(removal_reservation(
+                        &previous.values,
+                        key,
+                        *old_revision,
+                        old_value,
+                    )?)
+                    .ok_or_else(reservation_overflow)?;
+            }
+            let (_, value) = &next_values[key];
+            reserved_future_bytes = reserved_future_bytes
+                .checked_add(removal_reservation(&next_values, key, revision, value)?)
+                .ok_or_else(reservation_overflow)?;
+        }
+        // Outcomes consume reserved room in the same commit that retains their result.
+        check_history_reservation(
+            history_bytes,
+            reserved_future_bytes,
+            self.budget.limits.max_metadata_bytes,
+        )?;
         check_cache_size(&next_values, self.budget.limits.max_metadata_bytes)?;
         let files = storage::write_batches(
             &view.table,
@@ -347,6 +415,7 @@ impl Lifecycle {
             metadata: table.metadata_location_result()?.to_owned(),
             values: next_values,
             history_bytes,
+            reserved_future_bytes,
             _reservation: reservation,
         });
         *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
@@ -357,9 +426,79 @@ impl Lifecycle {
     }
 }
 
-fn history_row_bytes(key: &str, value: &str) -> usize {
+/// Returns the lifecycle history charge for one serialized row.
+pub(crate) fn history_row_bytes(key: &str, value: &str) -> usize {
     // Conservative per-record overhead for map nodes, revisions and owned strings.
     key.len().saturating_add(value.len()).saturating_add(128)
+}
+
+fn check_removal_state_exists(rows: &BTreeMap<String, (i64, String)>, key: &str) -> Result<()> {
+    let id = key
+        .strip_prefix("removal-intent/")
+        .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid removal intent key"))?;
+    validate_removal_id(id)?;
+    if !rows.contains_key(&format!("removal-state/{id}")) {
+        return Err(Error::refusal(
+            "corrupt_metadata",
+            "removal intent has no reserved progress state",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_removal_id(id: &str) -> Result<()> {
+    Id::new(id)
+        .map(|_| ())
+        .map_err(|_| Error::refusal("corrupt_metadata", "invalid removal record identifier"))
+}
+
+fn removal_reservation(
+    rows: &BTreeMap<String, (i64, String)>,
+    key: &str,
+    revision: i64,
+    json: &str,
+) -> Result<usize> {
+    let id = key
+        .strip_prefix("removal-state/")
+        .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid removal state key"))?;
+    validate_removal_id(id)?;
+    let state: RemovalProgress = serde_json::from_str(json)
+        .map_err(|_| Error::refusal("corrupt_metadata", "invalid removal history reservation"))?;
+    let (intent_revision, intent_json) =
+        rows.get(&format!("removal-intent/{id}")).ok_or_else(|| {
+            Error::refusal("corrupt_metadata", "removal state has no original intent")
+        })?;
+    let intent: RemovalIntent = serde_json::from_str(intent_json)
+        .map_err(|_| Error::refusal("corrupt_metadata", "invalid removal intent"))?;
+    if state.intent_revision <= 0
+        || state.intent_revision > revision
+        || *intent_revision != state.intent_revision
+        || intent.revision != *intent_revision
+        || intent.plan.removal.as_str() != id
+    {
+        return Err(Error::refusal(
+            "corrupt_metadata",
+            "removal state does not reference its exact original intent",
+        ));
+    }
+    crate::engine::retention::removal::validate_progress(&intent, &state).map_err(|_| {
+        Error::refusal(
+            "corrupt_metadata",
+            "invalid removal outcomes or reserved completion capacity",
+        )
+    })?;
+    usize::try_from(state.reserved_future_bytes).map_err(|_| reservation_overflow())
+}
+
+fn reservation_overflow() -> Error {
+    Error::refusal("metadata_capacity", "removal history reservation overflow")
+}
+
+fn check_history_reservation(history: usize, reserved: usize, limit: usize) -> Result<()> {
+    let total = history
+        .checked_add(reserved)
+        .ok_or_else(reservation_overflow)?;
+    check_history_size(total, limit)
 }
 
 fn check_history_size(bytes: usize, limit: usize) -> Result<()> {
@@ -498,7 +637,307 @@ impl Catalog for GuardedCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::budget::Limits;
+    use crate::{
+        budget::Limits,
+        model::{ObjectProtection, ObjectRef, RemovalOutcome, RemovalPlan, RetentionInspection},
+    };
+
+    fn test_budget(max_metadata_bytes: usize) -> Budget {
+        Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 64 << 20,
+            scratch_bytes: 16 << 20,
+            batch_rows: 32,
+            max_batch_bytes: 4096,
+            max_metadata_bytes,
+        })
+        .unwrap()
+    }
+
+    fn removal_intent(id: &str) -> RemovalIntent {
+        RemovalIntent {
+            plan: RemovalPlan {
+                dataset: Id::new("owner").unwrap(),
+                removal: Id::new(id).unwrap(),
+                reason: "catalog reservation test".into(),
+                table_uuid: "fixture".into(),
+                inspection: RetentionInspection {
+                    boundaries: vec![],
+                    objects: vec![ObjectProtection {
+                        object: ObjectRef {
+                            owner: Id::new("owner").unwrap(),
+                            path: format!("/fixture/{id}"),
+                            digest: "0".repeat(64),
+                            bytes: 1,
+                        },
+                        blocker: None,
+                    }],
+                    protected_bytes: 0,
+                    unmatched_bytes: 1,
+                    metadata_objects_read: 0,
+                },
+                registrations: vec![],
+            },
+            revision: 1,
+            boundaries: vec![],
+            blocked: vec![],
+            objects: vec![0],
+            registrations: vec![],
+        }
+    }
+
+    fn removal_state(intent_revision: i64, reserved: u64) -> RemovalProgress {
+        RemovalProgress {
+            intent_revision,
+            reserved_future_bytes: reserved,
+            registrations: vec![],
+            objects: vec![if reserved == 0 {
+                RemovalOutcome::Removed
+            } else {
+                RemovalOutcome::Unresolved
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn cold_and_warm_reservations_count_only_current_states() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let budget = test_budget(1 << 20);
+        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
+        let view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
+        let view = lifecycle
+            .commit(
+                &view,
+                vec![
+                    record("removal-intent/a", removal_intent("a")).unwrap(),
+                    record("removal-state/a", removal_state(1, 1000)).unwrap(),
+                    record("removal-intent/b", removal_intent("b")).unwrap(),
+                    record("removal-state/b", removal_state(1, 2000)).unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            lifecycle.rows(&view).await.unwrap().reserved_future_bytes,
+            3000
+        );
+        let view = lifecycle
+            .commit(
+                &view,
+                vec![record("removal-state/a", removal_state(1, 0)).unwrap()],
+            )
+            .await
+            .unwrap();
+        let warm = lifecycle.rows(&view).await.unwrap();
+        let reopened = Lifecycle::new(catalog, budget);
+        let cold = reopened.rows(&view).await.unwrap();
+        assert_eq!(warm.reserved_future_bytes, 2000);
+        assert_eq!(cold.reserved_future_bytes, warm.reserved_future_bytes);
+        assert_eq!(cold.history_bytes, warm.history_bytes);
+        let view = reopened
+            .commit(&view, vec![record("ordinary", true).unwrap()])
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.rows(&view).await.unwrap().reserved_future_bytes,
+            2000
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_commit_preserves_exact_terminal_headroom() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let state_key = "removal-state/a";
+        let terminal = removal_state(1, 0);
+        let terminal_charge =
+            history_row_bytes(state_key, &serde_json::to_string(&terminal).unwrap());
+        let floor = crate::engine::retention::removal::validate_progress(
+            &removal_intent("a"),
+            &removal_state(1, u64::MAX),
+        )
+        .unwrap();
+        let pending = removal_state(1, floor as u64);
+        let history = history_row_bytes(
+            "removal-intent/a",
+            &serde_json::to_string(&removal_intent("a")).unwrap(),
+        ) + history_row_bytes(state_key, &serde_json::to_string(&pending).unwrap());
+        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(history + floor));
+        let view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
+        let view = lifecycle
+            .commit(
+                &view,
+                vec![
+                    record("removal-intent/a", removal_intent("a")).unwrap(),
+                    record(state_key, pending).unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+        // Reopen to prove the guarantee survives loss of the warm cache.
+        let lifecycle = Lifecycle::new(catalog, test_budget(history + floor));
+        let refused = lifecycle
+            .commit(&view, vec![record("ordinary", true).unwrap()])
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), "metadata_capacity");
+        let view = lifecycle
+            .commit(&view, vec![record(state_key, terminal).unwrap()])
+            .await
+            .unwrap();
+        let rows = lifecycle.rows(&view).await.unwrap();
+        assert_eq!(rows.history_bytes, history + terminal_charge);
+        assert_eq!(rows.reserved_future_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_removal_references_refuse_before_native_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(1 << 20));
+        let owner = Id::new("owner").unwrap();
+        let view = lifecycle.open(&owner).await.unwrap();
+        let view = lifecycle
+            .commit(
+                &view,
+                vec![
+                    record("removal-intent/a", removal_intent("a")).unwrap(),
+                    record("removal-state/a", removal_state(1, 1000)).unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+        let invalid = [
+            ("removal-state/a", serde_json::json!({"intent_revision": 1})),
+            (
+                "removal-state/a",
+                serde_json::json!({"reserved_future_bytes": 1}),
+            ),
+            (
+                "removal-state/a",
+                serde_json::json!({"intent_revision": 1, "reserved_future_bytes": -1}),
+            ),
+            (
+                "removal-state/a",
+                serde_json::to_value(removal_state(0, 1)).unwrap(),
+            ),
+            (
+                "removal-state/a",
+                serde_json::to_value(removal_state(2, 1)).unwrap(),
+            ),
+            (
+                "removal-state/missing",
+                serde_json::to_value(removal_state(1, 1)).unwrap(),
+            ),
+            (
+                "removal-state/bad/id",
+                serde_json::to_value(removal_state(1, 1)).unwrap(),
+            ),
+            ("removal-intent/a", serde_json::json!("changed")),
+            (
+                "removal-intent/missing",
+                serde_json::to_value(removal_intent("missing")).unwrap(),
+            ),
+            (
+                "removal-state/a",
+                serde_json::to_value(RemovalProgress {
+                    intent_revision: 1,
+                    reserved_future_bytes: 0,
+                    registrations: vec![],
+                    objects: vec![RemovalOutcome::Unresolved],
+                })
+                .unwrap(),
+            ),
+            (
+                "removal-state/a",
+                serde_json::to_value(RemovalProgress {
+                    intent_revision: 1,
+                    reserved_future_bytes: 1000,
+                    registrations: vec![],
+                    objects: vec![],
+                })
+                .unwrap(),
+            ),
+            (
+                "removal-state/a",
+                serde_json::to_value(RemovalProgress {
+                    intent_revision: 1,
+                    reserved_future_bytes: 1000,
+                    registrations: vec![],
+                    objects: vec![RemovalOutcome::Failed {
+                        code: "invalid-code".into(),
+                    }],
+                })
+                .unwrap(),
+            ),
+            ("removal-intent/bad/id", serde_json::json!("bad")),
+        ];
+        for (key, value) in invalid {
+            let error = lifecycle
+                .commit(&view, vec![(key.into(), value)])
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), "corrupt_metadata", "{key}");
+            assert_eq!(
+                lifecycle.open(&owner).await.unwrap().revision,
+                view.revision
+            );
+        }
+        let error = lifecycle
+            .commit(
+                &view,
+                vec![record("removal-state/a", removal_state(1, u64::MAX)).unwrap()],
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "metadata_capacity");
+        assert_eq!(
+            lifecycle.open(&owner).await.unwrap().revision,
+            view.revision
+        );
+    }
+
+    #[test]
+    fn cold_reservation_validation_rejects_malformed_and_dangling_states() {
+        let key = "removal-state/a";
+        let mut rows = BTreeMap::new();
+        rows.insert(
+            "removal-intent/a".into(),
+            (1, serde_json::to_string(&removal_intent("a")).unwrap()),
+        );
+        let valid = serde_json::to_string(&removal_state(1, 1000)).unwrap();
+        assert_eq!(removal_reservation(&rows, key, 2, &valid).unwrap(), 1000);
+        for json in [
+            "{}",
+            "null",
+            "{",
+            "{\"intent_revision\":1,\"reserved_future_bytes\":\"42\"}",
+        ] {
+            assert_eq!(
+                removal_reservation(&rows, key, 2, json).unwrap_err().code(),
+                "corrupt_metadata"
+            );
+        }
+        assert!(removal_reservation(&rows, key, 0, &valid).is_err());
+        assert!(removal_reservation(&rows, "removal-state/../a", 2, &valid).is_err());
+        rows.insert("removal-intent/a".into(), (2, "{}".into()));
+        assert!(removal_reservation(&rows, key, 2, &valid).is_err());
+        rows.clear();
+        rows.insert(
+            "removal-intent/a".into(),
+            (1, serde_json::to_string(&removal_intent("a")).unwrap()),
+        );
+        assert!(check_removal_state_exists(&rows, "removal-intent/a").is_err());
+        rows.clear();
+        assert!(removal_reservation(&rows, key, 2, &valid).is_err());
+        assert_eq!(
+            check_history_reservation(1, usize::MAX, usize::MAX)
+                .unwrap_err()
+                .code(),
+            "metadata_capacity"
+        );
+    }
 
     #[tokio::test]
     async fn retained_snapshot_survives_cache_replacement_and_holds_its_reservation() {

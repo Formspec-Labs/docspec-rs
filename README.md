@@ -74,8 +74,8 @@ New completed phases also retain the exact input copies and schema interpretatio
 they consumed. Reuse keeps those references even if a later admission stores an
 equivalent copy elsewhere. This records small metadata references during existing
 work, without another payload read. Older completions remain resumable; missing
-dependency information does not authorize future cleanup. Retention and physical
-cleanup remain unfinished.
+dependency information does not authorize cleanup. Explicit local removal requires
+qualified identities and fresh protection checks; broader maintenance remains unfinished.
 
 When investigating retained disk use, `inspect-retention objects.json` accepts a
 JSON array of exact object references already present in release pins. It reports
@@ -198,7 +198,37 @@ lease and does not extend a retired availability promise. Logical retirement
 preserves the physical files, so independent reads can still use those files.
 Library callers can also use the shared catalog-free `engine::read_combined`
 function with a `Budget`; the same availability responsibility applies.
-Physical deletion, expiration and restore remain disabled.
+Explicit local removal uses the same maintenance admission. Automatic expiration,
+compaction and restore remain disabled.
+
+To reclaim explicitly retired local objects, save their exact `ObjectRef` values
+as a JSON array and capture a removal plan:
+
+```sh
+docspec --workspace ./workspace plan-removal --dataset comments \
+  --removal cleanup-1 --objects retired-objects.json --reason 'End old output retention' > removal-plan.json
+docspec --workspace ./workspace remove-objects --plan removal-plan.json
+docspec --workspace ./workspace inspect-removal --dataset comments --removal cleanup-1
+docspec --workspace ./workspace resume-removal --dataset comments --removal cleanup-1
+```
+
+Preview reports protections without hashing payloads. Execution removes only
+previewed objects that remain eligible. It durably reserves those exact targets
+and prevents new references before detaching affected native table registrations
+and removing files. A failed or interrupted operation resumes that saved scope;
+completed retries return saved outcomes without revisiting payloads. Protected
+objects stay in place, and removal never retires their promises implicitly.
+
+This path supports the owned local Unix workspace. It checks each present file's
+digest once at the irreversible removal boundary, rejects symlinks and changed
+files, and synchronizes its parent directory. Concurrent external changes to the
+owned filesystem are unsupported. Automatic sweeping and native purge remain
+disabled. Reported unlinked bytes are logical file sizes; reconciled absence
+does not claim another unlink or freed disk blocks.
+
+HTTP exposes the same services through `POST /retention/removal/plan`,
+`POST /retention/removal/execute`, `GET /datasets/{dataset}/removals/{removal}`,
+and `POST /datasets/{dataset}/removals/{removal}/resume`.
 
 To stop an unfinished operation, use:
 
@@ -668,13 +698,12 @@ configured batch size. DataFusion applies query filters and column selection abo
 that stream; this path deliberately makes no source-pushdown performance claim.
 Native capacity refusals keep their structured codes through DataFusion errors.
 
-Owned output directories are protected before writes. Automatic expiration and
-metadata deletion are disabled. Everything remains retained; application-level removal, compaction,
-cross-dataset sharing and restore are not implemented. A native storage probe
-qualifies sharing unchanged Parquet files across candidate snapshots while
-preserving their original owner and exact read dependencies. This conservative
-local behavior avoids promising a cleanup or recovery mechanism that has not been
-qualified.
+Owned output directories are protected before writes. Shared objects preserve
+their original owners and exact dependencies. Explicit local removal uses the
+common protection inventory and durably reserves outcome capacity in the owner's
+lifecycle table. Automatic expiration, native metadata cleanup, compaction and
+restore remain disabled. Lifecycle/catalog recovery files are outside the object
+removal namespace; retained history compaction remains unfinished.
 
 `--limits limits.json` accepts a partial resource profile. Defaults come from the
 proposal: 12 compute partitions, 24 GiB memory, 32 GiB scratch, bounded batches and

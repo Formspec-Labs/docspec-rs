@@ -6,13 +6,79 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes evidence-only changes and broader
-schema/cutover behavior; remaining protection lifetimes, guarded physical cleanup,
-compaction and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
+schema/cutover behavior; remaining protection lifetimes, broader destructive-maintenance
+qualification, compaction and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
 10-million-Comments qualification. The 1,800-second full-path target has not been
 measured.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Explicit local physical removal
+
+The library, CLI and HTTP interface now share preview, execute, inspect and resume
+for an explicit bounded set of owned files. Preview batches creation proofs and
+uses the existing protection inventory without reading payloads. Execution holds
+exclusive maintenance ownership, intersects the preview with fresh eligibility,
+and records exact intent and owner unavailability in one guarded commit. It does
+not end availability, phase recovery or any other protection by inference.
+
+Affected native registrations are captured by identifier, UUID and metadata head,
+including provisional tables with no completed result. The maintained catalog's
+registration-only drop runs before file effects; native purge remains disabled.
+Shared selected files survive when an obsolete registration also names an eligible
+file. New or changed native references refuse without expanding the submitted
+plan. Saved registration validation excludes lifecycle and unrelated tables.
+
+Each still-present target gets a final bounded digest and Unix file-identity check
+before exact unlink and parent-directory synchronization. This is an irreversible
+effect boundary, not a hash on preview or ordinary reads. Symlink ancestry,
+nonregular files and changed bytes refuse. Arbitrary simultaneous external
+filesystem mutation remains outside the cooperative local workspace model.
+
+Removal progress durably reserves enough lifecycle history for its bounded next
+report and terminal reconciliation. Every owner commit and cold replay honors
+that reservation. A failed report keeps terminal capacity; already-absent targets
+can finish without obtaining more room. New effects require their reporting room
+first. Outcome records distinguish acknowledged unlink, reconciled absence, failure
+and unresolved effects; logical byte totals do not claim freed allocated blocks.
+
+The initial execution reuses the proof captured under the same exclusive guard.
+Nonterminal retries recheck current protections and native heads against their
+saved exact scope. Completed retries return saved outcomes without a root walk,
+hash or unlink. Typed unavailable markers remain permanent, and inspection refuses
+malformed or orphaned removal records. No filesystem sweep, reverse-reference
+index, separate SQL ledger or automatic maintenance was added.
+
+The [focused service and file checks](reviews/physical-removal-internal-corrected.log)
+pass for actual retired-output deletion, exact selected replacement reads after
+reopen, protected previews, new owner grants, provisional native heads, reader
+exclusion, corruption refusal, permanent unavailability and completed retries.
+The [fault checks](reviews/physical-removal-faults.log) pass cold resume after
+intent, registration removal and unlink, lost native intent/outcome replies, and
+terminal reconciliation at the metadata limit. These use injected interruptions
+and fresh Engine instances; full process-kill, filesystem-failure and provider
+qualification remain broader work. The initial
+[focused run](reviews/physical-removal-internal-initial.log),
+[test compilation failure](reviews/physical-removal-internal-expanded.log),
+[lint correction](reviews/physical-removal-check-initial.log) and
+[fixture lint correction](reviews/physical-removal-check-fixture-lint.log) remain
+retained. The corrected [complete repository gate](reviews/physical-removal-check.log)
+passes formatting, strict linting and all library, integration and documentation
+tests. It includes exact data-and-metadata batch removal, malformed saved native
+registration refusal and shared CLI/HTTP preview behavior. The
+[resource snapshot](reviews/physical-removal-resources.json) separates allocated
+build-cache space from shared-volume free space; it does not measure peak usage,
+dataset storage, throughput or reclaimed blocks.
+
+The [independent review](reviews/physical-removal-review.md) identified the missing
+resume check and terminal-capacity problem. Both were corrected and tested. Review
+agents then hit their usage limit, so final independent approval remains pending.
+This implementation supports explicit local Unix file removal. Automatic native
+cleanup, directory sweeping, lifecycle history compaction, restore, remaining
+history/protection lifetimes, remote deletion and the complete R1–R7 qualification
+remain unfinished. Only temporary fixture files were removed; no retained corpus
+cleanup or performance experiment occurred.
 
 ## Reader lifetime during maintenance
 
@@ -854,7 +920,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; physical cleanup disabled | Historical observation bindings, seal and descendant dependency lifetimes; complete reader/removal race qualification; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation | Historical observation bindings, seal and descendant dependency lifetimes; final independent removal review; broader reader/removal, process-kill, filesystem and provider qualification; compaction; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key
