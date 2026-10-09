@@ -1,0 +1,436 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 5.50s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.54s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 119 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test engine::aggregation::tests::qualified_row_limit_bounds_every_signed_partial_sum ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::verification::tests::history_reuses_exact_manifests_and_bounds_combined_admission ... ok
+test engine::inputs::tests::canceled_manifest_read_keeps_admission_until_its_blocking_work_exits ... ok
+test engine::backfill::expressions::tests::rename_reorder_and_name_reuse_preserve_bound_values_and_material_identity ... ok
+test engine::backfill::expressions::tests::constants_ignore_schema_but_consumed_types_and_metadata_observers_invalidate ... ok
+test engine::inputs::tests::canceled_partial_input_lock_acquisition_releases_prior_locks ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test engine::admission::tests::provisional_managed_file_refuses_before_request_acknowledgment ... ok
+test engine::admission::tests::missing_external_locator_reuses_material_work_and_captures_selected_history ... ok
+test engine::admission::tests::lost_initial_request_reply_retains_exact_dependencies_without_reacquiring_owners ... ok
+test engine::backfill::tests::completed_plan_qualifies_admission_and_result_without_opening_inputs ... ok
+test engine::retention::availability::tests::lost_reply_and_concurrent_retry_preserve_one_availability_decision ... ok
+test engine::backfill::tests::native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning ... ok
+test engine::retention::grants::tests::a_new_claim_blocks_stale_execution_until_every_exact_claim_retires ... ok
+test engine::admission::tests::managed_input_admission_reuses_its_recorded_owner_without_copying_or_hashing ... ok
+test engine::retention::availability::tests::inconsistent_current_authority_cannot_authorize_retirement ... ok
+test engine::retention::inventory::collector_tests::authority_reuses_its_result_identity_without_lending_protection_to_unknown_results ... ok
+test engine::retention::inventory::collector_tests::closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads ... ok
+test engine::retention::inventory::collector_tests::conflicts_refuse_and_duplicate_references_do_not_consume_more_capacity ... ok
+test engine::retention::inventory::collector_tests::native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar ... ok
+test engine::retention::inventory::collector_tests::native_paths_require_exact_identities_discovered_anywhere_in_the_closure ... ok
+test engine::retention::grants::tests::corrupt_binding_revision_cannot_authorize_retirement ... ok
+test engine::retention::inventory::collector_tests::oversized_roots_refuse_before_following_missing_metadata ... ok
+test engine::retention::inventory::collector_tests::empty_authority_has_no_selected_result_or_protection_claim ... ok
+test engine::retention::grants::tests::oversized_grant_plan_refuses_before_metadata_mutation ... ok
+test engine::retention::grants::tests::orphan_grant_planning_does_not_create_a_consumer_lifecycle ... ok
+test engine::retention::inventory::collector_tests::repeated_bindings_share_claim_memory_and_owner_changes_refuse_inspection ... ok
+test engine::retention::inventory::history_tests::history_receipts_do_not_expand_unavailable_endpoints_but_results_keep_captured_inputs ... ok
+test engine::retention::inventory::history_tests::existing_succession_bindings_and_owner_grants_remain_enforced ... ok
+test engine::admission::tests::backfill_admission_binds_its_capture_and_foreign_base_in_one_native_commit ... ok
+test engine::retention::grants::tests::lost_reply_and_concurrent_retry_preserve_reacquired_and_unrelated_grants ... ok
+test engine::admission::tests::based_managed_rebuild_keeps_distinct_scopes_from_the_same_owner ... ok
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test engine::admission::tests::refresh_request_captures_and_protects_unused_members_of_its_producer_seal ... ok
+test engine::retention::inventory::history_tests::succession_roots_refuse_unanchored_or_malformed_ordering_receipts ... ok
+test engine::backfill::protection_tests::scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen ... ok
+test engine::retention::grants::tests::sealed_generation_binding_blocks_retirement_of_its_exact_owner_grants ... ok
+test engine::retention::owners::phase_tests::an_earlier_binding_requires_retirement_of_its_exact_native_generation ... ok
+test engine::retention::owners::tests::a_reserved_path_without_completed_identity_cannot_grant_a_reference ... ok
+test engine::retention::inventory::history_tests::progress_roots_refuse_wrong_receipts_endpoints_and_coverage ... ok
+test engine::retention::owners::tests::forged_object_identities_cannot_acquire_owner_protection ... ok
+test engine::retention::availability::tests::pointer_receipt_and_marker_must_form_one_native_decision ... ok
+test engine::retention::owners::phase_tests::material_reuse_carries_original_owner_scope_into_validation_and_readback ... ok
+test engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object ... ok
+test engine::retention::owners::phase_tests::retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation ... ok
+test engine::retention::owners::tests::a_family_that_owns_a_member_needs_no_foreign_grant_for_its_own_objects ... ok
+test engine::retention::owners::phase_tests::refresh_evidence_inherits_the_exact_captured_producer_scope ... ok
+test engine::retention::owners::tests::lost_native_owner_reply_reconciles_without_another_commit ... ok
+test engine::retention::owners::tests::owner_availability_and_grants_conflict_at_the_native_boundary ... ok
+test engine::retention::owners::tests::owner_grant_retry_and_reopen_reuse_one_native_commit ... ok
+test engine::retention::owners::tests::failed_consumer_handoff_keeps_grants_for_a_successful_retry ... ok
+test engine::retention::owners::tests::shared_owner_grant_survives_retirement_of_its_creation_phase ... ok
+test engine::retention::owners::phase_tests::succession_keeps_actual_predecessor_without_inheriting_its_payload_scope ... ok
+test engine::retention::retirement::tests::lost_native_reply_and_concurrent_retry_record_one_retirement ... ok
+test engine::retention::recovery::tests::lost_response_concurrent_retry_and_cold_replay_preserve_the_selected_result ... ok
+test engine::retention::owners::tests::lost_consumer_seal_reply_reuses_the_committed_binding_and_owner_grants ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::retention::recovery::tests::execution_rechecks_the_complete_attempt_set_and_canonical_owner ... ok
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::schema::tests::material_schema_identity_ignores_set_order_but_keeps_allocation_state ... ok
+test engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required ... ok
+test engine::retention::recovery::tests::saved_recovery_validation_reserves_original_metadata_on_retry ... ok
+test engine::worker::tests::canceled_caller_keeps_blocking_work_gate_and_host_until_real_exit ... ok
+test engine::worker::tests::canceled_callers_cannot_accumulate_unbounded_owned_requests ... ok
+test engine::retention::recovery::tests::otherwise_consistent_selection_cannot_complete_a_different_request ... ok
+test engine::retention::owners::phase_tests::unknown_predecessor_scope_does_not_erase_the_selected_results_known_scope ... ok
+test engine::worker::tests::unrelated_shared_work_can_enter_before_either_operation_finishes ... ok
+test engine::retention::owners::tests::partial_owner_handoff_refuses_sealing_and_reuses_prior_protection_on_retry ... ok
+test engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope ... ok
+test engine::worker::tests::shutdown_closes_admission_and_resumes_drain_after_its_wait_is_dropped ... ok
+test engine::worker::tests::private_worker_panic_quarantines_host_and_prevents_reopen ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test http::ipc::tests::demand_controls_batch_reads_and_chunks_keep_admission_until_last_clone_drops ... ok
+test http::ipc::tests::dictionaries_and_changing_batch_schemas_refuse ... ok
+test http::ipc::tests::encoded_chunks_refuse_before_growing_beyond_their_admission ... ok
+test http::ipc::tests::encoding_preserves_strings_nulls_duplicates_and_complete_empty_streams ... ok
+test http::ipc::tests::failures_abort_the_body_without_emitting_a_successful_end ... ok
+test engine::write::tests::oversized_candidate_metadata_refuses_before_writing_any_object ... ok
+test engine::worker::tests::canceled_maintenance_keeps_exclusion_until_its_native_decision_finishes ... ok
+test engine::retention::retirement::tests::legacy_processing_cannot_adopt_a_replacement_admission ... ok
+test engine::write::tests::value_only_key_probes_skip_wide_fields_and_keep_reader_admission ... ok
+test engine::write::tests::empty_candidate_clears_snapshot_state_but_preserves_native_schema_history ... ok
+test engine::retention::owners::tests::sealing_binds_exact_owner_grants_in_the_same_native_consumer_commit ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test engine::retention::owners::tests::retained_seal_refuses_forged_binding_or_missing_owner_token ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test engine::write::tests::renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_files ... ok
+test storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::schema::all_fields_hidden_and_a_user_file_name_preserve_values_and_occurrences ... ok
+test storage::tables::tests::metadata_serialization_stops_at_exact_byte_limit ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test storage::tests::canceled_inventory_checks_keep_worker_owned_metadata_admission ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+test storage::occurrences::tests::schema::transient_native_column_is_validated_and_charged_before_removal ... ok
+test storage::occurrences::tests::schema::unqualified_schema_interpretations_refuse_before_reading_payload ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test engine::write::tests::reused_key_name_with_new_id_matches_absence_and_empty_noop_results ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+test engine::worker::tests::queued_writer_does_not_deadlock_public_build_or_refresh_internal_reads ... ok
+
+test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.31s
+
+     Running unittests src/main.rs (target/debug/deps/docspec-b4733b2016bf5a7d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/abandonment.rs (target/debug/deps/abandonment-9e0aa3c34f260c86)
+
+running 7 tests
+test schema_requires_every_uncaptured_source_to_be_abandoned ... ok
+test abandoned_backfill_preserves_file_reuse_and_refuses_every_retry ... ok
+test backfill_prepares_during_pending_input_and_selects_after_its_abandonment ... ok
+test http_and_cli_share_the_durable_decision ... ok
+test abandonment_fences_updates_and_schema_without_rewinding_source_admission ... ok
+test abandoning_a_later_admission_does_not_revive_an_old_cutover_capture ... ok
+test abandonment_survives_reopen_and_preserves_shared_phases_and_readback ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.23s
+
+     Running tests/admission_formats.rs (target/debug/deps/admission_formats-762af29fde728515)
+
+running 2 tests
+test original_backfill_does_not_silently_adopt_new_gap_rules ... ok
+test original_admissions_resume_and_mixed_history_stays_readable ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.21s
+
+     Running tests/availability_retirement.rs (target/debug/deps/availability_retirement-0dc8835d321f97da)
+
+running 3 tests
+test retired_historical_build_refuses_lookup_and_own_retries_but_keeps_history_and_files ... ok
+test abandoned_backfill_retires_every_saved_composition_without_recomputing_on_retry ... ok
+test retained_dependent_refresh_resumes_after_source_retirement_while_fresh_capture_refuses ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+     Running tests/backfill.rs (target/debug/deps/backfill-a6d11c8e0e1629aa)
+
+running 15 tests
+test nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test competing_independent_backfills_both_survive_selection ... ok
+test failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test missing_cached_objects_cannot_be_selected_after_readback ... ok
+test concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+test killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.97s
+
+     Running tests/backfill_dependencies.rs (target/debug/deps/backfill_dependencies-dbc2fc20ad28de60)
+
+running 2 tests
+test empty_source_completions_retain_dependencies_without_file_work ... ok
+test legacy_group_completions_resume_and_keep_unknown_dependencies ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.14s
+
+     Running tests/completed_backfill_plan.rs (target/debug/deps/completed_backfill_plan-867000e51f69a233)
+
+running 2 tests
+test completed_retries_skip_unavailable_recovery_inputs_and_preserve_identity ... ok
+test completed_plan_honors_own_availability_independently_of_base_availability ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.52s
+
+     Running tests/defaults.rs (target/debug/deps/defaults-4c89bebbe8001542)
+
+running 3 tests
+test update_scope_refuses_omitted_keys_without_changing_selection ... ok
+test invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules ... ok
+test additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.24s
+
+     Running tests/grant_retirement_transport.rs (target/debug/deps/grant_retirement_transport-1fa40629b4b0e7d9)
+
+running 1 test
+test grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+
+     Running tests/http_read.rs (target/debug/deps/http_read-f692d827ad3b731b)
+
+running 5 tests
+test empty_streams_keep_schema_and_known_failures_return_structured_errors ... ok
+test catalog_free_cli_uses_the_shared_group_reader ... ok
+test in_flight_response_keeps_workspace_ownership_until_canceled ... ok
+test rebound_catalog_results_cannot_change_an_exact_version_url ... ok
+test http_reads_exact_historical_source_and_combined_values_in_bounded_frames ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+
+     Running tests/input_generations.rs (target/debug/deps/input_generations-6ec96f25e5f0cf8b)
+
+running 8 tests
+test invalid_seals_and_rebound_input_keys_refuse ... ok
+test offline_relationship_checks_need_only_captured_manifests_and_detect_tampering ... ok
+test cli_and_http_use_the_same_generation_guards ... ok
+test omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base ... ok
+test independent_release_verification_rejects_rewritten_producer_relationships ... ok
+test stable_family_membership_and_exact_retry_survive_restart_and_invalidation ... ok
+test updates_and_backfills_inherit_but_resealing_requires_exact_new_members ... ok
+test independent_and_coupled_inputs_follow_the_entire_consumed_member_map ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.67s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 24 tests
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+test dependency_correction_fences_adoption_without_output_change ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test independent_reader_rejects_same_size_corruption ... ok
+test cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+test comparison_preserves_duplicates_and_historical_release ... ok
+test empty_output_keeps_schema_and_readable_history ... ok
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test routine_checks_reject_damaged_footer_and_declared_counts ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test plan_and_run_apply_the_same_definition_fence ... ok
+test relocated_build_retry_keeps_the_original_readback_request ... ok
+test routine_checks_report_scope_and_deep_checks_find_same_size_input_damage ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test routine_samples_allow_several_individually_bounded_wide_batches ... ok
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.11s
+
+     Running tests/operation_retirement.rs (target/debug/deps/operation_retirement-30ad0f77da721e71)
+
+running 3 tests
+test active_operation_must_be_abandoned_and_its_phases_remain_independent ... ok
+test completed_recovery_retirement_keeps_phases_reusable_and_creator_evidence_readable ... ok
+test all_explicit_a_promises_retire_while_independent_selected_b_stays_protected ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.33s
+
+     Running tests/operation_retirement_transport.rs (target/debug/deps/operation_retirement_transport-13684c17f1b548ac)
+
+running 1 test
+test cli_http_retirement_preserves_selected_values_and_reconciles_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
+
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.39s
+
+     Running tests/phase_retirement.rs (target/debug/deps/phase_retirement-ba03eff11568c106)
+
+running 7 tests
+test processing_recovers_after_admission_retirement_and_restart ... ok
+test retained_readback_selects_after_upstream_retirement_without_source ... ok
+test exact_generation_retries_do_not_retire_recomputed_work ... ok
+test validation_requires_explicit_retirement_after_processing_replacement ... ok
+test scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test evidence_requires_explicit_retirement_after_source_replacement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.80s
+
+     Running tests/phase_retirement_transport.rs (target/debug/deps/phase_retirement_transport-d54b0438f0857867)
+
+running 2 tests
+test availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests/rebuild.rs (target/debug/deps/rebuild-71cd6360fd02d8fc)
+
+running 7 tests
+test rebuild_retry_identity_includes_base_and_self_base_refuses_before_admission ... ok
+test reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names ... ok
+test independent_rebuild_verifier_rejects_false_composition_and_input_claims ... ok
+test failed_or_invalidated_rebuild_keeps_previous_complete_selection ... ok
+test later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work ... ok
+test full_rebuild_requalifies_source_and_every_group_without_changing_history ... ok
+test rebuild_resumes_source_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.13s
+
+     Running tests/rebuild_completion.rs (target/debug/deps/rebuild_completion-e2c166ebcfc744bd)
+
+running 5 tests
+test lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.34s
+
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 9 tests
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test relocated_retry_preserves_original_request_and_readback ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.21s
+
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... FAILED
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+failures:
+
+---- incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/comments/2d830642e4af4f9ba2ea98aa6cb3d6e4/data/311deedd-1f95-4c08-986e-dc4788420d14-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/dockets/97a0f679619d4d5794375391ef5b6a48/data/906d862f-6bac-4e28-a159-15d20ba2c0fe-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/data/5db449b2-688a-44f8-950c-f105bbbc0445-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/data/09c1a705-b64b-4f42-8892-7e8d42b12234-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile' (21960703) panicked at tests/related_refresh/incremental.rs:652:37:
+called `Result::unwrap_err()` on an `Ok` value: ReleasePin { id: Id("noop"), dataset: DatasetPin { format: 11, dataset: Id("joined"), version: Id("noop"), groups: {"source": TablePin { table: "data_b900fa1c75044997bc45ac7cf84639b2", metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/00001-f7abda2a-a20c-4188-b9b9-4fb7f76c5500.metadata.json", digest: "beb4d27118d6f3e75120cf895fb9deff471d324538658182d86025020e2165c2", bytes: 2083 }, snapshot: Some(2358085158285334680), schema_id: 0, objects: [ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/data/5db449b2-688a-44f8-950c-f105bbbc0445-00000.parquet", digest: "5730255c585adbbf34a18018a7c3c38803aeff30dcb681562dc46665fec5bd4f", bytes: 9258 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/00001-f7abda2a-a20c-4188-b9b9-4fb7f76c5500.metadata.json", digest: "beb4d27118d6f3e75120cf895fb9deff471d324538658182d86025020e2165c2", bytes: 2083 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/01a12112-5bad-70d3-a0f5-ba56df4801fe-m0.avro", digest: "f544972c22d286e0d97a1058a3af57cd926a34c9158bf28551b85951754db913", bytes: 3988 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/snap-2358085158285334680-0-01a12112-5bad-70d3-a0f5-ba56df4801fe.avro", digest: "991674db9eda250ee908fd8d23c4206cf7f74c4f93a99b482553fedd28335e70", bytes: 1682 }], rows: 7 }}, computed: {}, inputs: {}, relationship: Independent, related: Some(RelatedResult { request: RefreshSpec { dataset: Id("joined"), operation: Id("noop"), base: Some(Id("initial")), definition: "v1", transform: Join(JoinTransform { left: VersionRef { dataset: Id("comments"), version: Id("initial"), manifest: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/comments/6facdfc0abe4483baeaf14cd7193f69a/release.json", digest: "4ab22ed75e79e3e91b8dd2313814e3ac8d55aac3821c48d5bae50db497fe6c0a", bytes: 3166 } }, right: VersionRef { dataset: Id("dockets"), version: Id("initial"), manifest: ObjectRef { owner: Id("dockets"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/dockets/2a2094d7f3eb498aaf5c6c166a9d65bf/release.json", digest: "c4c0c38da3ca06a3f1ade157b75c2cfa5336ecf1cf15cb5eddabd8515aecc967", bytes: 3151 } }, join: JoinDefinition { keys: [JoinKey { left: "a", right: "a" }, JoinKey { left: "b", right: "b" }], kind: Left, nulls: Equal, cardinality: ManyToMany, fields: [JoinField { side: Left, field: "text", name: "left_text" }, JoinField { side: Right, field: "text", name: "right_text" }] } }), policy: Captured, mode: Incremental, relationship: None }, coverage: InputCoverage { inputs: {Id("comments"): VersionRef { dataset: Id("comments"), version: Id("initial"), manifest: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/comments/6facdfc0abe4483baeaf14cd7193f69a/release.json", digest: "4ab22ed75e79e3e91b8dd2313814e3ac8d55aac3821c48d5bae50db497fe6c0a", bytes: 3166 } }, Id("dockets"): VersionRef { dataset: Id("dockets"), version: Id("initial"), manifest: ObjectRef { owner: Id("dockets"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/dockets/2a2094d7f3eb498aaf5c6c166a9d65bf/release.json", digest: "c4c0c38da3ca06a3f1ade157b75c2cfa5336ecf1cf15cb5eddabd8515aecc967", bytes: 3151 } }}, families: {}, generations: {} }, evidence: TablePin { table: "data_4dfd15966bff45caa6f38b3acaeed2ad", metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/metadata/00001-d872c66f-b96f-4da5-894d-f223398c4672.metadata.json", digest: "00a7590d8b48133b8e147186fde23bee7b1eef74bfb98aab4942ba63dd2982ba", bytes: 1960 }, snapshot: Some(3252903513369030718), schema_id: 0, objects: [ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/data/09c1a705-b64b-4f42-8892-7e8d42b12234-00000.parquet", digest: "24e33d16b11e1bbd38751070dac0d97732e1e991d202c3765966cc1c8c1c0d90", bytes: 7217 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/metadata/00001-d872c66f-b96f-4da5-894d-f223398c4672.metadata.json", digest: "00a7590d8b48133b8e147186fde23bee7b1eef74bfb98aab4942ba63dd2982ba", bytes: 1960 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/metadata/01a12112-5dc4-734c-ae01-b564182e4c37-m0.avro", digest: "d3bc4d85d0c2bf025d06572a9ddb931c57006d4466c5070e32d59a3def40569f", bytes: 3812 }, ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/22c8a44cb4e94112871c009963cfb3ae/metadata/snap-3252903513369030718-0-01a12112-5dc4-734c-ae01-b564182e4c37.avro", digest: "342a55bd4393470b0efdb2a88116401168134fe9d0e450f404ae0a86138a285c", bytes: 1682 }], rows: 7 } }), definition: "v1", eligibility: 0, boundary: 2, request: Refresh(RefreshSpec { dataset: Id("joined"), operation: Id("noop"), base: Some(Id("initial")), definition: "v1", transform: Join(JoinTransform { left: VersionRef { dataset: Id("comments"), version: Id("initial"), manifest: ObjectRef { owner: Id("comments"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/comments/6facdfc0abe4483baeaf14cd7193f69a/release.json", digest: "4ab22ed75e79e3e91b8dd2313814e3ac8d55aac3821c48d5bae50db497fe6c0a", bytes: 3166 } }, right: VersionRef { dataset: Id("dockets"), version: Id("initial"), manifest: ObjectRef { owner: Id("dockets"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/dockets/2a2094d7f3eb498aaf5c6c166a9d65bf/release.json", digest: "c4c0c38da3ca06a3f1ade157b75c2cfa5336ecf1cf15cb5eddabd8515aecc967", bytes: 3151 } }, join: JoinDefinition { keys: [JoinKey { left: "a", right: "a" }, JoinKey { left: "b", right: "b" }], kind: Left, nulls: Equal, cardinality: ManyToMany, fields: [JoinField { side: Left, field: "text", name: "left_text" }, JoinField { side: Right, field: "text", name: "right_text" }] } }), policy: Captured, mode: Incremental, relationship: None }), parent_manifest: Some(ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/1f7c450ca2944f168ade4e3736f21c35/release.json", digest: "f91408b2d9ced2590c7672118e75375fe3447c30a50804330498288abbf024f6", bytes: 8973 }), changes: Some(ChangePin { base_version: Id("initial"), base_manifest: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/1f7c450ca2944f168ade4e3736f21c35/release.json", digest: "f91408b2d9ced2590c7672118e75375fe3447c30a50804330498288abbf024f6", bytes: 8973 }, before_metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/00001-f7abda2a-a20c-4188-b9b9-4fb7f76c5500.metadata.json", digest: "beb4d27118d6f3e75120cf895fb9deff471d324538658182d86025020e2165c2", bytes: 2083 }, after_metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/640ee69e1a19465a838f61c9bd67106d/metadata/00001-f7abda2a-a20c-4188-b9b9-4fb7f76c5500.metadata.json", digest: "beb4d27118d6f3e75120cf895fb9deff471d324538658182d86025020e2165c2", bytes: 2083 }, key_field_ids: [1, 2, 3, 4], removed: TablePin { table: "data_62f0eacf613943f89480b28a5f3ebb5d", metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/756d01579f3d4c2f926e6c2b22385563/replacement/removed/metadata/00000-cf4e74ba-c3b5-49cb-9bf8-e7ab96828768.metadata.json", digest: "3beb5df361a9053f3415f96ac58893f13e456ed304416d1b5fa068a1239d1b89", bytes: 1332 }, snapshot: None, schema_id: 0, objects: [ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/756d01579f3d4c2f926e6c2b22385563/replacement/removed/metadata/00000-cf4e74ba-c3b5-49cb-9bf8-e7ab96828768.metadata.json", digest: "3beb5df361a9053f3415f96ac58893f13e456ed304416d1b5fa068a1239d1b89", bytes: 1332 }], rows: 0 }, added: TablePin { table: "data_fd83405d0a2a45f3aeb22ab48f8face0", metadata: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/756d01579f3d4c2f926e6c2b22385563/replacement/added/metadata/00000-b2e05fef-119e-431a-b3dc-803ccd7f427f.metadata.json", digest: "24d05adbbcbd8d62914f58020305bac81fbdddf4b9fc4bbc71e1a29b137c78c3", bytes: 1330 }, snapshot: None, schema_id: 0, objects: [ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/756d01579f3d4c2f926e6c2b22385563/replacement/added/metadata/00000-b2e05fef-119e-431a-b3dc-803ccd7f427f.metadata.json", digest: "24d05adbbcbd8d62914f58020305bac81fbdddf4b9fc4bbc71e1a29b137c78c3", bytes: 1330 }], rows: 0 } }), processor: "docspec.dataset.v10", validation: Routine }, manifest: ObjectRef { owner: Id("joined"), path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1xGV1P/workspace/objects/joined/fe4b46381de44674995bdfffdde4bb6c/release.json", digest: "586f92f15abdc2ce2544423c64f386a793e198fe194ed3546189989918551729", bytes: 12328 }, verified: true }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile
+
+test result: FAILED. 28 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 108.76s
+
+error: test failed, to rerun pass `--test related_refresh`

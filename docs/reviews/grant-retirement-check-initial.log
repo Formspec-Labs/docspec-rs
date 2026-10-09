@@ -1,0 +1,21 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: this call to `clone` can be replaced with `std::slice::from_ref`
+   --> src/engine/retention/grants/tests.rs:174:13
+    |
+174 |             &[original.token.clone()],
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&original.token)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#cloned_ref_to_slice_refs
+    = note: `-D clippy::cloned-ref-to-slice-refs` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::cloned_ref_to_slice_refs)]`
+
+error: this call to `clone` can be replaced with `std::slice::from_ref`
+   --> src/engine/retention/grants/tests.rs:396:17
+    |
+396 |                 &[reference.token.clone()],
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&reference.token)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#cloned_ref_to_slice_refs
+
+error: could not compile `docspec` (lib test) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

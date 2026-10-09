@@ -319,6 +319,23 @@ pub(super) fn earlier_binding(
     Ok(true)
 }
 
+/// Admits a bound claim and any retained base decoded by the shared root walker.
+pub(super) fn reserve_claim(
+    rows: &SnapshotRows,
+    budget: &Budget,
+    claim: &str,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    let mut memory = rows.reserve_decoded(budget, &[claim])?;
+    if claim.starts_with("operation/") {
+        let (_, operation): (_, Operation) =
+            read_retained(rows, claim, budget.limits.max_metadata_bytes)?.ok_or_else(invalid)?;
+        if let Some(base) = operation.base {
+            memory.merge(rows.reserve_decoded(budget, &[&format!("result/{base}")])?);
+        }
+    }
+    Ok(memory)
+}
+
 pub(super) fn validate_reference(
     reference: &OwnerProtectionRef,
     grant: &OwnerProtection,
@@ -330,6 +347,22 @@ pub(super) fn validate_reference(
         || grant.revision != reference.revision
     {
         return Err(invalid());
+    }
+    Ok(())
+}
+
+pub(super) fn check_grant_active(
+    rows: &SnapshotRows,
+    view: &View,
+    key: &str,
+    revision: i64,
+    budget: &Budget,
+) -> Result<()> {
+    if super::retirement::record_retired(rows, view, key, revision, budget)? {
+        return Err(Error::refusal(
+            "grant_retired",
+            "owner protection generation was explicitly retired",
+        ));
     }
     Ok(())
 }
@@ -397,9 +430,9 @@ impl Engine {
 
     /// Loads immutable references after checking the exact local claim identity.
     ///
-    /// No owner is reopened: tokens cannot retire in this checkpoint. Callers may
-    /// propagate these references only from the generations actually consumed;
-    /// newly introduced object scope still requires owner acquisition first.
+    /// No owner is reopened: retirement excludes admitted propagation and refuses
+    /// every live bound claim. Callers propagate only the generations consumed;
+    /// newly introduced scope still requires owner acquisition first.
     pub(in crate::engine) async fn retained_protections(
         &self,
         view: &View,
@@ -437,17 +470,8 @@ impl Engine {
             // Missing legacy bindings do not claim an earlier acquisition.
             return Ok(None);
         }
-        let mut memory = rows.reserve_decoded(&lifecycle.budget, &[claim, &key])?;
-        // Operation roots also expand their retained base from these same
-        // cached rows. Its decoded inventory outlives the small operation row.
-        if claim.starts_with("operation/") {
-            let (_, operation): (_, Operation) =
-                read_retained(&rows, claim, limit)?.ok_or_else(invalid)?;
-            if let Some(base) = operation.base {
-                memory
-                    .merge(rows.reserve_decoded(&lifecycle.budget, &[&format!("result/{base}")])?);
-            }
-        }
+        let mut memory = rows.reserve_decoded(&lifecycle.budget, &[&key])?;
+        memory.merge(reserve_claim(&rows, &lifecycle.budget, claim)?);
         let (revision, binding): (_, ReferenceBinding) =
             read_retained(&rows, &key, limit)?.ok_or_else(invalid)?;
         if binding.key != claim {
@@ -506,6 +530,7 @@ impl Engine {
                     read_retained(&rows, &reference.token, limit)?.ok_or_else(invalid)?;
                 validate_grant(&view, &reference.token, revision, &grant)?;
                 validate_reference(reference, &grant, &binding.consumer)?;
+                check_grant_active(&rows, &view, &reference.token, revision, &lifecycle.budget)?;
                 cover_required(&mut required, &grant)?;
                 for object in &grant.objects {
                     available(&rows, &view, object)?;
@@ -637,7 +662,10 @@ impl Engine {
             available(&rows, &view, object)?;
             self.check_object_owner(&rows, owner, object)?;
         }
-        if let Some((revision, _, previous)) = rows.get_record::<OwnerProtection>(&key)? {
+        let _previous_memory = rows.reserve_decoded(&lifecycle.budget, &[&key])?;
+        let known_scope = if let Some((revision, _, previous)) =
+            rows.get_record::<OwnerProtection>(&key)?
+        {
             validate_grant(&view, &key, revision, &previous)?;
             if previous.owner != *owner
                 || previous.consumer != *consumer
@@ -645,22 +673,30 @@ impl Engine {
             {
                 return Err(invalid());
             }
-            return Ok(reference(&key, &previous));
-        }
+            if !super::retirement::record_retired(&rows, &view, &key, revision, &lifecycle.budget)?
+            {
+                return Ok(reference(&key, &previous));
+            }
+            true
+        } else {
+            false
+        };
+        drop(_previous_memory);
         // Reservations prove who produces at a path; typed completed evidence
         // also proves the exact immutable identity. Provisional files cannot grant
         // foreign references solely because they lie inside a reserved directory.
-        let _decoding = lifecycle
-            .budget
-            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
-        confirm_creation(
-            &rows,
-            &view,
-            &grant.objects,
-            lifecycle.budget.limits.max_metadata_bytes,
-        )
-        .await?;
-        drop(_decoding);
+        if !known_scope {
+            let _decoding = lifecycle
+                .budget
+                .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
+            confirm_creation(
+                &rows,
+                &view,
+                &grant.objects,
+                lifecycle.budget.limits.max_metadata_bytes,
+            )
+            .await?;
+        }
         if let Err(error) = lifecycle.commit(&view, vec![record(&key, &grant)?]).await {
             let after = lifecycle.open(owner).await?;
             let rows = lifecycle.rows(&after).await?;

@@ -443,6 +443,20 @@ async fn existing_succession_bindings_and_owner_grants_remain_enforced() {
             .key
             .starts_with("owner-protection/")
     );
+    let reference = &binding.protections[0];
+    assert_eq!(
+        engine
+            .plan_grant_retirement(
+                &reference.owner,
+                &id("legacy-observation"),
+                std::slice::from_ref(&reference.token),
+                "legacy observation still promises protection",
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "grant_in_use"
+    );
     binding.revision = view.revision + 1;
     binding.protections[0].token = "owner-protection/missing".into();
     let view = lifecycle

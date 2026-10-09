@@ -644,7 +644,12 @@ async fn incremental_disk_refusal_retains_admission_for_a_smaller_resource_profi
     let spec = next(&first, &left, &right, "noop");
     drop(engine);
     let mut too_large = limits();
-    too_large.scratch_bytes = fs2::available_space(root.path()).unwrap() + (1 << 20);
+    // Other tests can free space between this setup and the actual preflight.
+    // Exceed total capacity so that unrelated cleanup cannot satisfy the request.
+    too_large.scratch_bytes = fs2::total_space(root.path())
+        .unwrap()
+        .checked_add(1)
+        .unwrap();
     let engine = Engine::open(root.path().join("workspace"), too_large)
         .await
         .unwrap();

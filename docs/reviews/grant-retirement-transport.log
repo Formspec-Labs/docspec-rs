@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: function `spec` is never used
+   --> tests/support/scalar.rs:117:15
+    |
+117 | pub(super) fn spec(
+    |               ^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "grant_retirement_transport") generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 9.75s
+     Running tests/grant_retirement_transport.rs (target/debug/deps/grant_retirement_transport-1fa40629b4b0e7d9)
+
+running 1 test
+test grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.14s

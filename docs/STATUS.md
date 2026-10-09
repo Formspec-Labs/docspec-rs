@@ -6,13 +6,67 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes evidence-only changes and broader
-schema/cutover behavior; grant retirement, guarded physical cleanup, compaction
-and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
+schema/cutover behavior; remaining protection lifetimes, guarded physical cleanup,
+compaction and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
 10-million-Comments qualification. The 1,800-second full-path target has not been
 measured.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Owner-grant retirement
+
+An operator can now retire an exact owner-grant generation after its named
+consumer has ended every binding that still uses it. Planning groups grants by
+consumer and reads each consumer's lifecycle metadata once. Execution waits for
+admitted workers, repeats the eligibility check under exclusive maintenance
+ownership, and uses the existing retirement commit and retry reconciliation.
+No dataset enumeration, external dependency expansion or payload read is needed
+for this proof. Ordinary data reads and local protection propagation gain no
+owner-history scan.
+
+Live phases, results, readbacks, admitted requests and generation seals block
+retirement independently. A failed handoff with no consumer table can retire
+without creating that table. Reacquiring the same exact object scope creates a
+new native grant generation and reuses its qualified creation evidence. Old
+references refuse, and retrying an older retirement decision cannot retire the
+new generation. Original grant records remain creation evidence.
+
+Shared retirement-membership and decoded-claim helpers remove duplicated
+validation. Temporary metadata reservations cover the actual binding, claim and
+any retained base result, separately from bounded retained sets. These are code
+and admission improvements; no throughput or whole-process memory gain has been
+measured.
+
+The [corrected retention checks](reviews/grant-retirement-internal-corrected.log)
+and [transport checks](reviews/grant-retirement-transport.log) pass. They cover
+fresh bindings after planning, independent phase and seal blockers, stale grant
+references, lost replies, concurrent/cold retries, absent consumers, malformed
+bindings and bounded request refusal. A complete owner/consumer case ends their
+old promises, makes the old object unblocked, preserves its file, and reads exact
+replacement values after reopening. The initial
+[fixture failure](reviews/grant-retirement-internal.log) is retained.
+
+The repository gate exposed an existing disk-test race: observed free space plus
+1 MiB could become available before the real preflight. The test now requests
+more than total volume capacity while retaining its admission/recovery
+assertions; production capacity checks are unchanged. The
+[failed gate](reviews/grant-retirement-check-disk-failure.log),
+[focused correction](reviews/grant-retirement-disk-corrected.log) and earlier
+[strict-lint failure](reviews/grant-retirement-check-initial.log) remain recorded.
+
+The corrected [complete repository gate](reviews/grant-retirement-check.log)
+passes formatting, strict linting and all library, integration and documentation
+tests, including the disk refusal under concurrent execution. The
+[resource snapshot](reviews/grant-retirement-resources.json) separates reusable
+build-cache allocation from shared-volume free space; it does not measure peak
+usage or dataset storage.
+
+The [independent review](reviews/grant-retirement-review.md) approves this bounded
+increment. Historical observation bindings remain conservative blockers, and
+generation-seal and descendant dependency lifetimes still need explicit handling.
+Physical deletion, reader protection, compaction, restore and the full R1–R7
+qualification remain unfinished. No reclaimed bytes are claimed.
 
 ## Terminal-operation recovery retirement
 
@@ -734,7 +788,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability and terminal-operation recovery retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; physical cleanup disabled | Owner-grant and seal lifetimes; reader protection; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; physical cleanup disabled | Historical observation bindings, seal and descendant dependency lifetimes; reader protection; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

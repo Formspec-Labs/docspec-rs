@@ -1,0 +1,39 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.21s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 6 tests
+test engine::retention::grants::tests::orphan_grant_planning_does_not_create_a_consumer_lifecycle ... ok
+test engine::retention::grants::tests::corrupt_binding_revision_cannot_authorize_retirement ... ok
+test engine::retention::grants::tests::oversized_grant_plan_refuses_before_metadata_mutation ... ok
+test engine::retention::grants::tests::a_new_claim_blocks_stale_execution_until_every_exact_claim_retires ... ok
+test engine::retention::grants::tests::lost_reply_and_concurrent_retry_preserve_reacquired_and_unrelated_grants ... ok
+test engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object ... FAILED
+
+failures:
+
+---- engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpriOFDi/workspace/objects/owner/1637b2d9b11b406ab6ef40025cdbd61e/data/b9e82ca6-0cb3-4d3d-b972-363a0e0f561f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpriOFDi/workspace/objects/consumer/25f49bbdc7584c019e894c8c59f2b44b/data/21eaffbb-6566-4575-a2f8-381316eb7a0e-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object' (21844903) panicked at src/engine/retention/grants/tests.rs:463:58:
+called `Result::unwrap()` on an `Err` value: Error { code: "io", message: "No such file or directory (os error 2)", source: Some(Os { code: 2, kind: NotFound, message: "No such file or directory" }), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 112 filtered out; finished in 1.38s
+
+error: test failed, to rerun pass `--lib`

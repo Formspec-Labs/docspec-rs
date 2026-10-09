@@ -508,6 +508,7 @@ pub enum RetirementScope {
     PhaseRecovery,
     ResultAvailability { operation: OperationId },
     OperationRecovery { operation: OperationId },
+    OwnerGrants,
 }
 
 /// Explicit retirement of retained promises, without deleting physical objects.

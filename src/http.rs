@@ -42,6 +42,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/retention/inspect", post(inspect_retention))
         .route("/retention/phases/plan", post(plan_phase_retirement))
         .route("/retention/phases/retire", post(retire_phases))
+        .route("/retention/grants/plan", post(plan_grant_retirement))
+        .route("/retention/grants/retire", post(retire_grants))
         .route(
             "/retention/availability/plan",
             post(plan_availability_retirement),
@@ -86,7 +88,7 @@ async fn inspect_retention(
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PhaseRetirementRequest {
+struct KeyRetirementRequest {
     dataset: Id,
     retirement: Id,
     keys: Vec<String>,
@@ -95,7 +97,7 @@ struct PhaseRetirementRequest {
 
 async fn plan_phase_retirement(
     State(engine): State<Engine>,
-    Json(request): Json<PhaseRetirementRequest>,
+    Json(request): Json<KeyRetirementRequest>,
 ) -> Result<Json<RetentionPlan>, HttpError> {
     Ok(Json(
         engine
@@ -114,6 +116,29 @@ async fn retire_phases(
     Json(plan): Json<RetentionPlan>,
 ) -> Result<Json<Retirement>, HttpError> {
     Ok(Json(engine.retire_phases(&plan).await?))
+}
+
+async fn plan_grant_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<KeyRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_grant_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.keys,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_grants(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_grants(&plan).await?))
 }
 
 #[derive(serde::Deserialize)]
@@ -192,6 +217,8 @@ impl IntoResponse for HttpError {
             | "generation_conflict"
             | "phase_generation_conflict"
             | "phase_retired"
+            | "grant_in_use"
+            | "grant_retired"
             | "recovery_retired"
             | "retirement_conflict"
             | "stale_retirement"

@@ -108,6 +108,26 @@ reusable. Retirement changes recovery promises: it preserves files, attempt
 protections, issued readbacks and selected releases. It does not delete objects
 or establish reclaimable space.
 
+To end unused owner grants, save their exact `owner-protection/` keys from
+`inspect` as a JSON array in `grant-keys.json`, then capture a plan in the owning
+dataset:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-grant-retirement comments retired-grant grant-keys.json "consumer no longer needs this grant" > grant-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-grants grant-retirement.json
+```
+
+The planner accepts the owner, retirement ID, keys file and reason.
+HTTP uses `POST /retention/grants/plan` with `dataset` (the owner), `retirement`,
+`keys` and `reason`; `POST /retention/grants/retire` accepts the returned plan.
+These call `Engine::plan_grant_retirement` and `Engine::retire_grants` with the
+shared `RetentionPlan` and its `owner_grants` scope. Planning and execution refuse
+with `grant_in_use` (HTTP 409) while a live consumer binding references an exact
+grant generation. Fresh planning of a retired generation returns `grant_retired`
+(HTTP 409). Identical execution retries return the retained decision, including
+after reopening the workspace. Grant retirement removes no physical files and
+does not establish reclaimable space.
+
 To stop offering an old result through catalog lookup, retire its standalone
 availability together with every saved readback for that operation:
 

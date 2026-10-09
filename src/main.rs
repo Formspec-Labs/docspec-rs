@@ -72,6 +72,16 @@ enum Command {
     },
     /// Retire the phase generations in a saved plan; preserve files and releases.
     RetirePhases { plan: PathBuf },
+    /// Capture exact owner grants that no live consumer binding needs.
+    PlanGrantRetirement {
+        owner: String,
+        retirement: String,
+        /// JSON array of exact owner-protection keys from inspect.
+        keys: PathBuf,
+        reason: String,
+    },
+    /// Retire unused owner grants from a saved plan; preserve physical files.
+    RetireGrants { plan: PathBuf },
     /// Capture a non-current result and all saved readbacks for logical retirement.
     PlanAvailabilityRetirement {
         dataset: String,
@@ -307,6 +317,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetirePhases { plan } => print_json(
                     &engine
                         .retire_phases(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanGrantRetirement {
+                    owner,
+                    retirement,
+                    keys,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_grant_retirement(
+                            &Id::new(owner)?,
+                            &Id::new(retirement)?,
+                            &read_json::<Vec<String>>(keys)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireGrants { plan } => print_json(
+                    &engine
+                        .retire_grants(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::PlanAvailabilityRetirement {

@@ -144,36 +144,10 @@ impl Engine {
             inventory.charge(boundary.table.len() + boundary.metadata.len() + 128)?;
             boundaries.push(boundary);
             let rows = lifecycle.rows(&view).await?;
-            // Decode each retirement batch once. The bounded set lets both marker
-            // validation and completion filtering share its exact authorization.
-            let mut retired_records = BTreeSet::new();
-            let mut retired_operations = BTreeSet::new();
-            for (key, revision, json) in rows.prefix("retirement/") {
-                let retired: Retirement = decode(json)?;
-                super::retirement::validate_markers(&rows, &retired, &view, key, revision, self)?;
-                if let RetirementScope::ResultAvailability { operation } = retired.plan.scope {
-                    inventory.charge(operation.as_str().len().saturating_add(128))?;
-                    if !retired_operations.insert(operation) {
-                        return Err(super::retirement::invalid_retirement());
-                    }
-                }
-                for phase in retired.plan.records {
-                    inventory.charge(phase.key.len().saturating_add(128))?;
-                    if !retired_records.insert(phase) {
-                        return Err(super::retirement::invalid_retirement());
-                    }
-                }
-            }
-            // Reject orphan markers before interpreting any active roots. Key
-            // sort order must not decide which retirement failures are detected.
-            for (key, _, json) in rows.prefix("retired/") {
-                let marker: super::retirement::RetiredRecord = decode(json)?;
-                if key != super::retirement::marker_key(&marker.record)
-                    || !retired_records.contains(&marker.record)
-                {
-                    return Err(super::retirement::invalid_retirement());
-                }
-            }
+            let retired = super::retirement::retired_records(&rows, &view, self, |bytes| {
+                inventory.charge(bytes)
+            })?;
+            let retired_records = &retired.records;
             for (key, revision, json) in rows.prefix("") {
                 tokio::task::consume_budget().await;
                 if revision <= 0 || revision > view.revision {
@@ -187,6 +161,12 @@ impl Engine {
                 if key.starts_with("owner-protection/") {
                     let grant: super::owners::OwnerProtection = decode(json)?;
                     super::owners::validate_grant(&view, key, revision, &grant)?;
+                    if retired_records.contains(&RetainedGeneration {
+                        key: key.into(),
+                        revision,
+                    }) {
+                        continue;
+                    }
                     for object in &grant.objects {
                         super::owners::available(&rows, &view, object)?;
                         inventory.object(object, &origin)?;
@@ -232,14 +212,7 @@ impl Engine {
                 if key.starts_with("retirement/") {
                     continue;
                 }
-                if let Some(operation) = key.strip_prefix("availability-retired/") {
-                    let operation = Id::new(operation)?;
-                    // The receipt pass already checked this exact pointer and
-                    // all of its markers. Reject orphan pointers without decoding
-                    // the same retirement batch again.
-                    if !retired_operations.contains(&operation) {
-                        return Err(super::retirement::invalid_retirement());
-                    }
+                if key.starts_with("availability-retired/") {
                     continue;
                 }
                 if key.starts_with("retired/") {
@@ -596,6 +569,13 @@ impl Inventory {
                 .ok_or_else(|| invalid_inventory("consumer refers to a missing owner token"))?;
                 super::owners::validate_grant(&view, token, revision, &grant)?;
                 super::owners::validate_reference(&claim.reference, &grant, &claim.consumer)?;
+                super::owners::check_grant_active(
+                    &rows,
+                    &view,
+                    token,
+                    revision,
+                    &lifecycle.budget,
+                )?;
                 for index in &claim.bindings {
                     super::owners::cover_required(
                         self.bindings[*index].required.values_mut(),

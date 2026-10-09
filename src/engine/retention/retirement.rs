@@ -30,6 +30,7 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
 pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
     match scope {
         RetirementScope::PhaseRecovery => completion_key(key),
+        RetirementScope::OwnerGrants => super::grants::grant_key(key),
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
         }
@@ -50,6 +51,7 @@ pub(super) fn retained_key(key: &str) -> bool {
         || key.starts_with("result/")
         || key.starts_with("readback/")
         || key.starts_with("backfill-readback/")
+        || super::grants::grant_key(key)
         || [
             "operation/",
             "request/",
@@ -152,7 +154,61 @@ pub(super) fn validate_markers(
     }
     super::availability::validate_pointer(rows, view, receipt, revision)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
+    super::grants::validate_saved(rows, view, receipt, engine)?;
     Ok(())
+}
+
+/// Validated retirement membership shared by inventory and grant eligibility.
+pub(super) struct RetiredRecords {
+    pub records: BTreeSet<RetainedGeneration>,
+}
+
+/// The caller charges retained sets against its admitted graph/state allowance.
+pub(super) fn retired_records(
+    rows: &SnapshotRows,
+    view: &View,
+    engine: &Engine,
+    mut charge: impl FnMut(usize) -> Result<()>,
+) -> Result<RetiredRecords> {
+    let budget = &engine.inner.lifecycle.budget;
+    let mut records = BTreeSet::new();
+    let mut operations = BTreeSet::new();
+    for (key, revision, _) in rows.prefix("retirement/") {
+        let _memory = rows.reserve_decoded(budget, &[key])?;
+        let (_, _, retired): (_, _, Retirement) =
+            rows.get_record(key)?.ok_or_else(invalid_retirement)?;
+        validate_markers(rows, &retired, view, key, revision, engine)?;
+        if let RetirementScope::ResultAvailability { operation } = retired.plan.scope {
+            charge(operation.as_str().len().saturating_add(128))?;
+            if !operations.insert(operation) {
+                return Err(invalid_retirement());
+            }
+        }
+        for record in retired.plan.records {
+            charge(record.key.len().saturating_add(128))?;
+            if !records.insert(record) {
+                return Err(invalid_retirement());
+            }
+        }
+    }
+    for (key, _, _) in rows.prefix("retired/") {
+        let _memory = rows.reserve_decoded(budget, &[key])?;
+        let (_, _, marker): (_, _, RetiredRecord) =
+            rows.get_record(key)?.ok_or_else(invalid_retirement)?;
+        if key != marker_key(&marker.record) || !records.contains(&marker.record) {
+            return Err(invalid_retirement());
+        }
+    }
+    for (key, _, _) in rows.prefix("availability-retired/") {
+        let operation = Id::new(
+            key.strip_prefix("availability-retired/")
+                .ok_or_else(invalid_retirement)?,
+        )?;
+        if !operations.contains(&operation) {
+            return Err(invalid_retirement());
+        }
+    }
+    Ok(RetiredRecords { records })
 }
 
 // Inventory validates each receipt once, then checks its markers without
@@ -396,6 +452,9 @@ impl Engine {
                     "operation recovery records changed; capture a fresh plan",
                 ));
             }
+        }
+        if plan.scope == RetirementScope::OwnerGrants {
+            super::grants::check_eligible(self, &view, &rows, &plan.records).await?;
         }
         let mut records = Vec::with_capacity(plan.records.len() + 1);
         for phase in &plan.records {
