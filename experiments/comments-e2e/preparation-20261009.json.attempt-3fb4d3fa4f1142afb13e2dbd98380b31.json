@@ -1,0 +1,92 @@
+{
+  "format": "comments-e2e-inputs-v1",
+  "complete": true,
+  "libraries": {
+    "pyarrow": "23.0.0",
+    "duckdb": "1.4.4",
+    "pyiceberg": "0.12.0",
+    "psutil": "7.0.0",
+    "blake3": "1.0.11"
+  },
+  "inputs": {
+    "comments": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-10m-20261008/comments.parquet",
+      "bytes": 2670490619,
+      "mtime_ns": 1791469143865380101,
+      "allocated_bytes": 2670493696,
+      "rows": 10000000,
+      "blake3": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875",
+      "sha256": null,
+      "schema_ipc_base64": "/////wAFAAAQAAAAAAAKAAwABgAFAAgACgAAAAABBAAMAAAACAAIAAAABAAIAAAABAAAABcAAACcBAAAXAQAACwEAAD8AwAAzAMAAJgDAABoAwAAPAMAABADAADcAgAArAIAAHwCAABIAgAAEAIAANwBAACgAQAAYAEAACQBAADoAAAArAAAAGgAAAA8AAAABAAAAND7//8AAAEFEAAAACQAAAAEAAAAAAAAABIAAABkdXBsaWNhdGVfY29tbWVudHMAAMj7//8E/P//AAABBRAAAAAYAAAABAAAAAAAAAAHAAAAc3VidHlwZQDw+///LPz//wAAAQUQAAAAMAAAAAQAAAAAAAAAHQAAAGNvbW1lbnRfcmVmZXJlbmNlX3ZhbHVlc19qc29uAAAAMPz//2z8//8AAAEFEAAAACgAAAAEAAAAAAAAABQAAABvcmlnaW5hbF9kb2N1bWVudF9pZAAAAABo/P//pPz//wAAAQUQAAAAKAAAAAQAAAAAAAAAFAAAAGNvbW1lbnRfb25fb2JqZWN0X2lkAAAAAKD8///c/P//AAABBRAAAAAoAAAABAAAAAAAAAAWAAAAY29tbWVudF9vbl9kb2N1bWVudF9pZAAA2Pz//xT9//8AAAEFEAAAACwAAAAEAAAAAAAAABsAAABwZGZfZXh0cmFjdGlvbl9yZXN1bHRzX2pzb24AFP3//1D9//8AAAEFEAAAACgAAAAEAAAAAAAAABYAAAB0ZXh0X2V4dHJhY3Rpb25fc3RhdHVzAABM/f//iP3//wAAAQUQAAAAIAAAAAQAAAAAAAAADAAAAHRleHRfY29udGVudAAAAAB8/f//uP3//wAAAQUQAAAAJAAAAAQAAAAAAAAAEAAAAGF0dGFjaG1lbnRzX2pzb24AAAAAsP3//+z9//8AAAEFEAAAACAAAAAEAAAAAAAAAAwAAAByZWNlaXZlX2RhdGUAAAAA4P3//xz+//8AAAEFEAAAABwAAAAEAAAAAAAAAAsAAABtb2RpZnlfZGF0ZQAM/v//SP7//wAAAQUQAAAAHAAAAAQAAAAAAAAACwAAAHBvc3RlZF9kYXRlADj+//90/v//AAABBRAAAAAgAAAABAAAAAAAAAANAAAAZG9jdW1lbnRfdHlwZQAAAGj+//+k/v//AAABBRAAAAAYAAAABAAAAAAAAAAHAAAAY29tbWVudACQ/v//zP7//wAAAQUQAAAAGAAAAAQAAAAAAAAABQAAAHRpdGxlAAAAuP7///T+//8AAAEFEAAAABwAAAAEAAAAAAAAAAgAAABjYXRlZ29yeQAAAADk/v//IP///wAAAQUQAAAAIAAAAAQAAAAAAAAADAAAAG9yZ2FuaXphdGlvbgAAAAAU////UP///wAAAQUQAAAAHAAAAAQAAAAAAAAACQAAAGxhc3RfbmFtZQAAAED///98////AAABBRAAAAAcAAAABAAAAAAAAAAKAAAAZmlyc3RfbmFtZQAAbP///6j///8AAAEFEAAAABwAAAAEAAAAAAAAAAsAAABhZ2VuY3lfY29kZQCY////1P///wAAAQUQAAAAHAAAAAQAAAAAAAAACQAAAGRvY2tldF9pZAAAAMT///8QABQACAAGAAcADAAAABAAEAAAAAAAAQUQAAAAIAAAAAQAAAAAAAAACgAAAGNvbW1lbnRfaWQAAAQABAAEAAAAAAAAAA==",
+      "provenance": {
+        "preparation": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/preparation-20261008.json",
+        "preparation_sha256": "b49cb539d96e1c46061611725bbcf587ded31eaee45c07e1452ec0764ae53157",
+        "selection": "floor((i+1)*10000000/26418078) > floor(i*10000000/26418078)",
+        "source": {
+          "source": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/comments-current-release/capture-02/comments.parquet",
+          "capture_record": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/comments-current-release/capture-02/RESULT.json",
+          "capture_record_sha256": "dd0933c0cf79e4f258c67f71042c1619318f367c803a0eef0638f236c92e80f2",
+          "bytes": 6680266997,
+          "sha256": "4512d7f5a9d63ada860ec092834c7538fd046a89878daccad42f7f664f827ac8",
+          "expected_sha256": "4512d7f5a9d63ada860ec092834c7538fd046a89878daccad42f7f664f827ac8",
+          "matches": true,
+          "source_identity": {
+            "tableUuid": "01a0d3fc-be18-70b0-abeb-e0f6e58d6cff",
+            "snapshotId": 7932544697392812642,
+            "schemaId": 6
+          },
+          "rows_reported": 26418078,
+          "schema_reported": "comment_id: string\ndocket_id: string\nagency_code: string\nfirst_name: string\nlast_name: string\norganization: string\ncategory: string\ntitle: string\ncomment: string\ndocument_type: string\nposted_date: string\nmodify_date: string\nreceive_date: string\nattachments_json: string\ntext_content: string\ntext_extraction_status: string\npdf_extraction_results_json: string\ncomment_on_document_id: string\ncomment_on_object_id: string\noriginal_document_id: string\ncomment_reference_values_json: string\nsubtype: string\nduplicate_comments: string",
+          "elapsed_seconds": 4.230817079544067,
+          "scope": "Local captured original bytes only; subset and receipts qualification pending"
+        }
+      }
+    },
+    "dockets": {
+      "path": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/dockets.parquet",
+      "bytes": 15480748,
+      "mtime_ns": 1791282254303555981,
+      "allocated_bytes": 15482880,
+      "rows": 279719,
+      "sha256": "81dcc636e24666cab8ccf4b215e24e80d74a13e5a0780ad7690efaaaa6316a44",
+      "blake3": "774d25ad36af090c40072f2a6a45c924ebc41309ffe4e6738753591c694366aa",
+      "schema_ipc_base64": "/////4gBAAAQAAAAAAAKAAwABgAFAAgACgAAAAABBAAMAAAACAAIAAAABAAIAAAABAAAAAcAAAAoAQAA6AAAALwAAACMAAAAXAAAACwAAAAEAAAABP///wAAAQUQAAAAFAAAAAQAAAAAAAAAAwAAAHJpbgDs/v//KP///wAAAQUQAAAAHAAAAAQAAAAAAAAACAAAAGFic3RyYWN0AAAAABj///9U////AAABBRAAAAAcAAAABAAAAAAAAAALAAAAbW9kaWZ5X2RhdGUARP///4D///8AAAEFEAAAABwAAAAEAAAAAAAAAAsAAABkb2NrZXRfdHlwZQBw////rP///wAAAQUQAAAAGAAAAAQAAAAAAAAABQAAAHRpdGxlAAAAmP///9T///8AAAEFEAAAABwAAAAEAAAAAAAAAAsAAABhZ2VuY3lfY29kZQDE////EAAUAAgABgAHAAwAAAAQABAAAAAAAAEFEAAAACAAAAAEAAAAAAAAAAkAAABkb2NrZXRfaWQAAAAEAAQABAAAAA=="
+    },
+    "docket-receipts": {
+      "path": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/etl_receipts.parquet",
+      "bytes": 58573148,
+      "mtime_ns": 1791282254293595319,
+      "allocated_bytes": 58576896,
+      "rows": 279720,
+      "sha256": "1bfc2b0d05b2f81bc39ee49633fd6560255652ec34f2567b02e45846b96c24c0",
+      "blake3": "7b22adab9da0e993d2d2f831afe10be5a783cb881a796f0b0ca37c675af3d7ed",
+      "schema_ipc_base64": "/////+ADAAAQAAAAAAAKAAwABgAFAAgACgAAAAABBAAMAAAACAAIAAAABAAIAAAABAAAAA0AAAB8AwAAQAMAAAwDAADYAgAAqAIAAHQCAABAAgAAEAIAAOQBAAC0AQAAbAAAADgAAAAEAAAAyPz//wAAAQUQAAAAIAAAAAQAAAAAAAAADwAAAGRpYWdub3N0aWNfanNvbgC8/P//+Pz//wAAAQUQAAAAIAAAAAQAAAAAAAAADwAAAHByb2Nlc3NpbmdfanNvbgDs/P//KP3//wAAAQwUAAAAIAAAAAQAAAABAAAAGAAAAAkAAAB3aXRuZXNzZXMAAAAc/f//WP3//wAAAQ0kAAAALAAAAAQAAAAFAAAA0AAAAKAAAAB0AAAASAAAABQAAAAHAAAAZWxlbWVudABY/f//lP3//wAAAQUQAAAAIAAAAAQAAAAAAAAADAAAAGJvZHlfdmVyc2lvbgAAAACI/f//xP3//wAAAQUQAAAAGAAAAAQAAAAAAAAABwAAAGxvY2F0b3IAsP3//+z9//8AAAEFEAAAABgAAAAEAAAAAAAAAAYAAABzaGEyNTYAANj9//8U/v//AAABBRAAAAAcAAAABAAAAAAAAAAKAAAAc291cmNlX3VyaQAABP7//0D+//8AAAEFEAAAABwAAAAEAAAAAAAAAAkAAABzb3VyY2VfaWQAAAAw/v//bP7//wAAAQUQAAAAHAAAAAQAAAAAAAAACQAAAHByb2Nlc3NvcgAAAFz+//+Y/v//AAABBRAAAAAYAAAABAAAAAAAAAAHAAAAb3V0Y29tZQCE/v//wP7//wAAAQUQAAAAHAAAAAQAAAAAAAAACgAAAGF0dGVtcHRfaWQAALD+///s/v//AAABBRAAAAAgAAAABAAAAAAAAAANAAAAaWRlbnRpdHlfanNvbgAAAOD+//8c////AAABBRAAAAAgAAAABAAAAAAAAAAPAAAAc3ViamVjdF92ZXJzaW9uABD///9M////AAABBRAAAAAcAAAABAAAAAAAAAAJAAAAcmVjb3JkX2lkAAAAPP///3j///8AAAEFEAAAACAAAAAEAAAAAAAAAA0AAABnZW5lcmF0aW9uX2lkAAAAbP///6j///8AAAEFEAAAACAAAAAEAAAAAAAAAA4AAABwb2xpY3lfdmVyc2lvbgAAnP///9j///8AAAEFEAAAABgAAAAEAAAAAAAAAAcAAABkYXRhc2V0AMT///8QABQACAAGAAcADAAAABAAEAAAAAAAAQUQAAAAIAAAAAQAAAAAAAAACgAAAHJlY2VpcHRfaWQAAAQABAAEAAAAAAAAAA=="
+    }
+  },
+  "started_at": 1791587198.669153,
+  "comments_payload_rehashed": false,
+  "docket_artifact": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/artifact.json",
+  "docket_members": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/members.json",
+  "docket_generation": "6890875d7aaf081b6974df133d307bddc2b5e4c9fb9793dcfc33a49707a2a9d2",
+  "docket_members_sha256": "3c97a7d3db06ae53a3abc6b9076d5fbc07676a46693389b0c99affccd16285a4",
+  "docket_artifact_sha256": "b9b8ced6384d60ea5ea8e156d1997e830ff8ba35dbf803f029049ff17fd72967",
+  "digest_checks": {
+    "dockets": {
+      "bytes": 15480748,
+      "blake3": "774d25ad36af090c40072f2a6a45c924ebc41309ffe4e6738753591c694366aa",
+      "sha256": "81dcc636e24666cab8ccf4b215e24e80d74a13e5a0780ad7690efaaaa6316a44",
+      "path": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/dockets.parquet",
+      "seconds": 0.023935916018672287,
+      "payload_passes": 1
+    },
+    "docket-receipts": {
+      "bytes": 58573148,
+      "blake3": "7b22adab9da0e993d2d2f831afe10be5a783cb881a796f0b0ca37c675af3d7ed",
+      "sha256": "1bfc2b0d05b2f81bc39ee49633fd6560255652ec34f2567b02e45846b96c24c0",
+      "path": "/Users/mikewolfd/Work/corpora/session-reports-2026-10-06/bulk-current-resume/hosted-37449048296/native-family-dockets/dockets/build/generation/etl_receipts.parquet",
+      "seconds": 0.0672456250176765,
+      "payload_passes": 1
+    }
+  },
+  "elapsed_seconds": 0.15258579200599343
+}

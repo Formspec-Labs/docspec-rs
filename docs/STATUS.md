@@ -14,6 +14,27 @@ measured.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Complete Comments qualification harness
+
+The [frozen full-path protocol](../experiments/comments-e2e/protocol.md) and runner
+now cover full-width Comments shaping, real docket joins, summaries, nested docket
+receipts, contributor relations, native/flat selection and independent exact
+readback. They share one deadline and account for aggregate memory, combined
+scratch, retained output and peak additional disk. Each series captures its
+executable and oracle sources before timing. Pilot results cannot pass acceptance.
+
+The [synthetic complete-path and adversarial checks](reviews/comments-e2e-harness-check.log)
+pass against a real Rust executable. They include duplicates, nulls, Unicode,
+nested receipt order, unmatched rows, missing/corrupt retained input and incorrect
+exported field IDs. The [independent review](reviews/comments-e2e-review.md) approves
+controlled collection. A DuckDB initialization error found during qualification
+was corrected before this pass.
+
+The [input preparation](../experiments/comments-e2e/preparation-20261009.json) reuses
+the frozen Comments identity and verifies the smaller Dockets/receipt members in
+one digest pass each. Full performance collection has not yet run. Preparation
+and tiny fixtures are not evidence that the 10M target passes.
+
 ## Local Dagster scheduling
 
 The [thin adapter](../adapters/dagster/README.md) submits an unchanged native JSON

@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 /experiments/**/workspace/
 /experiments/**/*.arrow
+
+/experiments/comments-e2e/runs/**/frozen/docspec
+/experiments/comments-e2e/runs/**/oracle-scratch/

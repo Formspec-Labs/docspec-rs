@@ -54,11 +54,12 @@ def inventory(root):
     return files
 
 
-def totals(files):
+def totals(files, scratch_prefixes=("scratch",)):
     result = {}
     for name, stat in files.items():
         path = Path(name)
-        if path.parts[0] == "scratch":
+        if any(path.parts[:len(Path(prefix).parts)] == Path(prefix).parts
+               for prefix in scratch_prefixes):
             category = "scratch"
         elif path.parts[0] == "warehouse":
             category = "lifecycle"
@@ -94,36 +95,46 @@ def tree_rss(pid):
     return total
 
 
-def measured_totals(workspace):
+def measured_totals(workspace, scratch_prefixes=("scratch",)):
     start = time.monotonic()
-    usage = totals(inventory(workspace))
+    usage = totals(inventory(workspace), scratch_prefixes)
     return usage, time.monotonic() - start
 
 
-def command(directory, workspace, label, argv, disk_bound):
+def command(directory, workspace, label, argv, disk_bound, *, limits=None,
+            timeout_seconds=1800, process_tree_root=None,
+            scratch_prefixes=("scratch",), progress_seconds=None, deadline_monotonic=None):
     """Same raw command/time evidence as local-reuse, plus bounded live sampling."""
+    limits = LIMITS if limits is None else limits
+    if timeout_seconds <= 0:
+        raise RuntimeError(f"{label}: no remaining time in the run deadline")
     save(directory / f"{label}.argv.json", argv)
     before = inventory(workspace)
     save(directory / f"{label}.before.json", before)
-    metrics = {"sampled_peak_tree_rss_bytes": 0, "min_volume_free_bytes": shutil.disk_usage(REPO).free,
+    metrics = {"sampled_peak_tree_rss_bytes": 0, "min_volume_free_bytes": shutil.disk_usage(workspace).free,
                "sampled_peak_workspace_bytes": 0, "sampled_peak_allocated_bytes": 0,
                "sampled_peak_scratch_bytes": 0, "inventory_sampling_seconds": 0.0,
-               "before": totals(before), "stop_reason": None}
+               "before": totals(before, scratch_prefixes), "stop_reason": None}
     timing = directory / f"{label}.time.log"
     with (directory / f"{label}.stdout.json").open("w") as out, \
             (directory / f"{label}.stderr.log").open("w") as err, \
             (directory / f"{label}.samples.jsonl").open("w") as samples:
         start = time.monotonic()
+        if deadline_monotonic is not None:
+            timeout_seconds = min(timeout_seconds, deadline_monotonic - start)
+            if timeout_seconds <= 0:
+                raise RuntimeError(f"{label}: run deadline elapsed before process launch")
         process = subprocess.Popen(["/usr/bin/time", "-l", "-o", str(timing), *argv],
                                    stdout=out, stderr=err, cwd=REPO, start_new_session=True)
         sampler = ThreadPoolExecutor(max_workers=1)
         pending_inventory = None
         next_inventory = 0.0
+        next_progress = progress_seconds
         try:
             while True:
                 elapsed = time.monotonic() - start
-                rss = tree_rss(process.pid)
-                free = shutil.disk_usage(REPO).free
+                rss = tree_rss(process_tree_root or process.pid)
+                free = shutil.disk_usage(workspace).free
                 sample = {"seconds": elapsed, "tree_rss_bytes": rss, "volume_free_bytes": free}
                 metrics["sampled_peak_tree_rss_bytes"] = max(metrics["sampled_peak_tree_rss_bytes"], rss)
                 metrics["min_volume_free_bytes"] = min(metrics["min_volume_free_bytes"], free)
@@ -137,18 +148,21 @@ def command(directory, workspace, label, argv, disk_bound):
                         metrics[metric] = max(metrics[metric], usage.get(group, {}).get(key, 0))
                     pending_inventory = None
                 if pending_inventory is None and elapsed >= next_inventory:
-                    pending_inventory = sampler.submit(measured_totals, workspace)
+                    pending_inventory = sampler.submit(measured_totals, workspace, scratch_prefixes)
                     next_inventory = elapsed + 5
                 samples.write(json.dumps(sample) + "\n")
                 samples.flush()
-                if elapsed > 1800:
-                    metrics["stop_reason"] = "1800-second deadline"
-                elif rss > LIMITS["memory_bytes"]:
+                if next_progress is not None and elapsed >= next_progress:
+                    print(json.dumps({"stage": label, **sample}), flush=True)
+                    next_progress = elapsed + progress_seconds
+                if elapsed > timeout_seconds:
+                    metrics["stop_reason"] = f"{timeout_seconds:g}-second remaining deadline"
+                elif rss > limits["memory_bytes"]:
                     metrics["stop_reason"] = "sampled process-tree RSS exceeded 24 GiB"
                 elif free < 2 * GIB:
                     metrics["stop_reason"] = "less than 2 GiB volume free space"
-                elif metrics["sampled_peak_scratch_bytes"] > LIMITS["scratch_bytes"]:
-                    metrics["stop_reason"] = "sampled scratch exceeded 8 GiB"
+                elif metrics["sampled_peak_scratch_bytes"] > limits["scratch_bytes"]:
+                    metrics["stop_reason"] = f"sampled scratch exceeded {limits['scratch_bytes']} bytes"
                 elif metrics["sampled_peak_workspace_bytes"] > disk_bound:
                     metrics["stop_reason"] = "sampled workspace exceeded preflight allowance"
                 if metrics["stop_reason"]:
@@ -186,8 +200,8 @@ def command(directory, workspace, label, argv, disk_bound):
                                             ("sampled_peak_scratch_bytes", "scratch", "bytes")]:
                     metrics[metric] = max(metrics[metric], usage.get(group, {}).get(key, 0))
             after = inventory(workspace)
-            metrics["after"] = totals(after)
-            metrics["volume_free_after_bytes"] = shutil.disk_usage(REPO).free
+            metrics["after"] = totals(after, scratch_prefixes)
+            metrics["volume_free_after_bytes"] = shutil.disk_usage(workspace).free
             for metric, group, key in [("sampled_peak_workspace_bytes", "total", "bytes"),
                                         ("sampled_peak_allocated_bytes", "total", "allocated_bytes"),
                                         ("sampled_peak_scratch_bytes", "scratch", "bytes")]:
@@ -196,14 +210,14 @@ def command(directory, workspace, label, argv, disk_bound):
                 match = re.search(r"(\d+)\s+maximum resident set size", timing.read_text())
                 metrics["time_max_rss_bytes"] = int(match.group(1)) if match else None
             if not metrics["stop_reason"]:
-                if metrics["elapsed_seconds"] > 1800:
-                    metrics["stop_reason"] = "1800-second deadline"
-                elif (metrics.get("time_max_rss_bytes") or 0) > LIMITS["memory_bytes"]:
+                if metrics["elapsed_seconds"] > timeout_seconds:
+                    metrics["stop_reason"] = f"{timeout_seconds:g}-second remaining deadline"
+                elif (metrics.get("time_max_rss_bytes") or 0) > limits["memory_bytes"]:
                     metrics["stop_reason"] = "reported maximum RSS exceeded 24 GiB"
                 elif metrics["sampled_peak_workspace_bytes"] > disk_bound:
                     metrics["stop_reason"] = "workspace exceeded preflight allowance"
-                elif metrics["sampled_peak_scratch_bytes"] > LIMITS["scratch_bytes"]:
-                    metrics["stop_reason"] = "scratch exceeded 8 GiB"
+                elif metrics["sampled_peak_scratch_bytes"] > limits["scratch_bytes"]:
+                    metrics["stop_reason"] = f"scratch exceeded {limits['scratch_bytes']} bytes"
                 elif metrics["volume_free_after_bytes"] < 2 * GIB:
                     metrics["stop_reason"] = "less than 2 GiB volume free space after command"
             save(directory / f"{label}.after.json", after)

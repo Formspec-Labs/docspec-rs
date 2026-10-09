@@ -1,0 +1,34 @@
+test_combined_scratch_includes_oracle_and_engine (test_workload.QualificationHarnessTests.test_combined_scratch_includes_oracle_and_engine) ... ok
+test_comparison_preserves_duplicates_nulls_empty_and_nested_order (test_workload.QualificationHarnessTests.test_comparison_preserves_duplicates_nulls_empty_and_nested_order) ... ok
+test_flat_export_rejects_changed_field_ids_and_pin_mapping (test_workload.QualificationHarnessTests.test_flat_export_rejects_changed_field_ids_and_pin_mapping) ... ok
+test_oracle_reconstructs_from_retained_input_without_external_fixture (test_workload.QualificationHarnessTests.test_oracle_reconstructs_from_retained_input_without_external_fixture) ... ERROR
+test_oracle_requires_retained_bytes_even_when_external_fixture_survives (test_workload.QualificationHarnessTests.test_oracle_requires_retained_bytes_even_when_external_fixture_survives) ... ERROR
+test_schema_check_precedes_possible_sql_coercion (test_workload.QualificationHarnessTests.test_schema_check_precedes_possible_sql_coercion) ... ok
+test_specs_keep_full_values_and_bind_receipts_without_a_fake_join (test_workload.QualificationHarnessTests.test_specs_keep_full_values_and_bind_receipts_without_a_fake_join) ... ok
+
+======================================================================
+ERROR: test_oracle_reconstructs_from_retained_input_without_external_fixture (test_workload.QualificationHarnessTests.test_oracle_reconstructs_from_retained_input_without_external_fixture)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/test_workload.py", line 62, in test_oracle_reconstructs_from_retained_input_without_external_fixture
+    checker = oracle.Oracle(root)
+              ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/oracle.py", line 123, in __init__
+    self.connection.execute("SET enable_external_access=true")
+_duckdb.InvalidInputException: Invalid Input Error: Cannot change enable_external_access setting while database is running
+
+======================================================================
+ERROR: test_oracle_requires_retained_bytes_even_when_external_fixture_survives (test_workload.QualificationHarnessTests.test_oracle_requires_retained_bytes_even_when_external_fixture_survives)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/test_workload.py", line 34, in test_oracle_requires_retained_bytes_even_when_external_fixture_survives
+    checker = oracle.Oracle(root)
+              ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/oracle.py", line 123, in __init__
+    self.connection.execute("SET enable_external_access=true")
+_duckdb.InvalidInputException: Invalid Input Error: Cannot change enable_external_access setting while database is running
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.054s
+
+FAILED (errors=2)
