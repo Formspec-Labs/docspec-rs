@@ -4,6 +4,7 @@
 mod tests;
 
 use super::*;
+use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter};
 use std::{future::Future, sync::atomic::Ordering};
 use tokio::{runtime::Handle, sync::OwnedSemaphorePermit};
 
@@ -155,6 +156,50 @@ impl Engine {
             .await?
     }
 
+    pub(super) async fn admit_stream<F, Fut>(
+        &self,
+        memory: OwnedSemaphorePermit,
+        operation: F,
+    ) -> Result<SendableRecordBatchStream>
+    where
+        F: FnOnce(Engine) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<SendableRecordBatchStream>> + Send + 'static,
+    {
+        self.check_admission()?;
+        let runtime = runtime()?;
+        let task = self.inner.lifecycle.budget.reserve(
+            std::mem::size_of::<Fut>()
+                .saturating_add(std::mem::size_of::<F>())
+                .saturating_add(4096),
+        )?;
+        let guard = Arc::new(self.inner.maintenance.clone().read_owned().await);
+        self.check_admission()?;
+        // Share this admission instead of reacquiring after a writer has queued.
+        // The owned opening task keeps custody if its caller is canceled.
+        self.spawn_work(
+            runtime,
+            guard.clone(),
+            memory,
+            task,
+            move |engine| async move {
+                let stream = operation(engine.clone()).await?;
+                let schema = stream.schema();
+                let retained = futures::stream::unfold(
+                    (stream, guard, engine),
+                    |(mut stream, guard, engine)| async move {
+                        stream
+                            .next()
+                            .await
+                            .map(|batch| (batch, (stream, guard, engine)))
+                    },
+                );
+                Ok(Box::pin(RecordBatchStreamAdapter::new(schema, retained))
+                    as SendableRecordBatchStream)
+            },
+        )
+        .await?
+    }
+
     fn spawn_work<T, G, F, Fut>(
         &self,
         runtime: Handle,
@@ -187,8 +232,9 @@ impl Engine {
     ///
     /// Call before shutting down the Tokio runtime. Dropping this wait leaves
     /// admission closed; calling again resumes waiting. Other engine clones also
-    /// stop accepting work. Drop all clones after completion to release the host.
-    /// Catalog-free immutable readers keep their existing retained-release rules.
+    /// stop accepting work. Engine read streams retain admission until EOF or
+    /// drop. Drop all clones after completion to release the host. Catalog-free
+    /// readers keep their existing caller-retained or published-availability rules.
     ///
     /// # Errors
     /// Refuses an uncertain host after private-worker panic or forced termination.

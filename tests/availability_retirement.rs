@@ -323,6 +323,37 @@ async fn abandoned_backfill_retires_every_saved_composition_without_recomputing_
         )
         .await
         .unwrap();
+    assert!(!before.contains_key("result/pending"));
+    let retained = expected
+        .iter()
+        .map(|key| serde_json::from_value::<ReleasePin>(before[key].clone()).unwrap())
+        .collect::<Vec<_>>();
+    for pin in &retained {
+        let combined = engine.read_combined(pin).await.unwrap();
+        assert!(combined.schema().field_with_name("pending").is_ok());
+        for mut stream in [combined, engine.read_group(pin, "source").await.unwrap()] {
+            let mut actual = Vec::new();
+            while let Some(batch) = stream.try_next().await.unwrap() {
+                let ids = batch
+                    .column_by_name("id")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                if let Some(values) = batch.column_by_name("pending") {
+                    let values = values.as_any().downcast_ref::<Int64Array>().unwrap();
+                    assert!(
+                        ids.iter()
+                            .zip(values.iter())
+                            .all(|(id, value)| { value == id.map(|id| id + 10) })
+                    );
+                }
+                actual.extend(ids.iter());
+            }
+            actual.sort();
+            assert_eq!(actual, vec![Some(1), Some(1), Some(2)]);
+        }
+    }
     let plan = engine
         .plan_availability_retirement(
             &pending.dataset,
@@ -346,6 +377,16 @@ async fn abandoned_backfill_retires_every_saved_composition_without_recomputing_
 
     let engine = open(root.path()).await;
     assert_eq!(engine.retire_availability(&plan).await.unwrap(), decision);
+    for pin in &retained {
+        for error in [
+            engine.read_group(pin, "source").await.err().unwrap(),
+            engine.read_evidence(pin).await.err().unwrap(),
+            engine.read_combined(pin).await.err().unwrap(),
+            engine.compare(pin, &sibling, "source").await.unwrap_err(),
+        ] {
+            assert_eq!(error.code(), "availability_retired");
+        }
+    }
     assert_eq!(
         engine.backfill(&pending).await.unwrap_err().code(),
         "availability_retired"

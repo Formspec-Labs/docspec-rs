@@ -612,16 +612,14 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
         limit = limit.max(batch.get_array_memory_size());
     }
     drop(engine);
-    let engine = Engine::open(
-        root.path().join("workspace"),
-        Limits {
-            max_batch_bytes: limit,
-            ..limits()
-        },
-    )
-    .await
+    // Exercise the shared payload reader independently of lifecycle metadata
+    // batches, which need not fit this deliberately tiny joined-output limit.
+    let budget = docspec::budget::Budget::new(Limits {
+        max_batch_bytes: limit,
+        ..limits()
+    })
     .unwrap();
-    let mut combined = engine.read_combined(&b).await.unwrap();
+    let mut combined = docspec::engine::read_combined(&b, &budget).await.unwrap();
     let error = docspec::Error::from(combined.try_next().await.unwrap_err());
     assert_eq!(error.code(), "oversized_batch");
     assert!(error.to_string().contains("combined result"));

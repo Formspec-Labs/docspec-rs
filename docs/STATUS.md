@@ -14,6 +14,72 @@ measured.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Reader lifetime during maintenance
+
+Engine group, evidence and combined reads now hold shared maintenance admission
+from opening through stream EOF or drop. Their opening task retains custody if
+the caller disconnects. Comparisons run as owned finite work under the same
+admission. Maintenance and shutdown wait for these readers; internal processing
+uses already-admitted helpers rather than nesting locks behind a queued writer.
+
+Engine read admission resolves an exact available result or independently
+completed readback from this host before opening the immutable selection. A
+mismatched pin refuses, and new reads of a retired result return
+`availability_retired`. There is no dependency-graph walk,
+payload hash or full validation on this path. The existing stream and worker
+mechanisms own the lifetime; no reader registry, durable lease or background
+scheduler was introduced.
+
+Standalone read and verification functions remain catalog-free. Their callers
+must keep objects retained for the operation or rely on the applicable published
+availability window. Saved pins identify exact content; they do not create an
+indefinite availability promise. Logical retirement still preserves physical
+files. Existing detached native read-only work has no retained-publication or
+file-mutation authority; dropping a reader does not drain unread payloads.
+
+The [focused checks](reviews/protected-readers-internal-complete.log) pass for
+opening cancellation, EOF/drop, workspace ownership, shutdown, exact host/pin
+identity and all Engine read kinds. An actual retirement race waits through the
+last returned batch until EOF, then permits retirement and refuses new Engine
+reads and comparison. A standalone reader still returns exact values from the
+retained file. The earlier [focused run](reviews/protected-readers-internal.log)
+is retained as well.
+
+The [initial full gate](reviews/protected-readers-check-initial.log) exposed an
+overly narrow result-only check: a completed readback must remain readable after
+its parent is abandoned before selection. The correction uses exact result and
+readback keys, including the existing Backfill manifest-digest key, rather than
+scanning phase history. It also avoids creating a lifecycle table when the pin
+belongs to a different host. The
+[corrected abandonment checks](reviews/protected-readers-abandonment-corrected.log)
+pass; independently completed work retains its original availability promise.
+
+The [next gate](reviews/protected-readers-check-batch-failure.log) reached a
+payload-size test whose deliberately tiny batch limit refused the new lifecycle
+lookup before reaching the joined output. The unchanged combined-reader body now
+has the same catalog-free form as group and evidence readers. Engine reads call
+that shared body under reader admission; the payload test exercises it directly
+with the tiny `Budget` and still requires the specific joined-output refusal.
+No alternate join implementation or relaxed limit was introduced.
+
+The corrected [complete repository gate](reviews/protected-readers-check.log)
+passes formatting, strict linting and all library, integration and documentation
+tests. This includes both independently completed Backfill compositions before
+and after retirement, wrong-host non-mutation, and the shared combined-reader
+output limit. The [independent review](reviews/protected-readers-review.md)
+approves the corrected checkpoint. Both earlier full-gate failures remain
+recorded above. The [resource snapshot](reviews/protected-readers-resources.json)
+separates allocated build-cache space from shared-volume free space; it does not
+measure peak usage, dataset storage or reclaimed bytes.
+
+The parallel [consistency](reviews/physical-cleanup-consistency.md) and
+[resource/native-metadata](reviews/physical-cleanup-resources.md) reviews define
+the remaining deletion boundary: fresh bounded eligibility, exact durable intent
+and owner unavailability, registration-only native table removal, exact file
+effects, durable outcomes and recovery capacity. This reader prerequisite does
+not enable deletion. Those effects, their fault qualification, compaction and
+restore remain required for R6. No reclaimed bytes or throughput gain are claimed.
+
 ## Owner-grant retirement
 
 An operator can now retire an exact owner-grant generation after its named
@@ -788,7 +854,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime and shutdown drain; physical cleanup disabled | Historical observation bindings, seal and descendant dependency lifetimes; reader protection; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; physical cleanup disabled | Historical observation bindings, seal and descendant dependency lifetimes; complete reader/removal race qualification; destructive maintenance qualification; compaction; removal preview/reservation/deletion reconciliation; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.12s
+     Running tests/abandonment.rs (target/debug/deps/abandonment-9e0aa3c34f260c86)
+
+running 7 tests
+test abandoned_backfill_preserves_file_reuse_and_refuses_every_retry ... ok
+test schema_requires_every_uncaptured_source_to_be_abandoned ... ok
+test backfill_prepares_during_pending_input_and_selects_after_its_abandonment ... ok
+test http_and_cli_share_the_durable_decision ... ok
+test abandonment_fences_updates_and_schema_without_rewinding_source_admission ... ok
+test abandoning_a_later_admission_does_not_revive_an_old_cutover_capture ... ok
+test abandonment_survives_reopen_and_preserves_shared_phases_and_readback ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.06s

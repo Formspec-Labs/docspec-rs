@@ -184,8 +184,21 @@ catalog work and drains admitted operations. The HTTP server does this after its
 graceful stop. If a private task panics or the runtime stops before private work
 finishes, that host stays unavailable until process exit because underlying
 blocking work may still finish.
-Immutable release streams keep their catalog-free behavior. This worker boundary
-does not enable deletion, expiration or restore.
+Engine group, evidence and combined reads resolve this host's exact available
+result or completed readback and hold shared maintenance admission until the
+stream reaches EOF or is dropped. Comparison holds the same admission through
+completion. Shutdown waits for these readers; consume or drop streams before
+awaiting shutdown. New Engine
+reads of a retired result refuse with `availability_retired`.
+
+Standalone `read`, `read-evidence` and `verify` remain catalog-free. Their callers
+must keep the files retained for the operation or rely on an applicable published
+availability window. A saved JSON pin identifies exact content; it creates no
+lease and does not extend a retired availability promise. Logical retirement
+preserves the physical files, so independent reads can still use those files.
+Library callers can also use the shared catalog-free `engine::read_combined`
+function with a `Budget`; the same availability responsibility applies.
+Physical deletion, expiration and restore remain disabled.
 
 To stop an unfinished operation, use:
 

@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, RwLock};
 mod admission;
 mod backfill;
 #[doc(inline)]
-pub use backfill::BackfillPlan;
+pub use backfill::{BackfillPlan, read_combined};
 mod changes;
 mod history;
 use changes::verify_changes;
@@ -50,7 +50,7 @@ mod write;
 /// Once admitted, catalog operations finish in owned tasks even if their caller
 /// disconnects or drops its future. Use [`Self::abandon`] to revoke an unfinished
 /// operation's selection authority, and [`Self::shutdown`] before stopping the
-/// runtime. Immutable release streams do not acquire catalog admission.
+/// runtime. Engine read streams retain shared admission until EOF or drop.
 #[derive(Clone, Debug)]
 pub struct Engine {
     inner: Arc<Inner>,
@@ -511,6 +511,26 @@ impl Engine {
     /// # Errors
     /// Refuses missing groups, changed evidence, unsupported comparisons, or exhausted capacity.
     pub async fn compare(
+        &self,
+        before: &ReleasePin,
+        after: &ReleasePin,
+        group: &str,
+    ) -> Result<Comparison> {
+        let memory = self.request_memory(&(before, after, group))?;
+        let before = before.clone();
+        let after = after.clone();
+        let group = group.to_owned();
+        self.admit_work(memory, move |engine| async move {
+            engine.check_read_release(&before).await?;
+            if before != after {
+                engine.check_read_release(&after).await?;
+            }
+            engine.compare_admitted(&before, &after, &group).await
+        })
+        .await
+    }
+
+    async fn compare_admitted(
         &self,
         before: &ReleasePin,
         after: &ReleasePin,
@@ -2108,6 +2128,8 @@ fn work_started(phase: &str) {
 
 /// Verifies exact retained objects and decodes a native result without its catalog.
 ///
+/// The caller retains the files for the check; this does not acquire a host reader.
+///
 /// # Errors
 /// Refuses changed bytes, invalid schemas, missing files, or row-count disagreement.
 pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
@@ -2135,6 +2157,9 @@ pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
 
 /// Independently verifies a serialized release and all retained data and evidence.
 ///
+/// The caller retains the files or relies on a published availability window.
+/// A serialized pin does not extend that availability promise.
+///
 /// # Errors
 /// Refuses modified or missing objects and inconsistent native metadata.
 pub async fn verify_release(release: &ReleasePin, limits: Limits) -> Result<()> {
@@ -2147,6 +2172,7 @@ pub async fn verify_release(release: &ReleasePin, limits: Limits) -> Result<()> 
 ///
 /// Routine checks read metadata and at most three files' first eight rows across
 /// the request. Deep checks also hash payloads and reconstruct all derived results.
+/// The caller retains the files for the check; this does not acquire a host reader.
 ///
 /// # Errors
 /// Refuses inconsistent references, missing objects, failed checks or exhausted capacity.

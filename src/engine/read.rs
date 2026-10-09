@@ -6,6 +6,8 @@ use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchSt
 impl Engine {
     /// Streams one retained field group from an exact release.
     ///
+    /// Resolves this host's available result once and protects it until EOF or drop.
+    ///
     /// # Errors
     /// Refuses unknown groups, invalid retained releases, or exhausted reader capacity.
     pub async fn read_group(
@@ -13,15 +15,84 @@ impl Engine {
         release: &ReleasePin,
         group: &str,
     ) -> Result<SendableRecordBatchStream> {
-        read_group(release, group, &self.inner.lifecycle.budget).await
+        let memory = self.request_memory(&(release, group))?;
+        let release = release.clone();
+        let group = group.to_owned();
+        self.admit_stream(memory, move |engine| async move {
+            engine.check_read_release(&release).await?;
+            read_group(&release, &group, &engine.inner.lifecycle.budget).await
+        })
+        .await
     }
 
     /// Streams the exact contributor occurrences retained by a related result.
     ///
+    /// Resolves this host's available result once and protects it until EOF or drop.
+    ///
     /// # Errors
     /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
     pub async fn read_evidence(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
-        read_evidence(release, &self.inner.lifecycle.budget).await
+        let memory = self.request_memory(release)?;
+        let release = release.clone();
+        self.admit_stream(memory, move |engine| async move {
+            engine.check_read_release(&release).await?;
+            read_evidence(&release, &engine.inner.lifecycle.budget).await
+        })
+        .await
+    }
+
+    pub(super) async fn check_read_release(&self, release: &ReleasePin) -> Result<()> {
+        if !release.verified || release.id != release.dataset.version {
+            return Err(Error::refusal(
+                "release_mismatch",
+                "read pin is not a completed immutable selection",
+            ));
+        }
+        let lock = self.lock(&release.dataset.dataset).await;
+        let _guard = lock.lock().await;
+        let lifecycle = &self.inner.lifecycle;
+        let table = lifecycle
+            .catalog
+            .load_table(&crate::catalog::lifecycle_ident(&release.dataset.dataset))
+            .await
+            .map_err(|error| {
+                if error.kind() == iceberg::ErrorKind::TableNotFound {
+                    Error::refusal("no_release", "this host has no retained dataset")
+                } else {
+                    error.into()
+                }
+            })?;
+        let view = View {
+            revision: table.metadata().last_sequence_number(),
+            table,
+        };
+        self.check_operation_available(&view, &release.id).await?;
+        let rows = lifecycle.rows(&view).await?;
+        // Completed readbacks are independently retained even if a later failure
+        // or abandonment prevented selection. Backfill uses its manifest digest
+        // in the readback key, so all lookups remain exact rather than history scans.
+        let keys = [
+            format!("result/{}", release.id),
+            format!("readback/{}", release.id),
+            format!(
+                "backfill-readback/{}/{}",
+                release.id, release.manifest.digest
+            ),
+        ];
+        for key in keys {
+            let _memory = rows.reserve_decoded(&lifecycle.budget, &[&key])?;
+            if let Some((revision, _, retained)) = rows.get_record::<ReleasePin>(&key)?
+                && revision > 0
+                && revision <= view.revision
+                && retained == *release
+            {
+                return Ok(());
+            }
+        }
+        Err(Error::refusal(
+            "release_mismatch",
+            "read pin differs from this host's available result or completed readback",
+        ))
     }
 
     pub(crate) fn read_budget(&self) -> Budget {
@@ -32,6 +103,8 @@ impl Engine {
 /// Streams a retained field group without requiring its producing catalog.
 ///
 /// The injected budget shares admission with other readers and application work.
+/// The caller must retain the files or rely on a published availability window.
+/// A serialized pin identifies content; it creates no lease or host protection.
 ///
 /// # Errors
 /// Refuses unknown groups, invalid retained releases, or exhausted reader capacity.
@@ -48,6 +121,9 @@ pub async fn read_group(
 }
 
 /// Streams retained contributor occurrences without the producing catalog.
+///
+/// The caller must retain the files or rely on a published availability window.
+/// A serialized pin identifies content; it creates no lease or host protection.
 ///
 /// # Errors
 /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.

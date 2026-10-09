@@ -1,0 +1,19 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.48s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 12 tests
+test engine::worker::tests::unrelated_shared_work_can_enter_before_either_operation_finishes ... ok
+test engine::worker::tests::canceled_callers_cannot_accumulate_unbounded_owned_requests ... ok
+test engine::worker::tests::canceled_stream_open_keeps_custody_until_opening_really_finishes ... ok
+test engine::worker::tests::shutdown_closes_admission_and_resumes_drain_after_its_wait_is_dropped ... ok
+test engine::worker::tests::canceled_caller_keeps_blocking_work_gate_and_host_until_real_exit ... ok
+test engine::worker::tests::stream_retains_maintenance_admission_and_host_until_eof_or_drop ... ok
+test engine::worker::tests::private_worker_panic_quarantines_host_and_prevents_reopen ... ok
+test engine::worker::tests::canceled_maintenance_keeps_exclusion_until_its_native_decision_finishes ... ok
+test engine::worker::tests::engine_reads_block_maintenance_and_shutdown_refuses_new_streams ... ok
+test engine::worker::tests::engine_reads_require_this_hosts_exact_available_result ... ok
+test engine::worker::tests::availability_retirement_waits_for_reader_and_then_refuses_new_engine_reads ... ok
+test engine::worker::tests::queued_writer_does_not_deadlock_public_build_or_refresh_internal_reads ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 112 filtered out; finished in 2.20s

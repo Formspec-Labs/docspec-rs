@@ -167,6 +167,236 @@ async fn unrelated_shared_work_can_enter_before_either_operation_finishes() {
     engine.shutdown().await.unwrap();
 }
 
+fn one_batch_stream() -> SendableRecordBatchStream {
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1]))]).unwrap();
+    Box::pin(RecordBatchStreamAdapter::new(
+        schema,
+        futures::stream::iter(vec![Ok(batch)]),
+    ))
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_retains_maintenance_admission_and_host_until_eof_or_drop() {
+    for consume in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::open(root.path(), limits()).await.unwrap();
+        let gate = engine.inner.maintenance.clone();
+        let host = Arc::downgrade(&engine.inner.host);
+        let memory = engine.request_memory(&()).unwrap();
+        let mut stream = engine
+            .admit_stream(memory, |_| async { Ok(one_batch_stream()) })
+            .await
+            .unwrap();
+        drop(engine);
+        assert!(host.upgrade().is_some());
+        assert_eq!(
+            WorkspaceLock::acquire(root.path()).unwrap_err().code(),
+            "workspace_busy"
+        );
+        let mut exclusive = Box::pin(gate.write_owned());
+        assert!(futures::poll!(&mut exclusive).is_pending());
+        if consume {
+            assert_eq!(stream.next().await.unwrap().unwrap().num_rows(), 1);
+            assert!(futures::poll!(&mut exclusive).is_pending());
+            assert!(stream.next().await.is_none());
+            // EOF releases custody even while the exhausted stream is retained.
+            assert!(host.upgrade().is_none());
+        }
+        drop(stream);
+        drop(within(exclusive).await);
+        assert!(host.upgrade().is_none());
+        drop(WorkspaceLock::acquire(root.path()).unwrap());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn canceled_stream_open_keeps_custody_until_opening_really_finishes() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let gate = engine.inner.maintenance.clone();
+    let host = Arc::downgrade(&engine.inner.host);
+    let (started, entered) = oneshot::channel();
+    let (release, parked) = oneshot::channel();
+    let owner = engine.clone();
+    let caller = tokio::spawn(async move {
+        let memory = owner.request_memory(&()).unwrap();
+        owner
+            .admit_stream(memory, move |_| async move {
+                started.send(()).unwrap();
+                parked.await.unwrap();
+                Ok(one_batch_stream())
+            })
+            .await
+    });
+    within(entered).await.unwrap();
+    let mut exclusive = Box::pin(gate.write_owned());
+    assert!(futures::poll!(&mut exclusive).is_pending());
+    caller.abort();
+    match within(caller).await {
+        Err(error) => assert!(error.is_cancelled()),
+        Ok(_) => panic!("canceled stream caller completed"),
+    }
+    drop(engine);
+    assert!(host.upgrade().is_some());
+    assert!(futures::poll!(&mut exclusive).is_pending());
+    release.send(()).unwrap();
+    drop(within(exclusive).await);
+    assert!(host.upgrade().is_none());
+    drop(WorkspaceLock::acquire(root.path()).unwrap());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn engine_reads_block_maintenance_and_shutdown_refuses_new_streams() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let release = engine
+        .run(&build(&input(root.path()), "reads"))
+        .await
+        .unwrap();
+    let group = engine.read_group(&release, "source").await.unwrap();
+    let combined = engine.read_combined(&release).await.unwrap();
+    let memory = engine.request_memory(&()).unwrap();
+    let mut maintenance = Box::pin(engine.maintain_work(memory, |_| async { Ok(()) }));
+    assert!(futures::poll!(&mut maintenance).is_pending());
+    drop(group);
+    assert!(futures::poll!(&mut maintenance).is_pending());
+    drop(combined);
+    within(maintenance).await.unwrap();
+
+    let mut stream = engine.read_group(&release, "source").await.unwrap();
+    let mut shutdown = Box::pin(engine.shutdown());
+    assert!(futures::poll!(&mut shutdown).is_pending());
+    assert_eq!(
+        engine
+            .read_group(&release, "source")
+            .await
+            .err()
+            .unwrap()
+            .code(),
+        "host_closing"
+    );
+    assert_eq!(
+        engine.read_evidence(&release).await.err().unwrap().code(),
+        "host_closing"
+    );
+    assert_eq!(
+        engine.read_combined(&release).await.err().unwrap().code(),
+        "host_closing"
+    );
+    assert_eq!(stream.next().await.unwrap().unwrap().num_rows(), 1);
+    assert!(stream.next().await.is_none());
+    within(shutdown).await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn engine_reads_require_this_hosts_exact_available_result() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let release = engine
+        .run(&build(&input(root.path()), "reads"))
+        .await
+        .unwrap();
+    let other = Engine::open(root.path().join("other"), limits())
+        .await
+        .unwrap();
+    assert!(other.read_group(&release, "source").await.is_err());
+    assert!(other.read_evidence(&release).await.is_err());
+    assert!(other.read_combined(&release).await.is_err());
+    assert!(
+        !other
+            .inner
+            .lifecycle
+            .catalog
+            .table_exists(&crate::catalog::lifecycle_ident(&release.dataset.dataset))
+            .await
+            .unwrap(),
+        "wrong-host reads must not create a producer lifecycle table"
+    );
+    let mut changed = release;
+    changed.manifest.digest.push('0');
+    for error in [
+        engine.read_group(&changed, "source").await.err().unwrap(),
+        engine.read_evidence(&changed).await.err().unwrap(),
+        engine.read_combined(&changed).await.err().unwrap(),
+    ] {
+        assert_eq!(error.code(), "release_mismatch");
+    }
+    other.shutdown().await.unwrap();
+    engine.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn availability_retirement_waits_for_reader_and_then_refuses_new_engine_reads() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let first_request = build(&input(root.path()), "reads");
+    let first = engine.run(&first_request).await.unwrap();
+    let replacement = engine
+        .run(&RunSpec {
+            operation: Id::new("replacement").unwrap(),
+            ..first_request.clone()
+        })
+        .await
+        .unwrap();
+    let mut stream = engine.read_group(&first, "source").await.unwrap();
+    let plan = engine
+        .plan_availability_retirement(
+            &first_request.dataset,
+            &Id::new("retire_initial").unwrap(),
+            &first_request.operation,
+            "end standalone engine access",
+        )
+        .await
+        .unwrap();
+    let mut retirement = Box::pin(engine.retire_availability(&plan));
+    assert!(futures::poll!(&mut retirement).is_pending());
+    let batch = stream.next().await.unwrap().unwrap();
+    let values = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    assert_eq!(values.values().as_ref(), &[1]);
+    assert!(futures::poll!(&mut retirement).is_pending());
+    assert!(stream.next().await.is_none());
+    within(retirement).await.unwrap();
+
+    for error in [
+        engine.read_group(&first, "source").await.err().unwrap(),
+        engine.read_evidence(&first).await.err().unwrap(),
+        engine.read_combined(&first).await.err().unwrap(),
+        engine
+            .compare(&first, &replacement, "source")
+            .await
+            .unwrap_err(),
+    ] {
+        assert_eq!(error.code(), "availability_retired");
+    }
+    // This caller explicitly retains the files. Catalog retirement does not
+    // delete them or turn a serialized identity into an implicit lease.
+    let mut standalone = read_group(&first, "source", &engine.inner.lifecycle.budget)
+        .await
+        .unwrap();
+    let batch = standalone.next().await.unwrap().unwrap();
+    let values = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    assert_eq!(values.values().as_ref(), &[1]);
+    assert!(standalone.next().await.is_none());
+    assert!(Path::new(&first.manifest.path).exists());
+    engine.shutdown().await.unwrap();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn canceled_maintenance_keeps_exclusion_until_its_native_decision_finishes() {
     let root = tempfile::tempdir().unwrap();
@@ -384,6 +614,11 @@ async fn queued_writer_does_not_deadlock_public_build_or_refresh_internal_reads(
     };
     let joined = with_queued_writer(&engine, &refresh.dataset, engine.refresh(&refresh)).await;
     assert_eq!(joined.dataset.groups["source"].rows, 1);
+    let mut evidence = engine.read_evidence(&joined).await.unwrap();
+    assert!(engine.inner.maintenance.try_write().is_err());
+    assert!(evidence.next().await.unwrap().unwrap().num_rows() > 0);
+    drop(evidence);
+    assert!(engine.inner.maintenance.try_write().is_ok());
     assert_eq!(
         joined.dataset.related.unwrap().coverage.inputs,
         refresh.inputs()

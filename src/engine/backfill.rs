@@ -128,59 +128,83 @@ fn validate_definition(spec: &GroupDefinition) -> Result<()> {
 impl Engine {
     /// Streams source values with their exactly covered computed fields.
     ///
+    /// Resolves this host's available result once and protects it until EOF or drop.
+    ///
     /// # Errors
     /// Refuses invalid pins or coverage, conflicting names, or exhausted capacity.
     pub async fn read_combined(
         &self,
         release: &ReleasePin,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-        let budget = &self.inner.lifecycle.budget;
-        resolve_release(release, budget).await?;
-        let source = storage::open_pin(&release.dataset.groups["source"]).await?;
-        let context = self.context();
-        let mut columns = source
-            .metadata()
-            .current_schema()
-            .as_struct()
-            .fields()
-            .iter()
-            .filter(|field| {
-                storage::defaults::supplied_id(&field.name).is_none()
-                    && (release.dataset.related.is_none() || !refresh::hidden_field(&field.name))
-            })
-            .map(|field| format!("s.{}", quote(&field.name)))
-            .collect::<Vec<_>>();
-        context.register_table("source", crate::query::occurrences(source, budget.clone())?)?;
-        let mut from = "source s".to_owned();
-        for (index, (name, binding)) in release.dataset.computed.iter().enumerate() {
-            let alias = format!("g{index}");
-            let native = storage::open_pin(&release.dataset.groups[name]).await?;
-            context.register_table(&alias, crate::query::table(native, budget.clone())?)?;
-            from.push_str(&format!(
-                " INNER JOIN {alias} ON s.{} = {alias}.{} AND s.{} = {alias}.{}",
-                quote(storage::OCCURRENCE_FILE),
-                quote(storage::OCCURRENCE_FILE),
-                quote(storage::OCCURRENCE_ROW),
-                quote(storage::OCCURRENCE_ROW)
-            ));
-            columns.extend(
-                binding
-                    .definition
-                    .fields
-                    .iter()
-                    .map(|field| format!("{alias}.{}", quote(&field.name))),
-            );
-        }
-        crate::query::bounded(
-            context
-                .sql(&format!("SELECT {} FROM {from}", columns.join(", ")))
-                .await?
-                .execute_stream()
-                .await?,
-            budget,
-        )
+        let memory = self.request_memory(release)?;
+        let release = release.clone();
+        self.admit_stream(memory, move |engine| async move {
+            engine.check_read_release(&release).await?;
+            read_combined(&release, &engine.inner.lifecycle.budget).await
+        })
+        .await
     }
+}
 
+/// Streams source and computed fields without requiring their producing catalog.
+///
+/// The caller retains the files or relies on a published availability window.
+/// A serialized pin creates no lease or host protection. Engine reads reuse
+/// this implementation inside their admitted reader lifetime.
+///
+/// # Errors
+/// Refuses invalid pins or coverage, conflicting names, or exhausted capacity.
+pub async fn read_combined(
+    release: &ReleasePin,
+    budget: &Budget,
+) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
+    resolve_release(release, budget).await?;
+    let source = storage::open_pin(&release.dataset.groups["source"]).await?;
+    let context = budget.context();
+    let mut columns = source
+        .metadata()
+        .current_schema()
+        .as_struct()
+        .fields()
+        .iter()
+        .filter(|field| {
+            storage::defaults::supplied_id(&field.name).is_none()
+                && (release.dataset.related.is_none() || !refresh::hidden_field(&field.name))
+        })
+        .map(|field| format!("s.{}", quote(&field.name)))
+        .collect::<Vec<_>>();
+    context.register_table("source", crate::query::occurrences(source, budget.clone())?)?;
+    let mut from = "source s".to_owned();
+    for (index, (name, binding)) in release.dataset.computed.iter().enumerate() {
+        let alias = format!("g{index}");
+        let native = storage::open_pin(&release.dataset.groups[name]).await?;
+        context.register_table(&alias, crate::query::table(native, budget.clone())?)?;
+        from.push_str(&format!(
+            " INNER JOIN {alias} ON s.{} = {alias}.{} AND s.{} = {alias}.{}",
+            quote(storage::OCCURRENCE_FILE),
+            quote(storage::OCCURRENCE_FILE),
+            quote(storage::OCCURRENCE_ROW),
+            quote(storage::OCCURRENCE_ROW)
+        ));
+        columns.extend(
+            binding
+                .definition
+                .fields
+                .iter()
+                .map(|field| format!("{alias}.{}", quote(&field.name))),
+        );
+    }
+    crate::query::bounded(
+        context
+            .sql(&format!("SELECT {} FROM {from}", columns.join(", ")))
+            .await?
+            .execute_stream()
+            .await?,
+        budget,
+    )
+}
+
+impl Engine {
     /// Plans file reuse without opening source payloads.
     ///
     /// # Errors
