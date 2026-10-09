@@ -1,0 +1,31 @@
+{
+  "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug",
+  "checked_at_utc": "2026-10-09T06:31:57.001262+00:00",
+  "canonical_directory_no_symlink": true,
+  "device": 16777233,
+  "inode": 760199941,
+  "allocated_bytes_before": 8479830016,
+  "no_reader_check": {
+    "command": [
+      "lsof",
+      "-nP",
+      "+D",
+      "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug"
+    ],
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": ""
+  },
+  "custody": "Checkpoint committed; full gate completed. No pending run or recovery depends on these compiled artifacts. Future checks can rebuild. Source, lockfile, test results and retained experiment evidence are outside this path.",
+  "source_commit": "bfa3efde364d2616dc7765d9cb80f6d918250dba",
+  "deletion_completed": true,
+  "volume_free_bytes_before": 16713297920,
+  "deletion_started_at_utc": "2026-10-09T06:31:57.012994+00:00",
+  "observed_at_utc": "2026-10-09T06:32:16.901537+00:00",
+  "path_absent": true,
+  "volume_free_bytes_after": 24695980032,
+  "volume_free_delta_bytes": 7982682112,
+  "startup_guard_bytes": 17179869184,
+  "startup_guard_met_at_observation": true,
+  "volume_observation_note": "Whole-volume free-space change includes concurrent workstation activity and APFS allocation behavior; startup must recheck fresh capacity."
+}
