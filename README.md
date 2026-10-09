@@ -49,6 +49,13 @@ procedure for a completed artifact; known retired points remain refused.
 Use `plan-restore-point-retirement` and `retire-restore-points` to end selected
 restore promises. Retirement and physical deletion remain separate operations.
 
+## Schedule operations with Dagster
+
+The [Dagster adapter](adapters/dagster/README.md) submits bounded native requests
+to one local Rust HTTP host. It preserves operation IDs across uncertain retries
+and leaves lifecycle decisions in Rust. Its local build/replay path is tested;
+provider and replacement-worker qualification remain unfinished.
+
 ## Run locally
 
 The pinned toolchain installs through rustup. Build the binary:

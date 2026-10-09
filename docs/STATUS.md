@@ -7,12 +7,26 @@ recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes evidence-only changes and broader
 schema/cutover behavior; remaining protection lifetimes, maintenance integration and
-broader failure qualification; remote publication, R2/Basin and Dagster; and complete Q1–Q8 and
+broader failure qualification; remote publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
 10-million-Comments qualification. The 1,800-second full-path target has not been
 measured.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Local Dagster scheduling
+
+The [thin adapter](../adapters/dagster/README.md) submits an unchanged native JSON
+request to a loopback Rust HTTP host. Stable IDs, explicit native refusals and
+bounded uncertain-outcome retries preserve Rust's recovery decisions. Python
+keeps no lifecycle database and returns bounded identity/status metadata.
+
+The [focused suite](reviews/dagster-adapter-check.log) passes with Python 3.13 and
+Dagster 1.13.16, including a real Rust host build/replay fixture and graceful host
+shutdown. The [independent review](reviews/dagster-adapter-review.md) approves this
+local scope. Lost responses from a real native completion, replacement workers,
+other native operations and hosted credentials/provider behavior remain separate
+qualification work.
 
 ## Local exports, compaction and restore points
 
@@ -1030,7 +1044,7 @@ or compatibility layer for legacy DocSpec.
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by new logical writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments; bounded local Dagster scheduling with actual Rust build/replay | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; native Dagster lost-response and replacement-worker qualification |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
