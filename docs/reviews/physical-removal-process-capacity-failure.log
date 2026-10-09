@@ -1,0 +1,31 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.01s
+     Running tests/physical_removal_process.rs (target/debug/deps/physical_removal_process-55c64a133547db59)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzF6KbT/workspace/objects/comments/ae4b4ad1612945e1978967bc9cc62b02/data/523753d3-ee76-49c4-bde7-6748a1a1d054-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzF6KbT/workspace/objects/comments/fb74c0bf26df4270ad96ec29670e9407/data/e15a5ef1-920e-4bf1-ae6d-c9d6825a394c-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli' (24070120) panicked at tests/support/mod.rs:68:5:
+removal/removal-intent: worker did not acknowledge the handoff: ["Error: capacity: shared memory budget exhausted; completed phases remain retained"] (exit status: 1)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... FAILED
+
+failures:
+
+failures:
+    sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.60s
+
+error: test failed, to rerun pass `--test physical_removal_process`

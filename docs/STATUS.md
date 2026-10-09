@@ -57,8 +57,29 @@ exclusion, corruption refusal, permanent unavailability and completed retries.
 The [fault checks](reviews/physical-removal-faults.log) pass cold resume after
 intent, registration removal and unlink, lost native intent/outcome replies, and
 terminal reconciliation at the metadata limit. These use injected interruptions
-and fresh Engine instances; full process-kill, filesystem-failure and provider
-qualification remain broader work. The initial
+and fresh Engine instances. Subsequent [process checks](reviews/physical-removal-process.log)
+send actual SIGKILL after the acknowledged intent, registration and unlink
+handoffs, then inspect and resume through fresh CLI processes. They preserve the
+exact replacement values, including duplicates, nulls and Unicode, and distinguish
+confirmed unlink from reconciled absence. Completed retries leave replacement
+bytes at an old path untouched. The pause follows an injected service return;
+these tests do not kill an in-flight native commit, hash or system call.
+
+The [first process attempt](reviews/physical-removal-process-capacity-failure.log)
+exposed overlapping maximum metadata reservations under the existing 512 MiB
+fixture profile. Proof decoding, inventory capture and intent encoding now hold
+their allowances only during their respective phases. Saved retries charge the
+exact intent/state records; fresh inspection has its own allowance for namespace
+growth. The unchanged-profile process test now passes. This corrects admission
+and allocation lifetimes; it does not measure peak resident memory or throughput.
+
+The [filesystem checks](reviews/physical-removal-filesystem.log) inject failed
+unlink and failed parent synchronization through the actual adapter. Failed unlink
+preserves bytes; failed synchronization after unlink returns uncertainty, and a
+retry acknowledges absence only after synchronization succeeds. The HTTP fixture
+also exercises successful execute, inspect and resume for an empty protected
+intersection. Power loss, arbitrary in-flight failures and real-provider behavior
+remain unqualified. The initial
 [focused run](reviews/physical-removal-internal-initial.log),
 [test compilation failure](reviews/physical-removal-internal-expanded.log),
 [lint correction](reviews/physical-removal-check-initial.log) and
@@ -73,7 +94,17 @@ dataset storage, throughput or reclaimed blocks.
 
 The [independent review](reviews/physical-removal-review.md) identified the missing
 resume check and terminal-capacity problem. Both were corrected and tested. Review
-agents then hit their usage limit, so final independent approval remains pending.
+agents then hit their usage limit. A subsequent
+[independent review](reviews/physical-removal-final-review.md) approves the local
+implementation and the process, filesystem, transport and memory-lifetime
+follow-up. The [complete follow-up repository gate](reviews/physical-removal-qualified-check.log)
+passes formatting, strict linting and all library, integration and documentation
+tests. The [new resource snapshot](reviews/physical-removal-qualified-resources.json)
+again separates allocated build cache from shared-volume free space. Native catalog
+listing allocation and the workspace-wide maintenance pause remain scaling
+limitations to measure under Q7. The [compaction analysis](reviews/compaction-prerequisites.md)
+records the stable-identity and representation-selection work required before
+rewriting source files can preserve backfills, evidence and history.
 This implementation supports explicit local Unix file removal. Automatic native
 cleanup, directory sweeping, lifecycle history compaction, restore, remaining
 history/protection lifetimes, remote deletion and the complete R1–R7 qualification
@@ -920,7 +951,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation | Historical observation bindings, seal and descendant dependency lifetimes; final independent removal review; broader reader/removal, process-kill, filesystem and provider qualification; compaction; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review | Historical observation bindings, seal and descendant dependency lifetimes; broader reader/removal, in-flight failure and provider qualification; stable occurrence identity and physical-representation selection for compaction; complete restore points and fenced fresh-catalog restore |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

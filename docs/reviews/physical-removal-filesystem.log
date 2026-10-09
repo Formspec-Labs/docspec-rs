@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.14s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 8 tests
+test storage::removal::tests::refuses_same_size_changed_bytes ... ok
+test storage::removal::tests::failed_directory_sync_reports_uncertainty_then_reconciles_absence ... ok
+test storage::removal::tests::refuses_escaped_paths_and_wrong_owner ... ok
+test storage::removal::tests::refuses_ancestor_symlink ... ok
+test storage::removal::tests::failed_unlink_preserves_bytes_and_does_not_synchronize ... ok
+test storage::removal::tests::refuses_directory_and_leaf_symlink ... ok
+test storage::removal::tests::absence_reconciliation_skips_present_bytes_and_rejects_unsafe_types ... ok
+test storage::removal::tests::deletes_exact_file_and_reconciles_absence ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 141 filtered out; finished in 0.04s
+

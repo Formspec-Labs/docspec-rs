@@ -85,6 +85,15 @@ pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phas
 
 /// Resumes through another CLI process using the request retained by `kill_after`.
 pub fn resume(root: &Path, command: &str) -> (docspec::model::ReleasePin, Vec<String>) {
+    run_cli(
+        root,
+        &[command, root.join("request.json").to_str().unwrap()],
+    )
+}
+
+/// Runs a fresh CLI process with bounded waiting and file-backed diagnostics.
+pub fn run_cli<T: serde::de::DeserializeOwned>(root: &Path, args: &[&str]) -> (T, Vec<String>) {
+    let command = args[0];
     // File-backed output avoids blocking a large release on an unread pipe.
     let stdout_path = root.join("resumed.json");
     let stderr_path = root.join("resumed.stderr");
@@ -93,8 +102,7 @@ pub fn resume(root: &Path, command: &str) -> (docspec::model::ReleasePin, Vec<St
         .arg(root.join("workspace"))
         .arg("--limits")
         .arg(root.join("limits.json"))
-        .arg(command)
-        .arg(root.join("request.json"))
+        .args(args)
         .stdout(std::fs::File::create(&stdout_path).unwrap())
         .stderr(std::fs::File::create(&stderr_path).unwrap())
         .spawn()

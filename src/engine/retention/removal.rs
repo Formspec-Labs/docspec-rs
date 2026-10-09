@@ -202,12 +202,20 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&dataset).await?;
         let rows = lifecycle.rows(&view).await?;
-        let _memory = lifecycle
-            .budget
-            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(8))?;
-        self.qualify_removal_objects(&view, &rows, &dataset, &objects)
-            .await?;
+        let limit = lifecycle.budget.limits.max_metadata_bytes;
+        {
+            // Owner creation proofs decode historical rows independently of the
+            // candidate count. Release their allowance before the inventory walk.
+            let _proof_memory = lifecycle.budget.reserve(limit.saturating_mul(8))?;
+            self.qualify_removal_objects(&view, &rows, &dataset, &objects)
+                .await?;
+        }
+        drop(rows);
+        // Keep returned inspection and native-registration collections charged
+        // after their helpers release transient traversal/decoder allowances.
+        let _memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
         let inspection = self.inspect_retention_admitted(&objects).await?;
+        drop(objects);
         let registrations = self
             .removal_registrations(&inspection.objects, &inspection.boundaries)
             .await?;
@@ -254,6 +262,21 @@ impl Engine {
         let plan = plan.clone();
         self.maintain_work(memory, move |engine| async move {
             engine.remove_admitted(&plan, None).await
+        })
+        .await
+    }
+
+    /// Interrupts removal at a durable effect boundary for process qualification.
+    ///
+    /// # Errors
+    /// Returns removal failures or `injected_failure` at the requested boundary.
+    #[cfg(feature = "test-util")]
+    pub async fn removal_until(&self, plan: &RemovalPlan, phase: &str) -> Result<RemovalStatus> {
+        let memory = self.request_memory(&(plan, phase))?;
+        let plan = plan.clone();
+        let phase = phase.to_owned();
+        self.maintain_work(memory, move |engine| async move {
+            engine.remove_admitted(&plan, Some(&phase)).await
         })
         .await
     }
@@ -317,14 +340,12 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&plan.dataset).await?;
         let rows = lifecycle.rows(&view).await?;
-        let _memory = lifecycle.budget.reserve(
-            lifecycle
-                .budget
-                .limits
-                .max_metadata_bytes
-                .saturating_mul(12),
-        )?;
+        let limit = lifecycle.budget.limits.max_metadata_bytes;
         if rows.contains_key(&intent_key(&plan.removal)) {
+            let _memory = rows.reserve_decoded(
+                &lifecycle.budget,
+                &[&intent_key(&plan.removal), &state_key(&plan.removal)],
+            )?;
             let (intent, progress) = self.saved_removal(&rows, &view, &plan.removal)?;
             if intent.plan != *plan {
                 return Err(conflict());
@@ -340,9 +361,19 @@ impl Engine {
             .iter()
             .map(|entry| entry.object.clone())
             .collect::<Vec<_>>();
-        self.qualify_removal_objects(&view, &rows, &plan.dataset, &objects)
-            .await?;
+        {
+            // Historical creation-proof decoding is bounded separately from the
+            // request-owned candidate list and ends before protection traversal.
+            let _proof_memory = lifecycle.budget.reserve(limit.saturating_mul(8))?;
+            self.qualify_removal_objects(&view, &rows, &plan.dataset, &objects)
+                .await?;
+        }
+        drop(rows);
+        // Inventory charges bound the fresh inspection, selected subset, native
+        // registrations and index lists. The request permit covers plan copies.
+        let _memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
         let fresh = self.inspect_retention_admitted(&objects).await?;
+        drop(objects);
         let chosen = plan
             .inspection
             .objects
@@ -360,6 +391,7 @@ impl Engine {
         let current_native = self
             .removal_registrations(&selected, &fresh.boundaries)
             .await?;
+        drop(selected);
         let mut registrations = Vec::new();
         for registration in current_native {
             let index = plan
@@ -373,6 +405,9 @@ impl Engine {
                 })?;
             registrations.push(index);
         }
+        // Restore the original encoding/commit allowance only after nested
+        // native inventory and its file-reader reservations have been released.
+        let _encoding_memory = lifecycle.budget.reserve(limit.saturating_mul(8))?;
         let intent = RemovalIntent {
             plan: plan.clone(),
             revision: view.revision.checked_add(1).ok_or_else(invalid)?,
@@ -579,12 +614,18 @@ impl Engine {
         // Completed retries return above. Unresolved retries check current roots
         // and native heads, but can only perform the original exact effects.
         if !eligibility_checked {
+            // New namespaces can enlarge the fresh inspection independently of
+            // the saved intent. Charge returned collections until checks finish.
+            let _inspection_memory = lifecycle
+                .budget
+                .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
             let objects = intent
                 .objects
                 .iter()
                 .map(|index| intent.plan.inspection.objects[*index].object.clone())
                 .collect::<Vec<_>>();
             let fresh = self.inspect_retention_admitted(&objects).await?;
+            drop(objects);
             if fresh.objects.iter().any(|entry| entry.blocker.is_some()) {
                 return Err(Error::refusal(
                     "stale_removal",

@@ -1,0 +1,48 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.35s
+     Running tests/physical_removal_process.rs (target/debug/deps/physical_removal_process-55c64a133547db59)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpF7BEtn/workspace/objects/comments/393b8564606743b7a5507c8670f3f5a2/data/ba5e3ef2-cc41-4838-bc9a-c79a9df4f166-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpF7BEtn/workspace/objects/comments/6ba0198c13004d9db0e8e807e2d9b91b/data/88bfa59a-90bd-407f-9d25-c1299e07e5d9-00000.parquet
+DOCSPEC_TEST_WORK readback
+killed removal worker after removal-intent; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmprpHQX1/workspace/objects/comments/cab3080428774c19894f5380578136cc/data/36fb6a65-fd73-4176-965a-133e62aff1ff-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmprpHQX1/workspace/objects/comments/5b27874397cf48d09c0a8138eb817eed/data/43177ebd-f47c-418d-a6b6-75bb61670bb7-00000.parquet
+DOCSPEC_TEST_WORK readback
+killed removal worker after removal-registrations; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSGgamG/workspace/objects/comments/a730c63ff0ee48788c783f88e5e667d6/data/e6d87769-77fc-47cb-b3ee-22802906fac5-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSGgamG/workspace/objects/comments/187d07d3259b40449905f1473e31e64f/data/d6b2cf2e-1796-4942-95cc-83a7ea49b02f-00000.parquet
+DOCSPEC_TEST_WORK readback
+killed removal worker after removal-unlink; status=signal: 9 (SIGKILL)
+test sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.97s
+

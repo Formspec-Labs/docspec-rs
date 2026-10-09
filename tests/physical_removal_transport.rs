@@ -12,7 +12,10 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use docspec::{Engine, model::RemovalPlan};
+use docspec::{
+    Engine,
+    model::{RemovalPlan, RemovalStatus},
+};
 use scalar::{fixture, limits};
 use tower::ServiceExt;
 
@@ -84,6 +87,42 @@ async fn cli_http_preview_agrees_and_keeps_protected_bytes() {
         serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
     assert_eq!(cli_plan, http_plan);
     assert!(http_plan.inspection.objects[0].blocker.is_some());
+    assert!(std::path::Path::new(&object.path).exists());
+
+    // Executing a protected preview may complete an empty intersection, but
+    // cannot turn an HTTP request into authority to remove selected bytes.
+    let response = router
+        .clone()
+        .oneshot(post("/retention/removal/execute", &http_plan))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: RemovalStatus =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert!(status.complete);
+    assert!(status.intent.objects.is_empty());
+    assert_eq!(status.confirmed_unlinked_bytes, 0);
+    for (method, path) in [
+        ("GET", "/datasets/comments/removals/transport"),
+        ("POST", "/datasets/comments/removals/transport/resume"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved: RemovalStatus =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap())
+                .unwrap();
+        assert_eq!(saved, status);
+    }
     assert!(std::path::Path::new(&object.path).exists());
 
     let mut oversized = request.clone();

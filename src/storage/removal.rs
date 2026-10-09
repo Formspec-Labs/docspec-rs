@@ -121,12 +121,23 @@ fn reconcile_absence(root: &Path, object: &ObjectRef) -> Result<bool> {
 }
 
 fn remove_file(root: &Path, object: &ObjectRef) -> Result<LocalRemovalOutcome> {
+    remove_file_with(root, object, |path| std::fs::remove_file(path), sync_parent)
+}
+
+// Keep the irreversible system calls injectable without a separate filesystem
+// implementation. A failed synchronization can follow a successful unlink.
+fn remove_file_with(
+    root: &Path,
+    object: &ObjectRef,
+    unlink: impl FnOnce(&Path) -> std::io::Result<()>,
+    synchronize: impl FnOnce(&Path) -> Result<()>,
+) -> Result<LocalRemovalOutcome> {
     let path = checked_path(root, object)?;
     let parent = path.parent().ok_or_else(invalid_path)?;
     let before = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            sync_parent(parent)?;
+            synchronize(parent)?;
             return Ok(LocalRemovalOutcome::Absent);
         }
         Err(_) => return Err(io_refusal()),
@@ -162,8 +173,8 @@ fn remove_file(root: &Path, object: &ObjectRef) -> Result<LocalRemovalOutcome> {
         &opened,
         &std::fs::symlink_metadata(path).map_err(|_| changed())?,
     )?;
-    std::fs::remove_file(path).map_err(|_| io_refusal())?;
-    sync_parent(parent)?;
+    unlink(path).map_err(|_| io_refusal())?;
+    synchronize(parent)?;
     Ok(LocalRemovalOutcome::Deleted)
 }
 
@@ -305,6 +316,62 @@ mod tests {
         assert_eq!(std::fs::read(neighbor).unwrap(), b"keep");
         assert_eq!(
             remove_owned_file(&root, &object, &budget).await.unwrap(),
+            LocalRemovalOutcome::Absent
+        );
+    }
+
+    #[test]
+    fn failed_unlink_preserves_bytes_and_does_not_synchronize() {
+        let (_temporary, root, object, _budget) = fixture();
+        let error = remove_file_with(
+            &root,
+            &object,
+            |_| Err(std::io::Error::from(ErrorKind::PermissionDenied)),
+            |_| panic!("failed unlink must not reach directory synchronization"),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "removal_io");
+        assert_eq!(std::fs::read(&object.path).unwrap(), b"original");
+        assert_eq!(
+            remove_file(&root, &object).unwrap(),
+            LocalRemovalOutcome::Deleted
+        );
+    }
+
+    #[test]
+    fn failed_directory_sync_reports_uncertainty_then_reconciles_absence() {
+        let (_temporary, root, object, _budget) = fixture();
+        let error = remove_file_with(
+            &root,
+            &object,
+            |path| std::fs::remove_file(path),
+            |_| {
+                Err(Error::refusal(
+                    "removal_sync",
+                    "injected synchronization failure",
+                ))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "removal_sync");
+        assert!(!Path::new(&object.path).exists());
+
+        // An absent file is still unresolved until its parent sync succeeds.
+        let error = remove_file_with(
+            &root,
+            &object,
+            |_| panic!("absence reconciliation must not unlink again"),
+            |_| {
+                Err(Error::refusal(
+                    "removal_sync",
+                    "injected synchronization failure",
+                ))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "removal_sync");
+        assert_eq!(
+            remove_file(&root, &object).unwrap(),
             LocalRemovalOutcome::Absent
         );
     }

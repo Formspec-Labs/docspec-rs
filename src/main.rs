@@ -212,6 +212,7 @@ enum PausedOperation {
     Backfill,
     Refresh,
     Schema,
+    Removal,
 }
 
 #[tokio::main(worker_threads = 12)]
@@ -280,29 +281,30 @@ async fn main() -> anyhow::Result<()> {
                 #[cfg(feature = "test-util")]
                 Command::PauseAfter { spec, phase, kind } => {
                     let result = match kind {
-                        PausedOperation::Build => {
-                            engine.run_until(&read_json::<RunSpec>(spec)?, &phase).await
-                        }
-                        PausedOperation::Update => {
-                            engine
-                                .update_until(&read_json::<UpdateSpec>(spec)?, &phase)
-                                .await
-                        }
-                        PausedOperation::Schema => {
-                            engine
-                                .schema_until(&read_json::<SchemaSpec>(spec)?, &phase)
-                                .await
-                        }
-                        PausedOperation::Backfill => {
-                            engine
-                                .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
-                                .await
-                        }
-                        PausedOperation::Refresh => {
-                            engine
-                                .refresh_until(&read_json::<RefreshSpec>(spec)?, &phase)
-                                .await
-                        }
+                        PausedOperation::Build => engine
+                            .run_until(&read_json::<RunSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Update => engine
+                            .update_until(&read_json::<UpdateSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Schema => engine
+                            .schema_until(&read_json::<SchemaSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Backfill => engine
+                            .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Refresh => engine
+                            .refresh_until(&read_json::<RefreshSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Removal => engine
+                            .removal_until(&read_json::<RemovalPlan>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
                     };
                     match result {
                         Err(error) if error.code() == "injected_failure" => {
