@@ -7,9 +7,11 @@ pub mod budget;
 pub mod catalog;
 pub mod engine;
 pub mod error;
+pub mod export;
 pub mod http;
 pub mod model;
 mod query;
+pub mod restore;
 pub mod storage;
 
 #[doc(inline)]

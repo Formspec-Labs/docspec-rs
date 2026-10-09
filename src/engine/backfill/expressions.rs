@@ -85,6 +85,9 @@ impl Expressions {
                     observes_metadata |= function.func.name() == "arrow_metadata";
                 }
                 if let Expr::Column(column) = part {
+                    if storage::identity::hidden(&column.name) {
+                        return Err(query_error(Error::refusal("invalid_expression", "computed expressions cannot consume internal occurrence storage fields")));
+                    }
                     let id = match binding {
                         Some(binding) => *binding.get(&column.name).ok_or_else(invalid_binding).map_err(query_error)?,
                         None => native_source.as_struct().fields()[source.index_of(&column.name)?].id,

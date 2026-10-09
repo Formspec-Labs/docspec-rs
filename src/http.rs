@@ -5,11 +5,14 @@
 
 use crate::{
     Engine, Error,
+    export::{ExportPin, ExportSpec},
     model::{
-        Abandonment, BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
-        ReleasePin, RemovalPlan, RemovalStatus, RetentionInspection, RetentionPlan, Retirement,
-        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
+        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, GenerationSeal, Id,
+        InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan, RemovalStatus,
+        RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec, SuccessionProof,
+        UpdateSpec, VersionRef,
     },
+    restore::RestorePointRef,
 };
 use axum::{
     Json, Router,
@@ -36,6 +39,9 @@ pub fn router(engine: Engine) -> Router {
         .route("/backfills/run", post(backfill))
         .route("/refreshes/plan", post(plan_refresh))
         .route("/refreshes/run", post(refresh))
+        .route("/exports/run", post(export))
+        .route("/compactions/run", post(compact))
+        .route("/restore-points", post(create_restore_point))
         .route("/succession", post(succession))
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
@@ -52,6 +58,14 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/retention/phases/plan", post(plan_phase_retirement))
         .route("/retention/phases/retire", post(retire_phases))
+        .route(
+            "/retention/restore-points/plan",
+            post(plan_restore_point_retirement),
+        )
+        .route(
+            "/retention/restore-points/retire",
+            post(retire_restore_points),
+        )
         .route("/retention/grants/plan", post(plan_grant_retirement))
         .route("/retention/grants/retire", post(retire_grants))
         .route(
@@ -71,6 +85,11 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/datasets/{dataset}/latest", get(latest))
         .route("/datasets/{dataset}/versions/{version}", get(release))
+        .route(
+            "/datasets/{dataset}/exports/channels/{channel}",
+            get(latest_export),
+        )
+        .route("/datasets/{dataset}/exports/{operation}", get(export_pin))
         .route(
             "/datasets/{dataset}/versions/{version}/arrow",
             get(read_combined),
@@ -182,6 +201,38 @@ async fn retire_phases(
     Ok(Json(engine.retire_phases(&plan).await?))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestorePointRetirementRequest {
+    dataset: Id,
+    retirement: Id,
+    points: Vec<Id>,
+    reason: String,
+}
+
+async fn plan_restore_point_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<RestorePointRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_restore_point_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.points,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_restore_points(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_restore_points(&plan).await?))
+}
+
 async fn plan_grant_retirement(
     State(engine): State<Engine>,
     Json(request): Json<KeyRetirementRequest>,
@@ -269,8 +320,8 @@ impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
             "availability_retired" => StatusCode::GONE,
-            "no_release" | "no_operation" | "no_phase" | "no_removal" | "missing_group"
-            | "missing_evidence" => StatusCode::NOT_FOUND,
+            "no_release" | "no_export" | "no_operation" | "no_phase" | "no_removal"
+            | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
             "operation_conflict"
             | "selected_result"
             | "operation_active"
@@ -291,6 +342,10 @@ impl IntoResponse for HttpError {
             | "stale_eligibility"
             | "stale_input"
             | "pending_source"
+            | "export_conflict"
+            | "export_regression"
+            | "stale_export"
+            | "stale_representation"
             | "coverage_regression" => StatusCode::CONFLICT,
             "stale_base" | "stale_source_boundary" | "stale_group" | "unproven_succession" => {
                 StatusCode::CONFLICT
@@ -330,6 +385,60 @@ async fn run(
     Json(spec): Json<RunSpec>,
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.run(&spec).await?))
+}
+
+async fn export(
+    State(engine): State<Engine>,
+    Json(spec): Json<ExportSpec>,
+) -> Result<Json<ExportPin>, HttpError> {
+    Ok(Json(engine.export(&spec).await?))
+}
+
+async fn latest_export(
+    State(engine): State<Engine>,
+    Path((dataset, channel)): Path<(String, String)>,
+) -> Result<Json<ExportPin>, HttpError> {
+    Ok(Json(
+        engine
+            .latest_export(&Id::new(dataset)?, &Id::new(channel)?)
+            .await?,
+    ))
+}
+
+async fn export_pin(
+    State(engine): State<Engine>,
+    Path((dataset, operation)): Path<(String, String)>,
+) -> Result<Json<ExportPin>, HttpError> {
+    Ok(Json(
+        engine
+            .export_pin(&Id::new(dataset)?, &Id::new(operation)?)
+            .await?,
+    ))
+}
+
+async fn compact(
+    State(engine): State<Engine>,
+    Json(spec): Json<CompactionSpec>,
+) -> Result<Json<CompactionResult>, HttpError> {
+    Ok(Json(engine.compact(&spec).await?))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestorePointRequest {
+    dataset: Id,
+    point: Id,
+}
+
+async fn create_restore_point(
+    State(engine): State<Engine>,
+    Json(request): Json<RestorePointRequest>,
+) -> Result<Json<RestorePointRef>, HttpError> {
+    Ok(Json(
+        engine
+            .create_restore_point(&request.dataset, &request.point)
+            .await?,
+    ))
 }
 async fn plan_update(
     State(engine): State<Engine>,

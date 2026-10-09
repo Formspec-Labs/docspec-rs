@@ -77,6 +77,45 @@ pub struct TablePin {
     pub schema_id: i32,
     pub objects: Vec<ObjectRef>,
     pub rows: u64,
+    /// Original logical state when this pin is a verified equivalent representation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_metadata: Option<ObjectRef>,
+}
+
+impl TablePin {
+    /// Returns the original metadata identity of this unchanged logical state.
+    pub fn logical_metadata(&self) -> &ObjectRef {
+        self.logical_metadata.as_ref().unwrap_or(&self.metadata)
+    }
+}
+
+/// Rewrites selected live files while preserving their logical group state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactionSpec {
+    pub dataset: Id,
+    pub operation: Id,
+    pub version: Id,
+    pub group: String,
+    /// Empty selects every live data file; supplied paths must be distinct and current.
+    #[serde(default)]
+    pub files: Vec<String>,
+    pub target_file_bytes: usize,
+}
+
+/// Exact equivalent physical representation and measured rewrite sizes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactionResult {
+    pub spec: CompactionSpec,
+    pub source: TablePin,
+    pub replacement: TablePin,
+    pub input_files: Vec<String>,
+    pub output_files: Vec<String>,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+    pub rows: u64,
+    pub verified: bool,
 }
 
 /// Exact native interpretation without copying the table's physical object inventory.
@@ -509,6 +548,7 @@ pub enum RetirementScope {
     ResultAvailability { operation: OperationId },
     OperationRecovery { operation: OperationId },
     OwnerGrants,
+    RestorePoints,
 }
 
 /// Explicit retirement of retained promises, without deleting physical objects.

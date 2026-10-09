@@ -405,7 +405,7 @@ pub(super) async fn verify_group_data(
     if !checks.deep() {
         return Ok(());
     }
-    {
+    if !storage::identity::has_origins(source_native.metadata().current_schema())? {
         let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
         let inventory = storage::snapshot_files(&source_native, budget).await?;
         let mut coverage: BTreeMap<String, FileCoverage> = inventory
@@ -468,8 +468,9 @@ pub(super) async fn verify_group_data(
             return Err(invalid_group());
         }
     }
-    // Coverage establishes one row per exact source occurrence. Reconstruct its
-    // values through a separate relational plan rather than trusting writer output.
+    // A full join detects every absent or invented stable identity. Native row
+    // counts are equal and source identities are unique, so complete coverage
+    // also excludes repeated computed occurrences without another payload scan.
     let context = budget.context();
     context.register_table(
         "source",
@@ -507,7 +508,9 @@ pub(super) async fn verify_group_data(
             ))
         })
         .reduce(Expr::or)
-        .ok_or_else(invalid_group)?;
+        .ok_or_else(invalid_group)?
+        .or(qualified("e", storage::OCCURRENCE_FILE).is_null())
+        .or(qualified("a", storage::OCCURRENCE_FILE).is_null());
     let locations = [storage::OCCURRENCE_FILE, storage::OCCURRENCE_ROW]
         .into_iter()
         .map(|field| qualified("e", field).eq(qualified("a", field)));
@@ -517,7 +520,7 @@ pub(super) async fn verify_group_data(
         .alias("e")?
         .join_on(
             context.table("actual").await?.alias("a")?,
-            JoinType::Inner,
+            JoinType::Full,
             locations,
         )?
         .filter(different)?

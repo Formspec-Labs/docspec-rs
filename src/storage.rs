@@ -1,6 +1,7 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
 pub(crate) mod defaults;
+pub(crate) mod identity;
 mod inspection;
 mod occurrences;
 pub(crate) mod removal;
@@ -51,12 +52,14 @@ use std::{
 /// # Errors
 /// Returns filesystem, SQLite driver, or catalog initialization errors.
 pub async fn local_catalog(root: &Path) -> Result<Arc<dyn Catalog>> {
+    local_catalog_at(root, &crate::restore::catalog_path(root)?).await
+}
+
+/// Opens one explicitly selected native catalog during fenced local recovery.
+pub(crate) async fn local_catalog_at(root: &Path, file: &Path) -> Result<Arc<dyn Catalog>> {
     std::fs::create_dir_all(root.join("warehouse"))?;
     let catalog = SqlCatalogBuilder::default()
-        .uri(format!(
-            "sqlite://{}?mode=rwc",
-            root.join("catalog.sqlite").display()
-        ))
+        .uri(format!("sqlite://{}?mode=rwc", file.display()))
         .warehouse_location(root.join("warehouse").to_string_lossy())
         .sql_bind_style(SqlBindStyle::QMark)
         .with_storage_factory(Arc::new(LocalFsStorageFactory))
@@ -167,76 +170,185 @@ async fn check_objects(
         .await
 }
 
-pub(crate) async fn write_batches<S>(
-    table: &Table,
+// Keep the large maintained writer future out of each caller's poll frame.
+// This boundary covers every writer, including both halves of paired changes.
+pub(crate) fn write_batches<'a, S>(
+    table: &'a Table,
     batches: S,
-    budget: &Budget,
-) -> Result<Vec<DataFile>>
+    budget: &'a Budget,
+) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
 where
-    S: Stream<Item = Result<RecordBatch>> + Send,
+    S: Stream<Item = Result<RecordBatch>> + Send + 'a,
 {
-    // Parquet and rolling-file buffers survive individual writes. Keep their
-    // admission for the entire writer lifetime, including close and flush.
-    let _reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(4))?;
-    let props = WriterProperties::builder()
-        .set_max_row_group_row_count(Some(budget.limits.batch_rows))
-        // The retained Comments probe found large avoidable uncompressed output.
-        // Keep the maintained default Zstandard level; see the codec experiment.
-        .set_compression(Compression::ZSTD(ZstdLevel::default()))
-        .build();
-    let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
-        .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
-    let rolling = RollingFileWriterBuilder::new(
-        parquet,
-        budget.limits.max_batch_bytes,
-        table.file_io().clone(),
-        DefaultLocationGenerator::new(table.metadata())?,
-        DefaultFileNameGenerator::new(
-            uuid::Uuid::new_v4().to_string(),
-            None,
-            DataFileFormat::Parquet,
-        ),
-    );
-    let mut writer = UnpartitionedWriter::new(DataFileWriterBuilder::new(rolling));
-    futures::pin_mut!(batches);
-    while let Some(batch) = batches.try_next().await? {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-        let bytes = batch.get_array_memory_size();
-        if bytes > budget.limits.max_batch_bytes {
+    write_batches_sized(table, batches, budget, budget.limits.max_batch_bytes)
+}
+
+pub(crate) fn write_batches_sized<'a, S>(
+    table: &'a Table,
+    batches: S,
+    budget: &'a Budget,
+    target_file_bytes: usize,
+) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
+where
+    S: Stream<Item = Result<RecordBatch>> + Send + 'a,
+{
+    Box::pin(async move {
+        if target_file_bytes == 0 {
             return Err(Error::refusal(
-                "oversized_batch",
-                format!(
-                    "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
-                    budget.limits.max_batch_bytes
-                ),
+                "invalid_compaction",
+                "output file size must be positive",
             ));
         }
-        // Literal expressions may be non-nullable even for optional native
-        // fields. Preserve the native physical nullability, without copying values.
-        let expected = table.metadata().current_schema();
-        let fields = batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| {
-                let native = expected.field_by_name(field.name()).ok_or_else(|| {
+        // Parquet and rolling-file buffers survive individual writes. Keep their
+        // admission for the entire writer lifetime, including close and flush.
+        let _reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(4))?;
+        let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
+        // The maintained rolling writer retains completed file descriptors and the
+        // open Parquet footer. Bound both before admitting another batch. Chunk-only
+        // truncated statistics keep variable-size values and page indexes from
+        // turning a small descriptor count into an unbounded metadata allocation.
+        let unit_metadata_bytes = table
+            .metadata()
+            .current_schema()
+            .field_id_to_name_map()
+            .values()
+            .fold(2048_usize, |bytes, name| {
+                bytes
+                    .saturating_add(2048)
+                    .saturating_add(name.len().saturating_mul(4))
+            });
+        let mut metadata_bytes = 0usize;
+        let mut retained_bytes = 0usize;
+        let mut completed = Vec::new();
+        let props = WriterProperties::builder()
+            .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .set_statistics_truncate_length(Some(64))
+            .set_offset_index_disabled(true)
+            .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+            // The retained Comments probe found large avoidable uncompressed output.
+            // Keep the maintained default Zstandard level; see the codec experiment.
+            .set_compression(Compression::ZSTD(ZstdLevel::default()))
+            .build();
+        let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
+            .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
+        let rolling = RollingFileWriterBuilder::new(
+            parquet,
+            target_file_bytes,
+            table.file_io().clone(),
+            DefaultLocationGenerator::new(table.metadata())?,
+            DefaultFileNameGenerator::new(
+                uuid::Uuid::new_v4().to_string(),
+                None,
+                DataFileFormat::Parquet,
+            ),
+        );
+        let new_writer = || UnpartitionedWriter::new(DataFileWriterBuilder::new(rolling.clone()));
+        let mut writer = new_writer();
+        let expected_arrow =
+            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
+        let origin = format!("docspec:{}", uuid::Uuid::new_v4());
+        let mut next_row = 0u64;
+        futures::pin_mut!(batches);
+        while let Some(batch) = batches.try_next().await? {
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let batch =
+                identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
+            next_row = next_row
+                .checked_add(batch.num_rows() as u64)
+                .ok_or_else(|| {
                     Error::refusal(
-                        "schema_mismatch",
-                        "writer field is absent from native schema",
+                        "occurrence_count",
+                        "writer occurrence positions exceed the supported range",
                     )
                 })?;
-                Ok(field.as_ref().clone().with_nullable(!native.required))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let batch = RecordBatch::try_new(
-            Arc::new(arrow::datatypes::Schema::new(fields)),
-            batch.columns().to_vec(),
-        )?;
-        writer.write(batch).await?;
-    }
-    Ok(writer.close().await?)
+            let bytes = batch.get_array_memory_size();
+            if bytes > budget.limits.max_batch_bytes {
+                return Err(Error::refusal(
+                    "oversized_batch",
+                    format!(
+                        "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
+                        budget.limits.max_batch_bytes
+                    ),
+                ));
+            }
+            // A write can finish the preceding row group, create new groups, and
+            // roll a file. This conservative total also covers descriptors retained
+            // after the underlying file closes. It is admission, not an RSS estimate.
+            let units = batch
+                .num_rows()
+                .div_ceil(budget.limits.batch_rows)
+                .saturating_add(1);
+            let incoming = units.saturating_mul(unit_metadata_bytes);
+            // Periodically finish the maintained writer, releasing its accumulated
+            // footers. Keep only bounded file descriptors, so this admission grows
+            // with output files instead of every row group in the entire population.
+            if metadata_bytes != 0
+                && metadata_bytes.saturating_add(incoming) > budget.limits.max_metadata_bytes / 2
+            {
+                let files = writer.close().await?;
+                for file in &files {
+                    retained_bytes = retained_bytes
+                        .saturating_add(unit_metadata_bytes)
+                        .saturating_add(file.file_path().len().saturating_mul(4))
+                        .saturating_add(
+                            file.split_offsets()
+                                .map_or(0, |offsets| offsets.len().saturating_mul(16)),
+                        );
+                }
+                completed.extend(files);
+                writer = new_writer();
+                metadata_bytes = 0;
+            }
+            metadata_bytes = metadata_bytes.saturating_add(incoming);
+            if retained_bytes.saturating_add(metadata_bytes) > budget.limits.max_metadata_bytes {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "native writer file and row-group metadata exceed the declared allowance",
+                ));
+            }
+            // Literal expressions may be non-nullable even for optional native
+            // fields. Preserve the native physical nullability, without copying values.
+            let expected = table.metadata().current_schema();
+            let mut columns = batch.columns().to_vec();
+            let fields = batch
+                .schema()
+                .fields()
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                        Error::refusal(
+                            "schema_mismatch",
+                            "writer field is absent from native schema",
+                        )
+                    })?;
+                    let mut field = field.as_ref().clone().with_nullable(!native.required);
+                    let target = expected_arrow.field_with_name(field.name())?.data_type();
+                    // Iceberg stores zoned timestamps as UTC. Arrow can label that
+                    // same instant with "UTC", "+00:00", or another zone; normalize
+                    // only zone metadata, retaining the exact unit and epoch values.
+                    if let (
+                        arrow::datatypes::DataType::Timestamp(unit, Some(_)),
+                        arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
+                    ) = (field.data_type(), target)
+                        && unit == target_unit
+                        && field.data_type() != target
+                    {
+                        columns[index] = arrow::compute::cast(&columns[index], target)?;
+                        field = field.with_data_type(target.clone());
+                    }
+                    Ok(field)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let batch =
+                RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
+            writer.write(batch).await?;
+        }
+        completed.extend(writer.close().await?);
+        Ok(completed)
+    })
 }
 
 pub(crate) async fn append(
@@ -529,7 +641,7 @@ pub(crate) async fn pin(
         }
         let metadata = objects.iter().find(|object| object.path == metadata_path).cloned()
             .ok_or_else(|| Error::refusal("incomplete_inventory", "native metadata is absent from snapshot inventory"))?;
-        Ok(TablePin { table: name, metadata, snapshot, schema_id, objects, rows })
+        Ok(TablePin { table: name, metadata, snapshot, schema_id, objects, rows, logical_metadata: None })
     }).await
 }
 

@@ -29,6 +29,7 @@ fn object(root: &Path, owner: &str, name: &str) -> ObjectRef {
 fn table(root: &Path, owner: &str, name: &str) -> TablePin {
     let metadata = object(root, owner, &format!("{name}.metadata.json"));
     TablePin {
+        logical_metadata: None,
         table: name.into(),
         metadata: metadata.clone(),
         snapshot: Some(1),
@@ -423,7 +424,7 @@ async fn native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar
     native.digest = blake3::hash(&bytes).to_hex().to_string();
     let mut inventory = Inventory::collecting(limits().max_metadata_bytes).unwrap();
     inventory.native(&native, &origin()).unwrap();
-    inventory.expand(&budget).await.unwrap();
+    inventory.expand(&budget, root.path()).await.unwrap();
     assert_eq!(inventory.metadata_objects_read, 1);
     assert!(
         inventory
@@ -439,7 +440,7 @@ async fn native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar
     );
     let mut inventory = Inventory::collecting(limits().max_metadata_bytes).unwrap();
     inventory.native(&native, &origin()).unwrap();
-    inventory.expand(&budget).await.unwrap();
+    inventory.expand(&budget, root.path()).await.unwrap();
     inventory.object(&sidecar, &origin()).unwrap();
     let references = inventory.into_references().unwrap();
     assert!(references.contains(&native));

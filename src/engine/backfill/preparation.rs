@@ -31,7 +31,7 @@ impl Engine {
         )?);
         let digest = blake3::hash(&serde_json::to_vec(&(
             PROCESSOR,
-            &source.metadata,
+            source.logical_metadata(),
             definition,
             &expressions.input_fields,
         ))?)
@@ -449,9 +449,11 @@ fn check_group_dependencies(
     // The prepared key already binds source metadata for legacy completions.
     // Known dependencies additionally bind the exact source and output snapshots.
     if let Some(dependencies) = dependencies
-        && (dependencies.source.metadata != source.metadata
-            || dependencies.source.snapshot != source.snapshot
-            || dependencies.source.schema_id != source.schema_id
+        && (!((dependencies.source.metadata == source.metadata
+            && dependencies.source.snapshot == source.snapshot
+            && dependencies.source.schema_id == source.schema_id)
+            || (source.logical_metadata.is_some()
+                && &dependencies.source.metadata == source.logical_metadata()))
             || dependencies.output.metadata != output.metadata
             || dependencies.output.snapshot != output.snapshot
             || dependencies.output.schema_id != output.schema_id)

@@ -258,6 +258,42 @@ impl Engine {
     ) -> Result<(TablePin, u64)> {
         let budget = &self.inner.lifecycle.budget;
         let old_native = storage::open_pin(old).await?;
+        let schema = storage::occurrence_schema(&old_native)?;
+        let indices = keys
+            .iter()
+            .map(|key| schema.index_of(key))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let key_schema = Arc::new(Schema::new(if keys.is_empty() {
+            vec![arrow::datatypes::Field::new(
+                "k0",
+                arrow::datatypes::DataType::Int64,
+                true,
+            )]
+        } else {
+            indices
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    schema
+                        .field(*field)
+                        .clone()
+                        .with_name(format!("k{index}"))
+                        .with_nullable(true)
+                })
+                .collect::<Vec<_>>()
+        }));
+        let table = self
+            .create_output(
+                dataset,
+                directory,
+                iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(&key_schema)?,
+            )
+            .await?;
+        // Equivalent representations carry their original logical identity. Resolve
+        // this before file discovery so physical rewrites never generate work keys.
+        if old.logical_metadata() == new.logical_metadata() {
+            return Ok((storage::pin(dataset, &table, 0, budget, &[]).await?, 0));
+        }
         let new_native = storage::open_pin(new).await?;
         let old_scan = storage::OccurrenceScan::open(&old_native, budget).await?;
         let new_scan = storage::OccurrenceScan::open(&new_native, budget).await?;
@@ -305,37 +341,6 @@ impl Engine {
                 ));
             }
         }
-        let schema = storage::occurrence_schema(&old_native)?;
-        let indices = keys
-            .iter()
-            .map(|key| schema.index_of(key))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let key_schema = Arc::new(Schema::new(if keys.is_empty() {
-            vec![arrow::datatypes::Field::new(
-                "k0",
-                arrow::datatypes::DataType::Int64,
-                true,
-            )]
-        } else {
-            indices
-                .iter()
-                .enumerate()
-                .map(|(index, field)| {
-                    schema
-                        .field(*field)
-                        .clone()
-                        .with_name(format!("k{index}"))
-                        .with_nullable(true)
-                })
-                .collect::<Vec<_>>()
-        }));
-        let table = self
-            .create_output(
-                dataset,
-                directory,
-                iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(&key_schema)?,
-            )
-            .await?;
         let changed = old_files
             .keys()
             .filter(|path| !new_files.contains_key(*path))
@@ -499,7 +504,7 @@ pub(super) async fn qualify(
         let new = refresh::read_release(new, budget, &mut bytes, &memory).await?;
         let old = storage::open_pin(source(&old)?).await?;
         let new = storage::open_pin(source(&new)?).await?;
-        if old.metadata().current_schema() != new.metadata().current_schema() {
+        if storage::identity::public_schema(&old)? != storage::identity::public_schema(&new)? {
             return Err(full_refresh());
         }
     }

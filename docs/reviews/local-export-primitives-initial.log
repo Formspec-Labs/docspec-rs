@@ -1,0 +1,25 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.48s
+     Running tests/exports.rs (target/debug/deps/exports-4441b6c55cd33e6a)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1M4hII/workspace/objects/primitives/d36ae04621e64d0aabe7a31e5dfe4607/data/0d0240d5-d252-481f-93cd-26fa53493c3a-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'primitive_exports_preserve_types_values_nulls_and_authorized_column_order' (25469972) panicked at tests/exports.rs:330:42:
+called `Result::unwrap()` on an `Err` value: Error { code: "unsupported_export_type", message: "local flat export column bytes has unsupported type LargeBinary", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... FAILED
+
+failures:
+
+failures:
+    primitive_exports_preserve_types_values_nulls_and_authorized_column_order
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.44s
+
+error: test failed, to rerun pass `--test exports`

@@ -806,7 +806,22 @@ async fn visit_creation(
         if revision <= 0 || revision > view.revision {
             return Err(invalid());
         }
-        if key.starts_with("phase/backfill/") {
+        if key.starts_with("restore-materialized/") {
+            let created: crate::restore::RestoreMaterialized = serde_json::from_str(json)?;
+            observe(&created.reference.manifest)?;
+            observe(&created.catalog)?;
+            for object in &created.backups {
+                observe(object)?;
+            }
+        } else if key.starts_with("export-materialized/") {
+            let output: crate::engine::export::ExportMaterialized = serde_json::from_str(json)?;
+            observe(&output.object)?;
+        } else if key.starts_with("compaction-prepared/") {
+            let result: CompactionResult = serde_json::from_str(json)?;
+            for object in &result.replacement.objects {
+                observe(object)?;
+            }
+        } else if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = serde_json::from_str(json)?;
             observe(&phase.descriptor)?;
             for object in &phase.outputs {

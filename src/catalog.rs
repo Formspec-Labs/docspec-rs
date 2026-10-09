@@ -749,27 +749,39 @@ mod tests {
     async fn ordinary_commit_preserves_exact_terminal_headroom() {
         let root = tempfile::tempdir().unwrap();
         let catalog = storage::local_catalog(root.path()).await.unwrap();
+        // Historical generations fill replay capacity while the current cache
+        // stays small and the bounded native writer keeps its working room.
+        let earlier_commits = 8;
+        let mut intent = removal_intent("a");
+        intent.revision = earlier_commits + 1;
         let state_key = "removal-state/a";
-        let terminal = removal_state(1, 0);
+        let terminal = removal_state(intent.revision, 0);
         let terminal_charge =
             history_row_bytes(state_key, &serde_json::to_string(&terminal).unwrap());
         let floor = crate::engine::retention::removal::validate_progress(
-            &removal_intent("a"),
-            &removal_state(1, u64::MAX),
+            &intent,
+            &removal_state(intent.revision, u64::MAX),
         )
         .unwrap();
-        let pending = removal_state(1, floor as u64);
-        let history = history_row_bytes(
-            "removal-intent/a",
-            &serde_json::to_string(&removal_intent("a")).unwrap(),
-        ) + history_row_bytes(state_key, &serde_json::to_string(&pending).unwrap());
+        let pending = removal_state(intent.revision, floor as u64);
+        let previous = "x".repeat(2048);
+        let history = earlier_commits as usize
+            * history_row_bytes("prior-status", &serde_json::to_string(&previous).unwrap())
+            + history_row_bytes("removal-intent/a", &serde_json::to_string(&intent).unwrap())
+            + history_row_bytes(state_key, &serde_json::to_string(&pending).unwrap());
         let lifecycle = Lifecycle::new(catalog.clone(), test_budget(history + floor));
-        let view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
+        let mut view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
+        for _ in 0..earlier_commits {
+            view = lifecycle
+                .commit(&view, vec![record("prior-status", &previous).unwrap()])
+                .await
+                .unwrap();
+        }
         let view = lifecycle
             .commit(
                 &view,
                 vec![
-                    record("removal-intent/a", removal_intent("a")).unwrap(),
+                    record("removal-intent/a", intent).unwrap(),
                     record(state_key, pending).unwrap(),
                 ],
             )

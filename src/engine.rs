@@ -27,14 +27,17 @@ mod backfill;
 #[doc(inline)]
 pub use backfill::{BackfillPlan, read_combined};
 mod changes;
+mod compaction;
+mod export;
 mod history;
+mod restore;
 use changes::verify_changes;
 mod inputs;
 #[doc(inline)]
 pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
-pub use read::{read_evidence, read_group};
+pub use read::{read_compaction, read_evidence, read_group};
 mod aggregation;
 mod incremental;
 mod refresh;

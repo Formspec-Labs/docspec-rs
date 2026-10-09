@@ -14,7 +14,7 @@ mod inventory;
 pub(super) mod owners;
 mod recovery;
 pub(crate) mod removal;
-mod retirement;
+pub(in crate::engine) mod retirement;
 
 impl Engine {
     /// Proves that every unselected admission in a captured interval was abandoned.

@@ -19,8 +19,14 @@ impl Engine {
         let release = release.clone();
         let group = group.to_owned();
         self.admit_stream(memory, move |engine| async move {
-            engine.check_read_release(&release).await?;
-            read_group(&release, &group, &engine.inner.lifecycle.budget).await
+            let view = engine.check_read_release(&release).await?;
+            let canonical = release.dataset.groups.get(&group).ok_or_else(|| {
+                Error::refusal("missing_group", "release lacks the requested field group")
+            })?;
+            let pin = engine
+                .representation_pin(&view, &release.id, &group, canonical)
+                .await?;
+            read_pin(&pin, &engine.inner.lifecycle.budget).await
         })
         .await
     }
@@ -36,12 +42,15 @@ impl Engine {
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
             engine.check_read_release(&release).await?;
-            read_evidence(&release, &engine.inner.lifecycle.budget).await
+            let related = release.dataset.related.as_ref().ok_or_else(|| {
+                Error::refusal("missing_evidence", "release has no contributor relation")
+            })?;
+            read_pin(&related.evidence, &engine.inner.lifecycle.budget).await
         })
         .await
     }
 
-    pub(super) async fn check_read_release(&self, release: &ReleasePin) -> Result<()> {
+    pub(super) async fn check_read_release(&self, release: &ReleasePin) -> Result<View> {
         if !release.verified || release.id != release.dataset.version {
             return Err(Error::refusal(
                 "release_mismatch",
@@ -86,7 +95,7 @@ impl Engine {
                 && revision <= view.revision
                 && retained == *release
             {
-                return Ok(());
+                return Ok(view);
             }
         }
         Err(Error::refusal(
@@ -139,13 +148,30 @@ pub async fn read_evidence(
     read_pin(&related.evidence, budget).await
 }
 
-async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
+pub(super) async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
     let table = storage::open_pin(pin).await?;
-    let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
-        table.metadata().current_schema(),
-    )?);
+    let schema = storage::identity::public_schema(&table)?;
     let stream = storage::read_batches(&table, budget)
         .await?
+        .and_then(|batch| async move { storage::identity::public_batch(batch) })
         .map_err(|error| datafusion::error::DataFusionError::External(Box::new(error)));
     Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+}
+
+/// Streams a verified physical representation without requiring its producer.
+/// The caller retains its immutable files for the lifetime of the stream.
+///
+/// # Errors
+/// Refuses unverified representations, unreadable native files, or capacity errors.
+pub async fn read_compaction(
+    result: &CompactionResult,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    if !result.verified {
+        return Err(Error::refusal(
+            "invalid_compaction",
+            "representation is not verified",
+        ));
+    }
+    read_pin(&result.replacement, budget).await
 }

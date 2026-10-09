@@ -17,7 +17,8 @@ pub(super) struct RetiredRecord {
 }
 
 pub(in crate::engine) fn completion_key(key: &str) -> bool {
-    key.starts_with("phase/backfill/")
+    key.starts_with("restore-reuse/")
+        || key.starts_with("phase/backfill/")
         || (key.starts_with("phase/")
             && ["/admission", "/processing", "/validation", "/evidence"]
                 .iter()
@@ -30,6 +31,7 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
 pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
     match scope {
         RetirementScope::PhaseRecovery => completion_key(key),
+        RetirementScope::RestorePoints => key.starts_with("restore-point/"),
         RetirementScope::OwnerGrants => super::grants::grant_key(key),
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
@@ -48,6 +50,7 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
 
 pub(super) fn retained_key(key: &str) -> bool {
     completion_key(key)
+        || key.starts_with("restore-point/")
         || key.starts_with("result/")
         || key.starts_with("readback/")
         || key.starts_with("backfill-readback/")
@@ -364,6 +367,81 @@ impl Engine {
             reason,
             phases,
         )
+    }
+
+    /// Captures explicit retirement of named local restore promises.
+    /// Backup bytes remain until a separately authorized removal becomes eligible.
+    ///
+    /// # Errors
+    /// Refuses missing/retired points, duplicate names, or changed native authority.
+    pub async fn plan_restore_point_retirement(
+        &self,
+        dataset: &Id,
+        retirement: &Id,
+        points: &[Id],
+        reason: &str,
+    ) -> Result<RetentionPlan> {
+        let memory = self.request_memory(&(dataset, retirement, points, reason))?;
+        let dataset = dataset.clone();
+        let retirement = retirement.clone();
+        let points = points.to_vec();
+        let reason = reason.to_owned();
+        self.admit_work(memory, move |engine| async move {
+            engine.retirement_catalog()?;
+            let mut keys = points
+                .iter()
+                .map(|point| format!("restore-point/{point}"))
+                .collect::<Vec<_>>();
+            keys.sort();
+            if keys.is_empty()
+                || reason.trim().is_empty()
+                || keys.windows(2).any(|pair| pair[0] == pair[1])
+            {
+                return Err(invalid_retirement());
+            }
+            let lock = engine.lock(&dataset).await;
+            let _guard = lock.lock().await;
+            let view = engine.inner.lifecycle.open(&dataset).await?;
+            let rows = engine.inner.lifecycle.rows(&view).await?;
+            let mut records = Vec::with_capacity(keys.len());
+            for key in keys {
+                let (revision, _, point) = rows
+                    .get_record::<crate::restore::RestorePointRef>(&key)?
+                    .ok_or_else(|| {
+                        Error::refusal("no_restore_point", "requested restore point is unavailable")
+                    })?;
+                if point.dataset != dataset || key != format!("restore-point/{}", point.id) {
+                    return Err(invalid_retirement());
+                }
+                if record_retired(&rows, &view, &key, revision, &engine.inner.lifecycle.budget)? {
+                    return Err(Error::refusal(
+                        "restore_point_retired",
+                        "requested restore point is already retired",
+                    ));
+                }
+                records.push(RetainedGeneration { key, revision });
+            }
+            plan(
+                &view,
+                dataset,
+                retirement,
+                RetirementScope::RestorePoints,
+                reason,
+                records,
+            )
+        })
+        .await
+    }
+
+    /// Ends only the exact restore promises captured by a reviewed plan.
+    ///
+    /// # Errors
+    /// Refuses changed generations, conflicting retries, or another retirement scope.
+    pub async fn retire_restore_points(&self, plan: &RetentionPlan) -> Result<Retirement> {
+        if plan.scope != RetirementScope::RestorePoints {
+            return Err(invalid_retirement());
+        }
+        self.retire_retained(plan).await
     }
 
     /// Retires only the exact completion generations named by a captured plan.

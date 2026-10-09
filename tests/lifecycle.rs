@@ -394,7 +394,9 @@ async fn every_acknowledged_metadata_update_survives_cache_loss() {
     let directory = TempDir::new().unwrap();
     let catalog = storage::local_catalog(directory.path()).await.unwrap();
     let profile = Limits {
-        max_metadata_bytes: 4096,
+        // Admit the native writer's fixed metadata before exhausting retained
+        // history. Refusal must preserve every previously acknowledged update.
+        max_metadata_bytes: 64 << 10,
         ..limits()
     };
     let lifecycle = Lifecycle::new(catalog.clone(), Budget::new(profile.clone()).unwrap());
@@ -402,7 +404,7 @@ async fn every_acknowledged_metadata_update_survives_cache_loss() {
     let mut view = lifecycle.open(&dataset).await.unwrap();
     let mut acknowledged = None;
     for revision in 0..100 {
-        let value = format!("{revision}:{}", "x".repeat(256));
+        let value = format!("{revision}:{}", "x".repeat(4096));
         match lifecycle
             .commit(&view, vec![record("authority", &value).unwrap()])
             .await

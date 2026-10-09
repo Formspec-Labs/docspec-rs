@@ -1,0 +1,70 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.98s
+     Running tests/exports.rs (target/debug/deps/exports-4441b6c55cd33e6a)
+
+running 10 tests
+test empty_snapshot_keeps_standalone_schema_and_explicit_policy ... ok
+test primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... ok
+test independent_parquet_contains_only_authorized_columns_and_exact_occurrences ... ok
+test validation_and_selection_resume_without_opening_the_source_again ... ok
+test flat_export_footer_limit_preserves_prior_selection_and_can_resume ... ok
+test stale_authority_and_channel_keep_completed_output_without_promotion ... ok
+test http_exports_compaction_and_restore_points_use_the_shared_services ... ok
+test replacements_deletions_and_old_downloads_follow_their_exact_snapshots ... ok
+test cli_compaction_and_offline_restore_share_the_application_paths ... ok
+test killed_export_workers_resume_without_repeating_completed_work ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.08s
+
+     Running tests/restore.rs (target/debug/deps/restore-3a394b6257246dbd)
+
+running 12 tests
+test delayed_writer_child ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test corruption_and_foreign_workspace_refuse_before_catalog_selection ... ok
+test catalog_loss_requires_explicit_artifact_import ... ok
+test live_engine_and_held_stream_keep_the_storage_fence ... ok
+test explicit_retirement_ends_restore_admission_and_preserves_creation_evidence ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+test explicitly_retired_shared_preparation_refuses_same_point_retry ... ok
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMBbciZ/workspace/objects/comments/265068f40b6e4220a0f64be3cabb4ef1/data/ac6a8986-9c6d-481c-ab07-e3d825c6b9da-00000.parquet
+DOCSPEC_TEST_WORK readback
+test interrupted_shared_capture_protects_reuse_after_older_point_retires ... ok
+test restores_exact_catalog_and_missing_originals_from_retained_copies ... ok
+test independent_delayed_writer_must_finish_before_restore_can_select ... ok
+test completed_capture_reconciles_manifest_and_commit_response_without_recopying ... ok
+test repeated_points_reuse_source_backups_and_do_not_clone_backup_trees ... ok
+test failed_capture_retries_reuse_one_reservation_and_bounded_partial_files ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.80s
+
+     Running tests/restore_catalog.rs (target/debug/deps/restore_catalog-930613c850bc237e)
+
+running 1 test
+test restore_reconstructs_an_unpromised_native_registration ... FAILED
+
+failures:
+
+---- restore_reconstructs_an_unpromised_native_registration stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuZBgxc/workspace/objects/comments/efca45be18fc42368132403d99da5447/data/98c8eff3-b3f7-4b71-93cb-1371f9e048a4-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuZBgxc/workspace/objects/comments/efca45be18fc42368132403d99da5447/data/98c8eff3-b3f7-4b71-93cb-1371f9e048a4-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuZBgxc/workspace/objects/comments/efca45be18fc42368132403d99da5447/data/98c8eff3-b3f7-4b71-93cb-1371f9e048a4-00002.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'restore_reconstructs_an_unpromised_native_registration' (25477790) panicked at tests/restore_catalog.rs:50:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_restore_point", message: "restore object escapes its workspace", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    restore_reconstructs_an_unpromised_native_registration
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+error: test failed, to rerun pass `--test restore_catalog`

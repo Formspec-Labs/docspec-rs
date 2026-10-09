@@ -102,7 +102,9 @@ impl Engine {
         if let Some(base) = &spec.base {
             let release = self.release_admitted(&spec.dataset, base).await?;
             let native = storage::open_pin(&release.dataset.groups["source"]).await?;
-            if storage::defaults::evolved(native.metadata()) {
+            if storage::defaults::evolved(native.metadata())
+                || storage::identity::has_origins(native.metadata().current_schema())?
+            {
                 let dataframe = schema::normalize(
                     dataframe,
                     native.metadata().current_schema(),
@@ -122,6 +124,7 @@ impl Engine {
             f.name()
                 .to_ascii_lowercase()
                 .starts_with(storage::defaults::SUPPLIED_PREFIX)
+                || storage::identity::hidden(&f.name().to_ascii_lowercase())
         }) {
             return Err(Error::refusal(
                 "reserved_field",

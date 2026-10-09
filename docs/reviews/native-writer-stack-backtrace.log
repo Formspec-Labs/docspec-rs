@@ -1,0 +1,199 @@
+(lldb) target create "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) run aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/typed/4bfc830422e646958a0d292fe9b268c6/data/2244dbb6-c1ae-47a5-9678-ff5dfaf884f6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/summary/fa4943f2b12e4129b22077fbaf5e735c/data/655acc61-3590-482d-87f7-9b16fdd0cd7e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/summary/a2685ff1fb0644a195ffe1da85da1404/data/818b41d5-9779-4eac-a2bd-d25472e51035-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/typed/78c884aed49548279d17e6e5e2b9e65a/data/data/30fafce7-0899-45a3-9620-52bae6a24cbf-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/typed/78c884aed49548279d17e6e5e2b9e65a/data/data/c700cf1e-9558-4551-b168-ca93eb769ab9-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpI1ufjn/workspace/objects/typed/78c884aed49548279d17e6e5e2b9e65a/removed/data/1122748a-3e36-49bc-bd3e-89b3dcd5d820-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 41406 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 41406 stopped
+* thread #2, name = 'aggregation_types::quoted_utf8_boolean_composite_groups_and_int', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03e60)
+    frame #0: 0x00000001015aee88 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::RecordField::parse::ha0e89c88c80260dd + 16
+related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::RecordField::parse::ha0e89c88c80260dd:
+->  0x1015aee88 <+16>: str    xzr, [sp]
+    0x1015aee8c <+20>: add    x9, sp, #0x868
+    0x1015aee90 <+24>: str    x9, [sp, #0xc0]
+    0x1015aee94 <+28>: str    x8, [sp, #0xc8]
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.
+(lldb) thread backtrace -c 220
+* thread #2, name = 'aggregation_types::quoted_utf8_boolean_composite_groups_and_int', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03e60)
+  * frame #0: 0x00000001015aee88 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::RecordField::parse::ha0e89c88c80260dd + 16
+    frame #1: 0x00000001015b5140 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hce89931a236c4e86 + 28
+    frame #2: 0x00000001015ef4f0 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h0dd2c98b6d15eda1 + 44
+    frame #3: 0x00000001015ed958 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::enumerate::_$u7b$$u7b$closure$u7d$$u7d$::hc3b7376d8068e75d + 44
+    frame #4: 0x00000001016119c8 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::filter_map::filter_map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h15268e64031f60ca + 124
+    frame #5: 0x00000001015c8d64 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::try_fold::hdd7938657ccf475c + 172
+    frame #6: 0x000000010160f7c8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..filter_map..FilterMap$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::heffa981a23282af3 + 52
+    frame #7: 0x00000001015ed7e8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::hacb9336ebc3b04e1 + 52
+    frame #8: 0x00000001015eca74 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h0609866ddd9bbb8c + 44
+    frame #9: 0x00000001015d07b4 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::ha1a7e792bddaaa29 + 44
+    frame #10: 0x00000001015d0180 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h3fb1a9e597faff60 + 28
+    frame #11: 0x00000001015c4904 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::hef35c13919c4c98c + 44
+    frame #12: 0x00000001015c7d88 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h56030b9c6fcb7a69 + 12
+    frame #13: 0x00000001015c7990 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h4a41d2bb72768e3b + 40
+    frame #14: 0x0000000101609160 related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h6311dc864c48ac52 + 16
+    frame #15: 0x00000001015d4498 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::try_process::h5554e1d4f90a2bea + 116
+    frame #16: 0x00000001016090fc related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hfdadc7245bc21697 + 40
+    frame #17: 0x00000001015ef068 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::collect::hedbdd9827efdb5da + 12
+    frame #18: 0x00000001015b50bc related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::h248e564ee49952a6 + 88
+    frame #19: 0x000000010160c580 related_refresh-36f3e2d2ba35a1a6`core::result::Result$LT$T$C$E$GT$::and_then::h02047520690072a2 + 88
+    frame #20: 0x00000001015b4b00 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::h708273aa7d6dc00a + 900
+    frame #21: 0x00000001015b6098 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_complex::hff16d2864457048f + 3920
+    frame #22: 0x00000001015ba724 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse::h639421e1b4a7c6a9 + 256
+    frame #23: 0x00000001015b3af8 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_array::_$u7b$$u7b$closure$u7d$$u7d$::h93994f910aaf7c2b + 28
+    frame #24: 0x000000010160c5e8 related_refresh-36f3e2d2ba35a1a6`core::result::Result$LT$T$C$E$GT$::and_then::h846937cfaeee7364 + 88
+    frame #25: 0x00000001015b3974 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_array::h096e8f505b1e491b + 76
+    frame #26: 0x00000001015b5fe4 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_complex::hff16d2864457048f + 3740
+    frame #27: 0x00000001015ba724 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse::h639421e1b4a7c6a9 + 256
+    frame #28: 0x00000001015b4390 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_union::_$u7b$$u7b$closure$u7d$$u7d$::h23e29d95616284be + 24
+    frame #29: 0x00000001015efc54 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::hcee953565ad45036 + 44
+    frame #30: 0x00000001015c8114 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::try_fold::h0a23cf280ab32660 + 168
+    frame #31: 0x00000001015ecbc4 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h6bc7037a062cecd0 + 44
+    frame #32: 0x00000001015d0624 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h83ec12393ea79a12 + 40
+    frame #33: 0x00000001015d00e0 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h39e70dcf57022949 + 28
+    frame #34: 0x00000001015c5b18 related_refresh-36f3e2d2ba35a1a6`alloc::vec::Vec$LT$T$C$A$GT$::extend_desugared::h28826eb1d9c76b05 + 40
+    frame #35: 0x00000001015c7d24 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$C$A$GT$$u20$as$u20$alloc..vec..spec_extend..SpecExtend$LT$T$C$I$GT$$GT$::spec_extend::hb5a9af764ae96268 + 12
+    frame #36: 0x00000001015c3cc4 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::h0c249828012c0e94 + 476
+    frame #37: 0x00000001015c7d9c related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h68816e6dd6d5d101 + 12
+    frame #38: 0x00000001015c7a88 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h8ac55cf6a3452e6f + 40
+    frame #39: 0x0000000101609190 related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h70aaccd9fec8e4db + 16
+    frame #40: 0x00000001015d45fc related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::try_process::h6ed6d8c476b9b7a7 + 100
+    frame #41: 0x00000001016090c8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hf835ecc34036fc57 + 40
+    frame #42: 0x00000001015eef64 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::collect::h468ab97a71584f24 + 12
+    frame #43: 0x00000001015b4360 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_union::h7b4796e33c301437 + 72
+    frame #44: 0x00000001015b5f18 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_complex::hff16d2864457048f + 3536
+    frame #45: 0x00000001015af018 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::RecordField::parse::ha0e89c88c80260dd + 416
+    frame #46: 0x00000001015b5140 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hce89931a236c4e86 + 28
+    frame #47: 0x00000001015ef4f0 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::map::map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h0dd2c98b6d15eda1 + 44
+    frame #48: 0x00000001015ed958 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::enumerate::_$u7b$$u7b$closure$u7d$$u7d$::hc3b7376d8068e75d + 44
+    frame #49: 0x00000001016119c8 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::filter_map::filter_map_try_fold::_$u7b$$u7b$closure$u7d$$u7d$::h15268e64031f60ca + 124
+    frame #50: 0x00000001015c8d64 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::try_fold::hdd7938657ccf475c + 172
+    frame #51: 0x000000010160f7c8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..filter_map..FilterMap$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::heffa981a23282af3 + 52
+    frame #52: 0x00000001015ed7e8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..enumerate..Enumerate$LT$I$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::hacb9336ebc3b04e1 + 52
+    frame #53: 0x00000001015eca74 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..map..Map$LT$I$C$F$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::h0609866ddd9bbb8c + 44
+    frame #54: 0x00000001015d07b4 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::try_fold::ha1a7e792bddaaa29 + 44
+    frame #55: 0x00000001015d0180 related_refresh-36f3e2d2ba35a1a6`_$LT$core..iter..adapters..GenericShunt$LT$I$C$R$GT$$u20$as$u20$core..iter..traits..iterator..Iterator$GT$::next::h3fb1a9e597faff60 + 28
+    frame #56: 0x00000001015c5974 related_refresh-36f3e2d2ba35a1a6`alloc::vec::Vec$LT$T$C$A$GT$::extend_desugared::h16086e1ee23eb425 + 44
+    frame #57: 0x00000001015c7c48 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$C$A$GT$$u20$as$u20$alloc..vec..spec_extend..SpecExtend$LT$T$C$I$GT$$GT$::spec_extend::h0f71e4b79d6e4a56 + 12
+    frame #58: 0x00000001015c4ab4 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter_nested..SpecFromIterNested$LT$T$C$I$GT$$GT$::from_iter::hef35c13919c4c98c + 476
+    frame #59: 0x00000001015c7d88 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..spec_from_iter..SpecFromIter$LT$T$C$I$GT$$GT$::from_iter::h56030b9c6fcb7a69 + 12
+    frame #60: 0x00000001015c7990 related_refresh-36f3e2d2ba35a1a6`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$T$GT$$GT$::from_iter::h4a41d2bb72768e3b + 40
+    frame #61: 0x0000000101609160 related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::_$u7b$$u7b$closure$u7d$$u7d$::h6311dc864c48ac52 + 16
+    frame #62: 0x00000001015d4498 related_refresh-36f3e2d2ba35a1a6`core::iter::adapters::try_process::h5554e1d4f90a2bea + 116
+    frame #63: 0x00000001016090fc related_refresh-36f3e2d2ba35a1a6`_$LT$core..result..Result$LT$V$C$E$GT$$u20$as$u20$core..iter..traits..collect..FromIterator$LT$core..result..Result$LT$A$C$E$GT$$GT$$GT$::from_iter::hfdadc7245bc21697 + 40
+    frame #64: 0x00000001015ef068 related_refresh-36f3e2d2ba35a1a6`core::iter::traits::iterator::Iterator::collect::hedbdd9827efdb5da + 12
+    frame #65: 0x00000001015b50bc related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::_$u7b$$u7b$closure$u7d$$u7d$::h248e564ee49952a6 + 88
+    frame #66: 0x000000010160c580 related_refresh-36f3e2d2ba35a1a6`core::result::Result$LT$T$C$E$GT$::and_then::h02047520690072a2 + 88
+    frame #67: 0x00000001015b4b00 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_record::h708273aa7d6dc00a + 900
+    frame #68: 0x00000001015b6098 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse_complex::hff16d2864457048f + 3920
+    frame #69: 0x00000001015ba724 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Parser::parse::h639421e1b4a7c6a9 + 256
+    frame #70: 0x00000001015bb118 related_refresh-36f3e2d2ba35a1a6`apache_avro::schema::Schema::parse::h56e95847f2a30d9d + 56
+    frame #71: 0x00000001013e7bf4 related_refresh-36f3e2d2ba35a1a6`apache_avro::reader::Block$LT$R$GT$::read_writer_schema::hcf47039bc8384681 + 332
+    frame #72: 0x00000001013e6cec related_refresh-36f3e2d2ba35a1a6`apache_avro::reader::Block$LT$R$GT$::read_header::he42390ac042c7f10 + 480
+    frame #73: 0x00000001013e81fc related_refresh-36f3e2d2ba35a1a6`apache_avro::reader::Block$LT$R$GT$::new::h89dba51fd8d40c53 + 344
+    frame #74: 0x00000001013e8ad8 related_refresh-36f3e2d2ba35a1a6`apache_avro::reader::Reader$LT$R$GT$::new::hae02103b77103daa + 108
+    frame #75: 0x0000000101163618 related_refresh-36f3e2d2ba35a1a6`iceberg::spec::manifest_list::ManifestList::parse_with_version::hd2da28937a9504e3 + 212
+    frame #76: 0x00000001014ecf34 related_refresh-36f3e2d2ba35a1a6`iceberg::spec::manifest_list::reader::ManifestListReader::load::_$u7b$$u7b$closure$u7d$$u7d$::hdf77fe4da7097282 + 3068
+    frame #77: 0x0000000100920344 related_refresh-36f3e2d2ba35a1a6`iceberg::io::object_cache::ObjectCache::fetch_and_parse_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::he2a26f2c920e99e7 + 704
+    frame #78: 0x0000000100d12a0c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h9d15e5819ffa0aa6 + 36
+    frame #79: 0x0000000100619734 related_refresh-36f3e2d2ba35a1a6`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf3ad31c210e8038c + 12
+    frame #80: 0x000000010097e1a4 related_refresh-36f3e2d2ba35a1a6`_$LT$futures_util..future..future..catch_unwind..CatchUnwind$LT$Fut$GT$$u20$as$u20$core..future..future..Future$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h4ee8760ab92123da + 16
+    frame #81: 0x0000000100638518 related_refresh-36f3e2d2ba35a1a6`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::hab6216739e7f96bb + 16
+    frame #82: 0x0000000100420098 related_refresh-36f3e2d2ba35a1a6`std::panicking::catch_unwind::do_call::h835b3bb1a010d523 + 44
+    frame #83: 0x0000000100d5b8bc related_refresh-36f3e2d2ba35a1a6`__rust_try + 32
+    frame #84: 0x0000000100cfdd14 related_refresh-36f3e2d2ba35a1a6`std::panic::catch_unwind::he28f27103dc4dc71 + 56
+    frame #85: 0x000000010097e0f4 related_refresh-36f3e2d2ba35a1a6`_$LT$futures_util..future..future..catch_unwind..CatchUnwind$LT$Fut$GT$$u20$as$u20$core..future..future..Future$GT$::poll::he3e468901c85f7b1 + 52
+    frame #86: 0x000000010059cbf4 related_refresh-36f3e2d2ba35a1a6`moka::future::value_initializer::ValueInitializer$LT$K$C$V$C$S$GT$::try_init_or_read::_$u7b$$u7b$closure$u7d$$u7d$::hd242a9eccfe8b610 + 3360
+    frame #87: 0x0000000100d8607c related_refresh-36f3e2d2ba35a1a6`moka::future::cache::Cache$LT$K$C$V$C$S$GT$::try_insert_with_hash_and_fun::_$u7b$$u7b$closure$u7d$$u7d$::h617b88427f0e0a1b + 668
+    frame #88: 0x0000000100d86754 related_refresh-36f3e2d2ba35a1a6`moka::future::cache::Cache$LT$K$C$V$C$S$GT$::get_or_try_insert_with_hash_by_ref_and_fun::_$u7b$$u7b$closure$u7d$$u7d$::h2f669c7696642d93 + 880
+    frame #89: 0x0000000100d06368 related_refresh-36f3e2d2ba35a1a6`moka::future::entry_selector::RefKeyEntrySelector$LT$K$C$Q$C$V$C$S$GT$::or_try_insert_with::_$u7b$$u7b$closure$u7d$$u7d$::hd1885b33cc9a9418 + 460
+    frame #90: 0x000000010091f9cc related_refresh-36f3e2d2ba35a1a6`iceberg::io::object_cache::ObjectCache::get_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::h0fe794badeeae477 + 1616
+    frame #91: 0x00000001009206b8 related_refresh-36f3e2d2ba35a1a6`iceberg::scan::context::PlanContext::get_manifest_list::_$u7b$$u7b$closure$u7d$$u7d$::hc1f54bf220748932 + 388
+    frame #92: 0x0000000100922050 related_refresh-36f3e2d2ba35a1a6`iceberg::scan::TableScan::plan_files::_$u7b$$u7b$closure$u7d$$u7d$::h046075364cf2d028 + 1348
+    frame #93: 0x0000000100c09f0c related_refresh-36f3e2d2ba35a1a6`docspec::storage::schema::plan_files::_$u7b$$u7b$closure$u7d$$u7d$::h5e74f80c9f72edcc + 1332
+    frame #94: 0x00000001008f6f1c related_refresh-36f3e2d2ba35a1a6`docspec::storage::occurrences::Occurrences::capture::_$u7b$$u7b$closure$u7d$$u7d$::ha95023907db2b6d6 + 1780
+    frame #95: 0x00000001008f8f00 related_refresh-36f3e2d2ba35a1a6`docspec::storage::occurrences::OccurrenceScan::values::_$u7b$$u7b$closure$u7d$$u7d$::h999a2bff5430a403 + 500
+    frame #96: 0x0000000100b92ca4 related_refresh-36f3e2d2ba35a1a6`docspec::engine::write::_$LT$impl$u20$docspec..engine..Engine$GT$::replace_keys::_$u7b$$u7b$closure$u7d$$u7d$::h998d4052f12abd58 + 8704
+    frame #97: 0x0000000100d12b2c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hab309e410356e8dd + 36
+    frame #98: 0x0000000100a6c74c related_refresh-36f3e2d2ba35a1a6`docspec::engine::aggregation::_$LT$impl$u20$docspec..engine..Engine$GT$::process_aggregation::_$u7b$$u7b$closure$u7d$$u7d$::h663008c1acba0a2a + 9872
+    frame #99: 0x0000000100d12894 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h839e8321bef31a6b + 36
+    frame #100: 0x0000000100a75320 related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77 + 4276
+    frame #101: 0x0000000100d12f24 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf06f6d7114383815 + 36
+    frame #102: 0x0000000100ad60d4 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::process_refresh::_$u7b$$u7b$closure$u7d$$u7d$::hbc5c2ec80c9d8af9 + 1228
+    frame #103: 0x0000000100d12c1c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hc1d7275d06cd4339 + 36
+    frame #104: 0x0000000100a8ca54 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h03429660ad42f5ab + 20020
+    frame #105: 0x0000000100d124d4 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h1a86e51eb70b0301 + 44
+    frame #106: 0x0000000100a9a3b0 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h8e2f661f2448634d + 27608
+    frame #107: 0x0000000100d12804 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h737866f7a4232f23 + 44
+    frame #108: 0x0000000100a866c4 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_admitted::_$u7b$$u7b$closure$u7d$$u7d$::h7140de71f9709bb8 + 1404
+    frame #109: 0x0000000100a879dc related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::hf75fb1c89e5ffcdf + 416
+    frame #110: 0x0000000100c9c53c related_refresh-36f3e2d2ba35a1a6`docspec::engine::worker::_$LT$impl$u20$docspec..engine..Engine$GT$::spawn_work::_$u7b$$u7b$closure$u7d$$u7d$::h30b6d148105ff64b + 440
+    frame #111: 0x0000000100d1270c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h59b5188ed36b5563 + 36
+    frame #112: 0x000000010051a1a8 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::hc372ff65cc2b71d9 + 164
+    frame #113: 0x0000000100510024 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::hfdb6ace07130c366 + 64
+    frame #114: 0x0000000100dbb4f4 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::_$u7b$$u7b$closure$u7d$$u7d$::he52daccc576e3028 + 80
+    frame #115: 0x0000000100638338 related_refresh-36f3e2d2ba35a1a6`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::ha95f97faeb7f9a4a + 52
+    frame #116: 0x0000000100426798 related_refresh-36f3e2d2ba35a1a6`std::panicking::catch_unwind::do_call::hf04f2123ff1283a4 + 68
+    frame #117: 0x0000000100d5b8bc related_refresh-36f3e2d2ba35a1a6`__rust_try + 32
+    frame #118: 0x0000000100d02764 related_refresh-36f3e2d2ba35a1a6`std::panic::catch_unwind::hff0938c07804774e + 120
+    frame #119: 0x0000000100da1e30 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::h79044ef7f202be1e + 112
+    frame #120: 0x0000000100dcb068 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll_inner::hc2368ad46a9260e3 + 164
+    frame #121: 0x0000000100de9700 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll::h72353995e90450b2 + 28
+    frame #122: 0x0000000100693808 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::poll::h134f5f3aebb8b3d2 + 16
+    frame #123: 0x00000001046c8750 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::RawTask::poll::h7c27b50b01ddfe51 + 44
+    frame #124: 0x00000001046bde1c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::LocalNotified$LT$S$GT$::run::h34a3e7f7e295ea61 + 28
+    frame #125: 0x00000001046b7798 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h84c7f60d7fde3220 + 12
+    frame #126: 0x00000001046b771c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::h0d3b60cfa95cccb7 + 208
+    frame #127: 0x00000001046b7140 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::enter::h3d52629b0772696d + 280
+    frame #128: 0x00000001046b7584 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::hdc46a7bba6e20a90 + 252
+    frame #129: 0x00000001000cd9e8 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h02b6d0a012903510 + 1972
+    frame #130: 0x00000001000cd138 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::enter::_$u7b$$u7b$closure$u7d$$u7d$::hf5dc5717365b22b5 + 28
+    frame #131: 0x00000001000ca9d0 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::scoped::Scoped$LT$T$GT$::set::hfd1ac0cbdaedd4a3 + 140
+    frame #132: 0x000000010005fd34 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::set_scheduler::_$u7b$$u7b$closure$u7d$$u7d$::hca5ecd0d3bb446f1 + 48
+    frame #133: 0x00000001000e692c related_refresh-36f3e2d2ba35a1a6`std::thread::local::LocalKey$LT$T$GT$::try_with::h620cbde1b4241c2c + 172
+    frame #134: 0x00000001000e61b4 related_refresh-36f3e2d2ba35a1a6`std::thread::local::LocalKey$LT$T$GT$::with::hef6c7e435933bee3 + 16
+    frame #135: 0x000000010005fcb0 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::set_scheduler::h16c63408a760cbde + 52
+    frame #136: 0x00000001000ccca0 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::enter::h9a457c69a04632ab + 340
+    frame #137: 0x00000001000cd1fc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::hb746a86963e16c56 + 64
+    frame #138: 0x00000001000cb654 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h4cbfdf28726e689d + 348
+    frame #139: 0x00000001000cad38 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::runtime::enter_runtime::h84909fd1ea363e27 + 180
+    frame #140: 0x00000001000cb4e8 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::hd5b02c1308e8252f + 108
+    frame #141: 0x0000000100060078 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::runtime::Runtime::block_on_inner::h7aa76221904842f6 + 160
+    frame #142: 0x00000001000601d4 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::runtime::Runtime::block_on::h7f8f60ba73784b2e + 268
+    frame #143: 0x0000000100053d8c related_refresh-36f3e2d2ba35a1a6`related_refresh::aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly::hf8d4ff856d1e0e9c + 308
+    frame #144: 0x0000000100056e38 related_refresh-36f3e2d2ba35a1a6`related_refresh::aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly::_$u7b$$u7b$closure$u7d$$u7d$::hdcd3d8ab75fd3731 + 20
+    frame #145: 0x0000000100001e04 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnOnce::call_once::hdc1c487574e88cbf + 20
+    frame #146: 0x00000001001427a8 related_refresh-36f3e2d2ba35a1a6`test::__rust_begin_short_backtrace::ha0e48c1a0658e118 + 24
+    frame #147: 0x0000000100151894 related_refresh-36f3e2d2ba35a1a6`test::run_test::_$u7b$$u7b$closure$u7d$$u7d$::hb3350d8e162b7432 + 908
+    frame #148: 0x0000000100132d14 related_refresh-36f3e2d2ba35a1a6`std::sys::backtrace::__rust_begin_short_backtrace::he121e5b5ae94324a + 132
+    frame #149: 0x0000000100135ce0 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h3cdfab2e71d5a0b4 + 64
+    frame #150: 0x0000000105f2a01c related_refresh-36f3e2d2ba35a1a6`std::sys::thread::unix::Thread::new::thread_start::hb5c7d2a38fab9e31 + 408
+    frame #151: 0x000000018d48fc58 libsystem_pthread.dylib`_pthread_start + 136
+(lldb) register read sp fp
+      sp = 0x000000016fe03e60
+      fp = 0x000000016fe04a80

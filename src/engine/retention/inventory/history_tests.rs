@@ -47,6 +47,7 @@ fn release(root: &Path, owner: &str, version: &str) -> ReleasePin {
             groups: BTreeMap::from([(
                 "source".into(),
                 TablePin {
+                    logical_metadata: None,
                     table: version.into(),
                     metadata: metadata.clone(),
                     snapshot: Some(1),

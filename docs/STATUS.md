@@ -6,13 +6,91 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes evidence-only changes and broader
-schema/cutover behavior; remaining protection lifetimes, broader destructive-maintenance
-qualification, compaction and restore; authorized exports, R2/Basin and Dagster; and complete Q1–Q8 and
+schema/cutover behavior; remaining protection lifetimes, maintenance integration and
+broader failure qualification; remote publication, R2/Basin and Dagster; and complete Q1–Q8 and
 10-million-Comments qualification. The 1,800-second full-path target has not been
 measured.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Local exports, compaction and restore points
+
+Local exports now produce independently readable Parquet using an explicit
+all-active-rows policy and an ordered list of authorized primitive columns.
+The writer projects those columns, removes source metadata, hashes as it writes,
+and retains materialization and bounded validation separately. A guarded catalog
+commit selects the channel; completed retries return the original immutable file
+without moving an advanced channel backward. Library, CLI and HTTP share these
+services. Nested/combined-group disclosure, row filtering, remote upload and public
+hosting remain outside this implemented slice.
+
+Compaction rewrites selected native files and verifies exact typed values,
+occurrence identities, multiplicity and order before selecting a physical
+representation. Selection uses the logical source identity, so an independent
+backfill can advance the dataset version without losing the shared representation.
+Existing exact pins stay unchanged. Managed group/combined readers resolve the
+representation through the same host admission as other reads. Normal updates
+still consume canonical files; preserving compaction benefits through those
+writes remains unfinished. Compaction does not reclaim old storage or retire
+obsolete representation recovery records.
+
+The maintained native writer now bounds footer accumulation through periodic
+writer closure and separately charges retained file descriptors. A very large
+requested target can close earlier at the metadata bound; a target creating too
+many files refuses before exhausting the declared allowance. Compaction checks
+free space during streaming, including declared scratch and writer headroom.
+These are conservative admission checks, not measured peak memory or storage
+bounds. Exact equivalence requires a source/output comparison at this physical
+replacement boundary; ordinary reads do not repeat it. The fixture assertions
+establish file sharing, preservation and bounded refusal, not throughput gains.
+
+Restore points capture the native catalog and every registered native table's
+required files, including unpromised registrations that a later cleanup could
+remove. Backup paths reuse existing immutable objects across checkpoints and
+owners; temporary reuse dependencies remain protected until the completed point
+takes over. Hard links avoid payload copies on the same filesystem. Recovery
+checks each physical inode once, restores missing original names, fences old
+local actors and selects a fresh catalog file. This is same-workspace Unix
+recovery, not portable or off-device disaster recovery.
+
+Capture retries use one stable reserved attempt. An incomplete attempt can
+rebuild only its validated, unpublished flat files; a completed descriptor
+reconciles without copying again. Explicit point retirement ends its recovery
+promise. Failed shared preparation can be retired through the existing phase
+API, after which the same point ID refuses further capture. Its own attempt
+prefix remains conservatively protected; dedicated abandoned-prefix disposal is
+still unfinished. Restore execution interruption and reuse of fresh candidate
+catalog generations need further qualification.
+
+Independent semi-formal reviews of [compaction](reviews/compaction-review.md),
+[exports](reviews/local-export-review.md) and [restore](reviews/local-restore-review.md)
+record the initial findings and subsequent static corrections. Review findings
+led to bounded writer metadata, nonquadratic file lookup, recovery independent
+of retired historical availability, complete native backup closure, stable failed
+attempts and shared backup references. The expanded primitive fixture also found
+UTC-label incompatibility in native writes and the missing `LargeBinary` export
+case; both now preserve native types, epoch values, bytes and nulls.
+
+The focused receipts cover typed and nested compaction, backfill races, phase recovery, primitive
+export disclosure, footer refusal/retry, process-killed export handoffs, native
+registration recovery, repeated/shared checkpoints, interrupted capture and
+explicit retirement. These use temporary fixtures. No corpus was deleted and no
+10-million-row or remote performance acceptance run occurred.
+
+The expanded writer exposed a default-stack regression in incremental summaries.
+The [backtrace](reviews/native-writer-stack-backtrace.log) and
+[disassembly](reviews/native-writer-stack-disassembly.log) identified large nested
+application future frames. A shared boxed writer boundary preserves writer and
+budget behavior while moving its state off callers' stacks. The original
+[regression now passes](reviews/native-writer-stack-corrected.log) without changing
+thread limits; an [independent review](reviews/native-writer-stack-review.md)
+checks the focused change. The complete gate also exposed a duplicated inventory
+and encoding reservation in physical removal; the corrected handoff keeps the
+intent covered without charging moved inventory twice. No resource limit was
+raised. The [complete repository gate](reviews/local-lifecycle-check.log) now
+passes formatting, strict linting and all library, integration and documentation
+tests. The failures remain retained with their corrections.
 
 ## Explicit local physical removal
 
@@ -947,11 +1025,11 @@ or compatibility layer for legacy DocSpec.
 | Requirement | Implemented locally | Required work remaining |
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
-| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse | Authorized public exports; R2 uploads and independent remote readback; transfer reuse and provider qualification |
+| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review | Historical observation bindings, seal and descendant dependency lifetimes; broader reader/removal, in-flight failure and provider qualification; stable occurrence identity and physical-representation selection for compaction; complete restore points and fenced fresh-catalog restore |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by new logical writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; Dagster adapter |
 
 The CLI exposes implemented operations only. Source updates support complete key

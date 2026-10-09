@@ -5,10 +5,13 @@ use docspec::{
     Engine,
     budget::{Budget, Limits},
     engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
+    export::ExportSpec,
     model::{
-        BackfillSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin,
-        RemovalPlan, RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, CompactionSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
+        ReleasePin, RemovalPlan, RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel,
+        VersionRef,
     },
+    restore::RestorePointRef,
     storage,
 };
 use futures::TryStreamExt;
@@ -103,6 +106,16 @@ enum Command {
     },
     /// Retire the phase generations in a saved plan; preserve files and releases.
     RetirePhases { plan: PathBuf },
+    /// Capture exact restore points whose recovery promises should end.
+    PlanRestorePointRetirement {
+        dataset: String,
+        retirement: String,
+        /// JSON array of restore-point identifiers.
+        points: PathBuf,
+        reason: String,
+    },
+    /// Retire saved restore points; preserve their files until separate removal.
+    RetireRestorePoints { plan: PathBuf },
     /// Capture exact owner grants that no live consumer binding needs.
     PlanGrantRetirement {
         owner: String,
@@ -141,6 +154,23 @@ enum Command {
     Latest { dataset: String },
     /// Resolve an immutable historical release by its operation identity.
     Release { dataset: String, version: String },
+    /// Create or resume an authorized immutable flat Parquet export.
+    Export { spec: PathBuf },
+    /// Resolve one export channel to its immutable file pin.
+    LatestExport { dataset: String, channel: String },
+    /// Resolve a completed historical export by its stable operation identity.
+    ExportPin { dataset: String, operation: String },
+    /// Rewrite selected files while preserving their exact logical values.
+    Compact { spec: PathBuf },
+    /// Retain an exact local catalog image and its required immutable files.
+    CreateRestorePoint { dataset: String, point: String },
+    /// Restore an exact local point while excluding every live workspace actor.
+    RestoreLocal {
+        point: PathBuf,
+        /// Permit a completed backup when current catalog registration is unavailable.
+        #[arg(long)]
+        allow_unregistered_import: bool,
+    },
     /// Prove that target follows prior on accepted history, without reading payloads.
     CheckSuccession { prior: PathBuf, target: PathBuf },
     /// Seal a producer generation's exact accepted versions once.
@@ -213,6 +243,8 @@ enum PausedOperation {
     Refresh,
     Schema,
     Removal,
+    Export,
+    Compaction,
 }
 
 #[tokio::main(worker_threads = 12)]
@@ -246,6 +278,20 @@ async fn main() -> anyhow::Result<()> {
         Command::VerifyInputs { coverage } => {
             verify_input_coverage(&read_json::<InputCoverage>(coverage)?, limits).await?;
             print_json(&serde_json::json!({"relationships_verified": true}))?;
+        }
+        Command::RestoreLocal {
+            point,
+            allow_unregistered_import,
+        } => {
+            print_json(
+                &Engine::restore_local(
+                    &cli.workspace,
+                    &read_json::<RestorePointRef>(point)?,
+                    limits,
+                    allow_unregistered_import,
+                )
+                .await?,
+            )?;
         }
         command @ (Command::Read { .. } | Command::ReadEvidence { .. }) => {
             let (release, output, group) = match command {
@@ -303,6 +349,14 @@ async fn main() -> anyhow::Result<()> {
                             .map(|_| ()),
                         PausedOperation::Removal => engine
                             .removal_until(&read_json::<RemovalPlan>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Export => engine
+                            .export_until(&read_json::<ExportSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Compaction => engine
+                            .compact_until(&read_json::<CompactionSpec>(spec)?, &phase)
                             .await
                             .map(|_| ()),
                     };
@@ -380,6 +434,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetirePhases { plan } => print_json(
                     &engine
                         .retire_phases(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanRestorePointRetirement {
+                    dataset,
+                    retirement,
+                    points,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_restore_point_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &read_json::<Vec<Id>>(points)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireRestorePoints { plan } => print_json(
+                    &engine
+                        .retire_restore_points(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::PlanGrantRetirement {
@@ -504,6 +578,27 @@ async fn main() -> anyhow::Result<()> {
                 Command::Release { dataset, version } => print_json(
                     &engine
                         .release(&Id::new(dataset)?, &Id::new(version)?)
+                        .await?,
+                )?,
+                Command::Export { spec } => {
+                    print_json(&engine.export(&read_json::<ExportSpec>(spec)?).await?)?
+                }
+                Command::LatestExport { dataset, channel } => print_json(
+                    &engine
+                        .latest_export(&Id::new(dataset)?, &Id::new(channel)?)
+                        .await?,
+                )?,
+                Command::ExportPin { dataset, operation } => print_json(
+                    &engine
+                        .export_pin(&Id::new(dataset)?, &Id::new(operation)?)
+                        .await?,
+                )?,
+                Command::Compact { spec } => {
+                    print_json(&engine.compact(&read_json::<CompactionSpec>(spec)?).await?)?
+                }
+                Command::CreateRestorePoint { dataset, point } => print_json(
+                    &engine
+                        .create_restore_point(&Id::new(dataset)?, &Id::new(point)?)
                         .await?,
                 )?,
                 Command::CheckSuccession { prior, target } => {

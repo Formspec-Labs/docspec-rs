@@ -1,0 +1,52 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.88s
+     Running tests/compaction.rs (target/debug/deps/compaction-42e20a2a29841672)
+
+running 10 tests
+test native_nested_decimal_time_and_null_values_survive_typed_rewrite ... ok
+test huge_target_rotates_bounded_footer_windows_without_limiting_total_rows ... ok
+test competing_representation_keeps_stale_completed_work_without_reselection ... ok
+test schema_defaults_and_supplied_state_remain_native_and_exact ... ok
+test tiny_targets_refuse_bounded_descriptor_inventory_without_selecting_partial_files ... ok
+test admitted_compaction_survives_retired_historical_result_availability ... ok
+test empty_source_and_partial_file_groups_preserve_exact_membership ... ok
+test sibling_backfill_keeps_the_shared_equivalent_source_representation ... ok
+test source_compaction_preserves_duplicates_backfill_identity_and_logical_selection ... ok
+test saved_rewrites_and_verification_resume_after_reopen_without_replacement ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.94s
+
+     Running tests/exports.rs (target/debug/deps/exports-4441b6c55cd33e6a)
+
+running 10 tests
+test primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... FAILED
+test empty_snapshot_keeps_standalone_schema_and_explicit_policy ... ok
+test independent_parquet_contains_only_authorized_columns_and_exact_occurrences ... ok
+test validation_and_selection_resume_without_opening_the_source_again ... ok
+test flat_export_footer_limit_preserves_prior_selection_and_can_resume ... ok
+test stale_authority_and_channel_keep_completed_output_without_promotion ... ok
+test http_exports_compaction_and_restore_points_use_the_shared_services ... ok
+test replacements_deletions_and_old_downloads_follow_their_exact_snapshots ... ok
+test cli_compaction_and_offline_restore_share_the_application_paths ... ok
+test killed_export_workers_resume_without_repeating_completed_work ... ok
+
+failures:
+
+---- primitive_exports_preserve_types_values_nulls_and_authorized_column_order stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'primitive_exports_preserve_types_values_nulls_and_authorized_column_order' (25444719) panicked at tests/exports.rs:309:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "iceberg", message: "Unexpected => Failed to write using parquet writer., source: Arrow: Incompatible type. Field 'instant_utc' has type Timestamp(µs, \"+00:00\"), array has type Timestamp(µs, \"UTC\")", source: Some(Unexpected => Failed to write using parquet writer.
+
+Source: Arrow: Incompatible type. Field 'instant_utc' has type Timestamp(µs, "+00:00"), array has type Timestamp(µs, "UTC")
+), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    primitive_exports_preserve_types_values_nulls_and_authorized_column_order
+
+test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.78s
+
+error: test failed, to rerun pass `--test exports`

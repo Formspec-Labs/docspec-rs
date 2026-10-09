@@ -140,7 +140,19 @@ impl Engine {
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
             engine.check_read_release(&release).await?;
-            read_combined(&release, &engine.inner.lifecycle.budget).await
+            resolve_release(&release, &engine.inner.lifecycle.budget).await?;
+            let lock = engine.lock(&release.dataset.dataset).await;
+            let mut dataset = release.dataset.clone();
+            {
+                let _guard = lock.lock().await;
+                let view = engine.inner.lifecycle.open(&dataset.dataset).await?;
+                for (group, pin) in &mut dataset.groups {
+                    *pin = engine
+                        .representation_pin(&view, &dataset.version, group, pin)
+                        .await?;
+                }
+            }
+            combined_dataset(&dataset, &engine.inner.lifecycle.budget).await
         })
         .await
     }
@@ -159,7 +171,14 @@ pub async fn read_combined(
     budget: &Budget,
 ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
     resolve_release(release, budget).await?;
-    let source = storage::open_pin(&release.dataset.groups["source"]).await?;
+    combined_dataset(&release.dataset, budget).await
+}
+
+async fn combined_dataset(
+    dataset: &DatasetPin,
+    budget: &Budget,
+) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
+    let source = storage::open_pin(&dataset.groups["source"]).await?;
     let context = budget.context();
     let mut columns = source
         .metadata()
@@ -169,15 +188,16 @@ pub async fn read_combined(
         .iter()
         .filter(|field| {
             storage::defaults::supplied_id(&field.name).is_none()
-                && (release.dataset.related.is_none() || !refresh::hidden_field(&field.name))
+                && !storage::identity::hidden(&field.name)
+                && (dataset.related.is_none() || !refresh::hidden_field(&field.name))
         })
         .map(|field| format!("s.{}", quote(&field.name)))
         .collect::<Vec<_>>();
     context.register_table("source", crate::query::occurrences(source, budget.clone())?)?;
     let mut from = "source s".to_owned();
-    for (index, (name, binding)) in release.dataset.computed.iter().enumerate() {
+    for (index, (name, binding)) in dataset.computed.iter().enumerate() {
         let alias = format!("g{index}");
-        let native = storage::open_pin(&release.dataset.groups[name]).await?;
+        let native = storage::open_pin(&dataset.groups[name]).await?;
         context.register_table(&alias, crate::query::table(native, budget.clone())?)?;
         from.push_str(&format!(
             " INNER JOIN {alias} ON s.{} = {alias}.{} AND s.{} = {alias}.{}",
@@ -1176,6 +1196,7 @@ mod tests {
                             schema_id: 0,
                             objects: vec![],
                             rows: 7,
+                            logical_metadata: None,
                         },
                     )]),
                     computed: BTreeMap::new(),

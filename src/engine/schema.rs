@@ -259,7 +259,8 @@ pub(super) async fn normalize(
     let incoming = frame.schema().as_arrow();
     let native = iceberg::arrow::schema_to_arrow_schema(schema)?;
     for field in incoming.fields() {
-        if native.field_with_name(field.name()).is_err() {
+        if native.field_with_name(field.name()).is_err() || storage::identity::hidden(field.name())
+        {
             return Err(Error::refusal(
                 "schema_mismatch",
                 "input contains a field outside the selected source schema",
@@ -267,7 +268,10 @@ pub(super) async fn normalize(
         }
     }
     for key in keys {
-        if incoming.field_with_name(key).is_err() || storage::defaults::supplied_id(key).is_some() {
+        if incoming.field_with_name(key).is_err()
+            || storage::defaults::supplied_id(key).is_some()
+            || storage::identity::hidden(key)
+        {
             return Err(Error::refusal(
                 "unknown_key",
                 "update keys must be explicitly supplied source fields",
@@ -277,6 +281,10 @@ pub(super) async fn normalize(
     let mut values = BTreeMap::new();
     let mut flags = BTreeMap::new();
     for field in schema.as_struct().fields() {
+        if storage::identity::hidden(&field.name) {
+            values.insert(field.id, lit(storage::defaults::scalar(field)?));
+            continue;
+        }
         if storage::defaults::supplied_id(&field.name).is_some() {
             continue;
         }
@@ -434,7 +442,9 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
                 .ok_or_else(invalid)?
                 .as_ref()
                 .clone();
-            if field.name.starts_with(storage::defaults::SUPPLIED_PREFIX) {
+            if field.name.starts_with(storage::defaults::SUPPLIED_PREFIX)
+                || storage::identity::hidden(&field.name)
+            {
                 return Err(invalid());
             }
             field.name = selected.name.clone();
@@ -490,6 +500,15 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
             .with_write_default(Literal::bool(false)),
         ));
     }
+    // Physical maintenance fields are never selected or renamed by schema requests.
+    fields.extend(
+        before
+            .as_struct()
+            .fields()
+            .iter()
+            .filter(|field| storage::identity::hidden(&field.name))
+            .cloned(),
+    );
     // Native validation prevents removing identifier fields or invalidating nested IDs.
     Ok(Schema::builder()
         .with_fields(fields)

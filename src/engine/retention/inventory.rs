@@ -58,7 +58,7 @@ impl Engine {
             };
             inventory.release_pin(release, &origin)?;
         }
-        inventory.expand(budget).await?;
+        inventory.expand(budget, &self.inner.root).await?;
         let objects = inventory.into_references()?;
         let bytes = objects.iter().fold(0usize, |bytes, object| {
             bytes.saturating_add(reference_bytes(object))
@@ -109,12 +109,79 @@ impl Engine {
         // do not reserve that decoder's old maximum here as well.
         let _memory = budget.reserve(limit.saturating_mul(5))?;
         let mut inventory = Inventory::new(objects, limit)?;
+        let boundaries = self.collect_inventory(&mut inventory, None).await?;
+        let mut protected_bytes = 0u64;
+        let mut unmatched_bytes = 0u64;
+        let objects = inventory.candidates.into_values().collect::<Vec<_>>();
+        for object in &objects {
+            let total = if object.blocker.is_some() {
+                &mut protected_bytes
+            } else {
+                &mut unmatched_bytes
+            };
+            *total = total
+                .checked_add(object.object.bytes)
+                .ok_or_else(capacity)?;
+        }
+        Ok(RetentionInspection {
+            boundaries,
+            objects,
+            protected_bytes,
+            unmatched_bytes,
+            metadata_objects_read: inventory.metadata_objects_read,
+        })
+    }
+    /// Captures the same active roots used by removal plus the native catalog's
+    /// lifecycle tables. Called only while exclusive maintenance owns the host.
+    pub(in crate::engine) async fn restore_dependencies(
+        &self,
+        owner: &Id,
+    ) -> Result<(Vec<RetentionBoundary>, Vec<ObjectRef>)> {
+        self.retirement_catalog()?;
+        let budget = &self.inner.lifecycle.budget;
+        let limit = budget.limits.max_metadata_bytes;
+        let _memory = budget.reserve(limit.saturating_mul(5))?;
+        let mut inventory = Inventory::collecting(limit)?;
+        let boundaries = self.collect_inventory(&mut inventory, Some(owner)).await?;
+        let paths = inventory.required_paths.take().unwrap_or_default();
+        for path in paths {
+            if inventory.candidates.contains_key(&path) {
+                continue;
+            }
+            let root = self.inner.root.clone();
+            let owner = owner.clone();
+            let object = budget
+                .blocking(move || {
+                    crate::restore::regular_owned_file(&root, Path::new(&path))?;
+                    storage::object(&owner, Path::new(&path))
+                })
+                .await?;
+            inventory.charge(reference_bytes(&object).saturating_add(object.path.len()))?;
+            inventory.candidates.insert(
+                object.path.clone(),
+                ObjectProtection {
+                    object,
+                    blocker: None,
+                },
+            );
+        }
+        Ok((boundaries, inventory.into_references()?))
+    }
+
+    async fn collect_inventory(
+        &self,
+        inventory: &mut Inventory,
+        restore_owner: Option<&Id>,
+    ) -> Result<Vec<RetentionBoundary>> {
+        let lifecycle = &self.inner.lifecycle;
+        let budget = &lifecycle.budget;
+        let limit = budget.limits.max_metadata_bytes;
         // Engine::open owns a flat embedded catalog. The maintained SQL adapter
         // scans all namespace rows per listing; recurse here and cost becomes
         // quadratic in dataset count. Injected/hierarchical catalogs need their
         // own qualified enumeration before this inventory can inspect them.
         let mut namespaces = lifecycle.catalog.list_namespaces(None).await?;
-        charge_namespaces(&mut inventory, &namespaces)?;
+        charge_namespaces(inventory, &namespaces)?;
         namespaces.sort();
         let mut visited = BTreeSet::new();
         let mut boundaries = Vec::new();
@@ -143,8 +210,64 @@ impl Engine {
             };
             inventory.charge(boundary.table.len() + boundary.metadata.len() + 128)?;
             boundaries.push(boundary);
+            if restore_owner.is_some() {
+                let origin = RetentionBlocker {
+                    table: table_name.clone(),
+                    key: "native-catalog".into(),
+                    revision: view.revision,
+                };
+                // The SQLite image includes every registration, even tables
+                // whose logical promises have since retired. Retain their native
+                // closure too, or restoring that image would create dangling heads.
+                let tables = lifecycle.catalog.list_tables(ident.namespace()).await?;
+                for native_ident in tables {
+                    inventory.charge(native_ident.to_string().len().saturating_add(128))?;
+                    let native = if native_ident == ident {
+                        view.table.clone()
+                    } else {
+                        lifecycle.catalog.load_table(&native_ident).await?
+                    };
+                    if native_ident != ident {
+                        let boundary = RetentionBoundary {
+                            table: native_ident.to_string(),
+                            metadata: native.metadata_location_result()?.to_owned(),
+                            revision: native.metadata().last_sequence_number(),
+                        };
+                        inventory.charge(
+                            boundary
+                                .table
+                                .len()
+                                .saturating_add(boundary.metadata.len())
+                                .saturating_add(128),
+                        )?;
+                        boundaries.push(boundary);
+                    }
+                    let files = storage::snapshot_files(&native, budget).await?;
+                    for path in &files.paths {
+                        inventory.path(path, &origin)?;
+                    }
+                }
+                // Missing identities are resolved after all typed roots were visited,
+                // so retained payload identities never incur a second hash pass.
+            }
             let rows = lifecycle.rows(&view).await?;
             let removal_markers = self.validate_removal_records(&rows, &view)?;
+            if restore_owner.is_some() {
+                for (_, _, json) in rows.prefix("removal-state/") {
+                    let progress: RemovalProgress = decode(json)?;
+                    if progress
+                        .objects
+                        .iter()
+                        .chain(&progress.registrations)
+                        .any(|outcome| !outcome.finished())
+                    {
+                        return Err(Error::refusal(
+                            "restore_removal_pending",
+                            "finish saved removal decisions before creating a restore point",
+                        ));
+                    }
+                }
+            }
             let retired = super::retirement::retired_records(&rows, &view, self, |bytes| {
                 inventory.charge(bytes)
             })?;
@@ -232,31 +355,19 @@ impl Engine {
                     continue;
                 }
                 inventory.record(key, json, &rows, &origin)?;
-                inventory.expand(budget).await?;
+                inventory.expand(budget, &self.inner.root).await?;
             }
         }
         boundaries.sort_by(|left, right| left.table.cmp(&right.table));
-        inventory.check_bindings(lifecycle, &boundaries).await?;
-        let mut protected_bytes = 0u64;
-        let mut unmatched_bytes = 0u64;
-        let objects = inventory.candidates.into_values().collect::<Vec<_>>();
-        for object in &objects {
-            let total = if object.blocker.is_some() {
-                &mut protected_bytes
-            } else {
-                &mut unmatched_bytes
-            };
-            *total = total
-                .checked_add(object.object.bytes)
-                .ok_or_else(capacity)?;
-        }
-        Ok(RetentionInspection {
-            boundaries,
-            objects,
-            protected_bytes,
-            unmatched_bytes,
-            metadata_objects_read: inventory.metadata_objects_read,
-        })
+        let lifecycle_boundaries = boundaries
+            .iter()
+            .filter(|boundary| boundary.table.ends_with(".lifecycle"))
+            .cloned()
+            .collect::<Vec<_>>();
+        inventory
+            .check_bindings(lifecycle, &lifecycle_boundaries)
+            .await?;
+        Ok(boundaries)
     }
 }
 
@@ -339,6 +450,7 @@ pub(super) fn reference_roots(
 
 enum Expansion {
     Release,
+    Restore(crate::restore::RestorePointRef),
     Native(Option<(Option<i64>, i32)>),
 }
 
@@ -351,6 +463,7 @@ struct Pending {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MetadataKind {
     Release,
+    Restore,
     Native,
 }
 
@@ -680,6 +793,7 @@ impl Inventory {
         self.object(object, origin)?;
         let (tag, binding) = match kind {
             Expansion::Release => (MetadataKind::Release, None),
+            Expansion::Restore(_) => (MetadataKind::Restore, None),
             Expansion::Native(binding) => (MetadataKind::Native, binding),
         };
         if let Some(old) = self.visited.get_mut(&object.path) {
@@ -746,6 +860,9 @@ impl Inventory {
 
     fn table(&mut self, table: &TablePin, origin: &RetentionBlocker) -> Result<()> {
         self.object(&table.metadata, origin)?;
+        if let Some(logical) = &table.logical_metadata {
+            self.object(logical, origin)?;
+        }
         // Pins created by supported writers already retain the native snapshot
         // inventory. No need to read those manifests again for direct table roots.
         if !table.objects.contains(&table.metadata) {
@@ -849,7 +966,152 @@ impl Inventory {
         origin: &RetentionBlocker,
     ) -> Result<()> {
         // Most-specific families precede their common prefix.
-        if key.starts_with("phase/backfill/") {
+        if let Some(id) = key.strip_prefix("restore-reuse/") {
+            let reuse: crate::restore::RestoreReuse = decode(json)?;
+            if reuse.id.as_str() != id
+                || crate::catalog::lifecycle_ident(&reuse.dataset).to_string() != origin.table
+            {
+                return Err(invalid_inventory("restore preparation identity differs"));
+            }
+            for object in &reuse.objects {
+                self.object(object, origin)?;
+            }
+        } else if let Some(id) = key.strip_prefix("restore-point/") {
+            let reference: crate::restore::RestorePointRef = decode(json)?;
+            if reference.id.as_str() != id
+                || reference.manifest.owner != reference.dataset
+                || crate::catalog::lifecycle_ident(&reference.dataset).to_string() != origin.table
+            {
+                return Err(invalid_inventory("restore point identity differs"));
+            }
+            self.enqueue(
+                &reference.manifest,
+                Expansion::Restore(reference.clone()),
+                origin,
+            )?;
+        } else if let Some(id) = key.strip_prefix("restore-materialized/") {
+            let created: crate::restore::RestoreMaterialized = decode(json)?;
+            if created.reference.id.as_str() != id
+                || created.reference.manifest.owner != created.reference.dataset
+                || created.catalog.owner != created.reference.dataset
+                || created
+                    .backups
+                    .iter()
+                    .any(|object| object.owner != created.reference.dataset)
+                || crate::catalog::lifecycle_ident(&created.reference.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory(
+                    "restore creation evidence identity differs",
+                ));
+            }
+            // Creation evidence is retained after explicit retirement. Only the
+            // active point promises continued availability of its backup objects.
+            for object in std::iter::once(&created.reference.manifest)
+                .chain(std::iter::once(&created.catalog))
+                .chain(&created.backups)
+            {
+                validate_object(object)?;
+            }
+        } else if let Some(id) = key.strip_prefix("compaction-request/") {
+            let capture: crate::engine::compaction::Capture = decode(json)?;
+            if capture.spec.operation.as_str() != id
+                || capture.manifest.owner != capture.spec.dataset
+                || crate::catalog::lifecycle_ident(&capture.spec.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory("compaction request identity differs"));
+            }
+            self.release(&capture.manifest, origin)?;
+            self.table(&capture.source, origin)?;
+        } else if [
+            "compaction-prepared/",
+            "compaction-verified/",
+            "compaction-result/",
+            "representation/",
+        ]
+        .iter()
+        .any(|prefix| key.starts_with(prefix))
+        {
+            let result: CompactionResult = decode(json)?;
+            let capture: crate::engine::compaction::Capture = required_record(
+                rows,
+                &format!("compaction-request/{}", result.spec.operation),
+            )?;
+            crate::engine::compaction::check_result(&capture, &result)?;
+            let expected = if key.starts_with("representation/") {
+                format!(
+                    "representation/{}/{}",
+                    result.source.logical_metadata().digest,
+                    result.spec.group
+                )
+            } else {
+                format!(
+                    "{}/{}",
+                    key.split('/').next().unwrap_or_default(),
+                    result.spec.operation
+                )
+            };
+            if key != expected
+                || (!key.starts_with("compaction-prepared/") && !result.verified)
+                || crate::catalog::lifecycle_ident(&result.spec.dataset).to_string() != origin.table
+            {
+                return Err(invalid_inventory("compaction completion identity differs"));
+            }
+            self.table(&result.source, origin)?;
+            self.table(&result.replacement, origin)?;
+        } else if let Some(id) = key.strip_prefix("export-operation/") {
+            let operation: crate::engine::export::ExportOperation = decode(json)?;
+            crate::engine::export::validate_operation_record(&operation)?;
+            if operation.request.operation.as_str() != id
+                || crate::catalog::lifecycle_ident(&operation.request.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory("export operation identity differs"));
+            }
+            self.release_pin(&operation.source, origin)?;
+        } else if let Some(id) = key.strip_prefix("export-materialized/") {
+            let output: crate::engine::export::ExportMaterialized = decode(json)?;
+            let operation: crate::engine::export::ExportOperation =
+                required_record(rows, &format!("export-operation/{id}"))?;
+            crate::engine::export::validate_operation_record(&operation)?;
+            crate::engine::export::check_materialized(&output, &operation)?;
+            if operation.request.operation.as_str() != id
+                || crate::catalog::lifecycle_ident(&operation.request.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory("export creation identity differs"));
+            }
+            self.object(&output.object, origin)?;
+        } else if let Some(id) = key.strip_prefix("export-validation/") {
+            let validation: crate::export::ExportValidation = decode(json)?;
+            let output: crate::engine::export::ExportMaterialized =
+                required_record(rows, &format!("export-materialized/{id}"))?;
+            if validation.object != output.object || validation.rows != output.rows {
+                return Err(invalid_inventory(
+                    "export validation differs from its output",
+                ));
+            }
+            self.object(&validation.object, origin)?;
+        } else if key.starts_with("export-result/") || key.starts_with("export-channel/") {
+            let pin: crate::export::ExportPin = decode(json)?;
+            crate::engine::export::check_pin(&pin)?;
+            let operation: crate::engine::export::ExportOperation =
+                required_record(rows, &format!("export-operation/{}", pin.id))?;
+            crate::engine::export::check_result(&pin, &operation)?;
+            let expected = if key.starts_with("export-result/") {
+                format!("export-result/{}", pin.id)
+            } else {
+                format!("export-channel/{}", operation.request.channel)
+            };
+            if key != expected
+                || crate::catalog::lifecycle_ident(&pin.dataset).to_string() != origin.table
+            {
+                return Err(invalid_inventory("export selection identity differs"));
+            }
+            self.object(&pin.object, origin)?;
+            self.release(&pin.source.manifest, origin)?;
+        } else if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = decode(json)?;
             self.object(&phase.source, origin)?;
             self.object(
@@ -1100,7 +1362,7 @@ impl Inventory {
         Ok(())
     }
 
-    async fn expand(&mut self, budget: &Budget) -> Result<()> {
+    async fn expand(&mut self, budget: &Budget, root: &Path) -> Result<()> {
         while let Some(Pending {
             object,
             kind,
@@ -1131,6 +1393,16 @@ impl Inventory {
                         return Err(invalid_inventory("release owner differs"));
                     }
                     self.dataset(&dataset, &origin)?;
+                }
+                Expansion::Restore(reference) => {
+                    let point: crate::restore::RestorePoint =
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
+                            .await?;
+                    crate::restore::validate_point(root, &reference, &point)?;
+                    self.object(&point.catalog, &origin)?;
+                    for retained in &point.objects {
+                        self.object(&retained.backup, &origin)?;
+                    }
                 }
                 Expansion::Native(_) => {
                     let Strict(metadata): Strict<TableMetadata> =
@@ -1292,3 +1564,12 @@ fn capacity() -> Error {
 mod collector_tests;
 #[cfg(test)]
 mod history_tests;
+
+fn required_record<T: DeserializeOwned>(
+    rows: &crate::catalog::SnapshotRows,
+    key: &str,
+) -> Result<T> {
+    rows.get_record(key)?
+        .map(|(_, _, value)| value)
+        .ok_or_else(unknown_dependencies)
+}

@@ -1,4 +1,4 @@
-//! Source-pinned physical row locations using unfiltered native file reads.
+//! Stable source occurrences using stored origins or initial physical row locations.
 
 use crate::{Error, Result, budget::Budget};
 use arrow::{
@@ -16,18 +16,17 @@ use iceberg::{
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
-/// Exact native data-file path; meaningful only with its verified source pin.
+/// Immutable birth-file or writer origin identifying a source occurrence.
 pub const OCCURRENCE_FILE: &str = "__docspec_file";
-/// Zero-based physical row position inside the named immutable data file.
+/// Zero-based occurrence position inside its immutable origin.
 pub const OCCURRENCE_ROW: &str = "__docspec_row";
 
-/// Adds physical occurrence fields to the captured native schema.
-///
-/// These are source-pinned locations, not logical IDs stable across rewrites.
+/// Adds stable occurrence fields to the captured native schema.
 ///
 /// # Errors
 /// Refuses reserved names or unqualified changes in native value interpretation.
 pub fn occurrence_schema(table: &Table) -> Result<SchemaRef> {
+    super::identity::has_origins(table.metadata().current_schema())?;
     let schema = super::schema::read_schema(table)?;
     if schema.fields().iter().any(|field| {
         field.name().eq_ignore_ascii_case(OCCURRENCE_FILE)
@@ -136,6 +135,8 @@ impl Occurrences {
             if let Some(file) = &mut self.current {
                 if let Some(batch) = file.stream.try_next().await? {
                     let batch = super::schema::strip_file_column(batch, self.limit)?;
+                    let batch =
+                        super::identity::materialize(batch, &file.path, file.next, self.limit)?;
                     let end = file
                         .next
                         .checked_add(batch.num_rows() as u64)
@@ -292,6 +293,10 @@ impl OccurrenceScan {
         })
     }
 
+    pub fn contains_file(&self, path: &str) -> bool {
+        self.tasks.contains_key(path)
+    }
+
     pub fn files(&self) -> impl Iterator<Item = &DataFile> {
         self.tasks.values().map(|(_, file)| file)
     }
@@ -387,6 +392,16 @@ fn append_locations(
     schema: &SchemaRef,
     limit: usize,
 ) -> Result<RecordBatch> {
+    let native_schema = batch.schema();
+    if let (Ok(file), Ok(row)) = (
+        native_schema.index_of(super::identity::ORIGIN_FILE),
+        native_schema.index_of(super::identity::ORIGIN_ROW),
+    ) {
+        let mut columns = batch.columns().to_vec();
+        columns.push(batch.column(file).clone());
+        columns.push(batch.column(row).clone());
+        return Ok(RecordBatch::try_new(schema.clone(), columns)?);
+    }
     // Bound path replication and position buffers before allocating them. The
     // final Arrow memory check also accounts for buffer padding and array structs.
     let added = path

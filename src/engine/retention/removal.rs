@@ -371,7 +371,7 @@ impl Engine {
         drop(rows);
         // Inventory charges bound the fresh inspection, selected subset, native
         // registrations and index lists. The request permit covers plan copies.
-        let _memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
+        let inventory_memory = lifecycle.budget.reserve(limit.saturating_mul(4))?;
         let fresh = self.inspect_retention_admitted(&objects).await?;
         drop(objects);
         let chosen = plan
@@ -405,8 +405,8 @@ impl Engine {
                 })?;
             registrations.push(index);
         }
-        // Restore the original encoding/commit allowance only after nested
-        // native inventory and its file-reader reservations have been released.
+        // Admit intent encoding before transferring the retained inventory into
+        // it. Nested native inventory and file-reader reservations have ended.
         let _encoding_memory = lifecycle.budget.reserve(limit.saturating_mul(8))?;
         let intent = RemovalIntent {
             plan: plan.clone(),
@@ -424,6 +424,11 @@ impl Engine {
             objects: chosen,
             registrations,
         };
+        // Boundaries, blockers and indices now belong to the intent charged by
+        // the encoding allowance. Candidate/selected/native copies are gone;
+        // keeping their inventory permit would charge these same values twice
+        // while the catalog writer admits its own buffers and metadata.
+        drop(inventory_memory);
         let mut progress = RemovalProgress {
             intent_revision: intent.revision,
             reserved_future_bytes: 0,

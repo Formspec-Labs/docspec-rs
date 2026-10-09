@@ -10,6 +10,45 @@ from the [accepted greenfield plan](docs/PLAN.md). **The complete dataset lifecy
 10-million-Comments performance target remain unfinished.** See
 [implementation status](docs/STATUS.md) for the requirement and qualification map.
 
+## Local exports, compaction and restore
+
+`export export.json` creates an independently readable Parquet file containing
+only the explicitly selected columns and all active rows of one retained group.
+The request uses [ExportSpec](src/export.rs): an exact source `VersionRef`, a stable
+operation ID, a channel, its expected previous export ID, and an explicit policy.
+The policy names the group, sets `rows` to `"all"`, and lists columns in output
+order. Row restrictions must already be applied upstream. The caller supplies
+this authorization; the loopback HTTP service does not implement user accounts.
+Use `latest-export DATASET CHANNEL` or `export-pin DATASET OPERATION` to resolve
+the immutable file. Repeating an operation reuses completed work. Remote upload
+and public hosting remain unfinished.
+
+`compact compaction.json` accepts [CompactionSpec](src/model.rs): dataset,
+operation, version, group, exact file paths (an empty list selects all active
+files), and `target_file_bytes`. It preserves the logical version and selects an
+equivalent physical representation for managed reads. Source occurrence IDs
+survive rewrites so retained computed groups remain readable. Target file size
+is a preference; metadata limits may close a file sooner. Old exact pins remain
+retained. Compaction currently improves managed reads; updates still start from
+canonical files, and the operation does not reclaim old storage.
+
+Create a local restore point before maintenance, then restore it only after
+closing the engine and all reader streams:
+
+```sh
+target/debug/docspec --workspace workspaces/comments create-restore-point comments before-maintenance > restore-point.json
+target/debug/docspec --workspace workspaces/comments restore-local restore-point.json
+```
+
+Restore points retain native catalog state and its required immutable objects in
+the same canonical Unix workspace. They protect against later unlink; hard links
+are not a second physical copy against disk failure or external modification.
+Restoring selects a fresh catalog file after fencing old local actors and checking
+backup identities. `--allow-unregistered-import` is an explicit catalog-loss
+procedure for a completed artifact; known retired points remain refused.
+Use `plan-restore-point-retirement` and `retire-restore-points` to end selected
+restore promises. Retirement and physical deletion remain separate operations.
+
 ## Run locally
 
 The pinned toolchain installs through rustup. Build the binary:
@@ -198,8 +237,8 @@ lease and does not extend a retired availability promise. Logical retirement
 preserves the physical files, so independent reads can still use those files.
 Library callers can also use the shared catalog-free `engine::read_combined`
 function with a `Budget`; the same availability responsibility applies.
-Explicit local removal uses the same maintenance admission. Automatic expiration,
-compaction and restore remain disabled.
+Explicit local removal and restore-point capture use the same maintenance admission.
+Automatic expiration remains disabled.
 
 To reclaim explicitly retired local objects, save their exact `ObjectRef` values
 as a JSON array and capture a removal plan:
@@ -701,8 +740,9 @@ Native capacity refusals keep their structured codes through DataFusion errors.
 Owned output directories are protected before writes. Shared objects preserve
 their original owners and exact dependencies. Explicit local removal uses the
 common protection inventory and durably reserves outcome capacity in the owner's
-lifecycle table. Automatic expiration, native metadata cleanup, compaction and
-restore remain disabled. Lifecycle/catalog recovery files are outside the object
+lifecycle table. Automatic expiration and native metadata cleanup remain disabled.
+Explicit compaction and restore use the shared lifecycle services. Lifecycle/catalog
+recovery files are outside the object
 removal namespace; retained history compaction remains unfinished.
 
 `--limits limits.json` accepts a partial resource profile. Defaults come from the

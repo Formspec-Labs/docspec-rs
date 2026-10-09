@@ -1,0 +1,6 @@
+{
+  "observed_at": "2026-10-09T23:05:25.149419+00:00",
+  "free_volume_bytes": 145256247296,
+  "target_allocated_kib": 10881076,
+  "scope": "Current build cache and shared-volume snapshot; not a peak, data storage amplification, or attributed volume change."
+}
