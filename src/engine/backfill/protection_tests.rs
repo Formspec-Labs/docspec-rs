@@ -146,9 +146,13 @@ async fn scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen() {
         binding(&rows, "request-dependencies/initial").unwrap().2["protections"].clone();
     assert_eq!(original_tokens.as_array().unwrap().len(), 1);
     assert_eq!(original_tokens[0]["owner"], raw_input.owner.as_str());
-    // Selection binding belongs to the later integration. Admission alone must
-    // not qualify a recomposed readback's independently retained current result.
-    assert!(binding(&rows, "result/initial").is_none());
+    let (_, result_revision, result_binding) = binding(&rows, "result/initial").unwrap();
+    assert_eq!(Some(result_revision), rows.revision("result/initial"));
+    assert_eq!(result_binding["protections"], original_tokens);
+    engine
+        .check_reference_binding(&view, "result/initial")
+        .await
+        .unwrap();
     drop(rows);
     let owner_revision = engine
         .inner
@@ -239,26 +243,84 @@ async fn scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen() {
     );
     let view = engine.inner.lifecycle.open(&spec.dataset).await.unwrap();
     let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
-    let (key, _, _) = rows.prefix("backfill-readback/").next().unwrap();
-    assert!(
-        binding(&rows, key).is_none(),
-        "an unbound selected result leaves readback provenance unknown"
-    );
-    assert!(
-        engine
-            .retained_protections(&view, key)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    let (key, revision, json) = rows.prefix("backfill-readback/").next().unwrap();
+    let retained_readback: ReleasePin = serde_json::from_str(json).unwrap();
+    let retained_key = key.to_owned();
+    let retained_binding = binding(&rows, key).unwrap();
+    assert_eq!(retained_binding.1, revision);
+    assert_eq!(retained_binding.2["revision"], revision);
+    assert_eq!(retained_binding.2["protections"], original_tokens);
+    engine.check_reference_binding(&view, key).await.unwrap();
     drop(rows);
+    assert_eq!(payloads(&data_directory), retained_payloads.unwrap());
+
+    // A newly selected sibling changes the final composition, while the target
+    // scalar files and their original protected readback remain reusable.
+    let sibling = BackfillSpec {
+        operation: id("sibling"),
+        group: id("additional"),
+        fields: vec![ComputedField {
+            id: 11,
+            name: "another_id".into(),
+            expression: "id + 2".into(),
+        }],
+        ..spec.clone()
+    };
+    let sibling_release = engine.backfill(&sibling).await.unwrap();
+    let with_sibling = scalar_records(&engine, &spec.dataset, &original_tokens).await;
+    for (key, value) in &previous {
+        assert_eq!(with_sibling.get(key), Some(value));
+    }
+    let retained_payloads = payloads(&data_directory);
     let release = engine.backfill(&spec).await.unwrap();
     assert_eq!(engine.backfill(&spec).await.unwrap(), release);
     assert_eq!(
-        scalar_records(&engine, &spec.dataset, &original_tokens).await,
-        previous
+        release.dataset.groups["calculated"],
+        retained_readback.dataset.groups["calculated"]
     );
-    assert_eq!(payloads(&data_directory), retained_payloads.unwrap());
+    assert_eq!(
+        release.dataset.groups["additional"],
+        sibling_release.dataset.groups["additional"]
+    );
+    assert_eq!(
+        release.dataset.parent_manifest,
+        Some(sibling_release.manifest)
+    );
+    assert_ne!(release.manifest, retained_readback.manifest);
+    assert_eq!(
+        scalar_records(&engine, &spec.dataset, &original_tokens).await,
+        with_sibling
+    );
+    assert_eq!(payloads(&data_directory), retained_payloads);
+    let view = engine.inner.lifecycle.open(&spec.dataset).await.unwrap();
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    assert_eq!(binding(&rows, &retained_key).unwrap(), retained_binding);
+    let saved: ReleasePin = rows.get_record(&retained_key).unwrap().unwrap().2;
+    assert_eq!(saved, retained_readback);
+    let result_revision = rows.revision("result/derived").unwrap();
+    for claim in ["result/derived", "succession/derived"] {
+        let (_, revision, scope) = binding(&rows, claim).unwrap();
+        assert_eq!(Some(revision), rows.revision(claim));
+        assert_eq!(revision, result_revision);
+        assert_eq!(scope["protections"], original_tokens);
+        engine.check_reference_binding(&view, claim).await.unwrap();
+    }
+    let mut selected_readback_found = false;
+    for (key, revision, json) in rows.prefix("backfill-readback/derived/") {
+        let candidate: ReleasePin = serde_json::from_str(json).unwrap();
+        let (_, binding_revision, scope) = binding(&rows, key).unwrap();
+        assert_eq!(binding_revision, revision);
+        assert_eq!(scope["protections"], original_tokens);
+        engine.check_reference_binding(&view, key).await.unwrap();
+        if candidate == release {
+            selected_readback_found = true;
+            assert!(
+                revision < result_revision,
+                "readback precedes final selection"
+            );
+        }
+    }
+    assert!(selected_readback_found);
     assert_eq!(
         engine
             .inner

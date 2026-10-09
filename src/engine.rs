@@ -1134,7 +1134,7 @@ impl Engine {
                 .get::<ReleasePin>(&retained_view, &format!("readback/{}", spec.operation()))
                 .await?
             {
-                let _protections = self
+                let protections = self
                     .retained_protections(&retained_view, &format!("readback/{}", spec.operation()))
                     .await?;
                 if !release.verified
@@ -1158,7 +1158,17 @@ impl Engine {
                     check_release_available(&release, &lifecycle.budget).await?;
                 }
                 stop_after(stop, "readback")?;
-                return self.select_prepared(spec, &operation, release, stop).await;
+                return self
+                    .select_prepared(
+                        spec,
+                        &operation,
+                        Retained {
+                            value: release,
+                            protections,
+                        },
+                        stop,
+                    )
+                    .await;
             }
 
             let PreparedSource {
@@ -1497,8 +1507,7 @@ impl Engine {
                 }
             };
             stop_after(stop, "readback")?;
-            self.select_prepared(spec, &operation, release.value, stop)
-                .await
+            self.select_prepared(spec, &operation, release, stop).await
         })
     }
 
@@ -1506,7 +1515,7 @@ impl Engine {
         &'a self,
         spec: &'a OperationRequest,
         operation: &'a Operation,
-        release: ReleasePin,
+        release: Retained<ReleasePin>,
         stop: Option<&'a str>,
     ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
         Box::pin(async move {
@@ -1540,7 +1549,7 @@ impl Engine {
             self.check_incremental(&authority, spec).await?;
             self.select(&view, authority, &release).await?;
             stop_after(stop, "selection")?;
-            Ok(release)
+            Ok(release.value)
         })
     }
 

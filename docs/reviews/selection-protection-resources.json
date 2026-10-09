@@ -1,0 +1,8 @@
+{
+  "recorded_at_utc": "2026-10-09T00:18:39.043619+00:00",
+  "context": "Selection-protection checkpoint snapshot; not a peak or a corpus benchmark.",
+  "debug_cache_path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug",
+  "debug_cache_allocated_bytes": 8226230272,
+  "volume_free_bytes": 14050107392,
+  "notes": "Allocated blocks may include shared APFS extents. Volume free space includes unrelated activity. Active and reusable build outputs were preserved; no cleanup occurred."
+}

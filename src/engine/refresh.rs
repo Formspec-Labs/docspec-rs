@@ -223,7 +223,7 @@ impl Engine {
         &self,
         spec: &RefreshSpec,
         operation: &Operation,
-        release: &ReleasePin,
+        release: &Retained<ReleasePin>,
     ) -> Result<ReleasePin> {
         let related = release.dataset.related.as_ref().ok_or_else(invalid)?;
         let dependencies =
@@ -264,7 +264,7 @@ impl Engine {
             .await?;
         self.select_with_progress(&view, authority, release, Some(&progress))
             .await?;
-        Ok(release.clone())
+        Ok(release.value.clone())
     }
 
     // Caller owns every participating source/family lock plus the output lock.

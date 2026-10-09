@@ -1,5 +1,39 @@
 # Implementation and qualification status
 
+## Protection follows selected results and their actual predecessors
+
+Selection carries the saved readback's protection into the immutable `result`
+record. The `succession` record separately combines that scope with the actual
+preceding selection's result scope, captured under the consumer lock. This covers
+overlapping builds whose predecessor changed after admission without adding the
+predecessor's unrelated dependencies to the new result. Both bindings commit with
+their claims in the existing single selection transaction.
+
+Backfill composition can now inherit the current selected result's protection,
+including already selected sibling groups. Unknown older provenance remains
+unknown: a known candidate following an unknown predecessor has a known result
+and an unknown succession scope. This propagation adds no owner acquisition,
+payload checks or historical dependency walk.
+
+The [source and history checks](reviews/selection-protection-source.log) and
+[backfill recovery checks](reviews/selection-protection-focused.log) passed. They
+exercise selection retries, overlapping unbased builds, unknown predecessors,
+refresh/schema paths, reopen and sibling recomposition while preserving payloads
+and owner grants. The [independent implementation review](reviews/selection-protection-review.md)
+approves this scope. The [repository gate](reviews/selection-protection-check.log)
+passed formatting, strict linting, and the complete regression suite.
+The [resource snapshot](reviews/selection-protection-resources.json) records debug
+cache allocation and shared-volume free space at this checkpoint; it is not a peak
+measurement or a corpus benchmark. Active build outputs remain reusable.
+
+Mutable `authority` still needs a checked link to its selected immutable result,
+which can reuse that result's binding instead of storing duplicate protection.
+Newly observed `input-progress` roots remain unbound and need owner acquisition
+before acknowledgment.
+The [design review](reviews/selection-protection-design.md) records those boundaries.
+Grants remain permanent, physical removal remains disabled, and the complete
+lifecycle and performance qualification remain unfinished.
+
 ## Protection follows completed work
 
 New source, processing, evidence and validation completions carry their input
@@ -42,11 +76,11 @@ The [post-gate resource snapshot](reviews/phase-protection-resources.json) recor
 allocated debug-cache blocks and shared-volume free space separately from dataset
 storage. It is not a peak measurement; the build outputs remain reusable.
 
-Final result/selection bindings, newly selected siblings and observed input heads
-remain unfinished. Backfill readbacks that consume an unbound selected result
-therefore remain unbound. Grants are still permanent, and physical removal stays
-disabled. This checkpoint does not complete retention, restore, hosted adapters or
-the full R1–R7 and performance qualification plan.
+The next checkpoint above adds immutable result and succession bindings. Older
+unbound selected results still leave their dependent backfill readbacks unbound.
+Mutable authority and observed input heads remain unfinished. Grants are still
+permanent, and physical removal stays disabled. These checkpoints do not complete
+retention, restore, hosted adapters or the full R1–R7 and performance plan.
 
 ## Protected request admission and managed input reuse
 

@@ -143,7 +143,7 @@ impl Engine {
         &self,
         view: &View,
         authority: Authority,
-        release: &ReleasePin,
+        release: &Retained<ReleasePin>,
     ) -> Result<()> {
         let progress = if let Some(related) = &release.dataset.related {
             Some(
@@ -161,7 +161,7 @@ impl Engine {
         &self,
         view: &View,
         mut authority: Authority,
-        release: &ReleasePin,
+        release: &Retained<ReleasePin>,
         progress: Option<&BTreeMap<Id, SuccessionProof>>,
     ) -> Result<()> {
         let lifecycle = &self.inner.lifecycle;
@@ -193,6 +193,30 @@ impl Engine {
             let (revision, _, link) = read_link(&rows, view.revision, &previous)?;
             check_selected_link(selected_revision, &head, revision, &link)?;
         }
+        // The accepted predecessor may have changed since this request was
+        // admitted. Inherit its exact retained scope from this guarded view.
+        // Unknown older provenance must not borrow the candidate's protection.
+        let mut succession_protections = release
+            .protections
+            .as_ref()
+            .map(ReferenceProtections::duplicate)
+            .transpose()?;
+        if let Some(previous) = &authority.release {
+            let previous_key = format!("result/{}", previous.id);
+            let previous_scope = self.retained_protections(view, &previous_key).await?;
+            if previous_scope.is_some() {
+                let _memory = rows.reserve_decoded(&lifecycle.budget, &[&previous_key])?;
+                if rows
+                    .get_record::<ReleasePin>(&previous_key)?
+                    .map(|(_, _, value)| value)
+                    .as_ref()
+                    != Some(previous)
+                {
+                    return Err(invalid("selected release differs from its retained result"));
+                }
+            }
+            ReferenceProtections::inherit(&mut succession_protections, previous_scope.as_ref())?;
+        }
         let link = Succession {
             selected: release.version_ref(),
             predecessor,
@@ -210,17 +234,27 @@ impl Engine {
             authority.definition = spec.next_definition.clone();
         }
         authority.selected = Some(release.dataset.clone());
-        authority.release = Some(release.clone());
+        authority.release = Some(release.value.clone());
         authority.selection_revision = Some(
             view.revision
                 .checked_add(1)
                 .ok_or_else(|| Error::refusal("revision_exhausted", "revision overflow"))?,
         );
-        let mut records = vec![
-            record("authority", authority)?,
-            record(format!("result/{}", release.id), release)?,
-            record(key, link)?,
-        ];
+        let mut records = vec![record("authority", authority)?];
+        records.extend(completion_records(
+            &release.dataset.dataset,
+            view,
+            &format!("result/{}", release.id),
+            &release.value,
+            release.protections.as_ref(),
+        )?);
+        records.extend(completion_records(
+            &release.dataset.dataset,
+            view,
+            &key,
+            &link,
+            succession_protections.as_ref(),
+        )?);
         if let Some(progress) = progress {
             records.push(record(format!("input-progress/{}", release.id), progress)?);
         }

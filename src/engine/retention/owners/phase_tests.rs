@@ -42,25 +42,39 @@ async fn fixture() -> (tempfile::TempDir, Engine, ObjectRef, ObjectRef) {
 }
 
 async fn fixture_with_limits(profile: Limits) -> (tempfile::TempDir, Engine, ObjectRef, ObjectRef) {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("same-external.parquet");
+    let fixture = fixture_with_values(profile, &[1, 1, 2]).await;
+    assert_eq!(fixture.2.digest, fixture.3.digest);
+    assert_eq!(fixture.2.bytes, fixture.3.bytes);
+    fixture
+}
+
+fn external_input(path: &std::path::Path, values: &[i64]) -> ObjectRef {
     let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
     let batch = RecordBatch::try_new(
         schema.clone(),
-        vec![Arc::new(Int64Array::from(vec![1, 1, 2]))],
+        vec![Arc::new(Int64Array::from(values.to_vec()))],
     )
     .unwrap();
     let mut writer =
-        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), schema, None).unwrap();
+        ArrowWriter::try_new(std::fs::File::create(path).unwrap(), schema, None).unwrap();
     writer.write(&batch).unwrap();
     writer.close().unwrap();
-    let (digest, bytes) = storage::digest(&path).unwrap();
-    let external = ObjectRef {
+    let (digest, bytes) = storage::digest(path).unwrap();
+    ObjectRef {
         owner: id("external"),
         path: path.to_string_lossy().into_owned(),
         digest,
         bytes,
-    };
+    }
+}
+
+async fn fixture_with_values(
+    profile: Limits,
+    second_values: &[i64],
+) -> (tempfile::TempDir, Engine, ObjectRef, ObjectRef) {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("same-external.parquet");
+    let external = external_input(&path, &[1, 1, 2]);
     let engine = Engine::open(root.path().join("workspace"), profile)
         .await
         .unwrap();
@@ -68,6 +82,7 @@ async fn fixture_with_limits(profile: Limits) -> (tempfile::TempDir, Engine, Obj
         .run(&request("owner-a", "initial", &external))
         .await
         .unwrap();
+    let external = external_input(&path, second_values);
     let second = engine
         .run(&request("owner-b", "initial", &external))
         .await
@@ -76,12 +91,30 @@ async fn fixture_with_limits(profile: Limits) -> (tempfile::TempDir, Engine, Obj
     // occurrence columns, so they need not have identical material digests.
     let first = first.dataset.inputs["input"].clone();
     let second = second.dataset.inputs["input"].clone();
-    assert_eq!(first.digest, second.digest);
-    assert_eq!(first.bytes, second.bytes);
     assert_ne!(first.owner, second.owner);
     assert_ne!(first.path, second.path);
     std::fs::remove_file(path).unwrap();
     (root, engine, first, second)
+}
+
+fn release_files(release: &ReleasePin) -> BTreeMap<String, (u64, std::time::SystemTime)> {
+    std::iter::once(&release.manifest)
+        .chain(release.dataset.inputs.values())
+        .chain(
+            release
+                .dataset
+                .groups
+                .values()
+                .flat_map(|table| std::iter::once(&table.metadata).chain(table.objects.iter())),
+        )
+        .map(|object| {
+            let metadata = std::fs::metadata(&object.path).unwrap();
+            (
+                object.path.clone(),
+                (metadata.len(), metadata.modified().unwrap()),
+            )
+        })
+        .collect()
 }
 
 async fn phase(engine: &Engine, dataset: &Id, name: &str) -> (String, i64, PhaseResult) {
@@ -213,6 +246,34 @@ async fn material_reuse_carries_original_owner_scope_into_validation_and_readbac
         .unwrap()
         .unwrap();
     assert_eq!(readback.dataset.inputs["input"], input_a);
+    let retained_files = release_files(&readback);
+    let selected = engine.run(&second).await.unwrap();
+    assert_eq!(selected, readback);
+    let result_binding = binding(&engine, &second.dataset, "result/b").await;
+    let succession_binding = binding(&engine, &second.dataset, "succession/b").await;
+    assert_eq!(result_binding.protections, readback_binding.protections);
+    assert_eq!(succession_binding.protections, readback_binding.protections);
+    assert_eq!(result_binding.revision, succession_binding.revision);
+    let selection_revision = engine
+        .inner
+        .lifecycle
+        .open(&second.dataset)
+        .await
+        .unwrap()
+        .revision;
+    assert_eq!(engine.run(&second).await.unwrap(), selected);
+    assert_eq!(
+        engine
+            .inner
+            .lifecycle
+            .open(&second.dataset)
+            .await
+            .unwrap()
+            .revision,
+        selection_revision,
+        "lost selection responses must reconcile without another commit"
+    );
+    assert_eq!(release_files(&selected), retained_files);
     for (owner, revision) in owner_revisions {
         assert_eq!(
             engine.inner.lifecycle.open(&owner).await.unwrap().revision,
@@ -220,6 +281,152 @@ async fn material_reuse_carries_original_owner_scope_into_validation_and_readbac
             "propagation must reuse grants rather than acquire owners again"
         );
     }
+}
+
+#[tokio::test]
+async fn succession_inherits_the_actual_predecessor_after_overlapping_unbased_builds() {
+    let (_root, engine, input_a, input_b) = fixture_with_values(limits(), &[10, 20]).await;
+    assert_ne!(input_a.digest, input_b.digest);
+    let first = request("consumer", "a", &input_a);
+    let mut second = request("consumer", "b", &input_b);
+    second.sql = "SELECT id + 1 AS id FROM input".into();
+    for build in [&first, &second] {
+        assert_eq!(
+            engine
+                .run_until(build, "readback")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+    }
+    let first_scope = binding(&engine, &first.dataset, "readback/a").await;
+    let second_scope = binding(&engine, &second.dataset, "readback/b").await;
+    assert_eq!(first_scope.protections.len(), 1);
+    assert_eq!(first_scope.protections[0].owner, input_a.owner);
+    assert_eq!(second_scope.protections.len(), 1);
+    assert_eq!(second_scope.protections[0].owner, input_b.owner);
+    let mut owner_revisions = BTreeMap::new();
+    for owner in [&input_a.owner, &input_b.owner] {
+        owner_revisions.insert(
+            owner.clone(),
+            engine.inner.lifecycle.open(owner).await.unwrap().revision,
+        );
+    }
+    let prior = engine.run(&first).await.unwrap();
+    let selected = engine.run(&second).await.unwrap();
+    assert!(selected.dataset.parent_manifest.is_none());
+    let result_scope = binding(&engine, &second.dataset, "result/b").await;
+    assert_eq!(result_scope.protections, second_scope.protections);
+    let succession_scope = binding(&engine, &second.dataset, "succession/b").await;
+    assert_eq!(succession_scope.revision, result_scope.revision);
+    let mut expected_scope = first_scope.protections;
+    expected_scope.extend(second_scope.protections);
+    expected_scope
+        .sort_by(|left, right| (&left.owner, &left.token).cmp(&(&right.owner, &right.token)));
+    assert_eq!(succession_scope.protections, expected_scope);
+    let view = engine.inner.lifecycle.open(&second.dataset).await.unwrap();
+    let succession: Succession = engine
+        .inner
+        .lifecycle
+        .get(&view, "succession/b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(succession.predecessor, Some(prior.version_ref()));
+    assert_eq!(succession.selected, selected.version_ref());
+    assert_eq!(engine.run(&second).await.unwrap(), selected);
+    assert_eq!(
+        binding(&engine, &second.dataset, "succession/b").await,
+        succession_scope
+    );
+    for (owner, revision) in owner_revisions {
+        assert_eq!(
+            engine.inner.lifecycle.open(&owner).await.unwrap().revision,
+            revision,
+            "selection reuses actual predecessor grants without reopening acquisition"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unknown_predecessor_scope_does_not_erase_the_selected_results_known_scope() {
+    let (_root, engine, input_a, input_b) = fixture_with_values(limits(), &[10, 20]).await;
+    let first = request("consumer", "a", &input_a);
+    let mut second = request("consumer", "b", &input_b);
+    second.sql = "SELECT id + 1 AS id FROM input".into();
+    assert_eq!(
+        engine
+            .run_until(&first, "admission")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let original = phase(&engine, &first.dataset, "admission").await;
+    let retirement = engine
+        .plan_phase_retirement(
+            &first.dataset,
+            &id("legacy-admission"),
+            std::slice::from_ref(&original.0),
+            "replace the retired completion with an older writer's unbound generation",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&retirement).await.unwrap();
+    let view = engine.inner.lifecycle.open(&first.dataset).await.unwrap();
+    let operation: Operation = engine
+        .inner
+        .lifecycle
+        .get(&view, "operation/a")
+        .await
+        .unwrap()
+        .unwrap();
+    engine
+        .complete(
+            &OperationRequest::Build(first.clone()),
+            &operation,
+            original.2,
+            None,
+        )
+        .await
+        .unwrap();
+    for build in [&first, &second] {
+        assert_eq!(
+            engine
+                .run_until(build, "readback")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+    }
+    let second_scope = binding(&engine, &second.dataset, "readback/b").await;
+    assert_eq!(second_scope.protections.len(), 1);
+    assert_eq!(second_scope.protections[0].owner, input_b.owner);
+    let prior = engine.run(&first).await.unwrap();
+    let selected = engine.run(&second).await.unwrap();
+    let view = engine.inner.lifecycle.open(&second.dataset).await.unwrap();
+    for key in ["result/a", "succession/a", "succession/b"] {
+        assert!(
+            engine
+                .retained_protections(&view, key)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let result_scope = binding(&engine, &second.dataset, "result/b").await;
+    assert_eq!(result_scope.protections, second_scope.protections);
+    let succession: Succession = engine
+        .inner
+        .lifecycle
+        .get(&view, "succession/b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(succession.predecessor, Some(prior.version_ref()));
+    assert_eq!(succession.selected, selected.version_ref());
 }
 
 #[tokio::test]
@@ -522,6 +729,13 @@ async fn refresh_evidence_inherits_the_exact_captured_producer_scope() {
     let readback_binding = binding(&engine, &refresh.dataset, "readback/initial").await;
     assert_eq!(validation_binding.protections, evidence_binding.protections);
     assert_eq!(readback_binding.protections, evidence_binding.protections);
+    let selected = engine.refresh(&refresh).await.unwrap();
+    let result_binding = binding(&engine, &refresh.dataset, "result/initial").await;
+    let succession_binding = binding(&engine, &refresh.dataset, "succession/initial").await;
+    assert_eq!(result_binding.protections, readback_binding.protections);
+    assert_eq!(succession_binding.protections, readback_binding.protections);
+    assert_eq!(succession_binding.revision, result_binding.revision);
+    assert_eq!(engine.refresh(&refresh).await.unwrap(), selected);
     for (owner, revision) in owner_revisions {
         assert_eq!(
             engine.inner.lifecycle.open(&owner).await.unwrap().revision,
