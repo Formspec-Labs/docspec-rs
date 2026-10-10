@@ -73,6 +73,15 @@ residual filter cannot recover rows already discarded. See the pinned
 [predicate handling](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/predicate_visitor.rs)
 and [reader pipeline](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/pipeline.rs).
 
+Keep row filtering in DataFusion unless the native reader can avoid I/O or
+decoding. Reimplementing the same filter after decoding adds owned code without
+removing that work. The official [table-provider guide](https://datafusion.apache.org/library-user-guide/custom-table-providers.html)
+recommends using the maintained vectorized filter when source pushdown offers no
+such advantage. Use physical plans to establish where selection and filtering
+actually happen; their presence in SQL does not establish reduced reads. This
+guide describes current upstream interfaces; implementation must use our pinned
+versions above.
+
 ### Finish the native writer improvement without inventing a writer
 
 The flat export already lets ArrowWriter combine small batches and flushes on
