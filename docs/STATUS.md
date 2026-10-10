@@ -8,13 +8,13 @@ historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes dependency-correction semantics and
 continuous-ingestion cutover; change-history composition; remaining protection
 lifetimes, maintenance integration and broader failure qualification; remote
-publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
-10-million-Comments qualification. Native row statistics now let the full
-Comments-to-Dockets join complete, and larger Parquet groups now let both flat
-exports finish. The full attempt stopped at the independent oracle’s 32 GiB
-scratch limit; a four-thread diagnostic now completes every exact check on those
-retained outputs. Three fresh full runs and the 1,800-second complete-path target
-remain unqualified.
+publication and R2/Basin; broader Dagster worker recovery; and the remaining
+Q1–Q8 and update/backfill/recovery performance qualification. The defined full
+local 10-million-Comments performance gate now **passes**: three fresh workspaces
+completed the entire workload and exact independent readback in **311.61, 346.31
+and 392.03 seconds** under the recorded controls. Native row statistics, larger
+export row groups and four active oracle threads resolved the observed failures.
+This does not complete the wider lifecycle plan or qualify remote execution.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
@@ -120,6 +120,41 @@ finds no correctness blocker. No new comparison algorithm is needed. This is a
 complete oracle result over retained pins; catalog selection remains historical
 evidence, and renewed fresh-run acceptance is pending. The [synthetic harness](reviews/oracle-threads4-check-20261010.log)
 and [complete repository gate](reviews/oracle-threads4-full-check-20261010.log) pass.
+
+## Full local performance acceptance
+
+The [fresh-run receipt](../experiments/comments-e2e/acceptance-oracle-threads4-20261010.json)
+records all required repetitions passing. Each workspace independently admitted
+the frozen 10-million-Comments inputs, shaped values, joined Dockets, produced
+summaries and evidence, wrote native and flat outputs, checked catalog selections,
+and completed exact readback. No hash or sample replaced full qualification.
+
+| Fresh run | Complete path | Exact oracle | Sampled tree RSS | Sampled scratch | Retained logical data | Peak additional logical disk |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 311.61 s | 180.92 s | 21.47 GiB | 30.12 GiB | 10.591 GB | 42.934 GB |
+| 2 | 346.31 s | 216.00 s | 21.53 GiB | 29.00 GiB | 10.596 GB | 41.730 GB |
+| 3 | 392.03 s | 261.26 s | 20.58 GiB | 26.55 GiB | 10.597 GB | 39.104 GB |
+
+The captured harness is `582ea80`; the unchanged Rust executable matches the
+successful `e40be01` build receipt. The engine used 12 threads and the oracle four,
+with unchanged 24 GiB aggregate RSS, 32 GiB combined scratch and 1,800-second
+limits. OS caches were not cleared. Normal desktop load remained; these timings
+establish acceptance on this workstation, not an isolated speedup. RSS and disk
+peaks are sampled lower bounds. The additional child maximum-RSS observation
+peaked at 21.85 GiB; no recorded bound or stop condition fired.
+
+Each run retained about **3.86×** the 2.745 GB frozen inputs. Peak additional disk
+includes scratch and new retained files, excludes earlier completed runs, and
+differs from allocated blocks and whole-volume free-space change. All repetitions
+together retained 31.97 GB; raw evidence reports allocated storage separately.
+This remains a resource optimization opportunity. The exact oracle accounts for
+most elapsed time and scratch; ordinary reads do not perform this reconstruction.
+
+Prior failed attempts remain failures in their original receipts. The complete
+repository gate passed before collection, and the [independent evidence review](reviews/comments-full-acceptance-evidence-review.md)
+is retained alongside the [raw run log](reviews/oracle-threads4-acceptance-20261010.log). Unchanged, small-update, backfill and
+interrupted/resumed scale tests, remaining Q1–Q8 cases and R2/Basin qualification
+remain open.
 
 ## Receipt changes without value recomputation
 
@@ -1251,7 +1286,7 @@ or compatibility layer for legacy DocSpec.
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes | Change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; final local and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require
@@ -1284,12 +1319,12 @@ and restore, then R2 and Dagster. Provider credentials and actual deployment beh
 must be qualified before claiming hosted support. Public-data authorization is not
 inferred from a readable local file.
 
-The full performance gate remains **unqualified** after the first attempt's
-hash-join memory failure; see the collection evidence above. Its scope remains a
-frozen representative selection of 10 million retained Comments, deterministic
-shaping, docket joins/summaries, evidence, native and flat outputs, release
-selection and independent readback in 1,800 seconds on each required fresh run.
-Neither a resumed diagnostic nor a smaller fixture can replace that gate.
+The defined full local performance gate **passes** on the frozen retained
+selection of 10 million retained Comments: deterministic shaping, docket
+joins/summaries, evidence, native and flat outputs, release selection and exact
+independent readback completed within 1,800 seconds in all three fresh workspaces.
+See [the acceptance evidence above](#full-local-performance-acceptance). Update,
+backfill, interrupted/resumed and remote performance remain unqualified.
 
 Q1–Q8 remain the acceptance framework. Current tests cover bounded worker recovery,
 stale dependency refusal, concurrent independent field-group selection and independent

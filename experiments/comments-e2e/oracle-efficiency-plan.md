@@ -92,3 +92,21 @@ fixture passed (`oracle-threads4-check-20261010.log`), and the repository
 format/lint/test gate passed (`oracle-threads4-full-check-20261010.log`). The
 independent implementation follow-up approves the exact two-line change: active
 threads and its environment record. Rust source and executable are unchanged.
+
+## Fresh acceptance result
+
+The captured `582ea80` harness and unchanged verified `e40be01` executable passed
+all three fresh full runs in **311.61, 346.31 and 392.03 seconds**. Each included
+catalog selection and all exact independent checks. See
+`acceptance-oracle-threads4-20261010.json` and the series it identifies. The
+terminal exited successfully; no resource stop or mismatch occurred.
+
+Maximum sampled tree RSS was 21.53 GiB; the largest child maximum RSS recorded
+by `time -l` was 21.85 GiB. Sampled scratch peaked at 30.12 GiB. These are monitored
+observations, not a proof of every instantaneous allocation. Retained data was
+10.591–10.597 GB per run (about 3.86× frozen input); peak additional logical disk
+was 39.104–42.934 GB. All prior failed attempts remain retained.
+
+The defined full local performance gate passes. Keep the four-thread oracle and
+defer more complex comparison alternatives. This result does not qualify remote
+execution, update/backfill/resume performance or every lifecycle requirement.

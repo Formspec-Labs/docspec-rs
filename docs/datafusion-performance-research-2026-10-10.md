@@ -183,3 +183,13 @@ The complete retained-output oracle subsequently passed at four threads in
 setting change and defer dictionary/keyed alternatives. Exact checks are intact;
 this does not qualify fresh-run performance. See the
 [diagnostic receipt](../experiments/comments-e2e/oracle-threads4-20261010.json).
+
+The subsequent [fresh full acceptance series](../experiments/comments-e2e/acceptance-oracle-threads4-20261010.json)
+passed all three repetitions in **311.61, 346.31 and 392.03 seconds**, including
+exact independent readback. Sampled tree RSS remained below 24 GiB and scratch
+below 32 GiB. Retained data was about 10.6 GB per run, or 3.86× frozen inputs;
+peak additional logical disk reached 42.93 GB. These observations qualify the
+defined local full workload. They do not establish an isolated speedup, remote
+performance or complete lifecycle coverage. Keep the maintained engine/writer
+changes and smaller oracle concurrency; further tuning should target measured
+I/O, duplicate storage and scratch costs.
