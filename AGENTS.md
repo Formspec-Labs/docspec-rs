@@ -169,6 +169,10 @@ completion. Later direct user instructions take precedence over older plans.
 - Run [the repository gate](scripts/check) for implementation changes and targeted
   checks that exercise the changed behavior. Keep tests meaningful and proportional;
   avoid tests that merely mirror code or repeated broad runs without new evidence.
+- Register ordinary integration suites in `tests/integration.rs`; Cargo does not
+  discover them automatically. Share its fixture modules, and keep suites needing
+  process isolation as explicit targets in `Cargo.toml`. Target an ordinary suite
+  with `cargo test --locked --all-features --test integration <suite>::`.
 - Reuse local corpora, caches and retained task outputs before downloading.
   Establish the exact version through manifests/digests, and preserve shared
   evidence. Download only the missing or unavailable portion.

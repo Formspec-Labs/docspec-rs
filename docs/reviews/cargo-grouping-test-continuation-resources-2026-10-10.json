@@ -1,0 +1,65 @@
+[
+  {
+    "command": [
+      "target/debug/deps/integration-a60f7bb4ca922bc7",
+      "--exact",
+      "related_refresh::incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders",
+      "--nocapture"
+    ],
+    "exit_code": 0,
+    "capacity_stop": false,
+    "elapsed_seconds": 82.26,
+    "minimum_volume_free_bytes": 928636928,
+    "executable": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/integration-a60f7bb4ca922bc7",
+      "logical_bytes": 271107696,
+      "allocated_bytes": 271110144
+    },
+    "completed_executable_cleanup": {
+      "lsof_exit_code": 1,
+      "volume_free_before": 957771776,
+      "volume_free_after": 1230651392,
+      "reason": "Reclaim only this completed executable under current disk pressure; dependencies and retained data remain."
+    }
+  },
+  {
+    "command": [
+      "target/debug/deps/restore-3a394b6257246dbd"
+    ],
+    "exit_code": 0,
+    "capacity_stop": false,
+    "elapsed_seconds": 18.06,
+    "minimum_volume_free_bytes": 1222475776,
+    "executable": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/restore-3a394b6257246dbd",
+      "logical_bytes": 248372704,
+      "allocated_bytes": 248373248
+    },
+    "completed_executable_cleanup": {
+      "lsof_exit_code": 1,
+      "volume_free_before": 1234870272,
+      "volume_free_after": 1480904704,
+      "reason": "Reclaim only this completed executable under current disk pressure; dependencies and retained data remain."
+    }
+  },
+  {
+    "command": [
+      "target/debug/deps/worker_initialization-919a3b3d41f29938"
+    ],
+    "exit_code": 0,
+    "capacity_stop": false,
+    "elapsed_seconds": 2.01,
+    "minimum_volume_free_bytes": 1480908800,
+    "executable": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/worker_initialization-919a3b3d41f29938",
+      "logical_bytes": 25610864,
+      "allocated_bytes": 25612288
+    },
+    "completed_executable_cleanup": {
+      "lsof_exit_code": 1,
+      "volume_free_before": 1484341248,
+      "volume_free_after": 1510674432,
+      "reason": "Reclaim only this completed executable under current disk pressure; dependencies and retained data remain."
+    }
+  }
+]

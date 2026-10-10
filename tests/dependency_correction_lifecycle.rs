@@ -2,9 +2,7 @@
 // Rust guideline compliant 2026-02-21
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-#[expect(dead_code, reason = "shared fixtures support other scalar scenarios")]
-mod scalar;
+use super::scalar;
 
 use arrow::array::Int32Array;
 use docspec::{

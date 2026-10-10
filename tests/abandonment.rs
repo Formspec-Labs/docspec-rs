@@ -1,8 +1,7 @@
 //! Explicit abandonment fences retries and preserves independently reusable work.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

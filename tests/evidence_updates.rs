@@ -23,7 +23,7 @@ use std::{collections::BTreeMap, fs::File, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 type Location = (String, i64);
 type Receipt = (Location, Option<String>);

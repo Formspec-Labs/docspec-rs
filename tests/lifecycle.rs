@@ -1,7 +1,7 @@
 //! Native integration tests against the maintained SQLite-backed Iceberg catalog.
 
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 use arrow::{
     array::{Int64Array, StringArray},

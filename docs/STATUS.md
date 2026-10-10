@@ -266,6 +266,42 @@ approves the substitution. No throughput or whole-process memory gain is claimed
 The repository gate and documentation continuation linked above also cover the
 existing lifecycle identity and recovery consumers.
 
+## Cargo integration-test build storage
+
+Ordinary integration suites now share one Cargo test executable and common
+fixture modules. Restore's self-spawned test and the worker-initialization
+quarantine fixture retain separate processes. CLI recovery tests still launch
+the real executable. New suites register in `tests/integration.rs`; the
+repository instructions record the new targeted-test command. No assertions,
+feature gates, production dependencies or build profiles changed.
+
+The [independent review](reviews/cargo-test-grouping-review-2026-10-10.md)
+approves coverage, fixture isolation and subprocess behavior. The first
+[gate](reviews/cargo-grouping-check-2026-10-10.log) caught duplicate helper
+modules; centralizing those helpers resolved it. The
+[next gate](reviews/cargo-grouping-check-2-2026-10-10.log) passed formatting,
+strict all-target/all-feature Clippy, library tests and all but one integration
+case before the shared volume reached the configured free-space floor.
+The [targeted continuation](reviews/cargo-grouping-test-continuation-2026-10-10.log)
+passed that remaining case and both isolated targets.
+[Documentation checks and default-feature compilation](reviews/cargo-grouping-default-compile-2026-10-10.log)
+pass. An extra [strict default-feature lint check](reviews/cargo-grouping-default-check-2026-10-10.log)
+exposed existing feature-only fixture imports/helpers; ordinary default
+compilation retains those warnings. All required gate components are covered
+across these runs, not by one uninterrupted invocation.
+
+The ordinary integration executable measured **271,107,696 logical bytes**.
+The library and integration-test executables together measured **803,545,248
+logical bytes**, excluding the CLI and common dependency artifacts. These are
+linked-output observations, not a clean-build benchmark or dataset storage result.
+The earlier partial executable inventory used a different scope, so it does not
+establish a reduction ratio. Shared-volume observations include unrelated builds.
+Under continued disk pressure, the root reclaimed only completed executables
+after exact no-reader checks; [library cleanup](reviews/cargo-grouping-completed-binary-cleanup-2026-10-10.json)
+and [continuation receipts](reviews/cargo-grouping-test-continuation-resources-2026-10-10.json)
+record logical/allocated bytes separately from volume free-space changes.
+Common dependencies, retained data and evidence remain intact.
+
 ## Scoped scalar dependency correction
 
 The local engine now records omitted source-field requirements for one exact

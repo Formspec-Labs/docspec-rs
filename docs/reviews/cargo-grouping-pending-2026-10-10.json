@@ -1,0 +1,10 @@
+{
+  "binary": "target/debug/deps/integration-a60f7bb4ca922bc7",
+  "listed_tests": 242,
+  "passed_in_interrupted_gate": 241,
+  "ignored_in_interrupted_gate": [],
+  "pending_tests": [
+    "related_refresh::incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders"
+  ],
+  "note": "Resume only uncompleted cases; the earlier gate stopped on the shared-volume free-space floor, not an assertion failure."
+}

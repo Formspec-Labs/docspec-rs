@@ -1,7 +1,6 @@
 //! Exact-version HTTP reads preserve values and cancellation through native Arrow IPC.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::{
     array::{Array, Int64Array, StringArray},

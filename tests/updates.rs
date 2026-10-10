@@ -1,7 +1,7 @@
 //! Applied-write changes are checked against an independent in-memory reconstruction.
 
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 #[cfg(feature = "test-util")]
 #[path = "updates/legacy_changes.rs"]

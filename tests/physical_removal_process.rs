@@ -3,14 +3,8 @@
 
 #![cfg(all(feature = "test-util", unix))]
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared scalar module also builds backfill fixtures"
-)]
-mod scalar;
-#[expect(dead_code, reason = "shared harness also supports operation resume")]
-mod support;
+use super::scalar;
+use super::support;
 
 use arrow::array::{Int64Array, StringArray};
 use docspec::{

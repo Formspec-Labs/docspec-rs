@@ -1,0 +1,11 @@
+{
+  "reason": "Shared-volume free space approached the gate floor while unrelated compilation continued. Reclaim only the completed library test executable after exact no-reader proof.",
+  "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-1f301305e1335978",
+  "logical_bytes_removed": 258453984,
+  "allocated_bytes_before": 258457600,
+  "volume_free_before": 1110700032,
+  "volume_free_after": 1343533056,
+  "lsof_exit_code": 1,
+  "completed_test_log": "cargo-grouping-check-2-2026-10-10.log",
+  "preserved": "Current integration process, CLI, pending test executables, common libraries, corpus and retained evidence."
+}

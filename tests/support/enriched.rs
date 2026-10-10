@@ -1,5 +1,5 @@
 //! Shared enriched fixtures and an independent Rust value oracle.
-use crate::scalar::{Row, fixture, spec};
+use super::scalar::{Row, fixture, spec};
 use arrow::{
     array::{Int64Array, StringArray},
     datatypes::DataType,

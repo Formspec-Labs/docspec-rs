@@ -1,7 +1,6 @@
 //! Additions retain absence independently of nulls, values, and physical rewrites.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::{
     array::{Array, BooleanArray, Float64Array, Int64Array, StringArray},

@@ -1,7 +1,7 @@
 //! Field groups checked against direct Rust reconstruction and retained recovery state.
 
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 use arrow::{
     array::{Int64Array, StringArray},
@@ -20,8 +20,7 @@ use parquet::arrow::ArrowWriter;
 use std::{fs::File, sync::Arc};
 use tempfile::TempDir;
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 use scalar::{fixture, id, input, limits, spec};
 
 #[cfg(feature = "test-util")]

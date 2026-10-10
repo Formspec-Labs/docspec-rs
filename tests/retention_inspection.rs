@@ -1,8 +1,7 @@
 //! Shared protection discovery reads bounded metadata, not retained data payloads.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

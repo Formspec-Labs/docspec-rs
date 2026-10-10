@@ -22,7 +22,7 @@ use std::{collections::BTreeMap, fs::File, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 type Row = (Option<i64>, Option<i64>, Option<String>);
 type Location = (String, i64);

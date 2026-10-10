@@ -1,7 +1,6 @@
 //! CLI and HTTP retain the same exact retirement decisions and availability behavior.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use axum::{
     body::{Body, to_bytes},

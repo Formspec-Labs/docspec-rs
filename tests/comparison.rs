@@ -1,7 +1,6 @@
 //! Exact comparison expectations use Rust bags and endpoint occurrence addresses.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::{
     array::{Int64Array, StringArray, StructArray},

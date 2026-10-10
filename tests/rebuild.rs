@@ -1,11 +1,9 @@
 //! Complete source rebuilds preserve scalar definitions and qualify a new selection.
 
-#[path = "support/enriched.rs"]
-mod enriched;
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::enriched;
+use super::scalar;
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 
 use docspec::{
     Engine,

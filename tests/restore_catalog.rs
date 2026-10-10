@@ -1,12 +1,7 @@
 //! A native catalog backup must retain even currently unpromised registrations.
 #![cfg(unix)]
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared fixtures support other lifecycle operations"
-)]
-mod scalar;
+use super::scalar;
 
 use docspec::{Engine, storage};
 use iceberg::{

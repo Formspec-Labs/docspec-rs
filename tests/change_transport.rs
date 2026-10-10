@@ -1,11 +1,6 @@
 //! Comparison transports preserve engine results, descriptions and successful EOF.
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared fixture includes scalar backfill scenarios"
-)]
-mod scalar;
+use super::scalar;
 
 use arrow::{
     array::Int64Array,

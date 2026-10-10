@@ -1,10 +1,10 @@
 //! Public metadata edits preserve values and fence writer-definition cutover.
 
-#[path = "support/enriched.rs"]
-mod enriched;
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::enriched;
+use super::scalar;
 
+#[cfg(feature = "test-util")]
+use super::support;
 use arrow::array::{Int64Array, StringArray};
 use docspec::{
     engine::verify_release,
@@ -14,8 +14,6 @@ use docspec::{
 use futures::{StreamExt, TryStreamExt};
 use scalar::{fixture, id, limits};
 use std::{collections::BTreeMap, path::Path};
-#[cfg(feature = "test-util")]
-mod support;
 
 fn request(base: &ReleasePin, operation: &str) -> SchemaSpec {
     SchemaSpec {

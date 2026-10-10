@@ -1,7 +1,6 @@
 //! Accepted version order is independent of input timestamps and change accelerators.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::array::{Int64Array, StringArray};
 use docspec::{

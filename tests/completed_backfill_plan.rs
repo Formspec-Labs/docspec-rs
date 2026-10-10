@@ -1,7 +1,6 @@
 //! Completed Backfill retries use immutable result metadata after recovery inputs disappear.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{Engine, model::RunSpec};
 use scalar::{fixture, id, input, limits, spec};

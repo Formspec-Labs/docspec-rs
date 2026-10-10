@@ -1,8 +1,7 @@
 //! Recovery dependencies retain exact consumed copies across reusable-key changes.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

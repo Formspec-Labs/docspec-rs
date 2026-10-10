@@ -1,11 +1,6 @@
 //! Optional change evidence retires through saved HTTP plans independently of results.
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared fixture also provides a backfill helper unused by this transport test"
-)]
-mod scalar;
+use super::scalar;
 
 use axum::{
     body::{Body, to_bytes},

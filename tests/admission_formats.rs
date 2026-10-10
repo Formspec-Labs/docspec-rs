@@ -1,8 +1,7 @@
 //! Retained format-10 admissions keep their meaning across format-11 cutovers.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

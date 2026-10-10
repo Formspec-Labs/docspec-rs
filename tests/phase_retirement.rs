@@ -1,8 +1,7 @@
 //! Retiring one recovery generation preserves independent results and later work.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

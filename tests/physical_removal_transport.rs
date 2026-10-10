@@ -1,12 +1,7 @@
 //! Removal transports share preview decisions, bounded requests, and saved-identity lookup.
 // Rust guideline compliant 2026-02-21
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared fixture also exposes an unused backfill request builder"
-)]
-mod scalar;
+use super::scalar;
 
 use axum::{
     body::{Body, to_bytes},

@@ -1,11 +1,9 @@
 //! Coordinated scalar refresh compared with complete independent Rust reconstruction.
 
-#[path = "support/enriched.rs"]
-mod enriched;
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::enriched;
+use super::scalar;
 #[cfg(feature = "test-util")]
-mod support;
+use super::support;
 use enriched::{check_values, enriched, forged};
 use scalar::{Row, fixture, id, input, limits, spec};
 

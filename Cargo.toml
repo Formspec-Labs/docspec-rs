@@ -4,7 +4,29 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
 publish = false
+autotests = false
 description = "Recoverable, evidence-bound dataset operations over Apache Iceberg"
+
+# The CLI has no unit tests; integration tests still build and invoke it.
+[[bin]]
+name = "docspec"
+path = "src/main.rs"
+test = false
+
+# Share linked dependencies; isolate process-sensitive suites below.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+# This suite intentionally retains a host descriptor until its process exits.
+[[test]]
+name = "worker_initialization"
+path = "tests/worker_initialization.rs"
+
+# Its child process selects a root-level test by exact name.
+[[test]]
+name = "restore"
+path = "tests/restore.rs"
 
 [features]
 test-util = []

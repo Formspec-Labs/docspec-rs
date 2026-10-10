@@ -1,8 +1,7 @@
 //! Scoped corrections qualify actual scalar reuse while preserving historical results.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::array::StringArray;
 use docspec::{

@@ -1,11 +1,6 @@
 //! Source changes retain exact occurrence addresses without receipt associations.
 
-#[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "shared fixture includes scalar backfill scenarios"
-)]
-mod scalar;
+use super::scalar;
 
 use arrow::array::{Int64Array, StringArray};
 use docspec::{

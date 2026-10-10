@@ -1,7 +1,6 @@
 //! CLI and HTTP share exact owner-grant retirement decisions and refusals.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use axum::{
     body::{Body, to_bytes},

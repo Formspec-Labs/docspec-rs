@@ -1,0 +1,68 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: unused imports: `Engine`, `PhaseResult`, and `TablePin`
+  --> tests/rebuild.rs:9:5
+   |
+ 9 |     Engine,
+   |     ^^^^^^
+10 |     engine::verify_release,
+11 |     model::{OperationRequest, PhaseResult, ReleasePin, RunSpec, TablePin, UpdateSpec},
+   |                               ^^^^^^^^^^^                       ^^^^^^^^
+   |
+   = note: `-D unused-imports` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(unused_imports)]`
+
+error: unused import: `check_values`
+ --> tests/refresh.rs:7:16
+  |
+7 | use enriched::{check_values, enriched, forged};
+  |                ^^^^^^^^^^^^
+
+error: unused imports: `fixture` and `spec`
+ --> tests/refresh.rs:8:19
+  |
+8 | use scalar::{Row, fixture, id, input, limits, spec};
+  |                   ^^^^^^^                     ^^^^
+
+error: unused imports: `Engine` and `PhaseResult`
+  --> tests/refresh.rs:16:5
+   |
+16 |     Engine,
+   |     ^^^^^^
+17 |     engine::verify_release,
+18 |     model::{InputSpec, OperationRequest, PhaseResult, ReleasePin, TablePin, UpdateSpec},
+   |                                          ^^^^^^^^^^^
+
+error: unused import: `SuccessionProof`
+  --> tests/related_refresh.rs:15:61
+   |
+15 |         RefreshSpec, RefreshTransform, ReleasePin, RunSpec, SuccessionProof,
+   |                                                             ^^^^^^^^^^^^^^^
+
+error: unused imports: `PhaseResult` and `RunSpec`
+  --> tests/schema.rs:11:31
+   |
+11 |     model::{OperationRequest, PhaseResult, ReleasePin, RunSpec, SchemaField, SchemaSpec},
+   |                               ^^^^^^^^^^^              ^^^^^^^
+
+error: unused import: `path::Path`
+  --> tests/schema.rs:16:34
+   |
+16 | use std::{collections::BTreeMap, path::Path};
+   |                                  ^^^^^^^^^^
+
+error: function `data_paths` is never used
+  --> tests/refresh.rs:62:4
+   |
+62 | fn data_paths(pin: &TablePin) -> BTreeSet<String> {
+   |    ^^^^^^^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: function `nested_recipe` is never used
+   --> tests/related_refresh.rs:869:4
+    |
+869 | fn nested_recipe(joined: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
+    |    ^^^^^^^^^^^^^
+
+error: could not compile `docspec` (test "integration") due to 9 previous errors

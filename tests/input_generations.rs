@@ -1,7 +1,6 @@
 //! Producer rules prevent mixed generations even when older inputs were independent.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use docspec::{
     Engine,

@@ -1,8 +1,7 @@
 //! Operation recovery retirement agrees across transports and preserves selected data.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use axum::{
     body::{Body, to_bytes},

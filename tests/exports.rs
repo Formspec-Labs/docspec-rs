@@ -2,11 +2,7 @@
 // Rust guideline compliant 2026-02-21
 
 #[cfg(feature = "test-util")]
-#[expect(
-    dead_code,
-    reason = "shared harness also supports dataset operation resume"
-)]
-mod support;
+use super::support;
 
 use arrow::{
     array::{ArrayRef, Int64Array, StringArray},

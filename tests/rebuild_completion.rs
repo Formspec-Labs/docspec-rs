@@ -2,8 +2,7 @@
 // Rust guideline compliant 2026-02-21
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use async_trait::async_trait;
 use docspec::{

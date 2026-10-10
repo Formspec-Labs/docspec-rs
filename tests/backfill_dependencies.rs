@@ -1,9 +1,8 @@
 //! Independent backfill roots retain exact source/output snapshots across recovery.
 #![cfg(feature = "test-util")]
 
-#[path = "support/scalar.rs"]
-mod scalar;
-mod support;
+use super::scalar;
+use super::support;
 
 use docspec::{
     Engine,

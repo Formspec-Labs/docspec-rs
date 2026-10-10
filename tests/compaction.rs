@@ -1,7 +1,6 @@
 //! Equivalent native representations preserve values, occurrences and saved recovery work.
 
-#[path = "support/scalar.rs"]
-mod scalar;
+use super::scalar;
 
 use arrow::array::{Int64Array, StringArray};
 use docspec::{

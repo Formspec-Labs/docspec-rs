@@ -1,0 +1,25 @@
+{
+  "command": "CARGO_BUILD_JOBS=1 ./scripts/check",
+  "baseline_commit": "2a5ae513cb0aa7c40f771a534474956ca92364c8",
+  "exit_code": 101,
+  "capacity_stop": false,
+  "elapsed_seconds": 15.04,
+  "initial_volume_free_bytes": 5870923776,
+  "minimum_volume_free_bytes": 5701660672,
+  "final_volume_free_bytes": 5696270336,
+  "volume_note": "Volume free space includes unrelated workstation activity; this is a gate observation, not a controlled performance comparison.",
+  "samples": [
+    {
+      "elapsed_seconds": 0.0,
+      "volume_free_bytes": 5870841856
+    },
+    {
+      "elapsed_seconds": 5.0,
+      "volume_free_bytes": 5802213376
+    },
+    {
+      "elapsed_seconds": 10.01,
+      "volume_free_bytes": 5701660672
+    }
+  ]
+}
