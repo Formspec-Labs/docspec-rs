@@ -1,0 +1,22 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 14.65s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+
+thread 'incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders' (27379047) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test related_refresh`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6` (signal: 6, SIGABRT: process abort signal)

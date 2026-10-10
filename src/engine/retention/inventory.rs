@@ -932,6 +932,13 @@ impl Inventory {
         if let Some(related) = &dataset.related {
             self.related(related, origin)?;
         }
+        if let Some(evidence) = &dataset.evidence {
+            self.snapshot(&evidence.source, origin)?;
+            self.table(&evidence.table, origin)?;
+            if let Some(changes) = &evidence.changes {
+                self.changes(changes, origin)?;
+            }
+        }
         if let Some(parent) = &dataset.parent_manifest {
             self.release(parent, origin)?;
         }
@@ -1129,7 +1136,7 @@ impl Inventory {
             let phase: PhaseResult = decode(json)?;
             if !matches!(
                 phase.phase.as_str(),
-                "admission" | "processing" | "validation" | "evidence"
+                "admission" | "processing" | "validation" | "evidence" | "receipts"
             ) {
                 return Err(invalid_inventory("unsupported completed phase kind"));
             }

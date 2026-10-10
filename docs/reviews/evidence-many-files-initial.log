@@ -1,0 +1,20 @@
+    Finished `test` profile [unoptimized] target(s) in 0.53s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'one_receipt_on_many_origin_files_uses_a_fixed_reader_budget' (26902261) panicked at tests/evidence_updates.rs:719:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "oversized_batch", message: "decoded batch uses 2099432 bytes, exceeding the 8192 byte allowance; reduce batch rows or split oversized values", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... FAILED
+
+failures:
+
+failures:
+    one_receipt_on_many_origin_files_uses_a_fixed_reader_budget
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.24s
+
+error: test failed, to rerun pass `--test evidence_updates`

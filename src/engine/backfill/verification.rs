@@ -115,7 +115,6 @@ pub(crate) async fn verify_groups(
                 || parent.boundary != dataset.boundary
                 || parent.definition != dataset.definition
                 || parent.eligibility != dataset.eligibility
-                || base.inputs != dataset.inputs
                 || base.boundary != dataset.boundary
                 || base.eligibility != dataset.eligibility
                 || parent.groups.get(spec.group.as_str()) != base.groups.get(spec.group.as_str())
@@ -124,6 +123,7 @@ pub(crate) async fn verify_groups(
             {
                 return Err(invalid_group());
             }
+            compatible_input_history(&base, &parent, &mut history).await?;
             let mut inherited = dataset.computed.clone();
             inherited.remove(spec.group.as_str());
             let mut expected = parent.computed.clone();
@@ -189,6 +189,31 @@ pub(crate) async fn verify_groups(
             super::super::schema::verify_transition(spec, &base, dataset, budget).await?;
             check_refreshed_groups(dataset, &base, parent)?;
         }
+        OperationRequest::Evidence(spec) => {
+            let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
+            let base = history.read(parent).await?;
+            let mut inherited_inputs = dataset.inputs.clone();
+            for name in dataset.request.inputs().keys() {
+                let key = dataset.request.input_key(name);
+                if base.inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
+                    return Err(invalid_group());
+                }
+            }
+            if base.dataset != dataset.dataset
+                || base.version != spec.base
+                || inherited_inputs != base.inputs
+                || dataset.groups != base.groups
+                || dataset.computed != base.computed
+                || dataset.related != base.related
+                || dataset.relationship != base.relationship
+                || dataset.changes.is_some()
+                || dataset.boundary != base.boundary
+                || dataset.eligibility != base.eligibility
+                || dataset.definition != base.definition
+            {
+                return Err(invalid_group());
+            }
+        }
     }
     for (name, binding) in &dataset.computed {
         if name != binding.definition.group.as_str()
@@ -216,6 +241,72 @@ pub(crate) async fn verify_groups(
         .await?;
     }
     Ok(())
+}
+
+// Independent receipt and field-group selections can advance while scalar work
+// runs. Establish exactly which input additions came from those selections;
+// equal source rows alone never authorize an unrelated provenance change.
+async fn compatible_input_history(
+    base: &DatasetPin,
+    parent: &DatasetPin,
+    history: &mut History<'_>,
+) -> Result<()> {
+    if base.inputs == parent.inputs {
+        return Ok(());
+    }
+    let mut retained = None;
+    let mut visited = BTreeSet::new();
+    loop {
+        let current = retained.as_deref().unwrap_or(parent);
+        if current.version == base.version {
+            return if current == base {
+                Ok(())
+            } else {
+                Err(invalid_group())
+            };
+        }
+        if !visited.insert(current.version.clone())
+            || current.dataset != base.dataset
+            || current.definition != base.definition
+            || current.eligibility != base.eligibility
+            || current.boundary != base.boundary
+            || current.groups.get("source") != base.groups.get("source")
+            || current.related != base.related
+            || current.relationship != base.relationship
+        {
+            return Err(invalid_group());
+        }
+        let previous = history
+            .read(current.parent_manifest.as_ref().ok_or_else(invalid_group)?)
+            .await?;
+        let mut expected = previous.inputs.clone();
+        match &current.request {
+            OperationRequest::Evidence(spec) => {
+                if spec.base != previous.version
+                    || current.groups != previous.groups
+                    || current.computed != previous.computed
+                {
+                    return Err(invalid_group());
+                }
+                for (name, input) in current.request.inputs() {
+                    let key = current.request.input_key(&name);
+                    let object = current.inputs.get(&key).ok_or_else(invalid_group)?;
+                    if object.digest != input.digest
+                        || expected.insert(key, object.clone()).is_some()
+                    {
+                        return Err(invalid_group());
+                    }
+                }
+            }
+            OperationRequest::Backfill(_) => {}
+            _ => return Err(invalid_group()),
+        }
+        if expected != current.inputs {
+            return Err(invalid_group());
+        }
+        retained = Some(previous);
+        tokio::task::consume_budget().await;
+    }
 }
 
 fn check_refreshed_groups(
@@ -305,7 +396,19 @@ async fn verify_binding_history(
         {
             return Err(invalid_group());
         }
-        if let OperationRequest::Backfill(spec) = &owner.request {
+        if matches!(&owner.request, OperationRequest::Evidence(_)) {
+            let parent = history
+                .read(owner.parent_manifest.as_ref().ok_or_else(invalid_group)?)
+                .await?;
+            if parent.dataset != owner.dataset
+                || parent.computed.get(name) != Some(binding)
+                || parent.groups.get("source") != Some(source)
+                || parent.groups.get(name) != owner.groups.get(name)
+            {
+                return Err(invalid_group());
+            }
+            retained = Some(parent);
+        } else if let OperationRequest::Backfill(spec) = &owner.request {
             if spec.group.as_str() == name {
                 let base = history.base(binding).await?;
                 if binding.request != owner.request
@@ -608,6 +711,7 @@ mod tests {
                 inputs: BTreeMap::new(),
                 relationship: SourceRelationship::Independent,
                 related: None,
+                evidence: None,
                 definition: request.definition.clone(),
                 eligibility: 0,
                 boundary: 0,

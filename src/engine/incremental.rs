@@ -56,6 +56,53 @@ impl Engine {
         resolve_release(&base, budget).await?;
         let previous = refresh::load_inputs(&related.coverage, budget).await?;
         let current = refresh::load_inputs(coverage, budget).await?;
+        if previous.releases.iter().all(|(dataset, old)| {
+            current.releases.get(dataset).is_some_and(|new| {
+                old.dataset
+                    .groups
+                    .get("source")
+                    .zip(new.dataset.groups.get("source"))
+                    .is_some_and(|(old, new)| old.logical_metadata() == new.logical_metadata())
+            })
+        }) {
+            // Receipt-only input succession advances exact coverage while the
+            // complete value result and contributor occurrences remain unchanged.
+            let before = source(&base)?;
+            let native = storage::open_pin(before).await?;
+            let empty = self
+                .create_output(
+                    &spec.dataset,
+                    &directory.join("empty-changes"),
+                    native.metadata().current_schema().as_ref().clone(),
+                )
+                .await?;
+            let empty = storage::pin(&spec.dataset, &empty, 0, budget, &[]).await?;
+            let key_field_ids = refresh::output_keys(&spec.transform)
+                .iter()
+                .map(|name| {
+                    native
+                        .metadata()
+                        .current_schema()
+                        .field_by_name(name)
+                        .map(|field| field.id)
+                        .ok_or_else(full_refresh)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(write::Prepared {
+                table: before.clone(),
+                changes: Some(ChangePin {
+                    base_version: base.id.clone(),
+                    base_manifest: base.manifest.clone(),
+                    before_metadata: before.metadata.clone(),
+                    after_metadata: before.metadata.clone(),
+                    key_field_ids,
+                    removed: empty.clone(),
+                    added: empty,
+                }),
+                metrics: WriteMetrics::default(),
+                schema_input: None,
+            });
+        }
         match &spec.transform {
             RefreshTransform::Join(_) => {
                 Box::pin(self.process_incremental_join(spec, directory, &base, &previous, &current))
@@ -216,16 +263,20 @@ impl Engine {
             })
             .collect::<Result<Vec<_>>>()?;
         let keys = TUPLE.map(str::to_owned);
-        let mut applied = Box::pin(self.replace_keys(Replacement {
-            dataset: &spec.dataset,
-            directory: &directory.join("replacement"),
-            before,
-            keys: &keys,
-            scope,
-            replacement,
-            replacement_bytes: None,
-        }))
-        .await?;
+        let (write_before, replacement) = self
+            .receipt_replacement(base, directory, replacement, &keys)
+            .await?;
+        let mut applied = self
+            .replace_keys(Replacement {
+                dataset: &spec.dataset,
+                directory: &directory.join("replacement"),
+                before: &write_before,
+                keys: &keys,
+                scope,
+                replacement,
+                replacement_bytes: None,
+            })
+            .await?;
         applied.metrics.files_scanned += discovery.files_scanned;
         applied.metrics.data_files_written += discovery.data_files_written;
         applied.metrics.bytes_written += discovery.bytes_written;
@@ -411,6 +462,14 @@ impl Engine {
         if changes.base_manifest != base.manifest {
             return Err(full_refresh());
         }
+        if changes.removed.rows == 0 && changes.added.rows == 0 {
+            return Ok(write::Prepared {
+                table: before.clone(),
+                changes: None,
+                metrics: WriteMetrics::default(),
+                schema_input: None,
+            });
+        }
         let context = self.context();
         for (alias, pin) in [("removed", &changes.removed), ("added", &changes.added)] {
             context.register_table(
@@ -429,8 +488,8 @@ impl Engine {
         }
         let columns = tuple_columns(None);
         let keys = TUPLE.map(str::to_owned);
-        let applied = Box::pin(
-            self.replace_keys(Replacement {
+        let applied = self
+            .replace_keys(Replacement {
                 dataset: &spec.dataset,
                 directory,
                 before,
@@ -446,9 +505,8 @@ impl Engine {
                         .iter()
                         .fold(0u64, |bytes, object| bytes.saturating_add(object.bytes)),
                 ),
-            }),
-        )
-        .await?;
+            })
+            .await?;
         Ok(write::Prepared {
             table: applied.table,
             changes: None,

@@ -60,6 +60,7 @@ fn release(root: &Path, owner: &str, version: &str) -> ReleasePin {
             inputs: BTreeMap::new(),
             relationship: SourceRelationship::Independent,
             related: None,
+            evidence: None,
             definition: "v1".into(),
             eligibility: 1,
             boundary: 1,

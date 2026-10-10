@@ -712,7 +712,7 @@ pub(super) async fn verify_related_with_inputs(
     let expected_schema =
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
     let native = storage::open_pin(source).await?;
-    if *native.metadata().current_schema().as_ref() != expected_schema {
+    if !storage::identity::preserves_schema(&expected_schema, native.metadata().current_schema())? {
         return Err(Error::refusal(
             "invalid_related_result",
             "native result schema differs from the declared computation",

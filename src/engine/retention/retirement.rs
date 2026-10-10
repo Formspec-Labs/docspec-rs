@@ -20,9 +20,15 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
     key.starts_with("restore-reuse/")
         || key.starts_with("phase/backfill/")
         || (key.starts_with("phase/")
-            && ["/admission", "/processing", "/validation", "/evidence"]
-                .iter()
-                .any(|suffix| key.ends_with(suffix)))
+            && [
+                "/admission",
+                "/processing",
+                "/validation",
+                "/evidence",
+                "/receipts",
+            ]
+            .iter()
+            .any(|suffix| key.ends_with(suffix)))
         || key.starts_with("backfill-prepared/")
         || key.starts_with("backfill-validation/")
         || key.starts_with("groups/")

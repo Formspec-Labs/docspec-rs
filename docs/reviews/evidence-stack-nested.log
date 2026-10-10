@@ -1,0 +1,69 @@
+(lldb) target create "target/debug/deps/evidence_updates-c58213d616c21a27"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64).
+(lldb) settings set target.disable-aslr false
+(lldb) run nested_receipt_lists_preserve_order_empty_and_null_distinctions --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp4IER4v/workspace/objects/comments/b9db903485934488b02baa336fe6394c/data/0080a7f2-02ce-452a-aa00-bbdc9e954e2d-00000.parquet
+DOCSPEC_TEST_WORK readback
+Process 81617 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64)
+Process 81617 stopped
+* thread #2, name = 'nested_receipt_lists_preserve_order_empty_and_null_distinctions', stop reason = EXC_BAD_ACCESS (code=2, address=0x16d2b3ad0)
+    frame #0: 0x0000000102d1ad80 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::hc4d47d7d814edbee + 20
+evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::hc4d47d7d814edbee:
+->  0x102d1ad80 <+20>: str    xzr, [sp]
+    0x102d1ad84 <+24>: cmp    sp, x9
+    0x102d1ad88 <+28>: b.ne   0x102d1ad7c               ; <+16>
+    0x102d1ad8c <+32>: sub    sp, sp, #0xa70
+Target 0: (evidence_updates-c58213d616c21a27) stopped.
+(lldb) thread backtrace -c 45
+* thread #2, name = 'nested_receipt_lists_preserve_order_empty_and_null_distinctions', stop reason = EXC_BAD_ACCESS (code=2, address=0x16d2b3ad0)
+  * frame #0: 0x0000000102d1ad80 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::hc4d47d7d814edbee + 20
+    frame #1: 0x0000000103163fdc evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217 + 1548
+    frame #2: 0x0000000102dca0e4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$::deserialize::h4b5fda9b7a135810 + 44
+    frame #3: 0x0000000103368ee8 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h544879df54494dc2 + 12
+    frame #4: 0x00000001030e7a18 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::hb4b7a098176ff27b + 148
+    frame #5: 0x00000001030b48ec evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::hd4d46b08949fe271 + 12
+    frame #6: 0x0000000102d25718 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a + 832
+    frame #7: 0x000000010315a0d0 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h9dfe7a2031797c52 + 1552
+    frame #8: 0x0000000102dca2e4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7 + 44
+    frame #9: 0x00000001032ff360 evidence_updates-c58213d616c21a27`_$LT$serde_core..de..impls..OptionVisitor$LT$T$GT$$u20$as$u20$serde_core..de..Visitor$GT$::visit_some::h4ab18d5c343c0f23 + 36
+    frame #10: 0x000000010312de04 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_option::h5000f728444fec75 + 176
+    frame #11: 0x0000000102f13ab4 evidence_updates-c58213d616c21a27`serde_core::de::impls::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$core..option..Option$LT$T$GT$$GT$::deserialize::h5a6faa76f42931fc + 12
+    frame #12: 0x0000000103369110 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h5afe82d10c48454e + 12
+    frame #13: 0x00000001030e4c0c evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::h695e35424b2e1d10 + 148
+    frame #14: 0x00000001030b42c0 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::h58c894f9cb449f09 + 12
+    frame #15: 0x0000000102cfc010 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Authority$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h8dad225394e6167b + 1852
+    frame #16: 0x000000010315130c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h7b1a440c662bc117 + 1600
+    frame #17: 0x0000000102dc2668 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Authority$GT$::deserialize::h5cdc38e1c905bf2a + 44
+    frame #18: 0x00000001030be90c evidence_updates-c58213d616c21a27`serde_json::de::from_trait::h9b8a694cb101b816 + 120
+    frame #19: 0x00000001030c609c evidence_updates-c58213d616c21a27`serde_json::de::from_str::he34b527ca33e5774 + 40
+    frame #20: 0x000000010322e4b4 evidence_updates-c58213d616c21a27`docspec::catalog::SnapshotRows::get_record::_$u7b$$u7b$closure$u7d$$u7d$::h01ccdac13cf3e1d4 + 108
+    frame #21: 0x0000000102f46b5c evidence_updates-c58213d616c21a27`core::option::Option$LT$T$GT$::map::h2e95e6b36d27a5b2 + 68
+    frame #22: 0x000000010322dea8 evidence_updates-c58213d616c21a27`docspec::catalog::SnapshotRows::get_record::h257b0bdbb82a5e94 + 48
+    frame #23: 0x0000000103234c98 evidence_updates-c58213d616c21a27`docspec::catalog::Lifecycle::get::_$u7b$$u7b$closure$u7d$$u7d$::h53dc029b44605f2a + 784
+    frame #24: 0x00000001034b058c evidence_updates-c58213d616c21a27`docspec::engine::Engine::check::_$u7b$$u7b$closure$u7d$$u7d$::habbea25f40f2c7de + 972
+    frame #25: 0x00000001034b0cd8 evidence_updates-c58213d616c21a27`docspec::engine::Engine::phase::_$u7b$$u7b$closure$u7d$$u7d$::h6acc14fa00fb7953 + 1196
+    frame #26: 0x000000010348c250 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665 + 1320
+    frame #27: 0x0000000103472ac8 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h1a86e51eb70b0301 + 44
+    frame #28: 0x000000010349fc34 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2 + 31696
+    frame #29: 0x0000000103472ca8 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h737866f7a4232f23 + 44
+    frame #30: 0x000000010348a7bc evidence_updates-c58213d616c21a27`docspec::engine::Engine::run_admitted::_$u7b$$u7b$closure$u7d$$u7d$::hda2585d1b78d9357 + 1400
+    frame #31: 0x000000010348bae4 evidence_updates-c58213d616c21a27`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h0b06bc532306b895 + 404
+    frame #32: 0x000000010354f400 evidence_updates-c58213d616c21a27`docspec::engine::worker::_$LT$impl$u20$docspec..engine..Engine$GT$::spawn_work::_$u7b$$u7b$closure$u7d$$u7d$::hfc0264f3b88f5501 + 436
+    frame #33: 0x0000000103472d68 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h886a19fcc63d86b8 + 36
+    frame #34: 0x00000001035e4b78 evidence_updates-c58213d616c21a27`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h5cc001f023616f19 + 164
+    frame #35: 0x00000001035de444 evidence_updates-c58213d616c21a27`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::h51f10d28d9d92424 + 64
+    frame #36: 0x00000001033e4b1c evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::poll_future::_$u7b$$u7b$closure$u7d$$u7d$::he629d4a0cc45bd0f + 96
+    frame #37: 0x00000001031798c8 evidence_updates-c58213d616c21a27`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h9ce49e2e4f8e595a + 52
+    frame #38: 0x0000000103183644 evidence_updates-c58213d616c21a27`std::panicking::catch_unwind::do_call::h91d6e8cca25f1427 + 72
+    frame #39: 0x000000010324c81c evidence_updates-c58213d616c21a27`__rust_try + 32
+    frame #40: 0x00000001031f4098 evidence_updates-c58213d616c21a27`std::panic::catch_unwind::hc7821406f64c3391 + 124
+    frame #41: 0x00000001033d8e2c evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::poll_future::h7abdaf3d6528dd0e + 124
+    frame #42: 0x00000001033e9a88 evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll_inner::h64106a60a7e774e4 + 164
+    frame #43: 0x00000001033fc808 evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll::h6bb76157a91dc5db + 28
+    frame #44: 0x000000010328199c evidence_updates-c58213d616c21a27`tokio::runtime::task::raw::poll::h3dfe67e1011086ce + 16

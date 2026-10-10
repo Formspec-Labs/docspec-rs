@@ -1,0 +1,2 @@
+['rustc', '--edition=2024', '--crate-name', 'evidence_type_sizes', '/tmp/docspec-evidence-type-sizes.rs', '-L', 'dependency=target/debug/deps', '--extern', 'docspec=target/debug/deps/libdocspec-d6fe04d0a78a5dd1.rlib', '-o', '/tmp/docspec-evidence-type-sizes-boxed']
+DatasetPin=1328 ReleasePin=1440 Authority=2832 EvidenceResult=1112 OptionEvidence=1112 OptionBoxEvidence=8

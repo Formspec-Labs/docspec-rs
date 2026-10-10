@@ -149,6 +149,9 @@ pub struct DatasetPin {
     pub relationship: SourceRelationship,
     /// Exact related inputs and contributor relation establishing this source table.
     pub related: Option<Box<RelatedResult>>,
+    /// Opaque receipt values associated with exact surviving source occurrences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Box<crate::evidence::EvidenceResult>>,
     pub definition: String,
     pub eligibility: u64,
     pub boundary: u64,
@@ -844,6 +847,7 @@ pub enum OperationRequest {
     Backfill(BackfillSpec),
     Refresh(Box<RefreshSpec>),
     Schema(SchemaSpec),
+    Evidence(crate::evidence::EvidenceSpec),
 }
 
 impl OperationRequest {
@@ -855,6 +859,7 @@ impl OperationRequest {
             Self::Backfill(spec) => &spec.dataset,
             Self::Refresh(spec) => &spec.dataset,
             Self::Schema(spec) => &spec.dataset,
+            Self::Evidence(spec) => &spec.dataset,
         }
     }
     /// Returns the stable retry identity.
@@ -865,6 +870,7 @@ impl OperationRequest {
             Self::Backfill(spec) => &spec.operation,
             Self::Refresh(spec) => &spec.operation,
             Self::Schema(spec) => &spec.operation,
+            Self::Evidence(spec) => &spec.operation,
         }
     }
     /// Returns the required active definition.
@@ -875,6 +881,7 @@ impl OperationRequest {
             Self::Backfill(spec) => &spec.definition,
             Self::Refresh(spec) => &spec.definition,
             Self::Schema(spec) => &spec.definition,
+            Self::Evidence(spec) => &spec.definition,
         }
     }
     /// Returns the writer definition selected with this operation's result.
@@ -892,6 +899,7 @@ impl OperationRequest {
             Self::Backfill(spec) => Some(&spec.base),
             Self::Refresh(spec) => spec.base.as_ref(),
             Self::Schema(spec) => Some(&spec.base),
+            Self::Evidence(spec) => Some(&spec.base),
         }
     }
     /// Lists bounded input declarations, excluding their payloads.
@@ -913,6 +921,14 @@ impl OperationRequest {
                 inputs
             }
             Self::Backfill(_) | Self::Refresh(_) | Self::Schema(_) => BTreeMap::new(),
+            Self::Evidence(spec) => {
+                let mut inputs =
+                    BTreeMap::from([("replacements".into(), spec.replacements.clone())]);
+                if let Some(input) = &spec.deletions {
+                    inputs.insert("deletions".into(), input.clone());
+                }
+                inputs
+            }
         }
     }
 
@@ -920,7 +936,11 @@ impl OperationRequest {
     pub(crate) fn input_key(&self, name: &str) -> String {
         match self {
             Self::Build(_) => name.to_owned(),
-            Self::Update(_) | Self::Backfill(_) | Self::Refresh(_) | Self::Schema(_) => {
+            Self::Update(_)
+            | Self::Backfill(_)
+            | Self::Refresh(_)
+            | Self::Schema(_)
+            | Self::Evidence(_) => {
                 format!("{}/{name}", self.operation())
             }
         }

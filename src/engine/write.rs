@@ -194,7 +194,29 @@ impl Engine {
             .ok_or_else(|| Error::refusal("invalid_base", "base has no source table"))?;
         // Older admissions consume their canonical source; retries never resolve
         // a newer physical representation after the request has been retained.
-        let before = captured_source.unwrap_or(canonical_before);
+        let captured_before = captured_source.unwrap_or(canonical_before);
+        let before_with_origins;
+        let before = if base.dataset.evidence.is_some()
+            && !storage::identity::has_origins(
+                storage::open_pin(captured_before)
+                    .await?
+                    .metadata()
+                    .current_schema(),
+            )? {
+            // Receipt associations survive the first value rewrite as well as
+            // compaction. Add optional origin fields through native metadata;
+            // the existing reader fills original file/row before filtering.
+            before_with_origins = self
+                .source_with_origins(
+                    &spec.dataset,
+                    captured_before,
+                    &directory.join("source-origins"),
+                )
+                .await?;
+            &before_with_origins
+        } else {
+            captured_before
+        };
         if before.logical_metadata() != canonical_before.logical_metadata()
             || before.rows != canonical_before.rows
         {
@@ -359,154 +381,163 @@ impl Engine {
         })
     }
     /// Replaces complete key groups and retains actual applied rows with shared files.
-    pub(super) async fn replace_keys(&self, request: Replacement<'_>) -> Result<Applied> {
-        let Replacement {
-            dataset,
-            directory,
-            before,
-            keys,
-            scope,
-            replacement,
-            replacement_bytes,
-        } = request;
-        let budget = &self.inner.lifecycle.budget;
-        let native = storage::open_pin(before).await?;
-        let inventory = storage::snapshot_files(&native, budget).await?;
-        storage::check_inventory_files(before, &inventory)?;
-        let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-        if !same_fields(&schema, replacement.schema().as_arrow())? {
-            return Err(Error::refusal(
-                "schema_mismatch",
-                "replacement rows must preserve the complete native schema",
-            ));
-        }
-        let context = self.context();
-        let marker = format!("__docspec_match_{}", uuid::Uuid::new_v4().simple());
-        let scope = scope.with_column(&marker, datafusion::prelude::lit(true))?;
-        // Prepare distinct keys once. A logical view would rescan all input rows
-        // and repeat DISTINCT for every source-file probe and rewrite.
-        let scope_table = self
-            .create_output(
+    // Keep shared replacement state out of nested application poll frames.
+    pub(super) fn replace_keys<'a>(
+        &'a self,
+        request: Replacement<'a>,
+    ) -> futures::future::BoxFuture<'a, Result<Applied>> {
+        Box::pin(async move {
+            let Replacement {
                 dataset,
-                &directory.join("keys"),
-                iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(scope.schema().as_arrow())?,
-            )
-            .await?;
-        let key_files = storage::write_batches(&scope_table, execute(scope).await?, budget).await?;
-        let key_files_written = key_files.len() as u64;
-        let key_bytes_written = key_files
-            .iter()
-            .map(|file| file.file_size_in_bytes())
-            .sum::<u64>();
-        let scope_schema =
-            iceberg::arrow::schema_to_arrow_schema(scope_table.metadata().current_schema())?;
-        if key_files.is_empty() {
-            context.register_table(
-                "affected_keys",
-                Arc::new(datafusion::datasource::empty::EmptyTable::new(Arc::new(
-                    scope_schema,
-                ))),
-            )?;
-        } else {
-            let paths = key_files
-                .iter()
-                .map(|file| file.file_path().to_owned())
-                .collect::<Vec<_>>();
-            let prepared_keys = context
-                .read_parquet(paths, ParquetReadOptions::default().schema(&scope_schema))
-                .await?;
-            context.register_table("affected_keys", prepared_keys.into_view())?;
-        }
-        let scan = Arc::new(storage::OccurrenceScan::values(&native, budget, inventory).await?);
-        let mut shared = Vec::new();
-        let mut changed = Vec::new();
-        let mut rewrite_bytes = 0_u64;
-        for (index, file) in scan.files().enumerate() {
-            let name = format!("chunk_{index}");
-            context.register_table(
-                name.as_str(),
-                crate::query::file(
-                    scan.clone(),
-                    file.file_path().to_owned(),
-                    Some(keys),
-                    budget.clone(),
-                )?,
-            )?;
-            if any_rows(key_join(
-                context.table(&name).await?,
-                context.table("affected_keys").await?,
+                directory,
+                before,
                 keys,
-                datafusion::logical_expr::JoinType::Inner,
-            )?)
-            .await?
-            {
-                rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
-                // Replace the key-only probe with the complete selected native schema.
-                context.deregister_table(&name)?;
+                scope,
+                replacement,
+                replacement_bytes,
+            } = request;
+            let budget = &self.inner.lifecycle.budget;
+            let native = storage::open_pin(before).await?;
+            let inventory = storage::snapshot_files(&native, budget).await?;
+            storage::check_inventory_files(before, &inventory)?;
+            let schema =
+                iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+            if !same_fields(&schema, replacement.schema().as_arrow())? {
+                return Err(Error::refusal(
+                    "schema_mismatch",
+                    "replacement rows must preserve the complete native schema",
+                ));
+            }
+            let context = self.context();
+            let marker = format!("__docspec_match_{}", uuid::Uuid::new_v4().simple());
+            let scope = scope.with_column(&marker, datafusion::prelude::lit(true))?;
+            // Prepare distinct keys once. A logical view would rescan all input rows
+            // and repeat DISTINCT for every source-file probe and rewrite.
+            let scope_table = self
+                .create_output(
+                    dataset,
+                    &directory.join("keys"),
+                    iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                        scope.schema().as_arrow(),
+                    )?,
+                )
+                .await?;
+            let key_files =
+                storage::write_batches(&scope_table, execute(scope).await?, budget).await?;
+            let key_files_written = key_files.len() as u64;
+            let key_bytes_written = key_files
+                .iter()
+                .map(|file| file.file_size_in_bytes())
+                .sum::<u64>();
+            let scope_schema =
+                iceberg::arrow::schema_to_arrow_schema(scope_table.metadata().current_schema())?;
+            if key_files.is_empty() {
+                context.register_table(
+                    "affected_keys",
+                    Arc::new(datafusion::datasource::empty::EmptyTable::new(Arc::new(
+                        scope_schema,
+                    ))),
+                )?;
+            } else {
+                let paths = key_files
+                    .iter()
+                    .map(|file| file.file_path().to_owned())
+                    .collect::<Vec<_>>();
+                let prepared_keys = context
+                    .read_parquet(paths, ParquetReadOptions::default().schema(&scope_schema))
+                    .await?;
+                context.register_table("affected_keys", prepared_keys.into_view())?;
+            }
+            let scan = Arc::new(storage::OccurrenceScan::values(&native, budget, inventory).await?);
+            let mut shared = Vec::new();
+            let mut changed = Vec::new();
+            let mut rewrite_bytes = 0_u64;
+            for (index, file) in scan.files().enumerate() {
+                let name = format!("chunk_{index}");
                 context.register_table(
                     name.as_str(),
                     crate::query::file(
                         scan.clone(),
                         file.file_path().to_owned(),
-                        None,
+                        Some(keys),
                         budget.clone(),
                     )?,
                 )?;
-                // One joined decode supplies both kept rows and actual removed rows.
-                let mut columns = schema
-                    .fields()
-                    .iter()
-                    .map(|field| qualified("l", field.name()))
-                    .collect::<Vec<_>>();
-                columns.push(qualified("r", &marker).is_not_null().alias(&marker));
-                changed.push(
-                    key_join(
-                        context.table(&name).await?,
-                        context.table("affected_keys").await?,
-                        keys,
-                        datafusion::logical_expr::JoinType::Left,
-                    )?
-                    .select(columns)?,
-                );
-            } else {
-                shared.push(file.clone());
+                if any_rows(key_join(
+                    context.table(&name).await?,
+                    context.table("affected_keys").await?,
+                    keys,
+                    datafusion::logical_expr::JoinType::Inner,
+                )?)
+                .await?
+                {
+                    rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
+                    // Replace the key-only probe with the complete selected native schema.
+                    context.deregister_table(&name)?;
+                    context.register_table(
+                        name.as_str(),
+                        crate::query::file(
+                            scan.clone(),
+                            file.file_path().to_owned(),
+                            None,
+                            budget.clone(),
+                        )?,
+                    )?;
+                    // One joined decode supplies both kept rows and actual removed rows.
+                    let mut columns = schema
+                        .fields()
+                        .iter()
+                        .map(|field| qualified("l", field.name()))
+                        .collect::<Vec<_>>();
+                    columns.push(qualified("r", &marker).is_not_null().alias(&marker));
+                    changed.push(
+                        key_join(
+                            context.table(&name).await?,
+                            context.table("affected_keys").await?,
+                            keys,
+                            datafusion::logical_expr::JoinType::Left,
+                        )?
+                        .select(columns)?,
+                    );
+                } else {
+                    shared.push(file.clone());
+                }
+                // Retained changed-file plans own their provider; idle catalog entries
+                // need not accumulate across the file population.
+                context.deregister_table(&name)?;
             }
-            // Retained changed-file plans own their provider; idle catalog entries
-            // need not accumulate across the file population.
-            context.deregister_table(&name)?;
-        }
-        let required = rewrite_bytes
-            .saturating_mul(2)
-            .saturating_add(replacement_bytes.unwrap_or(0).saturating_mul(2))
-            .saturating_add(budget.limits.scratch_bytes);
-        if fs2::available_space(&self.inner.root)? < required {
-            return Err(Error::refusal(
-                "disk_capacity",
-                "affected-file rewrites, change rows and declared scratch do not fit available disk",
-            ));
-        }
-        let candidate = self
-            .replacement_output(dataset, &directory.join("data"), &native)
-            .await?;
-        let removed = self
-            .replacement_output(dataset, &directory.join("removed"), &native)
-            .await?;
-        let added = self
-            .replacement_output(dataset, &directory.join("added"), &native)
-            .await?;
-        let mut metrics = WriteMetrics {
-            files_scanned: (scan.files().count() + changed.len()) as u64,
-            files_reused: shared.len() as u64,
-            bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
-            ..WriteMetrics::default()
-        };
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        let max_batch_bytes = budget.limits.max_batch_bytes;
-        let source = futures::stream::iter(changed)
-            .then(execute)
-            .try_flatten()
-            .boxed();
-        let kept = source.and_then(move |batch| {
+            let required = rewrite_bytes
+                .saturating_mul(2)
+                .saturating_add(replacement_bytes.unwrap_or(0).saturating_mul(2))
+                .saturating_add(budget.limits.scratch_bytes);
+            if fs2::available_space(&self.inner.root)? < required {
+                return Err(Error::refusal(
+                    "disk_capacity",
+                    "affected-file rewrites, change rows and declared scratch do not fit available disk",
+                ));
+            }
+            let candidate = self
+                .replacement_output(dataset, &directory.join("data"), &native)
+                .await?;
+            let removed = self
+                .replacement_output(dataset, &directory.join("removed"), &native)
+                .await?;
+            let added = self
+                .replacement_output(dataset, &directory.join("added"), &native)
+                .await?;
+            let mut metrics = WriteMetrics {
+                files_scanned: (scan.files().count() + changed.len()) as u64,
+                files_reused: shared.len() as u64,
+                bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
+                ..WriteMetrics::default()
+            };
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            let max_batch_bytes = budget.limits.max_batch_bytes;
+            let source = futures::stream::iter(changed)
+                .then(execute)
+                .try_flatten()
+                .boxed();
+            let kept = source.and_then(move |batch| {
             let sender = sender.clone();
             async move {
                 let bytes = batch.get_array_memory_size();
@@ -528,76 +559,78 @@ impl Engine {
                 Ok(keep)
             }
         });
-        let removed_rows = futures::stream::unfold(receiver, |mut receiver| async move {
-            receiver.recv().await.map(|batch| (batch, receiver))
-        });
-        let (kept_files, removed_files) = tokio::try_join!(
-            storage::write_batches(&candidate, kept, budget),
-            storage::write_batches(&removed, removed_rows, budget)
-        )?;
-        let added_files = storage::write_batches(
-            &candidate,
-            replacement.execute_stream().await?.map(|batch| {
-                let batch = batch.map_err(Error::from)?;
-                // Join fanout has no honest input-byte upper bound. Keep
-                // scratch and bounded writer buffers available as rows arrive.
-                let reserve = budget
-                    .limits
-                    .scratch_bytes
-                    .saturating_add((budget.limits.max_batch_bytes as u64).saturating_mul(4));
-                if fs2::available_space(&self.inner.root)? < reserve {
-                    return Err(Error::refusal(
-                        "disk_capacity",
-                        "replacement writer and declared scratch no longer fit available disk",
-                    ));
-                }
-                Ok(batch)
-            }),
-            budget,
-        )
-        .await?;
-        metrics.rows_removed = removed_files.iter().map(|file| file.record_count()).sum();
-        metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
-        metrics.data_files_written =
-            key_files_written + (kept_files.len() + removed_files.len() + added_files.len()) as u64;
-        metrics.bytes_written = kept_files
-            .iter()
-            .chain(&removed_files)
-            .chain(&added_files)
-            .map(|file| file.file_size_in_bytes())
-            .sum::<u64>()
-            + key_bytes_written;
-        let rows = before
-            .rows
-            .checked_sub(metrics.rows_removed)
-            .and_then(|rows| rows.checked_add(metrics.rows_added))
-            .ok_or_else(|| {
-                Error::refusal(
-                    "invalid_changes",
-                    "applied change counts do not fit the captured base",
-                )
-            })?;
-        shared.extend(kept_files);
-        shared.extend(added_files.clone());
-        let catalog = self.inner.lifecycle.catalog.as_ref();
-        // No applied rows means membership, values and schema are unchanged. Keep
-        // the exact source pin so completed groups also reuse their prepared tables.
-        let table = if metrics.rows_removed == 0 && metrics.rows_added == 0 {
-            before.clone()
-        } else {
-            let candidate = storage::append(&candidate, catalog, shared).await?;
-            storage::pin(dataset, &candidate, rows, budget, &before.objects).await?
-        };
-        let removed = storage::append(&removed, catalog, removed_files).await?;
-        let added = storage::append(&added, catalog, added_files).await?;
-        let removed = storage::pin(dataset, &removed, metrics.rows_removed, budget, &[]).await?;
-        let added =
-            storage::pin(dataset, &added, metrics.rows_added, budget, &table.objects).await?;
-        Ok(Applied {
-            table,
-            removed,
-            added,
-            metrics,
+            let removed_rows = futures::stream::unfold(receiver, |mut receiver| async move {
+                receiver.recv().await.map(|batch| (batch, receiver))
+            });
+            let (kept_files, removed_files) = tokio::try_join!(
+                storage::write_batches(&candidate, kept, budget),
+                storage::write_batches(&removed, removed_rows, budget)
+            )?;
+            let added_files = storage::write_batches(
+                &candidate,
+                replacement.execute_stream().await?.map(|batch| {
+                    let batch = batch.map_err(Error::from)?;
+                    // Join fanout has no honest input-byte upper bound. Keep
+                    // scratch and bounded writer buffers available as rows arrive.
+                    let reserve = budget
+                        .limits
+                        .scratch_bytes
+                        .saturating_add((budget.limits.max_batch_bytes as u64).saturating_mul(4));
+                    if fs2::available_space(&self.inner.root)? < reserve {
+                        return Err(Error::refusal(
+                            "disk_capacity",
+                            "replacement writer and declared scratch no longer fit available disk",
+                        ));
+                    }
+                    Ok(batch)
+                }),
+                budget,
+            )
+            .await?;
+            metrics.rows_removed = removed_files.iter().map(|file| file.record_count()).sum();
+            metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
+            metrics.data_files_written = key_files_written
+                + (kept_files.len() + removed_files.len() + added_files.len()) as u64;
+            metrics.bytes_written = kept_files
+                .iter()
+                .chain(&removed_files)
+                .chain(&added_files)
+                .map(|file| file.file_size_in_bytes())
+                .sum::<u64>()
+                + key_bytes_written;
+            let rows = before
+                .rows
+                .checked_sub(metrics.rows_removed)
+                .and_then(|rows| rows.checked_add(metrics.rows_added))
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "invalid_changes",
+                        "applied change counts do not fit the captured base",
+                    )
+                })?;
+            shared.extend(kept_files);
+            shared.extend(added_files.clone());
+            let catalog = self.inner.lifecycle.catalog.as_ref();
+            // No applied rows means membership, values and schema are unchanged. Keep
+            // the exact source pin so completed groups also reuse their prepared tables.
+            let table = if metrics.rows_removed == 0 && metrics.rows_added == 0 {
+                before.clone()
+            } else {
+                let candidate = storage::append(&candidate, catalog, shared).await?;
+                storage::pin(dataset, &candidate, rows, budget, &before.objects).await?
+            };
+            let removed = storage::append(&removed, catalog, removed_files).await?;
+            let added = storage::append(&added, catalog, added_files).await?;
+            let removed =
+                storage::pin(dataset, &removed, metrics.rows_removed, budget, &[]).await?;
+            let added =
+                storage::pin(dataset, &added, metrics.rows_added, budget, &table.objects).await?;
+            Ok(Applied {
+                table,
+                removed,
+                added,
+                metrics,
+            })
         })
     }
 }

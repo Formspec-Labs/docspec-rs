@@ -641,7 +641,16 @@ async fn incremental_disk_refusal_retains_admission_for_a_smaller_resource_profi
     let root = TempDir::new().unwrap();
     let (engine, left, right) = fixture(root.path()).await;
     let first = engine.refresh(&recipe(&left, &right)).await.unwrap();
-    let spec = next(&first, &left, &right, "noop");
+    let unchanged = next(&first, &left, &right, "noop");
+    let right = update(
+        &engine,
+        root.path(),
+        &right,
+        "changed-right",
+        &[row(Some(9), Some(9), "new matching value")],
+        &[],
+    )
+    .await;
     drop(engine);
     let mut too_large = limits();
     // Other tests can free space between this setup and the actual preflight.
@@ -653,6 +662,14 @@ async fn incremental_disk_refusal_retains_admission_for_a_smaller_resource_profi
     let engine = Engine::open(root.path().join("workspace"), too_large)
         .await
         .unwrap();
+    // Exact value adoption needs no payload spill allowance, even while a newer
+    // producer selection exists under the declared captured-input policy.
+    let adopted = engine.refresh(&unchanged).await.unwrap();
+    assert_eq!(
+        adopted.dataset.groups["source"],
+        first.dataset.groups["source"]
+    );
+    let spec = next(&adopted, &left, &right, "changed");
     assert_eq!(
         engine.refresh(&spec).await.unwrap_err().code(),
         "disk_capacity"
@@ -666,14 +683,21 @@ async fn incremental_disk_refusal_retains_admission_for_a_smaller_resource_profi
             .iter()
             .any(|phase| phase == "admission")
     );
-    assert_eq!(engine.latest(&spec.dataset).await.unwrap(), first);
+    assert_eq!(engine.latest(&spec.dataset).await.unwrap(), adopted);
     drop(engine);
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
         .unwrap();
     let release = engine.refresh(&spec).await.unwrap();
-    assert_eq!(
+    assert_ne!(
         release.dataset.groups["source"],
         first.dataset.groups["source"]
     );
+    check(
+        &engine,
+        &release,
+        &oracle(&left, &right, &join(&spec).join).await,
+    )
+    .await;
+    verify_release(&release, limits()).await.unwrap();
 }

@@ -52,6 +52,24 @@ pub(crate) fn file(
     columns: Option<&[String]>,
     budget: Budget,
 ) -> Result<Arc<dyn TableProvider>> {
+    projected_files(scan, Some(path), columns, budget)
+}
+
+/// Streams captured files sequentially so reader buffers do not grow with file count.
+pub(crate) fn files(
+    scan: Arc<storage::OccurrenceScan>,
+    columns: Option<&[String]>,
+    budget: Budget,
+) -> Result<Arc<dyn TableProvider>> {
+    projected_files(scan, None, columns, budget)
+}
+
+fn projected_files(
+    scan: Arc<storage::OccurrenceScan>,
+    path: Option<String>,
+    columns: Option<&[String]>,
+    budget: Budget,
+) -> Result<Arc<dyn TableProvider>> {
     let projection = columns
         .map(|columns| {
             columns
@@ -87,7 +105,7 @@ enum NativeSource {
     },
     File {
         scan: Arc<storage::OccurrenceScan>,
-        path: String,
+        path: Option<String>,
         projection: Option<Vec<usize>>,
     },
 }
@@ -119,11 +137,42 @@ impl PartitionStream for NativePartition {
                 } => storage::read_batches(&table, &budget).await?.boxed(),
                 NativeSource::File {
                     scan,
-                    path,
+                    path: Some(path),
                     projection,
                 } => scan
                     .read_projected_file(&path, &budget, projection.as_deref())?
                     .boxed(),
+                NativeSource::File {
+                    scan,
+                    path: None,
+                    projection,
+                } => {
+                    let bytes = scan.files().fold(0usize, |bytes, file| {
+                        bytes
+                            .saturating_add(file.file_path().len())
+                            .saturating_add(size_of::<String>())
+                    });
+                    if bytes > budget.limits.max_metadata_bytes {
+                        return Err(crate::Error::refusal(
+                            "metadata_capacity",
+                            "captured file paths exceed metadata allowance",
+                        ));
+                    }
+                    let memory = budget.reserve(bytes)?;
+                    let paths = scan
+                        .files()
+                        .map(|file| file.file_path().to_owned())
+                        .collect::<Vec<_>>();
+                    // The next reader opens only after the preceding stream reaches
+                    // EOF and releases its buffers. Keep path admission until drop.
+                    futures::stream::iter(paths)
+                        .map(move |path| {
+                            let _memory = &memory;
+                            scan.read_projected_file(&path, &budget, projection.as_deref())
+                        })
+                        .try_flatten()
+                        .boxed()
+                }
             };
             Ok::<_, crate::Error>(stream)
         };

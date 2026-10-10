@@ -4,7 +4,8 @@ use clap::{Parser, Subcommand};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_evidence, read_group, verify_input_coverage, verify_release_at},
+    engine::{read_evidence, read_group, read_receipts, verify_input_coverage, verify_release_at},
+    evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
         BackfillSpec, CompactionSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
@@ -187,6 +188,10 @@ enum Command {
     PlanUpdate { spec: PathBuf },
     /// Apply or resume an update using its stable operation identity.
     Update { spec: PathBuf },
+    /// Plan receipt changes for exact source occurrences.
+    PlanEvidence { spec: PathBuf },
+    /// Apply or resume receipt changes without recomputing values.
+    Evidence { spec: PathBuf },
     /// Plan a schema edit against an exact selected source.
     PlanSchema { spec: PathBuf },
     /// Rename, reorder or hide existing root fields and select the new definition.
@@ -199,6 +204,10 @@ enum Command {
     ReadCombined { release: PathBuf, output: PathBuf },
     /// Stream exact contributor pairs as Arrow IPC without the producer catalog.
     ReadEvidence { release: PathBuf, output: PathBuf },
+    /// Stream exact receipt values as Arrow IPC without the producer catalog.
+    ReadReceipts { release: PathBuf, output: PathBuf },
+    /// Stream source values and stable occurrence keys from the local host.
+    ReadOccurrences { release: PathBuf, output: PathBuf },
     /// Compare complete pinned results, preserving duplicate row counts.
     Compare {
         before: PathBuf,
@@ -239,6 +248,7 @@ enum Command {
 enum PausedOperation {
     Build,
     Update,
+    Evidence,
     Backfill,
     Refresh,
     Schema,
@@ -293,20 +303,25 @@ async fn main() -> anyhow::Result<()> {
                 .await?,
             )?;
         }
-        command @ (Command::Read { .. } | Command::ReadEvidence { .. }) => {
-            let (release, output, group) = match command {
+        command @ (Command::Read { .. }
+        | Command::ReadEvidence { .. }
+        | Command::ReadReceipts { .. }) => {
+            let (release, output, group, receipts) = match command {
                 Command::Read {
                     release,
                     output,
                     group,
-                } => (release, output, Some(group)),
-                Command::ReadEvidence { release, output } => (release, output, None),
+                } => (release, output, Some(group), false),
+                Command::ReadEvidence { release, output } => (release, output, None, false),
+                Command::ReadReceipts { release, output } => (release, output, None, true),
                 _ => unreachable!(),
             };
             let release: ReleasePin = read_json(release)?;
             let budget = Budget::new(limits)?;
             let mut stream = if let Some(group) = group {
                 read_group(&release, &group, &budget).await?
+            } else if receipts {
+                read_receipts(&release, &budget).await?
             } else {
                 read_evidence(&release, &budget).await?
             };
@@ -333,6 +348,10 @@ async fn main() -> anyhow::Result<()> {
                             .map(|_| ()),
                         PausedOperation::Update => engine
                             .update_until(&read_json::<UpdateSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::Evidence => engine
+                            .evidence_until(&read_json::<EvidenceSpec>(spec)?, &phase)
                             .await
                             .map(|_| ()),
                         PausedOperation::Schema => engine
@@ -539,6 +558,16 @@ async fn main() -> anyhow::Result<()> {
                 Command::Update { spec } => {
                     print_json(&engine.update(&read_json::<UpdateSpec>(spec)?).await?)?
                 }
+                Command::PlanEvidence { spec } => print_json(
+                    &engine
+                        .plan_evidence(&read_json::<EvidenceSpec>(spec)?)
+                        .await?,
+                )?,
+                Command::Evidence { spec } => print_json(
+                    &engine
+                        .update_evidence(&read_json::<EvidenceSpec>(spec)?)
+                        .await?,
+                )?,
                 Command::PlanSchema { spec } => {
                     print_json(&engine.plan_schema(&read_json::<SchemaSpec>(spec)?).await?)?
                 }
@@ -555,10 +584,18 @@ async fn main() -> anyhow::Result<()> {
                 Command::Backfill { spec } => {
                     print_json(&engine.backfill(&read_json::<BackfillSpec>(spec)?).await?)?
                 }
-                Command::ReadCombined { release, output } => {
-                    let mut stream = engine
-                        .read_combined(&read_json::<ReleasePin>(release)?)
-                        .await?;
+                command @ (Command::ReadCombined { .. } | Command::ReadOccurrences { .. }) => {
+                    let (release, output, occurrences) = match command {
+                        Command::ReadCombined { release, output } => (release, output, false),
+                        Command::ReadOccurrences { release, output } => (release, output, true),
+                        _ => unreachable!(),
+                    };
+                    let release = read_json::<ReleasePin>(release)?;
+                    let mut stream = if occurrences {
+                        engine.read_source_occurrences(&release).await?
+                    } else {
+                        engine.read_combined(&release).await?
+                    };
                     let file = std::fs::OpenOptions::new()
                         .create_new(true)
                         .write(true)

@@ -28,7 +28,10 @@ mod backfill;
 pub use backfill::{BackfillPlan, read_combined};
 mod changes;
 mod compaction;
+mod evidence;
 mod export;
+#[doc(inline)]
+pub use evidence::read_receipts;
 mod history;
 mod restore;
 use changes::verify_changes;
@@ -328,6 +331,7 @@ impl Engine {
         if matches!(spec, OperationRequest::Refresh(_)) {
             phases.insert(2, "evidence");
         }
+        let mut receipt_base = None;
         if let Some(version) = spec.base() {
             let base: ReleasePin = lifecycle
                 .get(&view, &format!("result/{version}"))
@@ -335,8 +339,17 @@ impl Engine {
                 .ok_or_else(|| {
                     Error::refusal("no_release", "captured source version is unavailable")
                 })?;
-            if !base.dataset.computed.is_empty() {
+            if !base.dataset.computed.is_empty() && !matches!(spec, OperationRequest::Evidence(_)) {
                 phases.insert(3, "groups");
+            }
+            if base.dataset.evidence.is_some()
+                && !matches!(
+                    spec,
+                    OperationRequest::Evidence(_) | OperationRequest::Schema(_)
+                )
+            {
+                phases.insert(2, "receipts");
+                receipt_base = Some(base.dataset);
             }
         }
         let schema_key = match &operation {
@@ -344,7 +357,11 @@ impl Engine {
             None => self.schema_key(&authority, spec).await?,
         };
         let mut retained_processing = false;
+        let mut adopted_receipts = false;
         for phase in phases {
+            if phase == "receipts" && adopted_receipts {
+                continue;
+            }
             let exists = if phase == "groups" {
                 self.active_completion::<CompletedGroups>(
                     &view,
@@ -381,6 +398,9 @@ impl Engine {
                     retained_processing = completion
                         .as_ref()
                         .is_some_and(|phase| phase.dependencies.is_some());
+                    if let (Some(processing), Some(base)) = (&completion, &receipt_base) {
+                        adopted_receipts = evidence::adopts_receipts(spec, processing, base)?;
+                    }
                 }
                 completion.is_some()
             };
@@ -967,6 +987,10 @@ impl Engine {
                     OperationRequest::Schema(schema) => {
                         self.process_schema(schema, &directory, operation).await?
                     }
+                    OperationRequest::Evidence(evidence) => {
+                        self.process_receipts(evidence, &directory, &admission)
+                            .await?
+                    }
                     OperationRequest::Refresh(refresh) => {
                         Box::pin(self.process_refresh(refresh, &directory, &admission, operation))
                             .await?
@@ -1145,7 +1169,10 @@ impl Engine {
                         self.guard_inputs(coverage, None, RefreshPolicy::Captured)
                             .await?;
                     }
-                    let composition = matches!(spec, OperationRequest::Schema(_));
+                    let composition = matches!(
+                        spec,
+                        OperationRequest::Schema(_) | OperationRequest::Evidence(_)
+                    );
                     let boundary = if composition {
                         authority
                             .selected
@@ -1263,16 +1290,60 @@ impl Engine {
                 .prepare_source(spec, &operation, &request, stop)
                 .await?;
 
-            let table = processing.table.clone().ok_or_else(|| {
+            let processed = processing.table.clone().ok_or_else(|| {
                 Error::refusal("corrupt_phase", "processing completion has no table pin")
             })?;
-            let related = if let OperationRequest::Refresh(refresh) = spec {
-                Some(Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?)
+            let base = if let Some(base) = spec.base() {
+                Some(self.release_admitted(spec.dataset(), base).await?)
             } else {
                 None
             };
-            let base = if let Some(base) = spec.base() {
-                Some(self.release_admitted(spec.dataset(), base).await?)
+            let evidence_only = matches!(spec, OperationRequest::Evidence(_));
+            let table = if evidence_only {
+                base.as_ref()
+                    .and_then(|base| base.dataset.groups.get("source"))
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::refusal("invalid_evidence", "captured result lacks source values")
+                    })?
+            } else {
+                processed.clone()
+            };
+            let related = if let OperationRequest::Refresh(refresh) = spec {
+                Some(Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?)
+            } else if evidence_only {
+                base.as_ref()
+                    .and_then(|base| base.dataset.related.as_ref())
+                    .map(|related| {
+                        Ok::<_, Error>(Retained {
+                            value: (**related).clone(),
+                            protections: processing
+                                .protections
+                                .as_ref()
+                                .map(ReferenceProtections::duplicate)
+                                .transpose()?,
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
+            let receipts = if evidence_only {
+                Some(Retained {
+                    value: crate::evidence::EvidenceResult {
+                        source: (&table).into(),
+                        table: processed,
+                        changes: processing.changes.clone(),
+                    },
+                    protections: processing
+                        .protections
+                        .as_ref()
+                        .map(ReferenceProtections::duplicate)
+                        .transpose()?,
+                })
+            } else if let Some(base) = &base {
+                self.inherit_receipts(spec, &operation, &processing, base, stop)
+                    .await?
             } else {
                 None
             };
@@ -1284,6 +1355,9 @@ impl Engine {
                 processing.dependencies.clone().map(|mut dependencies| {
                     if let Some(related) = &related {
                         dependencies.tables.push((&related.evidence).into());
+                    }
+                    if let Some(receipts) = &receipts {
+                        dependencies.tables.push((&receipts.table).into());
                     }
                     dependencies
                 });
@@ -1307,11 +1381,28 @@ impl Engine {
                 verify_changes(
                     spec,
                     &table,
-                    processing.changes.as_ref(),
+                    if evidence_only {
+                        None
+                    } else {
+                        processing.changes.as_ref()
+                    },
                     &lifecycle.budget,
                     &mut checks,
                 )
                 .await?;
+                if let Some(receipts) = &receipts {
+                    evidence::verify_result(
+                        spec,
+                        &table,
+                        base.as_ref().ok_or_else(|| {
+                            Error::refusal("invalid_evidence", "receipts require a captured base")
+                        })?,
+                        receipts,
+                        &lifecycle.budget,
+                        &mut checks,
+                    )
+                    .await?;
+                }
                 if let Some(related) = &related {
                     Box::pin(refresh::verify_related(
                         &table,
@@ -1334,6 +1425,9 @@ impl Engine {
                 if let Some(related) = &related {
                     ReferenceProtections::inherit(&mut protections, related.protections.as_ref())?;
                 }
+                if let Some(receipts) = &receipts {
+                    ReferenceProtections::inherit(&mut protections, receipts.protections.as_ref())?;
+                }
                 self.complete(spec, &operation, phase, protections).await?
             };
             stop_after(stop, "validation")?;
@@ -1355,6 +1449,12 @@ impl Engine {
                     related.protections.as_ref(),
                 )?;
             }
+            if let Some(receipts) = &receipts {
+                ReferenceProtections::inherit(
+                    &mut readback_protections,
+                    receipts.protections.as_ref(),
+                )?;
+            }
 
             // A full rebuild declares a complete new input. Updates retain the prior
             // source evidence because they only replace a subset of its rows.
@@ -1363,7 +1463,9 @@ impl Engine {
                 .filter(|_| {
                     matches!(
                         spec,
-                        OperationRequest::Update(_) | OperationRequest::Schema(_)
+                        OperationRequest::Update(_)
+                            | OperationRequest::Schema(_)
+                            | OperationRequest::Evidence(_)
                     )
                 })
                 .map(|base| base.dataset.inputs.clone())
@@ -1387,7 +1489,13 @@ impl Engine {
             }
             let mut groups = BTreeMap::from([("source".to_owned(), table.clone())]);
             let mut computed = BTreeMap::new();
-            if let Some(base) = &base {
+            if evidence_only {
+                let base = base
+                    .as_ref()
+                    .ok_or_else(|| Error::refusal("invalid_evidence", "receipts require a base"))?;
+                groups = base.dataset.groups.clone();
+                computed = base.dataset.computed.clone();
+            } else if let Some(base) = &base {
                 for (name, previous) in &base.dataset.computed {
                     self.check(
                         &lifecycle.open(spec.dataset()).await?,
@@ -1490,7 +1598,12 @@ impl Engine {
                 inputs,
                 relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
                 related: related.map(|related| Box::new(related.value)),
-                changes: processing.changes.clone(),
+                evidence: receipts.map(|receipts| Box::new(receipts.value)),
+                changes: if evidence_only {
+                    None
+                } else {
+                    processing.changes.clone()
+                },
                 definition: captured_request.result_definition().to_owned(),
                 eligibility: operation.eligibility,
                 boundary: operation.boundary,
@@ -1500,6 +1613,12 @@ impl Engine {
                 validation: VerificationLevel::Routine,
             };
             backfill::verify_groups(
+                &dataset,
+                &lifecycle.budget,
+                &mut verification::Checks::composition(),
+            )
+            .await?;
+            evidence::verify(
                 &dataset,
                 &lifecycle.budget,
                 &mut verification::Checks::composition(),
@@ -1609,8 +1728,16 @@ impl Engine {
                 stop_after(stop, "selection")?;
                 return Ok(selected);
             }
-            let lock = self.lock(spec.dataset()).await;
-            let _guard = lock.lock().await;
+            let dependencies = if release.dataset.related.is_some() {
+                Some(verification::available_graph(&release, &self.inner.lifecycle.budget).await?)
+            } else {
+                None
+            };
+            let datasets = dependencies.as_ref().map_or_else(
+                || std::collections::BTreeSet::from([spec.dataset().clone()]),
+                verification::DependencyGraph::datasets,
+            );
+            let _guards = self.lock_inputs(datasets).await;
             let lifecycle = &self.inner.lifecycle;
             let view = lifecycle.open(spec.dataset()).await?;
             if let Some(completed) = lifecycle
@@ -1632,6 +1759,9 @@ impl Engine {
             }
             check_group_rebuild(&authority, spec)?;
             self.check_incremental(&authority, spec).await?;
+            if let Some(dependencies) = &dependencies {
+                self.guard_ancestors(dependencies, &release).await?;
+            }
             self.select(&view, authority, &release).await?;
             stop_after(stop, "selection")?;
             Ok(release.value)
@@ -1788,7 +1918,7 @@ impl Engine {
         // Another attempt may have completed the same deterministic phase. Preserve
         // that generation rather than relabeling or replacing its evidence.
         if let Some(completed) = self.active_completion::<PhaseResult>(&view, &key).await? {
-            if matches!(phase.phase.as_str(), "validation" | "evidence")
+            if matches!(phase.phase.as_str(), "validation" | "evidence" | "receipts")
                 && (completed.dependencies != phase.dependencies
                     || (phase.phase == "validation" && completed.table != phase.table))
             {
@@ -1815,7 +1945,7 @@ fn captured_manifest<'a>(
     authority: &'a Authority,
     request: &OperationRequest,
 ) -> Option<&'a ObjectRef> {
-    (matches!(request, OperationRequest::Schema(_))
+    (matches!(request, OperationRequest::Schema(_) | OperationRequest::Evidence(_))
         || matches!(request, OperationRequest::Refresh(spec) if spec.mode == RefreshMode::Incremental))
         .then(|| authority.release.as_ref().map(|release| &release.manifest)).flatten()
 }
@@ -1828,6 +1958,9 @@ fn phase_key(
     base_manifest: Option<&ObjectRef>,
     schema_key: Option<&String>,
 ) -> Result<String> {
+    if phase == "receipts" {
+        return Ok(format!("phase/{request}/{eligibility}/receipts"));
+    }
     if let OperationRequest::Refresh(refresh) = spec {
         return refresh::phase_key(refresh, eligibility, phase, base_manifest);
     }
@@ -1937,7 +2070,7 @@ fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()
 fn check_update_eligibility(authority: &Authority, request: &OperationRequest) -> Result<()> {
     if matches!(
         request,
-        OperationRequest::Update(_) | OperationRequest::Schema(_)
+        OperationRequest::Update(_) | OperationRequest::Schema(_) | OperationRequest::Evidence(_)
     ) && authority
         .selected
         .as_ref()
@@ -1990,12 +2123,18 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             }
             value
         }
+        OperationRequest::Evidence(spec) => {
+            serde_json::json!({"evidence": {"base": spec.base, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
+        }
     };
     Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
         .to_hex()
         .to_string())
 }
 fn validate_request(spec: &OperationRequest) -> Result<()> {
+    if let OperationRequest::Evidence(spec) = spec {
+        return evidence::validate(spec);
+    }
     if let OperationRequest::Schema(spec) = spec {
         return schema::validate(spec);
     }
@@ -2273,6 +2412,18 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
         objects.extend(changes.added.objects.iter().cloned());
         objects.extend(changes.removed.objects.iter().cloned());
     }
+    if let Some(evidence) = &dataset.evidence {
+        objects.push(evidence.source.metadata.clone());
+        objects.extend(evidence.table.objects.iter().cloned());
+        if let Some(changes) = &evidence.changes {
+            objects.extend([
+                changes.base_manifest.clone(),
+                changes.before_metadata.clone(),
+            ]);
+            objects.extend(changes.added.objects.iter().cloned());
+            objects.extend(changes.removed.objects.iter().cloned());
+        }
+    }
     objects.sort_by(|left, right| left.path.cmp(&right.path));
     objects.dedup();
     objects
@@ -2345,5 +2496,6 @@ async fn verify_local_release(
     )
     .await?;
     backfill::verify_groups(decoded, budget, checks).await?;
+    evidence::verify(decoded, budget, checks).await?;
     Ok(())
 }

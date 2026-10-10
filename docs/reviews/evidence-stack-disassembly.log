@@ -1,0 +1,64 @@
+(lldb) target create "target/debug/deps/evidence_updates-c58213d616c21a27"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64).
+(lldb) settings set target.disable-aslr false
+(lldb) run first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpkEExk4/workspace/objects/comments/658ae3647e184dd886ef01a54a62a1f1/data/840e36d4-1a5c-4e1b-a37c-3fbde568e5ac-00000.parquet
+DOCSPEC_TEST_WORK readback
+Process 74978 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64)
+Process 74978 stopped
+* thread #2, name = 'first_value_update_preserves_receipts_for_unrelated_rows_in_the', stop reason = EXC_BAD_ACCESS (code=2, address=0x16bca34b0)
+    frame #0: 0x00000001048b875c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217 + 20
+evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217:
+->  0x1048b875c <+20>: str    xzr, [sp]
+    0x1048b8760 <+24>: cmp    sp, x9
+    0x1048b8764 <+28>: b.ne   0x1048b8758               ; <+16>
+    0x1048b8768 <+32>: sub    sp, sp, #0x70
+Target 0: (evidence_updates-c58213d616c21a27) stopped.
+(lldb) frame select 25
+frame #25: 0x0000000104a61870 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665 + 1332
+evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665:
+->  0x104a61870 <+1332>: b      0x104a61874               ; <+1336>
+    0x104a61874 <+1336>: ldr    x9, [sp, #0x5e58]
+    0x104a61878 <+1340>: mov    x8, #0x0                  ; =0 
+    0x104a6187c <+1344>: subs   x9, x9, #0x4
+(lldb) disassemble --frame --count 12
+evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665:
+    0x104a6133c <+0>:  stp    x28, x27, [sp, #-0x20]!
+    0x104a61340 <+4>:  stp    x29, x30, [sp, #0x10]
+    0x104a61344 <+8>:  add    x29, sp, #0x10
+    0x104a61348 <+12>: sub    x9, sp, #0x87, lsl #12    ; =0x87000 
+    0x104a6134c <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+    0x104a61350 <+20>: str    xzr, [sp]
+    0x104a61354 <+24>: cmp    sp, x9
+    0x104a61358 <+28>: b.ne   0x104a6134c               ; <+16>
+    0x104a6135c <+32>: sub    sp, sp, #0xfc0
+    0x104a61360 <+36>: str    xzr, [sp]
+    0x104a61364 <+40>: sub    x9, x29, #0x40
+    0x104a61368 <+44>: str    x9, [sp, #0xb88]
+(lldb) frame select 27
+frame #27: 0x0000000104a75254 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2 + 31696
+evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2:
+->  0x104a75254 <+31696>: b      0x104a75258               ; <+31700>
+    0x104a75258 <+31700>: ldr    x8, [sp, #0x1f50]
+    0x104a7525c <+31704>: ldr    x9, [x8, #0x51a0]
+    0x104a75260 <+31708>: mov    x8, #0x0                  ; =0 
+(lldb) disassemble --frame --count 12
+evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2:
+    0x104a6d684 <+0>:  stp    x28, x27, [sp, #-0x20]!
+    0x104a6d688 <+4>:  stp    x29, x30, [sp, #0x10]
+    0x104a6d68c <+8>:  add    x29, sp, #0x10
+    0x104a6d690 <+12>: sub    x9, sp, #0xe1, lsl #12    ; =0xe1000 
+    0x104a6d694 <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+    0x104a6d698 <+20>: str    xzr, [sp]
+    0x104a6d69c <+24>: cmp    sp, x9
+    0x104a6d6a0 <+28>: b.ne   0x104a6d694               ; <+16>
+    0x104a6d6a4 <+32>: sub    sp, sp, #0x8f0
+    0x104a6d6a8 <+36>: str    xzr, [sp]
+    0x104a6d6ac <+40>: sub    x9, x29, #0xb0
+    0x104a6d6b0 <+44>: str    x9, [sp, #0x1e90]

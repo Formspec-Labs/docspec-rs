@@ -48,13 +48,25 @@ impl Checks {
         let mut bytes = self.known.values().fold(0usize, |sum, file| {
             sum.saturating_add(file.estimated_bytes())
         });
-        for pin in release.dataset.groups.values().chain(
-            release
-                .dataset
-                .related
-                .iter()
-                .map(|related| &related.evidence),
-        ) {
+        for pin in release
+            .dataset
+            .groups
+            .values()
+            .chain(
+                release
+                    .dataset
+                    .related
+                    .iter()
+                    .map(|related| &related.evidence),
+            )
+            .chain(
+                release
+                    .dataset
+                    .evidence
+                    .iter()
+                    .map(|evidence| &evidence.table),
+            )
+        {
             let table = storage::open_pin(pin).await?;
             let schemas = Arc::new(
                 table

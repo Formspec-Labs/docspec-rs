@@ -5,14 +5,58 @@
 The full [implementation plan](PLAN.md) remains **incomplete**. Local processing,
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
-specific limits. Remaining delivery includes evidence-only changes and broader
-schema/cutover behavior; remaining protection lifetimes, maintenance integration and
-broader failure qualification; remote publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
+specific limits. Remaining delivery includes dependency-correction semantics and
+continuous-ingestion cutover; change-history composition; remaining protection
+lifetimes, maintenance integration and broader failure qualification; remote
+publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
 10-million-Comments qualification. The 1,800-second full-path target has not been
 measured.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Receipt changes without value recomputation
+
+The [receipt interface](evidence-updates.md) replaces complete receipt groups for
+stable source occurrences. It retains original input bytes, nested values,
+duplicates and nulls, records actual removed/added rows, and adopts existing
+source, computed and contributor tables. Source corrections preserve surviving
+occurrences and prune replaced/deleted associations in a durable phase. Scalar
+backfills incorporate intervening receipt selections without repeating completed
+computation. Value-only dependent refresh retains its tables while advancing exact
+input coverage. Opaque receipt URIs do not promise custody of external bodies.
+
+The [focused checks](reviews/evidence-updates-focused-final.log) pass for these
+behaviors, invalid keys/conflicting retries, exact receipt-phase retirement,
+restore-point capture, and actual process loss after receipt processing, pruning
+and validation. The many-file fixture uses managed compaction, then holds one
+receipt correction and the memory allowance fixed. Projected origin reads use one
+sequential reader, avoiding buffer admission proportional to the file count.
+This establishes bounded reader admission in the fixture, not measured peak memory
+or a complete update-cost result. Writer metrics omit source-association reads.
+
+The [consistency](reviews/evidence-consistency-review.md) and
+[efficiency](reviews/evidence-efficiency-review.md) reviews led to the sequential
+reader, accurate no-work planning and pruning recovery tests. Runtime checks then
+found native string-view compatibility and missing receipt-phase recognition;
+both are corrected. Default-stack failures also exposed large embedded async state
+and inline receipt metadata. Shared boxed futures and boxing receipt metadata like
+related results reduce that state without changing serialized data or resource
+limits. The measured `DatasetPin` size fell from 2,432 to 1,328 bytes; failed runs
+and [type measurements](reviews/evidence-type-sizes-boxed.log) remain retained.
+The subsequent full gate exposed the same stack pressure in an existing
+incremental join. Isolating the new validation futures fixes the
+[original regression](reviews/evidence-related-stack-verified.log) under the
+default stack. The disk-refusal fixture now exercises a real input change;
+unchanged values correctly reuse their tables without reserving payload scratch.
+The [final repository gate](reviews/evidence-updates-final-check.log) passes
+formatting, strict linting, and every library, integration and documentation test.
+It includes the receipt suite after the final future correction and the existing
+incremental oracle. The separate [related-refresh suite](reviews/evidence-related-final.log)
+also passes. Independent reviews approve the static implementation; the primary
+agent executed these runtime checks without increasing stack or resource limits.
+These fixture checks do not establish throughput, remote support, the Q4 discovered
+dependency-omission case, or the complete Comments acceptance target.
 
 ## Complete Comments qualification harness
 
@@ -1077,9 +1121,9 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies; continuous-ingestion catch-up and cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files | Evidence-only changes; change-history composition, lineage certificates and explicit unavailable-history fallback |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement | General evidence-only changes; computed input groups; broader aggregate functions and key types |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies and Q4 discovered-dependency correction; continuous-ingestion catch-up and cutover |
+| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes | Change-history composition, lineage certificates and explicit unavailable-history fallback |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; raw local experiments; bounded local Dagster scheduling with actual Rust build/replay | Complete counters; aggregate resource and real-network qualification; broader fault tests; representative Comments corpus; final local and remote performance gates; native Dagster lost-response and replacement-worker qualification |
 
@@ -1088,8 +1132,9 @@ replacement and deletion against an exact base; unsupported transformations requ
 an explicit full query. Independent scalar backfill and coordinated source/scalar
 updates and explicit full rebuilds are available. Incremental reuse of a globally
 invalidated source refuses until a full rebuild requalifies it. General incremental
-SQL remains unfinished. A retained source file establishes whole-input provenance, not
-per-value evidence relationships or complete DocSpec conformance.
+SQL remains unfinished. A retained source file establishes whole-input provenance. Explicit receipt
+associations add occurrence-level evidence; neither alone establishes complete
+DocSpec conformance.
 
 ## Component qualifications
 

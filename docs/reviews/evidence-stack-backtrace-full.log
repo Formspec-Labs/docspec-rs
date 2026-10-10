@@ -1,0 +1,115 @@
+(lldb) target create "target/debug/deps/evidence_updates-c58213d616c21a27"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64).
+(lldb) settings set target.disable-aslr false
+(lldb) run first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFpoZD0/workspace/objects/comments/4c596cf8163f441f9d8394508513426f/data/49ea1fb6-5f12-4d52-bb67-1c8f39d3bec4-00000.parquet
+DOCSPEC_TEST_WORK readback
+Process 73738 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64)
+Process 73738 stopped
+* thread #2, name = 'first_value_update_preserves_receipts_for_unrelated_rows_in_the', stop reason = EXC_BAD_ACCESS (code=2, address=0x16ba9b4b0)
+    frame #0: 0x0000000104ac075c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217 + 20
+evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217:
+->  0x104ac075c <+20>: str    xzr, [sp]
+    0x104ac0760 <+24>: cmp    sp, x9
+    0x104ac0764 <+28>: b.ne   0x104ac0758               ; <+16>
+    0x104ac0768 <+32>: sub    sp, sp, #0x70
+Target 0: (evidence_updates-c58213d616c21a27) stopped.
+(lldb) thread backtrace -c 80
+* thread #2, name = 'first_value_update_preserves_receipts_for_unrelated_rows_in_the', stop reason = EXC_BAD_ACCESS (code=2, address=0x16ba9b4b0)
+  * frame #0: 0x0000000104ac075c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217 + 20
+    frame #1: 0x00000001045e0520 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$::deserialize::h4b5fda9b7a135810 + 44
+    frame #2: 0x00000001046d0ce0 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h544879df54494dc2 + 12
+    frame #3: 0x0000000104a441f4 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::hb4b7a098176ff27b + 148
+    frame #4: 0x0000000104a0f0f0 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::hd4d46b08949fe271 + 12
+    frame #5: 0x000000010453bb54 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a + 832
+    frame #6: 0x0000000104ab6e48 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h9dfe7a2031797c52 + 1552
+    frame #7: 0x00000001045e0720 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7 + 44
+    frame #8: 0x0000000104b7ea94 evidence_updates-c58213d616c21a27`_$LT$serde_core..de..impls..OptionVisitor$LT$T$GT$$u20$as$u20$serde_core..de..Visitor$GT$::visit_some::h4ab18d5c343c0f23 + 36
+    frame #9: 0x0000000104a8ab7c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_option::h5000f728444fec75 + 176
+    frame #10: 0x000000010492ebd8 evidence_updates-c58213d616c21a27`serde_core::de::impls::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$core..option..Option$LT$T$GT$$GT$::deserialize::h5a6faa76f42931fc + 12
+    frame #11: 0x00000001046d0f08 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h5afe82d10c48454e + 12
+    frame #12: 0x0000000104a413e8 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::h695e35424b2e1d10 + 148
+    frame #13: 0x0000000104a0eac4 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::h58c894f9cb449f09 + 12
+    frame #14: 0x000000010451244c evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Authority$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h8dad225394e6167b + 1852
+    frame #15: 0x0000000104aae084 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h7b1a440c662bc117 + 1600
+    frame #16: 0x00000001045d8aa4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Authority$GT$::deserialize::h5cdc38e1c905bf2a + 44
+    frame #17: 0x0000000104a19880 evidence_updates-c58213d616c21a27`serde_json::de::from_trait::h9b8a694cb101b816 + 120
+    frame #18: 0x0000000104a21010 evidence_updates-c58213d616c21a27`serde_json::de::from_str::he34b527ca33e5774 + 40
+    frame #19: 0x0000000104736c6c evidence_updates-c58213d616c21a27`docspec::catalog::SnapshotRows::get_record::_$u7b$$u7b$closure$u7d$$u7d$::h01ccdac13cf3e1d4 + 108
+    frame #20: 0x00000001049612d8 evidence_updates-c58213d616c21a27`core::option::Option$LT$T$GT$::map::h2e95e6b36d27a5b2 + 68
+    frame #21: 0x0000000104736660 evidence_updates-c58213d616c21a27`docspec::catalog::SnapshotRows::get_record::h257b0bdbb82a5e94 + 48
+    frame #22: 0x000000010473d450 evidence_updates-c58213d616c21a27`docspec::catalog::Lifecycle::get::_$u7b$$u7b$closure$u7d$$u7d$::h53dc029b44605f2a + 784
+    frame #23: 0x0000000104c8dbac evidence_updates-c58213d616c21a27`docspec::engine::Engine::check::_$u7b$$u7b$closure$u7d$$u7d$::habbea25f40f2c7de + 972
+    frame #24: 0x0000000104c8e2f8 evidence_updates-c58213d616c21a27`docspec::engine::Engine::phase::_$u7b$$u7b$closure$u7d$$u7d$::h6acc14fa00fb7953 + 1196
+    frame #25: 0x0000000104c69870 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665 + 1332
+    frame #26: 0x0000000104c4eed8 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h1a86e51eb70b0301 + 44
+    frame #27: 0x0000000104c7d254 evidence_updates-c58213d616c21a27`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2 + 31696
+    frame #28: 0x0000000104c4f0b8 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h737866f7a4232f23 + 44
+    frame #29: 0x0000000104c67dd0 evidence_updates-c58213d616c21a27`docspec::engine::Engine::run_admitted::_$u7b$$u7b$closure$u7d$$u7d$::hda2585d1b78d9357 + 1400
+    frame #30: 0x0000000104c690f8 evidence_updates-c58213d616c21a27`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h0b06bc532306b895 + 404
+    frame #31: 0x0000000104bd90e0 evidence_updates-c58213d616c21a27`docspec::engine::worker::_$LT$impl$u20$docspec..engine..Engine$GT$::spawn_work::_$u7b$$u7b$closure$u7d$$u7d$::hfc0264f3b88f5501 + 436
+    frame #32: 0x0000000104c4f178 evidence_updates-c58213d616c21a27`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h886a19fcc63d86b8 + 36
+    frame #33: 0x000000010485fffc evidence_updates-c58213d616c21a27`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h5cc001f023616f19 + 164
+    frame #34: 0x00000001048598c8 evidence_updates-c58213d616c21a27`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::h51f10d28d9d92424 + 64
+    frame #35: 0x00000001049d438c evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::poll_future::_$u7b$$u7b$closure$u7d$$u7d$::he629d4a0cc45bd0f + 96
+    frame #36: 0x0000000104676654 evidence_updates-c58213d616c21a27`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h9ce49e2e4f8e595a + 52
+    frame #37: 0x000000010467e8c0 evidence_updates-c58213d616c21a27`std::panicking::catch_unwind::do_call::h91d6e8cca25f1427 + 72
+    frame #38: 0x0000000104752730 evidence_updates-c58213d616c21a27`__rust_try + 32
+    frame #39: 0x00000001046f7278 evidence_updates-c58213d616c21a27`std::panic::catch_unwind::hc7821406f64c3391 + 124
+    frame #40: 0x00000001049c869c evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::poll_future::h7abdaf3d6528dd0e + 124
+    frame #41: 0x00000001049d92f8 evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll_inner::h64106a60a7e774e4 + 164
+    frame #42: 0x00000001049ec078 evidence_updates-c58213d616c21a27`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll::h6bb76157a91dc5db + 28
+    frame #43: 0x0000000104b07580 evidence_updates-c58213d616c21a27`tokio::runtime::task::raw::poll::h3dfe67e1011086ce + 16
+    frame #44: 0x0000000108673944 evidence_updates-c58213d616c21a27`tokio::runtime::task::raw::RawTask::poll::h7c27b50b01ddfe51 + 44
+    frame #45: 0x0000000108669010 evidence_updates-c58213d616c21a27`tokio::runtime::task::LocalNotified$LT$S$GT$::run::h34a3e7f7e295ea61 + 28
+    frame #46: 0x000000010866298c evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h84c7f60d7fde3220 + 12
+    frame #47: 0x0000000108662910 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::h0d3b60cfa95cccb7 + 208
+    frame #48: 0x0000000108662334 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::Context::enter::h3d52629b0772696d + 280
+    frame #49: 0x0000000108662778 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::Context::run_task::hdc46a7bba6e20a90 + 252
+    frame #50: 0x00000001043ee62c evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h7c84620b48406141 + 1972
+    frame #51: 0x00000001043edd54 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CoreGuard::enter::_$u7b$$u7b$closure$u7d$$u7d$::h0867c7207ea48b53 + 28
+    frame #52: 0x00000001043bfc14 evidence_updates-c58213d616c21a27`tokio::runtime::context::scoped::Scoped$LT$T$GT$::set::hc9c766c9594ff5e2 + 140
+    frame #53: 0x00000001043f0eb8 evidence_updates-c58213d616c21a27`tokio::runtime::context::set_scheduler::_$u7b$$u7b$closure$u7d$$u7d$::h854338d6e62cd32f + 48
+    frame #54: 0x00000001043da650 evidence_updates-c58213d616c21a27`std::thread::local::LocalKey$LT$T$GT$::try_with::h544a1e16ff5fa459 + 172
+    frame #55: 0x00000001043d9d9c evidence_updates-c58213d616c21a27`std::thread::local::LocalKey$LT$T$GT$::with::h4a5c480a2f071c0b + 16
+    frame #56: 0x00000001043f0df4 evidence_updates-c58213d616c21a27`tokio::runtime::context::set_scheduler::h10ca8777350fa91f + 52
+    frame #57: 0x00000001043ed8e4 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CoreGuard::enter::hd41fefb9bd97050f + 340
+    frame #58: 0x00000001043eddc8 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::hc66858a96ac4bc73 + 64
+    frame #59: 0x00000001043ecaf4 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h897cc840957e1de5 + 348
+    frame #60: 0x00000001043c997c evidence_updates-c58213d616c21a27`tokio::runtime::context::runtime::enter_runtime::heffd3b2f09e23da9 + 180
+    frame #61: 0x00000001043ec988 evidence_updates-c58213d616c21a27`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::h1ba29e1d1be1ed26 + 108
+    frame #62: 0x00000001043d0c20 evidence_updates-c58213d616c21a27`tokio::runtime::runtime::Runtime::block_on_inner::h89b2a1705a68bfc4 + 160
+    frame #63: 0x00000001043d0d7c evidence_updates-c58213d616c21a27`tokio::runtime::runtime::Runtime::block_on::h2f31ecc6c98be45e + 268
+    frame #64: 0x000000010437fdec evidence_updates-c58213d616c21a27`evidence_updates::first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file::h1060ed012960c311 + 308
+    frame #65: 0x000000010437fe74 evidence_updates-c58213d616c21a27`evidence_updates::first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file::_$u7b$$u7b$closure$u7d$$u7d$::h66c8ed83c2b6d1b8 + 20
+    frame #66: 0x00000001043860cc evidence_updates-c58213d616c21a27`core::ops::function::FnOnce::call_once::hcae3c8e77700f681 + 20
+    frame #67: 0x000000010440e084 evidence_updates-c58213d616c21a27`test::__rust_begin_short_backtrace::ha0e48c1a0658e118 + 24
+    frame #68: 0x000000010441d170 evidence_updates-c58213d616c21a27`test::run_test::_$u7b$$u7b$closure$u7d$$u7d$::hb3350d8e162b7432 + 908
+    frame #69: 0x00000001043fe5f0 evidence_updates-c58213d616c21a27`std::sys::backtrace::__rust_begin_short_backtrace::he121e5b5ae94324a + 132
+    frame #70: 0x00000001044015bc evidence_updates-c58213d616c21a27`core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h3cdfab2e71d5a0b4 + 64
+    frame #71: 0x0000000109ed43c8 evidence_updates-c58213d616c21a27`std::sys::thread::unix::Thread::new::thread_start::hb5c7d2a38fab9e31 + 408
+    frame #72: 0x000000018d48fc58 libsystem_pthread.dylib`_pthread_start + 136
+(lldb) disassemble --frame --count 16
+evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217:
+    0x104ac0748 <+0>:  stp    x28, x27, [sp, #-0x20]!
+    0x104ac074c <+4>:  stp    x29, x30, [sp, #0x10]
+    0x104ac0750 <+8>:  add    x29, sp, #0x10
+    0x104ac0754 <+12>: sub    x9, sp, #0x6, lsl #12     ; =0x6000 
+    0x104ac0758 <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+->  0x104ac075c <+20>: str    xzr, [sp]
+    0x104ac0760 <+24>: cmp    sp, x9
+    0x104ac0764 <+28>: b.ne   0x104ac0758               ; <+16>
+    0x104ac0768 <+32>: sub    sp, sp, #0x70
+    0x104ac076c <+36>: sub    x9, x29, #0x29
+    0x104ac0770 <+40>: str    x9, [sp, #0xa8]
+    0x104ac0774 <+44>: add    x10, sp, #0xa80
+    0x104ac0778 <+48>: str    x10, [sp, #0xb0]
+    0x104ac077c <+52>: str    x8, [sp, #0xb8]
+    0x104ac0780 <+56>: str    x0, [sp, #0xc0]
+    0x104ac0784 <+60>: strb   wzr, [x9, #0x4]

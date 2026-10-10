@@ -1,0 +1,77 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.62s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 10 tests
+test nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... FAILED
+test receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... FAILED
+test inherited_receipt_deletions_survive_process_loss_without_repeating_work ... FAILED
+test receipt_processing_survives_process_loss_without_original_input ... ok
+test adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+test active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+
+failures:
+
+---- first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDa4lAI/workspace/objects/comments/fed62b53678644cb90f720d6ea0e1181/data/7f35b16d-6658-4d88-b37b-f2b0f3d10467-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpDa4lAI/workspace/objects/comments/dc23c5945754417e8c79d4babb20744c/data/data/bb5d2d6c-1cbb-4b58-913e-13074fa186fa-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file' (27052615) panicked at tests/evidence_updates.rs:336:48:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_retirement", message: "retirement identity or native generation is inconsistent", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- one_receipt_on_many_origin_files_uses_a_fixed_reader_budget stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'one_receipt_on_many_origin_files_uses_a_fixed_reader_budget' (27052618) panicked at tests/evidence_updates.rs:736:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "oversized_batch", message: "decoded batch uses 162528 bytes, exceeding the 8192 byte allowance; reduce batch rows or split oversized values", source: None, backtrace: <disabled> }
+
+---- inherited_receipt_deletions_survive_process_loss_without_repeating_work stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyeGEGr/workspace/objects/comments/3d51c0b1b4744be88b80e9d22b942ef8/data/68fd8fea-bc8b-427d-9f8e-a18250a4ca7f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyeGEGr/workspace/objects/comments/37055939e5f242718d1fe993150cdae6/data/data/dc693a08-8c0a-4069-8eca-eedc07502a66-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'inherited_receipt_deletions_survive_process_loss_without_repeating_work' (27052616) panicked at tests/support/mod.rs:68:5:
+update/receipts: worker did not acknowledge the handoff: ["DOCSPEC_TEST_WORK admission", "2026-10-09T23:26:38.396841Z  INFO docspec::engine: phase durably complete phase=\"admission\" rows=0 operation=replace", "DOCSPEC_TEST_WORK processing", "2026-10-09T23:26:38.918204Z  INFO docspec::engine: phase durably complete phase=\"processing\" rows=3 operation=replace", "Error: invalid_retirement: retirement identity or native generation is inconsistent"] (exit status: 1)
+
+
+failures:
+    first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file
+    inherited_receipt_deletions_survive_process_loss_without_repeating_work
+    one_receipt_on_many_origin_files_uses_a_fixed_reader_budget
+
+test result: FAILED. 7 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.86s
+
+error: test failed, to rerun pass `--test evidence_updates`

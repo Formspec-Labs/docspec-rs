@@ -1,0 +1,103 @@
+(lldb) target create "target/debug/deps/evidence_updates-c58213d616c21a27"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64).
+(lldb) settings set target.disable-aslr false
+(lldb) run first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9rATGm/workspace/objects/comments/e7097a032a01451299fab682072e9b99/data/315abdcb-3bbb-4f5c-b188-fe17993e82fb-00000.parquet
+DOCSPEC_TEST_WORK readback
+Process 87743 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27' (arm64)
+Process 87743 stopped
+* thread #2, name = 'first_value_update_preserves_receipts_for_unrelated_rows_in_the', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fbb3c30)
+    frame #0: 0x000000010040b0ec evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ObjectRef$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h64594a8b8b2c956c + 16
+evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ObjectRef$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h64594a8b8b2c956c:
+->  0x10040b0ec <+16>: str    xzr, [sp]
+    0x10040b0f0 <+20>: str    x8, [sp, #0x98]
+    0x10040b0f4 <+24>: str    x0, [sp, #0xa0]
+    0x10040b0f8 <+28>: strb   w1, [sp, #0xa8]
+Target 0: (evidence_updates-c58213d616c21a27) stopped.
+(lldb) thread backtrace -c 35
+* thread #2, name = 'first_value_update_preserves_receipts_for_unrelated_rows_in_the', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fbb3c30)
+  * frame #0: 0x000000010040b0ec evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ObjectRef$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h64594a8b8b2c956c + 16
+    frame #1: 0x00000001009a1b3c evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h67b8905340f16e15 + 1420
+    frame #2: 0x00000001004c29e0 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ObjectRef$GT$::deserialize::h2b4b671d8f40c344 + 44
+    frame #3: 0x0000000100877cc8 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::he5e3907e6ca101eb + 12
+    frame #4: 0x0000000100936df8 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::h2b566b63d22eaa7d + 148
+    frame #5: 0x0000000100908624 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::ha9efa37ba4c17c75 + 12
+    frame #6: 0x00000001003f7e18 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..TablePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::hb8e5424e0a2cda8f + 864
+    frame #7: 0x000000010098b988 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h1c2b31c0ff77b2fe + 1408
+    frame #8: 0x00000001004be874 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..TablePin$GT$::deserialize::ha12ae99a311385bd + 44
+    frame #9: 0x0000000100877efc evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::hee6e328f7e6ac0db + 12
+    frame #10: 0x0000000100938e54 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::h6e2e7985ae36bc93 + 148
+    frame #11: 0x0000000100909e64 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_entry_seed::h55e28c7de31d6c0b + 212
+    frame #12: 0x0000000100907c10 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_entry::hbe016191571fa8ec + 12
+    frame #13: 0x0000000100b0b820 evidence_updates-c58213d616c21a27`_$LT$serde_core..de..impls..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$alloc..collections..btree..map..BTreeMap$LT$K$C$V$GT$$GT$..deserialize..MapVisitor$LT$K$C$V$GT$$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::heede2ca0aae5fedc + 92
+    frame #14: 0x0000000100966e54 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_map::h3c42a731e8ba723a + 480
+    frame #15: 0x0000000100c6a538 evidence_updates-c58213d616c21a27`serde_core::de::impls::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$alloc..collections..btree..map..BTreeMap$LT$K$C$V$GT$$GT$::deserialize::hc1a9b3ae4cb55cf3 + 12
+    frame #16: 0x0000000100875108 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h4e879649c37140b5 + 12
+    frame #17: 0x000000010093c940 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::hd5c5f9f370ff53ae + 148
+    frame #18: 0x000000010090891c evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::he4e5a0d3d09c2397 + 12
+    frame #19: 0x000000010041b3d0 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::hc4d47d7d814edbee + 1636
+    frame #20: 0x00000001009b7dd8 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::hb3df96f135b42217 + 1548
+    frame #21: 0x00000001004ca0e4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..DatasetPin$GT$::deserialize::h4b5fda9b7a135810 + 44
+    frame #22: 0x0000000100875248 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h544879df54494dc2 + 12
+    frame #23: 0x000000010093b990 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::hb4b7a098176ff27b + 148
+    frame #24: 0x000000010090882c evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::hd4d46b08949fe271 + 12
+    frame #25: 0x0000000100425718 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a + 832
+    frame #26: 0x00000001009adecc evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h9dfe7a2031797c52 + 1552
+    frame #27: 0x00000001004ca2e4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7 + 44
+    frame #28: 0x0000000100ba3a94 evidence_updates-c58213d616c21a27`_$LT$serde_core..de..impls..OptionVisitor$LT$T$GT$$u20$as$u20$serde_core..de..Visitor$GT$::visit_some::h4ab18d5c343c0f23 + 36
+    frame #29: 0x0000000100981c00 evidence_updates-c58213d616c21a27`_$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_option::h5000f728444fec75 + 176
+    frame #30: 0x000000010073cebc evidence_updates-c58213d616c21a27`serde_core::de::impls::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$core..option..Option$LT$T$GT$$GT$::deserialize::h5a6faa76f42931fc + 12
+    frame #31: 0x0000000100875470 evidence_updates-c58213d616c21a27`_$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h5afe82d10c48454e + 12
+    frame #32: 0x0000000100938b84 evidence_updates-c58213d616c21a27`_$LT$serde_json..de..MapAccess$LT$R$GT$$u20$as$u20$serde_core..de..MapAccess$GT$::next_value_seed::h695e35424b2e1d10 + 148
+    frame #33: 0x0000000100908200 evidence_updates-c58213d616c21a27`serde_core::de::MapAccess::next_value::h58c894f9cb449f09 + 12
+    frame #34: 0x00000001003fc010 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Authority$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h8dad225394e6167b + 1852
+(lldb) frame select 25
+frame #25: 0x0000000100425718 evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a + 832
+evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a:
+->  0x100425718 <+832>: b      0x100425738               ; <+864>
+    0x10042571c <+836>: adrp   x0, 24720
+    0x100425720 <+840>: add    x0, x0, #0xceb
+    0x100425724 <+844>: mov    w8, #0x7                  ; =7 
+(lldb) disassemble --frame --count 12
+evidence_updates-c58213d616c21a27`_$LT$docspec..model.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$..deserialize..__Visitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_map::h1793ad201565bd9a:
+    0x1004253d8 <+0>:  stp    x28, x27, [sp, #-0x20]!
+    0x1004253dc <+4>:  stp    x29, x30, [sp, #0x10]
+    0x1004253e0 <+8>:  add    x29, sp, #0x10
+    0x1004253e4 <+12>: sub    x9, sp, #0x7, lsl #12     ; =0x7000 
+    0x1004253e8 <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+    0x1004253ec <+20>: str    xzr, [sp]
+    0x1004253f0 <+24>: cmp    sp, x9
+    0x1004253f4 <+28>: b.ne   0x1004253e8               ; <+16>
+    0x1004253f8 <+32>: sub    sp, sp, #0x8c0
+    0x1004253fc <+36>: str    xzr, [sp]
+    0x100425400 <+40>: sub    x10, x29, #0x23
+    0x100425404 <+44>: str    x10, [sp, #0xf0]
+(lldb) frame select 27
+frame #27: 0x00000001004ca2e4 evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7 + 44
+evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7:
+->  0x1004ca2e4 <+44>: ldp    x29, x30, [sp], #0x10
+    0x1004ca2e8 <+48>: ret    
+
+evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..Retirement$GT$::deserialize::h7710235a34eec4c1:
+    0x1004ca2ec <+0>:  stp    x29, x30, [sp, #-0x10]!
+    0x1004ca2f0 <+4>:  mov    x29, sp
+(lldb) disassemble --frame --count 12
+evidence_updates-c58213d616c21a27`docspec::model::_::_$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$docspec..model..ReleasePin$GT$::deserialize::hc5d8a567dab4c1d7:
+    0x1004ca2b8 <+0>:  stp    x29, x30, [sp, #-0x10]!
+    0x1004ca2bc <+4>:  mov    x29, sp
+    0x1004ca2c0 <+8>:  adrp   x1, 24557
+    0x1004ca2c4 <+12>: add    x1, x1, #0x122
+    0x1004ca2c8 <+16>: mov    w9, #0xa                  ; =10 
+    0x1004ca2cc <+20>: mov    x2, x9
+    0x1004ca2d0 <+24>: adrp   x3, 32288
+    0x1004ca2d4 <+28>: add    x3, x3, #0xde8
+    0x1004ca2d8 <+32>: mov    w9, #0x4                  ; =4 
+    0x1004ca2dc <+36>: mov    x4, x9
+    0x1004ca2e0 <+40>: bl     0x1009ad8bc               ; _$LT$$RF$mut$u20$serde_json..de..Deserializer$LT$R$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_struct::h9dfe7a2031797c52
+->  0x1004ca2e4 <+44>: ldp    x29, x30, [sp], #0x10

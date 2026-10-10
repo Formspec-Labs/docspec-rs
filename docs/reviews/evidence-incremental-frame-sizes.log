@@ -1,0 +1,110 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) disassemble --name docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77 --count 12
+error: Unable to find symbol with name 'docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77'.
+
+Retry using discovered file addresses:
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) disassemble --start-address 0x0000000100a74658 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77:
+related_refresh-36f3e2d2ba35a1a6[0x100a74658] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x100a7465c] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x100a74660] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x100a74664] <+12>: sub    x9, sp, #0x11, lsl #12    ; =0x11000 
+related_refresh-36f3e2d2ba35a1a6[0x100a74668] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x100a7466c] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x100a74670] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x100a74674] <+28>: b.ne   0x100a74668               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x100a74678] <+32>: sub    sp, sp, #0x990
+related_refresh-36f3e2d2ba35a1a6[0x100a7467c] <+36>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x100a74680] <+40>: add    x9, sp, #0xf, lsl #12     ; =0xf000 
+related_refresh-36f3e2d2ba35a1a6[0x100a74684] <+44>: add    x9, x9, #0xd40
+(lldb) disassemble --start-address 0x0000000100a78350 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental_join::_$u7b$$u7b$closure$u7d$$u7d$::h24da57142a7db73c:
+related_refresh-36f3e2d2ba35a1a6[0x100a78350] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x100a78354] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x100a78358] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x100a7835c] <+12>: sub    x9, sp, #0x1b, lsl #12    ; =0x1b000 
+related_refresh-36f3e2d2ba35a1a6[0x100a78360] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x100a78364] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x100a78368] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x100a7836c] <+28>: b.ne   0x100a78360               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x100a78370] <+32>: sub    sp, sp, #0x380
+related_refresh-36f3e2d2ba35a1a6[0x100a78374] <+36>: add    x9, sp, #0x17, lsl #12    ; =0x17000 
+related_refresh-36f3e2d2ba35a1a6[0x100a78378] <+40>: add    x9, x9, #0xe50
+related_refresh-36f3e2d2ba35a1a6[0x100a7837c] <+44>: str    x9, [sp, #0x9b8]
+
+Enclosing application frames:
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) disassemble --start-address 0x0000000100497bc8 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665:
+related_refresh-36f3e2d2ba35a1a6[0x100497bc8] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x100497bcc] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x100497bd0] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x100497bd4] <+12>: sub    x9, sp, #0x7f, lsl #12    ; =0x7f000 
+related_refresh-36f3e2d2ba35a1a6[0x100497bd8] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x100497bdc] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x100497be0] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x100497be4] <+28>: b.ne   0x100497bd8               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x100497be8] <+32>: sub    sp, sp, #0xcc0
+related_refresh-36f3e2d2ba35a1a6[0x100497bec] <+36>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x100497bf0] <+40>: sub    x9, x29, #0x30
+related_refresh-36f3e2d2ba35a1a6[0x100497bf4] <+44>: str    x9, [sp, #0xb88]
+(lldb) disassemble --start-address 0x00000001004a4808 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2:
+related_refresh-36f3e2d2ba35a1a6[0x1004a4808] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x1004a480c] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x1004a4810] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x1004a4814] <+12>: sub    x9, sp, #0xc5, lsl #12    ; =0xc5000 
+related_refresh-36f3e2d2ba35a1a6[0x1004a4818] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x1004a481c] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004a4820] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x1004a4824] <+28>: b.ne   0x1004a4818               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x1004a4828] <+32>: sub    sp, sp, #0xba0
+related_refresh-36f3e2d2ba35a1a6[0x1004a482c] <+36>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004a4830] <+40>: sub    x9, x29, #0xa0
+related_refresh-36f3e2d2ba35a1a6[0x1004a4834] <+44>: str    x9, [sp, #0x1e90]
+(lldb) disassemble --start-address 0x00000001004f31cc --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_registered::_$u7b$$u7b$closure$u7d$$u7d$::h481b32300bb1b527:
+related_refresh-36f3e2d2ba35a1a6[0x1004f31cc] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x1004f31d0] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31d4] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x1004f31d8] <+12>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x1004f31dc] <+16>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31e0] <+20>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x1004f31e4] <+24>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31e8] <+28>: sub    sp, sp, #0xf0
+related_refresh-36f3e2d2ba35a1a6[0x1004f31ec] <+32>: str    x8, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31f0] <+36>: str    x0, [sp, #0x8]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31f4] <+40>: str    x1, [sp, #0x18]
+related_refresh-36f3e2d2ba35a1a6[0x1004f31f8] <+44>: ldrb   w8, [x0, #0xf20]
+(lldb) disassemble --start-address 0x00000001004fb2c0 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::process_refresh::_$u7b$$u7b$closure$u7d$$u7d$::hbc5c2ec80c9d8af9:
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2c0] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2c4] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2c8] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2cc] <+12>: sub    x9, sp, #0x8, lsl #12     ; =0x8000 
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2d0] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2d4] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2d8] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2dc] <+28>: b.ne   0x1004fb2d0               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2e0] <+32>: sub    sp, sp, #0x780
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2e4] <+36>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2e8] <+40>: add    x9, sp, #0x8, lsl #12     ; =0x8000 
+related_refresh-36f3e2d2ba35a1a6[0x1004fb2ec] <+44>: add    x9, x9, #0x468
+(lldb) disassemble --start-address 0x0000000100500094 --count 12
+related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_plan::_$u7b$$u7b$closure$u7d$$u7d$::hebf23ca76f0068ba:
+related_refresh-36f3e2d2ba35a1a6[0x100500094] <+0>:  stp    x28, x27, [sp, #-0x20]!
+related_refresh-36f3e2d2ba35a1a6[0x100500098] <+4>:  stp    x29, x30, [sp, #0x10]
+related_refresh-36f3e2d2ba35a1a6[0x10050009c] <+8>:  add    x29, sp, #0x10
+related_refresh-36f3e2d2ba35a1a6[0x1005000a0] <+12>: sub    x9, sp, #0x5, lsl #12     ; =0x5000 
+related_refresh-36f3e2d2ba35a1a6[0x1005000a4] <+16>: sub    sp, sp, #0x1, lsl #12     ; =0x1000 
+related_refresh-36f3e2d2ba35a1a6[0x1005000a8] <+20>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1005000ac] <+24>: cmp    sp, x9
+related_refresh-36f3e2d2ba35a1a6[0x1005000b0] <+28>: b.ne   0x1005000a4               ; <+16>
+related_refresh-36f3e2d2ba35a1a6[0x1005000b4] <+32>: sub    sp, sp, #0xd80
+related_refresh-36f3e2d2ba35a1a6[0x1005000b8] <+36>: str    xzr, [sp]
+related_refresh-36f3e2d2ba35a1a6[0x1005000bc] <+40>: add    x9, sp, #0x5, lsl #12     ; =0x5000 
+related_refresh-36f3e2d2ba35a1a6[0x1005000c0] <+44>: add    x9, x9, #0x7c0

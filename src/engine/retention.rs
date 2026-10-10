@@ -73,9 +73,11 @@ impl Engine {
             }
             // Format 10 schema operations advanced the admission counter. New
             // schema and all backfill operations preserve their source coverage.
-            if matches!(request, OperationRequest::Backfill(_))
-                || (matches!(request, OperationRequest::Schema(_))
-                    && operation.result_format == FORMAT)
+            if matches!(
+                request,
+                OperationRequest::Backfill(_) | OperationRequest::Evidence(_)
+            ) || (matches!(request, OperationRequest::Schema(_))
+                && operation.result_format == FORMAT)
             {
                 continue;
             }

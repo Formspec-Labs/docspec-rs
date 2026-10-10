@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 15.32s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpo7SB1W/workspace/objects/comments/529c1ed402914891a053e4eee85f5b20/data/99cb76ec-744f-4e6c-a5bb-aa7d0fbf936c-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file' (26993365) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test evidence_updates`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/evidence_updates-c58213d616c21a27 first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file --exact --nocapture` (signal: 6, SIGABRT: process abort signal)

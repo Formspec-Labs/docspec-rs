@@ -7,6 +7,7 @@ pub mod budget;
 pub mod catalog;
 pub mod engine;
 pub mod error;
+pub mod evidence;
 pub mod export;
 pub mod http;
 pub mod model;

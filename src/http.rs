@@ -5,6 +5,7 @@
 
 use crate::{
     Engine, Error,
+    evidence::EvidenceSpec,
     export::{ExportPin, ExportSpec},
     model::{
         Abandonment, BackfillSpec, CompactionResult, CompactionSpec, GenerationSeal, Id,
@@ -33,6 +34,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/run", post(run))
         .route("/updates/plan", post(plan_update))
         .route("/updates/run", post(update))
+        .route("/receipts/plan", post(plan_evidence))
+        .route("/receipts/run", post(update_evidence))
         .route("/schemas/plan", post(plan_schema))
         .route("/schemas/run", post(evolve_schema))
         .route("/backfills/plan", post(plan_backfill))
@@ -101,6 +104,14 @@ pub fn router(engine: Engine) -> Router {
         .route(
             "/datasets/{dataset}/versions/{version}/evidence",
             get(read_evidence),
+        )
+        .route(
+            "/datasets/{dataset}/versions/{version}/receipts",
+            get(read_receipts),
+        )
+        .route(
+            "/datasets/{dataset}/versions/{version}/occurrences",
+            get(read_occurrences),
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(engine)
@@ -452,6 +463,18 @@ async fn update(
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.update(&spec).await?))
 }
+async fn plan_evidence(
+    State(engine): State<Engine>,
+    Json(spec): Json<EvidenceSpec>,
+) -> Result<Json<crate::engine::RunPlan>, HttpError> {
+    Ok(Json(engine.plan_evidence(&spec).await?))
+}
+async fn update_evidence(
+    State(engine): State<Engine>,
+    Json(spec): Json<EvidenceSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.update_evidence(&spec).await?))
+}
 async fn plan_schema(
     State(engine): State<Engine>,
     Json(spec): Json<SchemaSpec>,
@@ -575,6 +598,21 @@ enum ReadKind {
     Combined,
     Group(String),
     Evidence,
+    Receipts,
+    Occurrences,
+}
+
+async fn read_receipts(
+    State(engine): State<Engine>,
+    Path((dataset, version)): Path<(String, String)>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, ReadKind::Receipts).await
+}
+async fn read_occurrences(
+    State(engine): State<Engine>,
+    Path((dataset, version)): Path<(String, String)>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, ReadKind::Occurrences).await
 }
 
 async fn read(
@@ -590,6 +628,8 @@ async fn read(
         ReadKind::Group(group) => engine.read_group(&release, &group).await?,
         ReadKind::Combined => engine.read_combined(&release).await?,
         ReadKind::Evidence => engine.read_evidence(&release).await?,
+        ReadKind::Receipts => engine.read_receipts(&release).await?,
+        ReadKind::Occurrences => engine.read_source_occurrences(&release).await?,
     };
     let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
         // The in-flight response retains local workspace ownership as well as

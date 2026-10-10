@@ -256,16 +256,20 @@ impl Engine {
                     .ok_or_else(invalid)
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut applied = Box::pin(self.replace_keys(Replacement {
-            dataset: &spec.dataset,
-            directory: &directory.join("replacement"),
-            before,
-            keys: &key_names,
-            scope,
-            replacement,
-            replacement_bytes: None,
-        }))
-        .await?;
+        let (write_before, replacement) = self
+            .receipt_replacement(base, directory, replacement, &key_names)
+            .await?;
+        let mut applied = self
+            .replace_keys(Replacement {
+                dataset: &spec.dataset,
+                directory: &directory.join("replacement"),
+                before: &write_before,
+                keys: &key_names,
+                scope,
+                replacement,
+                replacement_bytes: None,
+            })
+            .await?;
         applied.metrics.files_scanned += scanned;
         applied.metrics.data_files_written += discovery_files;
         applied.metrics.bytes_written += discovery_bytes;
@@ -329,16 +333,17 @@ impl Engine {
                 "SELECT s.* FROM contributors s LEFT SEMI JOIN affected_groups k ON {predicate}"
             ))
             .await?;
-        let applied = Box::pin(self.replace_keys(Replacement {
-            dataset: &spec.dataset,
-            directory,
-            before,
-            keys: &key_names,
-            scope,
-            replacement,
-            replacement_bytes: None,
-        }))
-        .await?;
+        let applied = self
+            .replace_keys(Replacement {
+                dataset: &spec.dataset,
+                directory,
+                before,
+                keys: &key_names,
+                scope,
+                replacement,
+                replacement_bytes: None,
+            })
+            .await?;
         Ok(write::Prepared {
             table: applied.table,
             changes: None,

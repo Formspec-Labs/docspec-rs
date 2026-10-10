@@ -697,6 +697,9 @@ impl Engine {
             dataset.version = spec.operation.clone();
             dataset.request = request.clone();
             dataset.changes = None;
+            if let Some(evidence) = &mut dataset.evidence {
+                evidence.changes = None;
+            }
             dataset.processor = PROCESSOR.into();
             dataset
                 .groups
@@ -706,6 +709,12 @@ impl Engine {
                 .insert(spec.group.to_string(), binding.clone());
             check_names(&dataset)?;
             verify_groups(
+                &dataset,
+                &lifecycle.budget,
+                &mut super::verification::Checks::composition(),
+            )
+            .await?;
+            super::evidence::verify(
                 &dataset,
                 &lifecycle.budget,
                 &mut super::verification::Checks::composition(),
@@ -892,7 +901,6 @@ impl Engine {
                 || dataset.processor != PROCESSOR
                 || dataset.groups.get("source") != Some(source)
                 || dataset.related != capture.related
-                || dataset.inputs != base.dataset.inputs
                 || dataset.relationship != base.dataset.relationship
                 || dataset.changes.is_some()
                 || dataset.parent_manifest.is_none()
@@ -906,6 +914,18 @@ impl Engine {
             {
                 return Err(invalid_group());
             }
+            verify_groups(
+                dataset,
+                &lifecycle.budget,
+                &mut super::verification::Checks::composition(),
+            )
+            .await?;
+            super::evidence::verify(
+                dataset,
+                &lifecycle.budget,
+                &mut super::verification::Checks::composition(),
+            )
+            .await?;
             if let Some((_, _, previous)) = &retained
                 && (previous.dataset.groups.get(spec.group.as_str()) != Some(table)
                     || previous.dataset.computed.get(spec.group.as_str()) != Some(binding))
@@ -1208,6 +1228,7 @@ mod tests {
                     inputs: BTreeMap::new(),
                     relationship: SourceRelationship::Independent,
                     related: None,
+                    evidence: None,
                     definition: spec.definition.clone(),
                     eligibility: 0,
                     boundary: 0,

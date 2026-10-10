@@ -20,7 +20,8 @@ pub(super) async fn verify_changes(
         (
             OperationRequest::Build(_)
             | OperationRequest::Backfill(_)
-            | OperationRequest::Schema(_),
+            | OperationRequest::Schema(_)
+            | OperationRequest::Evidence(_),
             None,
         ) => return Ok(()),
         (OperationRequest::Refresh(spec), None) if spec.mode == RefreshMode::Full => return Ok(()),
@@ -68,6 +69,32 @@ pub(super) async fn verify_changes(
             .checked_sub(changes.removed.rows)
             .and_then(|rows| rows.checked_add(changes.added.rows))
             != Some(source.rows)
+    {
+        return Err(invalid());
+    }
+    verify_native_changes(before_source, source, &keys, changes, budget, checks).await
+}
+
+/// Shared applied-write proof for source values and occurrence-associated receipts.
+pub(super) async fn verify_native_changes(
+    before_source: &TablePin,
+    source: &TablePin,
+    keys: &[String],
+    changes: &ChangePin,
+    budget: &Budget,
+    checks: &mut verification::Checks,
+) -> Result<()> {
+    let invalid = || {
+        Error::refusal(
+            "invalid_changes",
+            "applied rows, native schemas or endpoint counts disagree",
+        )
+    };
+    if before_source
+        .rows
+        .checked_sub(changes.removed.rows)
+        .and_then(|rows| rows.checked_add(changes.added.rows))
+        != Some(source.rows)
     {
         return Err(invalid());
     }

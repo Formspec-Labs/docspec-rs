@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 14.35s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 10 tests
+test nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test receipt_processing_survives_process_loss_without_original_input ... ok
+test adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+test evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+test inherited_receipt_deletions_survive_process_loss_without_repeating_work ... ok
+test active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... ok
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.78s
+

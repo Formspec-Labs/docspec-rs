@@ -1,0 +1,126 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) settings set target.disable-aslr false
+(lldb) run incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders --exact --nocapture
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/comments/4ac6aabfc2f24729a7a036b431cf533b/data/4fffab77-0544-4391-aef9-a283ae383feb-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/dockets/a578e681cfbe49a8b919c943dd4b05e8/data/fe435e99-5a86-4add-9c32-7673efca47ad-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/joined/ad21fc4f91ad47a6ba9d4904dedff218/data/b9b84bd6-3f87-4452-b8eb-7600004f3a1f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/joined/3bafc18e47a341228d6ed3dab2c1038c/data/68f2b788-44af-4181-a025-ef554b354bb0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/dockets/6a233c4e2e294ec78fee253b7cf50812/data/data/bbef56be-6fdd-433d-a565-4a678d807f1d-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/dockets/6a233c4e2e294ec78fee253b7cf50812/data/data/e160f2e5-6b09-4070-936d-321d4b575717-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpdeLowZ/workspace/objects/dockets/6a233c4e2e294ec78fee253b7cf50812/removed/data/26936f64-8475-485a-aa92-31a305ee3412-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 34255 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 34255 stopped
+* thread #2, name = 'incremental::incremental_matches_oracle_across_key_moves_nulls_', stop reason = EXC_BAD_ACCESS (code=2, address=0x16d6b3f10)
+    frame #0: 0x0000000106f74210 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd + 16
+related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd:
+->  0x106f74210 <+16>: str    xzr, [sp]
+    0x106f74214 <+20>: sub    sp, sp, #0x80
+    0x106f74218 <+24>: add    x9, sp, #0x538
+    0x106f7421c <+28>: str    x9, [sp, #0x1a8]
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.
+(lldb) thread backtrace -c 75
+* thread #2, name = 'incremental::incremental_matches_oracle_across_key_moves_nulls_', stop reason = EXC_BAD_ACCESS (code=2, address=0x16d6b3f10)
+  * frame #0: 0x0000000106f74210 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name_inner::h5c0648cdd61113cd + 16
+    frame #1: 0x0000000106f2ce70 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_object_name::hf7970ef8d66587b6 + 20
+    frame #2: 0x0000000106f66170 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_data_type_helper::hd5ee7b766a70323e + 2000
+    frame #3: 0x0000000106f1ab34 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_data_type::h8e3203e812e83a2c + 44
+    frame #4: 0x0000000106f07c1c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hbe9a0326eb229dec + 60
+    frame #5: 0x0000000106fdd2e8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::h8a50fe6a1c5cbaf5 + 48
+    frame #6: 0x0000000106ef034c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h3a1c9ca0fed14a78 + 64
+    frame #7: 0x0000000106f05a04 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 280
+    frame #8: 0x0000000106f14490 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #9: 0x0000000106f44df4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::_$u7b$$u7b$closure$u7d$$u7d$::h364fc05f32d272b8 + 80
+    frame #10: 0x0000000106fdde08 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::he8f3ae1bc2c98981 + 56
+    frame #11: 0x0000000106eefb30 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h0c845ba6572b9080 + 40
+    frame #12: 0x0000000106f44054 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::h40693becc326e5d7 + 572
+    frame #13: 0x0000000106f146b8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 816
+    frame #14: 0x0000000106ef659c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 10052
+    frame #15: 0x0000000106f14ba0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #16: 0x0000000106eed404 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #17: 0x000000010711dd04 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hc135016bc223f1f8 + 24
+    frame #18: 0x0000000106fc3d8c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::hae348042fb8246f6 + 96
+    frame #19: 0x0000000106f596f8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated::h81bfc7e7d6e16b31 + 20
+    frame #20: 0x0000000106f0818c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hd3ff2ec3b61f8255 + 16
+    frame #21: 0x0000000106eef204 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::with_state::h3b588a3db529ddbe + 44
+    frame #22: 0x0000000106f0694c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 4192
+    frame #23: 0x0000000106f14490 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #24: 0x0000000106ef659c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 10052
+    frame #25: 0x0000000106f14ba0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #26: 0x0000000106eed404 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #27: 0x0000000106f5e8f8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_join_constraint::hf8b926000aafbaa5 + 132
+    frame #28: 0x0000000106efa588 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_joins::hb00ccc5199936bba + 2996
+    frame #29: 0x0000000106f615e0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_and_joins::h07086e6e26d9498b + 192
+    frame #30: 0x000000010711dc98 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hb1c44cf9b20ffe60 + 24
+    frame #31: 0x0000000106fc2964 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::h9dca7c8cde5fcf72 + 104
+    frame #32: 0x0000000106f70ba0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_with_joins::h9abc692b496f2d50 + 64
+    frame #33: 0x0000000106f0a100 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_select::h5961a7f0220e9894 + 5276
+    frame #34: 0x0000000106f21d10 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query_body::hee12bf7aac49c476 + 104
+    frame #35: 0x0000000106efbf1c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::_$u7b$$u7b$closure$u7d$$u7d$::h645a63b12e5bf522 + 1068
+    frame #36: 0x0000000106efbacc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::h1268472b367ce16d + 200
+    frame #37: 0x0000000106f1d558 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_statement::h86503e952b8f30a8 + 4204
+    frame #38: 0x000000010422ab90 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_and_handle_statement::h18cb9b30f1f61f14 + 40
+    frame #39: 0x0000000104228484 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statement::h0fe2bee314f72f03 + 172
+    frame #40: 0x0000000104229844 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statements::h052a996030a87e41 + 292
+    frame #41: 0x0000000104073904 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::sql_to_statement::h90fa2bea0499a095 + 604
+    frame #42: 0x0000000104074fd8 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::create_logical_plan::_$u7b$$u7b$closure$u7d$$u7d$::h42908669bc3b8376 + 272
+    frame #43: 0x0000000103f3017c related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql_with_options::_$u7b$$u7b$closure$u7d$$u7d$::h5e19e3eabd5497cd + 452
+    frame #44: 0x0000000103f3bf94 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql::_$u7b$$u7b$closure$u7d$$u7d$::hcf8c6cf50f8a3cdf + 448
+    frame #45: 0x000000010318af18 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_plan::_$u7b$$u7b$closure$u7d$$u7d$::hebf23ca76f0068ba + 7976
+    frame #46: 0x000000010317c26c related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_registered::_$u7b$$u7b$closure$u7d$$u7d$::h481b32300bb1b527 + 324
+    frame #47: 0x000000010330e040 related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental_join::_$u7b$$u7b$closure$u7d$$u7d$::h24da57142a7db73c + 17356
+    frame #48: 0x0000000103103dcc related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hda3592962196bd98 + 36
+    frame #49: 0x0000000103307cfc related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77 + 7552
+    frame #50: 0x0000000103103f4c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf06f6d7114383815 + 36
+    frame #51: 0x00000001031846f8 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::process_refresh::_$u7b$$u7b$closure$u7d$$u7d$::hbc5c2ec80c9d8af9 + 1244
+    frame #52: 0x0000000103103c3c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hc1d7275d06cd4339 + 36
+    frame #53: 0x00000001031264ac related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665 + 22920
+    frame #54: 0x000000010310341c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h1a86e51eb70b0301 + 44
+    frame #55: 0x0000000103135050 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2 + 30956
+    frame #56: 0x000000010310378c related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h737866f7a4232f23 + 44
+    frame #57: 0x000000010311f5d8 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_admitted::_$u7b$$u7b$closure$u7d$$u7d$::hda2585d1b78d9357 + 1404
+    frame #58: 0x00000001031208e0 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h0b06bc532306b895 + 416
+    frame #59: 0x00000001034077b8 related_refresh-36f3e2d2ba35a1a6`docspec::engine::worker::_$LT$impl$u20$docspec..engine..Engine$GT$::spawn_work::_$u7b$$u7b$closure$u7d$$u7d$::hfc0264f3b88f5501 + 440
+    frame #60: 0x00000001031038ac related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h886a19fcc63d86b8 + 36
+    frame #61: 0x0000000102ef2ddc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h5cc001f023616f19 + 164
+    frame #62: 0x0000000102ee5dd8 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::h51f10d28d9d92424 + 64
+    frame #63: 0x0000000102f971b4 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::_$u7b$$u7b$closure$u7d$$u7d$::he629d4a0cc45bd0f + 96
+    frame #64: 0x0000000102d25d20 related_refresh-36f3e2d2ba35a1a6`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h9ce49e2e4f8e595a + 52
+    frame #65: 0x0000000102d33d14 related_refresh-36f3e2d2ba35a1a6`std::panicking::catch_unwind::do_call::h91d6e8cca25f1427 + 68
+    frame #66: 0x00000001030a60f8 related_refresh-36f3e2d2ba35a1a6`__rust_try + 32
+    frame #67: 0x000000010303c4e8 related_refresh-36f3e2d2ba35a1a6`std::panic::catch_unwind::hc7821406f64c3391 + 120
+    frame #68: 0x0000000102f7d56c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::h7abdaf3d6528dd0e + 112
+    frame #69: 0x0000000102fa1508 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll_inner::h64106a60a7e774e4 + 164
+    frame #70: 0x0000000102fc7240 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll::h6bb76157a91dc5db + 28
+    frame #71: 0x00000001031f85dc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::poll::h3dfe67e1011086ce + 16
+    frame #72: 0x0000000106e99a50 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::RawTask::poll::h7c27b50b01ddfe51 + 44
+    frame #73: 0x0000000106e8f11c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::LocalNotified$LT$S$GT$::run::h34a3e7f7e295ea61 + 28
+    frame #74: 0x0000000106e88a98 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h84c7f60d7fde3220 + 12

@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.95s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWEQ7K3/workspace/objects/comments/d0f308ecf6ab40709433cce2e5ba63d0/data/9d6c129a-3012-48d8-bfa2-bfc3de7e3e4e-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file' (27021223) panicked at tests/evidence_updates.rs:326:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_evidence", message: "receipt rows need source_file: string, source_row: long, and evidence; deletion rows contain only those keys", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... FAILED
+
+failures:
+
+failures:
+    first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.63s
+
+error: test failed, to rerun pass `--test evidence_updates`
