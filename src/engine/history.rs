@@ -3,6 +3,8 @@
 use super::*;
 use crate::catalog::{SnapshotRows, View};
 
+mod admissions;
+
 impl Engine {
     /// Proves forward coverage using one captured accepted-history snapshot.
     ///

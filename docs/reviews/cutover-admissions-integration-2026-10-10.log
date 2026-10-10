@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.54s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 4 tests
+test cutover_admissions::format_10_backfill_refuses_hidden_admission_and_reuses_exact_completion ... ok
+test cutover_admissions::retired_selected_history_does_not_become_a_source_backlog ... ok
+test cutover_admissions::schema_refuses_hidden_admission_and_keeps_old_writer_until_exact_retry ... ok
+test cutover_admissions::backfill_refuses_hidden_admission_and_reuses_completed_work_after_abandonment ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 261 filtered out; finished in 8.29s
+

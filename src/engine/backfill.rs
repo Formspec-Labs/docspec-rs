@@ -386,14 +386,9 @@ impl Engine {
                 })
                 .err()
                 .map(|error| error.code().to_owned());
-        if plan.promotion_refusal.is_none() && operation.result_format == FORMAT {
+        if plan.promotion_refusal.is_none() {
             plan.promotion_refusal = self
-                .check_abandoned_gap(
-                    &view,
-                    &spec.dataset,
-                    operation.boundary,
-                    capture.admission_fence,
-                )
+                .check_cutover_inputs(&view, &spec.dataset, None)
                 .await
                 .err()
                 .map(|error| error.code().to_owned());
@@ -887,15 +882,8 @@ impl Engine {
             if authority.release.as_ref() != Some(&current) {
                 continue;
             }
-            if operation.result_format == FORMAT {
-                self.check_abandoned_gap(
-                    &view,
-                    &spec.dataset,
-                    operation.boundary,
-                    capture.admission_fence,
-                )
+            self.check_cutover_inputs(&view, &spec.dataset, None)
                 .await?;
-            }
             if let Some(dependencies) = &dependencies {
                 Box::pin(self.guard_ancestors(dependencies, &release)).await?;
             }

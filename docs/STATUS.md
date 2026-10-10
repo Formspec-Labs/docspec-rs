@@ -19,6 +19,61 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Complete source-admission accounting before cutover
+
+Strict backfill and schema selection now account for every accepted source
+request, including unfinished requests below the selected source boundary.
+Each request must belong to the accepted selection history or have an exact,
+later abandonment decision. A later full build cannot silently resolve an older
+request. An unresolved request returns `pending_source` while preserving the
+completed candidate, validation and readback for exact retry.
+
+The shared proof traverses accepted history once and scans operation records
+once from one captured lifecycle view. It reads metadata only and accepts retained
+ordering receipts after historical result availability and recovery retirement.
+Malformed receipts, request identities, abandonment decisions and missing or
+duplicate source sequence numbers refuse. Both supported saved-operation formats
+are checked; an older schema operation resolves its own source admission through
+the same guarded selection, without exempting another unfinished request.
+
+Work grows with retained operations and selections, with `O(H log H)` map/set
+operations and linear serialized metadata processing. A conservative cumulative
+metadata allowance refuses oversized histories before further decoding. This is
+neither a whole-process memory proof nor population-scale performance evidence.
+The proof runs at strict cutover and requested backfill planning, not ordinary
+reads or every source update.
+
+This is the admission prerequisite identified by the independent
+[consistency design](reviews/continuous-backfill-design-consistency-2026-10-10.md)
+and [resource design](reviews/continuous-backfill-design-resources-2026-10-10.md).
+Continuous-ingestion R3 remains unfinished: it still needs durable transition and
+child identities, target-lineage checks, bounded intake fencing, catch-up, atomic
+parent completion and fence closure, and successful concurrent-ingestion/recovery
+qualification. The current fixed-capture service is not that complete workflow.
+
+The [metadata checks](reviews/cutover-admissions-unit-2-2026-10-10.log),
+[real operation checks](reviews/cutover-admissions-integration-2026-10-10.log)
+and [saved-format checks](reviews/cutover-admissions-formats-2026-10-10.log)
+pass. They cover hidden admissions stopped at durable phases, cold retry,
+unchanged completion records/output timestamps, independent values, retired
+history and both supported formats. The initial
+[unit attempt](reviews/cutover-admissions-unit-2026-10-10.log) exhausted the
+fixture's memory admission before reaching the proof; only the fixture budget
+changed. Production limits are unchanged.
+
+The [independent review](reviews/cutover-admissions-implementation-review-2026-10-10.md)
+approves the corrected prerequisite. The
+[repository gate](reviews/cutover-admissions-full-check-2026-10-10.log) passed
+lint, library and the other integration cases but found an older race fixture
+expecting cutover while its replaced source request remained unresolved. The
+fixture now proves inherited file reuse before executing the candidate, checks
+`pending_source`, and explicitly abandons that request before retrying.
+The [focused continuation](reviews/cutover-admissions-continuation-2026-10-10.log)
+passes strict lint, that corrected case, restore, worker-isolation and documentation
+checks. Formatting also passes. Every gate component is covered across these
+runs; this is not an uninterrupted gate pass. The external Comments physical-plan
+probe remains explicitly ignored, and no full-data performance workload was rerun.
+
 ## Exact streamed endpoint comparison
 
 The Rust engine, CLI and HTTP now expose changed members with typed values,

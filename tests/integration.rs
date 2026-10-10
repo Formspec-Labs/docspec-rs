@@ -20,6 +20,7 @@ mod compaction_retirement;
 mod compaction_retirement_transport;
 mod comparison;
 mod completed_backfill_plan;
+mod cutover_admissions;
 mod defaults;
 mod dependency_correction_lifecycle;
 mod dependency_correction_transport;

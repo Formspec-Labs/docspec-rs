@@ -485,6 +485,13 @@ new source can reuse unchanged file computations. Independent groups merge into
 the latest selection; competing replacements of one group reject a stale target.
 Combined reads join group values to exact source-file row positions.
 
+Before schema or backfill selection, every accepted source request must have
+entered the selected history or been explicitly abandoned. A later full build
+does not resolve an earlier unfinished request. Such a request produces
+`pending_source`; completed backfill/schema work remains reusable after resolution.
+This check reads retained metadata, including receipts for retired historical
+results. It does not reopen historical payloads or run during ordinary reads.
+
 The same `update` request works after group selection; `plan-update` includes group
 preparation. A no-op update preserves the exact source and group table pins while
 recording its new input coverage and empty source changes. Metadata-only schema

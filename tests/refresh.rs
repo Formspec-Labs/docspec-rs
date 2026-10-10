@@ -525,14 +525,25 @@ async fn refresh_and_backfill_races_preserve_captured_source_and_selected_groups
     let catchup = update(root.path(), &selected, "catchup", &[(Some(2), None)], &[]);
     let caught_up = engine.update(&catchup).await.unwrap();
     let new_group = spec(&caught_up, "new-scope", "c", "third", "id + 3");
-    assert!(
-        engine
-            .plan_backfill(&new_group)
-            .await
-            .unwrap()
-            .files_completed
-            .is_some_and(|files| files > 0)
+    let initial_plan = engine.plan_backfill(&new_group).await.unwrap();
+    assert_eq!(
+        initial_plan.promotion_refusal.as_deref(),
+        Some("pending_source")
     );
+    assert!(initial_plan.files_completed.is_some_and(|files| files > 0));
+    assert_eq!(
+        engine.backfill(&new_group).await.unwrap_err().code(),
+        "pending_source"
+    );
+    assert_eq!(engine.latest(&later.dataset).await.unwrap(), caught_up);
+    engine
+        .abandon(
+            &later.dataset,
+            &later.operation,
+            "later input was replaced by catchup against the selected source",
+        )
+        .await
+        .unwrap();
     let complete = engine.backfill(&new_group).await.unwrap();
     assert_eq!(complete.dataset.groups.len(), 4);
     verify_release(&complete, limits()).await.unwrap();

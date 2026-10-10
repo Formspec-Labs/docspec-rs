@@ -1701,6 +1701,10 @@ impl Engine {
             if let Some(dependencies) = &dependencies {
                 self.guard_ancestors(dependencies, &release).await?;
             }
+            if matches!(spec, OperationRequest::Schema(_)) {
+                self.check_cutover_inputs(&view, spec.dataset(), Some(spec.operation()))
+                    .await?;
+            }
             self.select(&view, authority, &release).await?;
             stop_after(stop, "selection")?;
             Ok(release.value)

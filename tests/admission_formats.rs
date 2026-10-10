@@ -51,7 +51,7 @@ fn schema(base: &ReleasePin, operation: &str, next: &str) -> SchemaSpec {
 
 // Reproduce the original serialized admission shape, not a historical binary.
 // Operation and request still share their atomic commit revision.
-async fn original_admission(root: &Path, operation: &str, old_schema: bool) {
+pub(super) async fn original_admission(root: &Path, operation: &str, old_schema: bool) {
     let lifecycle = Lifecycle::new(
         storage::local_catalog(&root.join("workspace"))
             .await
@@ -83,6 +83,15 @@ async fn original_admission(root: &Path, operation: &str, old_schema: bool) {
 async fn original_admissions_resume_and_mixed_history_stays_readable() {
     let root = tempfile::tempdir().unwrap();
     let (engine, first, _) = fixture(root.path(), false).await;
+    let pending = build(&first, "hidden-pending");
+    assert_eq!(
+        engine
+            .run_until(&pending, "admission")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
     let request = build(&first, "old-build");
     assert_eq!(
         engine
@@ -123,11 +132,39 @@ async fn original_admissions_resume_and_mixed_history_stays_readable() {
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
         .unwrap();
+    assert_eq!(
+        engine.evolve_schema(&edit).await.unwrap_err().code(),
+        "pending_source",
+        "format-10 Schema must exclude its own admission but retain unrelated pending inputs"
+    );
+    assert_eq!(engine.latest(&edit.dataset).await.unwrap(), old);
+    let refused = engine.inspect(&edit.dataset).await.unwrap();
+    assert_eq!(refused["authority"]["definition"], "v1");
+    assert!(!refused.contains_key("result/old-schema"));
+    assert_eq!(
+        refused["readback/old-schema"],
+        before["readback/old-schema"]
+    );
+    engine
+        .abandon(
+            &pending.dataset,
+            &pending.operation,
+            "withdraw hidden input",
+        )
+        .await
+        .unwrap();
     let old_schema = engine.evolve_schema(&edit).await.unwrap();
     assert_eq!(
         old_schema, readback,
         "resume must preserve the serialized interpretation"
     );
+
+    let resumed = engine.inspect(&edit.dataset).await.unwrap();
+    for (key, value) in &before {
+        if key.starts_with("phase/") {
+            assert_eq!(resumed[key], *value, "legacy Schema recomputed {key}");
+        }
+    }
 
     let mut backfill = spec(
         &old_schema,

@@ -1,0 +1,64 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.41s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 7 tests
+test engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request ... FAILED
+test engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission ... FAILED
+test engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt ... FAILED
+test engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads ... FAILED
+test engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not ... FAILED
+test engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries ... FAILED
+test engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request ... FAILED
+
+failures:
+
+---- engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request stdout ----
+
+thread 'engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request' (37690721) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission stdout ----
+
+thread 'engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission' (37690724) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+---- engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt stdout ----
+
+thread 'engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt' (37690726) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+---- engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads stdout ----
+
+thread 'engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads' (37690727) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+---- engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not stdout ----
+
+thread 'engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not' (37690722) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+---- engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries stdout ----
+
+thread 'engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries' (37690725) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+---- engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request stdout ----
+
+thread 'engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request' (37690723) panicked at src/engine/history/admissions/tests.rs:79:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+
+
+failures:
+    engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request
+    engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not
+    engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request
+    engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission
+    engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries
+    engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt
+    engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads
+
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `--lib`

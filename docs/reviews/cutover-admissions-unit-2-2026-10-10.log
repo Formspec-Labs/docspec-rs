@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.82s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 7 tests
+test engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request ... ok
+test engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission ... ok
+test engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not ... ok
+test engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries ... ok
+test engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt ... ok
+test engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request ... ok
+test engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.37s
+

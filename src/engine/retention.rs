@@ -18,6 +18,29 @@ pub(crate) mod removal;
 pub(in crate::engine) mod retirement;
 
 impl Engine {
+    /// Requires a qualified outcome for every accepted source operation.
+    ///
+    /// A later selected boundary cannot stand in for an earlier request's
+    /// selection or explicit abandonment. Call from the locked cutover view.
+    /// `selecting` may name only the already checked schema operation selected
+    /// by the same guarded commit: format-10 schemas also admitted source input.
+    pub(super) async fn check_cutover_inputs(
+        &self,
+        view: &View,
+        dataset: &Id,
+        selecting: Option<&Id>,
+    ) -> Result<()> {
+        if self
+            .pending_source_operations(view, dataset)
+            .await?
+            .iter()
+            .any(|operation| Some(operation) != selecting)
+        {
+            return Err(pending_source());
+        }
+        Ok(())
+    }
+
     /// Proves that every unselected admission in a captured interval was abandoned.
     /// Caller uses the same locked view for admission or final selection.
     pub(super) async fn check_abandoned_gap(
