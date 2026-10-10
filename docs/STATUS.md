@@ -9,9 +9,9 @@ specific limits. Remaining delivery includes dependency-correction semantics and
 continuous-ingestion cutover; change-history composition; remaining protection
 lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
-10-million-Comments qualification. The first full performance attempt failed
-at the Comments-to-Dockets hash join; the 1,800-second full-path target remains
-unqualified.
+10-million-Comments qualification. Native row statistics now let the full
+Comments-to-Dockets join complete. The next full attempt stopped at flat-export
+footer accounting; the 1,800-second complete-path target remains unqualified.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
@@ -47,7 +47,22 @@ walk with a map lookup and bind diagnostic manifests through the production
 reader. Post-correction [strict lint](reviews/native-statistics-review-fixes-check.log),
 [library checks](reviews/native-statistics-review-fixes-tests.log), and verified
 plan capture pass. The [implementation review](reviews/native-scan-implementation-review.md)
-approves the final static change. Full Comments performance remains unqualified.
+approves the final static change.
+
+The [new acceptance attempt](../experiments/comments-e2e/acceptance-native-statistics-20261010.json)
+uses the [captured `881eb8c` release](../experiments/comments-e2e/release-build-native-statistics-20261010.json).
+Its complete join/evidence/validation stage finished in 47.58 seconds, followed by
+the docket summary in 18.94 seconds. Run 1 stopped after 116.53 seconds when flat
+export's conservative accumulated-footer accounting exceeded the 32 MiB metadata
+allowance. This is an admission estimate, not a measured serialized footer size.
+The independent oracle and remaining repetitions did not run.
+
+Sampled aggregate memory peaked at 5.06 GB, sampled scratch remained zero, and
+retained logical storage reached 9.62 GB (3.50× the 2.74 GB input). This includes
+partial export and completed native results; it is not final-output amplification.
+The original hash-build failure is cleared for these inputs, while complete-path
+acceptance remains unqualified. The next investigation targets output row-group
+layout under the unchanged memory and metadata allowances.
 
 ## Receipt changes without value recomputation
 

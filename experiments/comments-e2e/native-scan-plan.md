@@ -89,3 +89,18 @@ for each of F file providers. No lookup-only test or alternate index was added.
 bounded planning and correctness evidence, not a throughput or memory result.
 The complete performance question still requires the unchanged full protocol.
 Evidence is retained under `docs/reviews/native-*` and linked from `docs/STATUS.md`.
+
+## Full-run outcome
+
+`881eb8c` completed the full join, contributor evidence and validation in 47.58
+seconds and the docket summary in 18.94 seconds. The run failed after 116.53
+seconds at the flat export's conservative footer admission check, before
+independent readback. Sampled peak aggregate RSS was 5.06 GB and scratch was zero;
+retained logical storage was 9.62 GB, or 3.50 times input, including partial export.
+See `acceptance-native-statistics-20261010.json` for captured executable, stage
+measurements and retained failure paths. The original failed run remains intact.
+
+**Verdict: bounded improvement, full acceptance not solved.** The observed
+hash-build failure no longer prevents this join's completion. No complete-path
+speedup or passing three-run result is claimed. Investigate export row-group
+layout next because it now blocks the full workload; retain all resource limits.

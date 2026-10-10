@@ -1,0 +1,602 @@
+{
+  "format": "docspec-full-acceptance-observation-v1",
+  "artifact_directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a",
+  "build_receipt": "release-build-native-statistics-20261010.json",
+  "source_commit": "881eb8cd92a05f7935a5964dccb5b929e947d773",
+  "captured_binary_matches_build": true,
+  "execution_capture": {
+    "format": "comments-e2e-execution-v1",
+    "complete": true,
+    "started_at": 1791641487.993811,
+    "artifacts": {
+      "runner": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807787,
+          "size": 21309,
+          "mtime_ns": 1791587027905655220,
+          "ctime_ns": 1791587027905655220,
+          "mode": 33188
+        },
+        "bytes": 21309,
+        "sha256": "723dd2fb7b7545ba94d9b5ba8f5b0d5b1681c7cd79ff9fffb0af3fee6d6aaf88",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/run.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957166,
+          "size": 21309,
+          "mtime_ns": 1791641487994037229,
+          "ctime_ns": 1791641487994091729,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "workload": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/workload.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803312,
+          "size": 4864,
+          "mtime_ns": 1791585824108655838,
+          "ctime_ns": 1791585824108655838,
+          "mode": 33188
+        },
+        "bytes": 4864,
+        "sha256": "c44f2fedf9d1990d0d61db3e391aa3c80fc2b6f20282ee5c9aab05ba0f9bd0a3",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/workload.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957167,
+          "size": 4864,
+          "mtime_ns": 1791641487994179686,
+          "ctime_ns": 1791641487994221811,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "integrity": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/integrity.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766879064,
+          "size": 3760,
+          "mtime_ns": 1791586936069824459,
+          "ctime_ns": 1791586936069824459,
+          "mode": 33188
+        },
+        "bytes": 3760,
+        "sha256": "6ebbbc347173d0e70576d01acabb8e3fcd9f974f9ff487b35ff8ab84086a964b",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/integrity.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957168,
+          "size": 3760,
+          "mtime_ns": 1791641487994293227,
+          "ctime_ns": 1791641487994324769,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "comments_input_monitor": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 759489030,
+          "size": 18490,
+          "mtime_ns": 1791585964192078142,
+          "ctime_ns": 1791585964192078142,
+          "mode": 33188
+        },
+        "bytes": 18490,
+        "sha256": "8bb7b248c3ee20df009a844092fbdc2612aa2cb08dc58695fa7b2b318a237cc8",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/comments-input-monitor.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957169,
+          "size": 18490,
+          "mtime_ns": 1791641487994405226,
+          "ctime_ns": 1791641487994448726,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "binary": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767956997,
+          "size": 181921208,
+          "mtime_ns": 1791641463484771792,
+          "ctime_ns": 1791641463570837994,
+          "mode": 33261
+        },
+        "bytes": 181921208,
+        "sha256": "bfa567a567bb6163bb791d11c320f744d86fef5873f806bc4299a1ce8fef89ce",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/docspec",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957170,
+          "size": 181921208,
+          "mtime_ns": 1791641488166997877,
+          "ctime_ns": 1791641488168528240,
+          "mode": 33133
+        }
+      },
+      "oracle": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/oracle.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803313,
+          "size": 20874,
+          "mtime_ns": 1791586698402375624,
+          "ctime_ns": 1791586698402375624,
+          "mode": 33188
+        },
+        "bytes": 20874,
+        "sha256": "aa140f1bbbc31c9e9ef9bf591f6db33e301a0605273dbf153e2867b64b4b4e81",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/oracle.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957171,
+          "size": 20874,
+          "mtime_ns": 1791641488169147318,
+          "ctime_ns": 1791641488169217860,
+          "mode": 33060
+        }
+      },
+      "protocol": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/protocol.md",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807788,
+          "size": 13438,
+          "mtime_ns": 1791587027926873302,
+          "ctime_ns": 1791587027926873302,
+          "mode": 33188
+        },
+        "bytes": 13438,
+        "sha256": "a5a0dd9503e325330cf02401ba5a9758e7ae15a6fa372b67f347a69057d22a0c",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/protocol.md",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957172,
+          "size": 13438,
+          "mtime_ns": 1791641488169551399,
+          "ctime_ns": 1791641488169619231,
+          "mode": 33060
+        }
+      },
+      "lock": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/Cargo.lock",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 757661924,
+          "size": 130931,
+          "mtime_ns": 1791484279971238840,
+          "ctime_ns": 1791484279971238840,
+          "mode": 33188
+        },
+        "bytes": 130931,
+        "sha256": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/Cargo.lock",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957173,
+          "size": 130931,
+          "mtime_ns": 1791641488169969187,
+          "ctime_ns": 1791641488170075644,
+          "mode": 33060
+        }
+      },
+      "prepared": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/preparation-20261009.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767014769,
+          "size": 8918,
+          "mtime_ns": 1791587198822526130,
+          "ctime_ns": 1791587198822526130,
+          "mode": 33188
+        },
+        "bytes": 8918,
+        "sha256": "be82b5999be8b1a7514e2059a3c6220e333d8ef5ce702f40ae766d1e27647a6e",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/prepared.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957174,
+          "size": 8918,
+          "mtime_ns": 1791641488170251851,
+          "ctime_ns": 1791641488170298101,
+          "mode": 33060
+        }
+      },
+      "build_receipt": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/release-build-native-statistics-20261010.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767956998,
+          "size": 14484,
+          "mtime_ns": 1791641463661971115,
+          "ctime_ns": 1791641463661971115,
+          "mode": 33188
+        },
+        "bytes": 14484,
+        "sha256": "8deedf1faba5b037f5fcd5f6bf285c6002e8f2442a1f2bfa45a55be1ac0c2b26",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/build-receipt.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767957175,
+          "size": 14484,
+          "mtime_ns": 1791641488170555891,
+          "ctime_ns": 1791641488170606099,
+          "mode": 33060
+        }
+      }
+    },
+    "scope": "series-owned read-only files; protection from normal worktree drift",
+    "worktree_diff": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-native-statistics-20261010/20261010T101127-acceptance-d075da9a/frozen/worktree.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "finished_at": 1791641488.2346041,
+    "elapsed_seconds": 0.24079666699981317
+  },
+  "results": {
+    "mode": "acceptance",
+    "required_fresh_runs": 3,
+    "runs": [
+      {
+        "run": 1,
+        "passed": false,
+        "stages": {
+          "comments-dockets-export": {
+            "sampled_peak_tree_rss_bytes": 1349926912,
+            "min_volume_free_bytes": 112481841152,
+            "sampled_peak_workspace_bytes": 9798303730,
+            "sampled_peak_allocated_bytes": 9837330432,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.12240950105478987,
+            "before": {
+              "catalog_and_other": {
+                "files": 396,
+                "bytes": 8295910083,
+                "allocated_bytes": 8325394432
+              },
+              "total": {
+                "files": 396,
+                "bytes": 8295910083,
+                "allocated_bytes": 8325394432
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 18.280042583995964,
+            "exit_code": 1,
+            "after": {
+              "catalog_and_other": {
+                "files": 410,
+                "bytes": 9798303730,
+                "allocated_bytes": 9837330432
+              },
+              "total": {
+                "files": 410,
+                "bytes": 9798303730,
+                "allocated_bytes": 9837330432
+              }
+            },
+            "volume_free_after_bytes": 112405221376,
+            "time_max_rss_bytes": 1310867456
+          },
+          "comments-dockets": {
+            "sampled_peak_tree_rss_bytes": 5056397312,
+            "min_volume_free_bytes": 115383996416,
+            "sampled_peak_workspace_bytes": 8264114468,
+            "sampled_peak_allocated_bytes": 8401592320,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.17505195902776904,
+            "before": {
+              "catalog_and_other": {
+                "files": 218,
+                "bytes": 5660681966,
+                "allocated_bytes": 5807415296
+              },
+              "total": {
+                "files": 218,
+                "bytes": 5660681966,
+                "allocated_bytes": 5807415296
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 47.57548158298596,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 313,
+                "bytes": 8264114468,
+                "allocated_bytes": 8293998592
+              },
+              "total": {
+                "files": 313,
+                "bytes": 8264114468,
+                "allocated_bytes": 8293998592
+              }
+            },
+            "volume_free_after_bytes": 115377250304,
+            "time_max_rss_bytes": 5018288128
+          },
+          "comments": {
+            "sampled_peak_tree_rss_bytes": 3576643584,
+            "min_volume_free_bytes": 119448752128,
+            "sampled_peak_workspace_bytes": 5513561254,
+            "sampled_peak_allocated_bytes": 5660037120,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.017749790946254507,
+            "before": {
+              "catalog_and_other": {
+                "files": 18,
+                "bytes": 182289212,
+                "allocated_bytes": 182333440
+              },
+              "total": {
+                "files": 18,
+                "bytes": 182289212,
+                "allocated_bytes": 182333440
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 29.98229195800377,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 85,
+                "bytes": 5513561254,
+                "allocated_bytes": 5660037120
+              },
+              "total": {
+                "files": 85,
+                "bytes": 5513561254,
+                "allocated_bytes": 5660037120
+              }
+            },
+            "volume_free_after_bytes": 119440216064,
+            "time_max_rss_bytes": 3542482944
+          },
+          "docket-receipts": {
+            "sampled_peak_tree_rss_bytes": 38141952,
+            "min_volume_free_bytes": 119384338432,
+            "sampled_peak_workspace_bytes": 5660486840,
+            "sampled_peak_allocated_bytes": 5807161344,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.012401249987306073,
+            "before": {
+              "catalog_and_other": {
+                "files": 142,
+                "bytes": 5544403337,
+                "allocated_bytes": 5690986496
+              },
+              "total": {
+                "files": 142,
+                "bytes": 5544403337,
+                "allocated_bytes": 5690986496
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.8166957909998018,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 192,
+                "bytes": 5660486840,
+                "allocated_bytes": 5807161344
+              },
+              "total": {
+                "files": 192,
+                "bytes": 5660486840,
+                "allocated_bytes": 5807161344
+              }
+            },
+            "volume_free_after_bytes": 119256412160,
+            "time_max_rss_bytes": 328318976
+          },
+          "docket-summary": {
+            "sampled_peak_tree_rss_bytes": 1235746816,
+            "min_volume_free_bytes": 114631598080,
+            "sampled_peak_workspace_bytes": 8295825604,
+            "sampled_peak_allocated_bytes": 8325300224,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.11973300104727969,
+            "before": {
+              "catalog_and_other": {
+                "files": 317,
+                "bytes": 8264182197,
+                "allocated_bytes": 8294076416
+              },
+              "total": {
+                "files": 317,
+                "bytes": 8264182197,
+                "allocated_bytes": 8294076416
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 18.94148649997078,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 392,
+                "bytes": 8295825604,
+                "allocated_bytes": 8325300224
+              },
+              "total": {
+                "files": 392,
+                "bytes": 8295825604,
+                "allocated_bytes": 8325300224
+              }
+            },
+            "volume_free_after_bytes": 114630746112,
+            "time_max_rss_bytes": 1197998080
+          },
+          "dockets": {
+            "sampled_peak_tree_rss_bytes": 37978112,
+            "min_volume_free_bytes": 119440158720,
+            "sampled_peak_workspace_bytes": 5544373936,
+            "sampled_peak_allocated_bytes": 5690945536,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.009016124997287989,
+            "before": {
+              "catalog_and_other": {
+                "files": 89,
+                "bytes": 5513579693,
+                "allocated_bytes": 5660065792
+              },
+              "total": {
+                "files": 89,
+                "bytes": 5513579693,
+                "allocated_bytes": 5660065792
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.501648874982493,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 138,
+                "bytes": 5544373936,
+                "allocated_bytes": 5690945536
+              },
+              "total": {
+                "files": 138,
+                "bytes": 5544373936,
+                "allocated_bytes": 5690945536
+              }
+            },
+            "volume_free_after_bytes": 119384420352,
+            "time_max_rss_bytes": 161611776
+          },
+          "seal": {
+            "sampled_peak_tree_rss_bytes": 38240256,
+            "min_volume_free_bytes": 119255289856,
+            "sampled_peak_workspace_bytes": 5660632450,
+            "sampled_peak_allocated_bytes": 5807353856,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.014721125015057623,
+            "before": {
+              "catalog_and_other": {
+                "files": 196,
+                "bytes": 5660528196,
+                "allocated_bytes": 5807214592
+              },
+              "total": {
+                "files": 196,
+                "bytes": 5660528196,
+                "allocated_bytes": 5807214592
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.16904337500454858,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 214,
+                "bytes": 5660632450,
+                "allocated_bytes": 5807353856
+              },
+              "total": {
+                "files": 214,
+                "bytes": 5660632450,
+                "allocated_bytes": 5807353856
+              }
+            },
+            "volume_free_after_bytes": 119253561344,
+            "time_max_rss_bytes": 43384832
+          }
+        },
+        "failure": "RuntimeError('comments-dockets-export failed: see retained logs and metrics')",
+        "deadline_seconds": 1800,
+        "input_bytes": 2744544515,
+        "elapsed_seconds": 116.5287894999783,
+        "retained_workspace": {
+          "catalog_and_other": {
+            "files": 2,
+            "bytes": 32768,
+            "allocated_bytes": 32768
+          },
+          "total": {
+            "files": 333,
+            "bytes": 9615355766,
+            "allocated_bytes": 9654185984
+          },
+          "object_metadata": {
+            "files": 33,
+            "bytes": 246109,
+            "allocated_bytes": 311296
+          },
+          "admitted_or_prepared_data": {
+            "files": 4,
+            "bytes": 4246798349,
+            "allocated_bytes": 4256325632
+          },
+          "native_data": {
+            "files": 52,
+            "bytes": 5367236992,
+            "allocated_bytes": 5396094976
+          },
+          "lifecycle": {
+            "files": 242,
+            "bytes": 1041548,
+            "allocated_bytes": 1421312
+          }
+        },
+        "retained_run": {
+          "catalog_and_other": {
+            "files": 398,
+            "bytes": 9616110348,
+            "allocated_bytes": 9655111680
+          },
+          "total": {
+            "files": 398,
+            "bytes": 9616110348,
+            "allocated_bytes": 9655111680
+          }
+        },
+        "retained_amplification_vs_inputs": 3.5037181198717047,
+        "sampled_peak_tree_rss_bytes": 5056397312,
+        "sampled_peak_workspace_bytes": 9798303730,
+        "sampled_peak_allocated_bytes": 9837330432,
+        "sampled_peak_scratch_bytes": 0,
+        "time_max_rss_bytes": 5018288128,
+        "peak_additional_logical_bytes": 9616015724,
+        "peak_additional_allocated_bytes": 9655005184,
+        "min_volume_free_bytes": 112481841152,
+        "inventory_sampling_seconds": 0.4710827520757448
+      }
+    ],
+    "full_local_performance_acceptance_passed": false,
+    "failure": "RuntimeError('run 1 failed; retained; remaining repetitions not run')",
+    "retained_series": {
+      "catalog_and_other": {
+        "files": 413,
+        "bytes": 9798398385,
+        "allocated_bytes": 9837432832
+      },
+      "total": {
+        "files": 413,
+        "bytes": 9798398385,
+        "allocated_bytes": 9837432832
+      }
+    },
+    "volume_free_after_bytes": 112405102592
+  },
+  "failure_stderr": "Error: metadata_capacity: flat export footer exceeds the declared metadata allowance\n",
+  "scope": "Join, contributor evidence and summary completed. Export refused conservative accumulated footer accounting; actual serialized footer size was not measured. First run failed; later repetitions not run. Independent oracle did not run; full acceptance remains unqualified."
+}
