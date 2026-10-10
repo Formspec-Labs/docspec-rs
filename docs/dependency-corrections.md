@@ -1,6 +1,9 @@
 # Scoped dependency correction
 
-Status: implementation design; Q4 is not yet qualified. This follows R1/R3 and
+Status: the local scalar correspondence path is implemented and covered by the
+[repository gate](reviews/dependency-correction-full-check-2.log). The
+[status and remaining limits](STATUS.md#scoped-scalar-dependency-correction)
+distinguish this case from broader qualification. This follows R1/R3 and
 [Q4](requirements/07-operations-qualification.md#q4-discovered-dependency-omission).
 The independent [consistency](reviews/dependency-correction-consistency-design.md)
 and [efficiency](reviews/dependency-correction-efficiency-design.md) reviews supply
@@ -9,8 +12,8 @@ the failure cases and code traces.
 An operator who discovers an omitted material dependency needs to stop unsafe
 reuse, preserve the original execution history and keep unrelated completed work.
 The existing global `invalidate` safely refuses adoption but also discards reuse
-eligibility for unrelated work. Add a scoped correction through the existing
-Iceberg lifecycle. Keep global invalidation for explicitly broad invalidations.
+eligibility for unrelated work. Scoped corrections use the existing Iceberg
+lifecycle. Global invalidation remains available for explicitly broad invalidations.
 
 ## Supported first case
 
@@ -37,7 +40,7 @@ its missing applicability condition.
 
 ## Retained facts and authority
 
-Use bounded typed records and immutable JSON objects through existing services:
+Use bounded typed records and existing immutable JSON descriptors:
 
 | Fact | Representation and purpose |
 | --- | --- |
@@ -45,7 +48,7 @@ Use bounded typed records and immutable JSON objects through existing services:
 | Current requirements | A directly addressed lifecycle record for that processor/definition, containing the bounded cumulative field set and current revision/latest decision reference. Union fields and update it atomically with the new decision under the dataset lock and native guarded commit. Later corrections cannot forget earlier requirements. |
 | Original declaration | One immutable descriptor per compiled material definition containing processor, original `GroupDefinition` and exact SQL field bindings. File completions reference it and retain their original operation and source metadata. Missing fields on older records remain unknown. |
 | Original file executions | One immutable descriptor for each prepared group, listing the actual file-completion generations and their original retained records. Include the information needed to resolve them without the old catalog. Reference their declaration/output descriptors and original source metadata directly; do not build an adoption chain. |
-| Supplemental qualification | One retained completion binding those original executions, exact target source, current requirements and the supported field correspondence. A new group binding references it separately from its original SQL declaration. |
+| Supplemental qualification | A small `DependencyQualification` embedded in the hash-bound `ComputedGroup`, separate from its original SQL declaration. The same value is retained as a directly addressed lifecycle completion for recovery. It binds original executions, exact target source, normalized requirements and the correspondence checker. No separate proof object or proof-object read is needed. |
 
 Reuse `RetainedGeneration`, `ObjectRef`, existing completion acknowledgments and
 owner protection. The prepared-group descriptor carries per-file origins because
@@ -73,13 +76,29 @@ Those original generations now persist in shared immutable descriptors, with
 original declarations and source-schema references retained through prepared,
 validation and result records. See the
 [original execution checkpoint](STATUS.md#original-scalar-execution-metadata).
-The correction service and supplemental evaluator below remain future work.
+The correction service, supplemental evaluator and adoption guards below are
+implemented; [STATUS](STATUS.md) records their verification and remaining limits.
 
 The current requirement key is derived from the exact deficient processor and
 group definition, independently of source writer definitions or adoption IDs.
 It must apply to every reuse of that same deficient definition. Correction IDs
 and qualification identities are separate from the existing broad eligibility
 epoch; no unrelated value-cache key changes.
+
+Every original file acknowledgment must predate the first correction for that
+scope. This cutoff uses retained lifecycle revisions, not a claim about when
+computation began. Fresh execution of a known deficient definition, including a
+recreated retired file completion, cannot establish an original baseline.
+Precomputed but late-acknowledged work also refuses conservatively. A new explicit
+definition can consume or validate the omitted field. An empty or incomplete
+original-execution history remains unknown.
+
+The inline proof contains the cumulative field set and first-correction revision;
+it does not copy the latest decision or whole correction history. Another decision
+that adds no new requirement therefore does not invalidate identical evidence.
+The shared typed inventory follows the proof's original executions and exact
+target snapshot for protection and restore. Recovery completions may retire;
+immutable correction decisions and current requirements do not retire as phases.
 
 ## Decision path
 
@@ -106,6 +125,13 @@ Use one shared evaluator for early reuse decisions and final adoption. Do not
 make ordinary historical reads consult current corrections. A routine result
 read continues to resolve an immutable pin and stream the requested data.
 
+The public entry points are `Engine::correct_dependencies`, CLI
+`correct-dependencies <request.json>` and HTTP `POST /dependencies/corrections`.
+The request names the dataset, stable correction ID, exact group definition,
+omitted stable source-field IDs and reason. `plan_backfill` exposes a pending
+`correction_required` refusal when qualification is needed; `inspect` retains
+the decision and normalized requirement state for investigation.
+
 Prepared, validation and readback caches must retain original execution identity
 and cannot bypass the final rule. Before immutable readback exists, supplemental
 evidence can qualify the pending association and its new manifest. Once readback
@@ -116,6 +142,9 @@ and association/manifest metadata, with composition checks. This fits the existi
 single readback identity instead of adding readback generations. Preserve the old
 acknowledgment and bytes; never overwrite them or rerun values just to obtain a
 new manifest. Completed-operation replay still returns its historical result.
+The readback commit also compares its target against already retained readbacks
+in the same locked lifecycle view. This covers a correction racing a cache hit,
+a sibling-composition retry and another worker retaining the operation first.
 
 ## Implementation order and checks
 

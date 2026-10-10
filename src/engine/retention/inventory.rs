@@ -912,7 +912,20 @@ impl Inventory {
         if let Some(origins) = &computed.origins {
             self.enqueue(origins, Expansion::Origins, origin)?;
         }
+        if let Some(qualification) = &computed.qualification {
+            self.qualification(qualification, origin)?;
+        }
         self.release(&computed.base_manifest, origin)
+    }
+
+    fn qualification(
+        &mut self,
+        qualification: &DependencyQualification,
+        origin: &RetentionBlocker,
+    ) -> Result<()> {
+        crate::engine::corrections::validate_qualification(qualification)?;
+        self.enqueue(&qualification.origins, Expansion::Origins, origin)?;
+        self.snapshot(&qualification.target, origin)
     }
 
     fn file_completion(&mut self, phase: &FileCompletion, origin: &RetentionBlocker) -> Result<()> {
@@ -1018,7 +1031,63 @@ impl Inventory {
         origin: &RetentionBlocker,
     ) -> Result<()> {
         // Most-specific families precede their common prefix.
-        if let Some(id) = key.strip_prefix("restore-reuse/") {
+        if let Some(id) = key.strip_prefix("dependency-correction/") {
+            let decision: CorrectionDecision = decode(json)?;
+            crate::engine::corrections::records::validate(&decision.request)?;
+            if decision.request.id.as_str() != id
+                || decision.processor != crate::engine::backfill::PROCESSOR
+                || decision.revision != origin.revision
+                || decision.revision <= 0
+                || crate::catalog::lifecycle_ident(&decision.request.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory("dependency correction identity differs"));
+            }
+        } else if key.starts_with("correction-requirements/") {
+            let requirements: crate::engine::corrections::records::Requirements = decode(json)?;
+            let decision_key = format!("dependency-correction/{}", requirements.latest_decision);
+            let (_, decision_revision, decision_json) = rows
+                .prefix(&decision_key)
+                .find(|(key, _, _)| *key == decision_key)
+                .ok_or_else(unknown_dependencies)?;
+            if decision_json.len() > self.limit {
+                return Err(capacity());
+            }
+            let decision: CorrectionDecision = decode(decision_json)?;
+            crate::engine::corrections::records::validate(&decision.request)?;
+            if key != crate::engine::corrections::records::scope_key(&requirements.definition)?
+                || requirements.processor != crate::engine::backfill::PROCESSOR
+                || requirements.revision != origin.revision
+                || decision_revision != requirements.revision
+                || requirements.first_revision <= 0
+                || requirements.first_revision > requirements.revision
+                || requirements.fields.is_empty()
+                || requirements.fields.iter().any(|field| *field <= 0)
+                || decision.processor != requirements.processor
+                || decision.request.definition != requirements.definition
+                || decision.request.id != requirements.latest_decision
+                || decision.revision != requirements.revision
+                || !decision.request.fields.is_subset(&requirements.fields)
+                || crate::catalog::lifecycle_ident(&decision.request.dataset).to_string()
+                    != origin.table
+            {
+                return Err(invalid_inventory(
+                    "dependency requirements identity differs",
+                ));
+            }
+        } else if key.starts_with("dependency-qualification/") {
+            let qualification: DependencyQualification = decode(json)?;
+            if key != crate::engine::corrections::qualification_key(&qualification)?
+                || crate::catalog::lifecycle_ident(&qualification.origins.owner).to_string()
+                    != origin.table
+                || qualification.first_revision > origin.revision
+            {
+                return Err(invalid_inventory(
+                    "dependency qualification identity differs",
+                ));
+            }
+            self.qualification(&qualification, origin)?;
+        } else if let Some(id) = key.strip_prefix("restore-reuse/") {
             let reuse: crate::restore::RestoreReuse = decode(json)?;
             if reuse.id.as_str() != id
                 || crate::catalog::lifecycle_ident(&reuse.dataset).to_string() != origin.table
@@ -1832,6 +1901,162 @@ mod scalar_origins_tests {
 mod collector_tests;
 #[cfg(test)]
 mod history_tests;
+
+#[cfg(test)]
+mod correction_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn correction_registry_is_typed_object_free_and_revision_bound() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::open(
+            root.path(),
+            Limits {
+                compute_threads: 1,
+                memory_bytes: 64 << 20,
+                scratch_bytes: 16 << 20,
+                max_batch_bytes: 1 << 20,
+                max_metadata_bytes: 1 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        let correction = DependencyCorrection {
+            dataset: Id::new("comments").unwrap(),
+            id: Id::new("language-omission").unwrap(),
+            definition: GroupDefinition {
+                group: Id::new("classification").unwrap(),
+                definition: "text-only-v1".into(),
+                fields: vec![ComputedField {
+                    id: 10,
+                    name: "label".into(),
+                    expression: "text".into(),
+                }],
+            },
+            fields: BTreeSet::from([2]),
+            reason: "language was material".into(),
+        };
+        let decision = engine.correct_dependencies(&correction).await.unwrap();
+        let lifecycle = &engine.inner.lifecycle;
+        let view = lifecycle.open(&correction.dataset).await.unwrap();
+        let rows = lifecycle.rows(&view).await.unwrap();
+        for (key, revision, json) in rows.prefix("") {
+            let origin = RetentionBlocker {
+                table: view.table.identifier().to_string(),
+                key: key.into(),
+                revision,
+            };
+            assert!(
+                reference_roots(&rows, key, json, &origin, 1 << 20)
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut wrong_revision = origin;
+            wrong_revision.revision += 1;
+            assert!(reference_roots(&rows, key, json, &wrong_revision, 1 << 20).is_err());
+        }
+        // Restore follows these registry records without inventing physical objects.
+        let inspection = engine.inspect_retention(&[]).await.unwrap();
+        assert!(inspection.objects.is_empty());
+        let (_, objects) = engine
+            .restore_dependencies(&correction.dataset)
+            .await
+            .unwrap();
+        assert!(
+            objects
+                .iter()
+                .all(|object| object.owner == correction.dataset)
+        );
+
+        let mut unexpected = serde_json::to_value(&decision).unwrap();
+        unexpected["unrecognized_dependency"] = serde_json::json!({"path": "/unknown"});
+        assert!(decode::<CorrectionDecision>(&unexpected.to_string()).is_err());
+        let key = format!("dependency-correction/{}", correction.id);
+        let origin = RetentionBlocker {
+            table: view.table.identifier().to_string(),
+            key: key.clone(),
+            revision: decision.revision,
+        };
+        let proof = DependencyQualification {
+            checker: "docspec.scalar-field-correspondence.v1".into(),
+            scope: crate::engine::corrections::records::scope_key(&correction.definition).unwrap(),
+            fields: correction.fields.clone(),
+            first_revision: decision.revision,
+            origins: ObjectRef {
+                owner: correction.dataset.clone(),
+                path: "/unavailable/origins.json".into(),
+                digest: "0".repeat(64),
+                bytes: 17,
+            },
+            target: NativeSnapshotRef {
+                metadata: ObjectRef {
+                    owner: correction.dataset.clone(),
+                    path: "/unavailable/target.json".into(),
+                    digest: "0".repeat(64),
+                    bytes: 17,
+                },
+                snapshot: Some(42),
+                schema_id: 7,
+            },
+        };
+        let proof_key = crate::engine::corrections::qualification_key(&proof).unwrap();
+        let references = reference_roots(
+            &rows,
+            &proof_key,
+            &serde_json::to_string(&proof).unwrap(),
+            &origin,
+            1 << 20,
+        )
+        .unwrap();
+        assert!(references.contains(&proof.origins));
+        assert!(references.contains(&proof.target.metadata));
+        assert_eq!(references.len(), 2);
+        assert!(
+            reference_roots(
+                &rows,
+                "dependency-qualification/wrong-key",
+                &serde_json::to_string(&proof).unwrap(),
+                &origin,
+                1 << 20,
+            )
+            .is_err()
+        );
+        let mut inventory = Inventory::collecting(1 << 20).unwrap();
+        inventory.shallow = true;
+        inventory.qualification(&proof, &origin).unwrap();
+        assert_eq!(
+            inventory.visited[&proof.target.metadata.path].binding,
+            Some((proof.target.snapshot, proof.target.schema_id)),
+        );
+        assert!(inventory.pending.is_empty());
+        assert!(inventory.pending_native.is_empty());
+        assert!(
+            reference_roots(
+                &rows,
+                "dependency-correction/different-id",
+                &serde_json::to_string(&decision).unwrap(),
+                &origin,
+                1 << 20,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn qualification_recovery_can_retire_without_retiring_correction_authority() {
+        assert!(super::super::retirement::completion_key(
+            "dependency-qualification/proof"
+        ));
+        for key in [
+            "dependency-correction/decision",
+            "correction-requirements/scope",
+        ] {
+            assert!(!super::super::retirement::completion_key(key));
+            assert!(!super::super::retirement::retained_key(key));
+        }
+    }
+}
 
 fn required_record<T: DeserializeOwned>(
     rows: &crate::catalog::SnapshotRows,

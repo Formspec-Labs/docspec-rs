@@ -166,6 +166,7 @@ impl Engine {
     ) -> Result<()> {
         let lifecycle = &self.inner.lifecycle;
         self.check_not_abandoned(view, &release.id).await?;
+        self.guard_corrections(view, &release.dataset, None).await?;
         if authority.selected.as_ref() != authority.release.as_ref().map(|old| &old.dataset) {
             return Err(invalid("selected dataset and release disagree"));
         }

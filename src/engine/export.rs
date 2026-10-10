@@ -272,6 +272,8 @@ impl Engine {
             return Ok(saved);
         }
         self.check_operation_available(&view, &source.id).await?;
+        self.guard_corrections(&view, &source.dataset, Some(&spec.policy.group))
+            .await?;
         let rows = self.inner.lifecycle.rows(&view).await?;
         let source_revision = rows
             .revision(&format!("result/{}", source.id))
@@ -303,6 +305,12 @@ impl Engine {
     }
 
     async fn check_export_authority(&self, view: &View, operation: &ExportOperation) -> Result<()> {
+        self.guard_corrections(
+            view,
+            &operation.source.dataset,
+            Some(&operation.request.policy.group),
+        )
+        .await?;
         let authority: Authority = self
             .inner
             .lifecycle

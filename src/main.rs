@@ -8,9 +8,9 @@ use docspec::{
     evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
-        BackfillSpec, CompactionSpec, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
-        ReleasePin, RemovalPlan, RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel,
-        VersionRef,
+        BackfillSpec, CompactionSpec, DependencyCorrection, GenerationSeal, Id, InputCoverage,
+        ObjectRef, RefreshSpec, ReleasePin, RemovalPlan, RetentionPlan, RunSpec, SchemaSpec,
+        UpdateSpec, VerificationLevel, VersionRef,
     },
     restore::RestorePointRef,
     storage,
@@ -178,6 +178,8 @@ enum Command {
     SealGeneration { spec: PathBuf },
     /// Capture admissible input versions and the producer seals they require.
     CaptureInputs { spec: PathBuf },
+    /// Record omitted source-field dependencies for one exact scalar definition.
+    CorrectDependencies { spec: PathBuf },
     /// Verify retained input relationships without opening the catalog or payloads.
     VerifyInputs { coverage: PathBuf },
     /// Explain retained native join work over exact input versions.
@@ -657,6 +659,13 @@ async fn main() -> anyhow::Result<()> {
                 Command::CaptureInputs { spec } => {
                     let inputs: std::collections::BTreeMap<Id, VersionRef> = read_json(spec)?;
                     print_json(&engine.capture_inputs(&inputs).await?)?;
+                }
+                Command::CorrectDependencies { spec } => {
+                    print_json(
+                        &engine
+                            .correct_dependencies(&read_json::<DependencyCorrection>(spec)?)
+                            .await?,
+                    )?;
                 }
                 Command::Compare {
                     before,

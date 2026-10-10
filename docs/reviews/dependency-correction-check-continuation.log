@@ -1,0 +1,253 @@
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 0.82s
+cargo test --locked --all-features --test dependency_correction_transport --test dependency_corrections --test evidence_updates --test exports --test grant_retirement_transport --test http_read --test input_generations --test lifecycle --test operation_retirement --test operation_retirement_transport --test phase_dependencies --test phase_retirement --test phase_retirement_transport --test physical_removal_process --test physical_removal_transport --test rebuild --test rebuild_completion --test refresh --test related_refresh --test restore --test restore_catalog --test retention_inspection --test scalar_bindings --test schema --test succession --test updates --test worker_initialization
+    Finished `test` profile [unoptimized] target(s) in 0.21s
+     Running tests/dependency_correction_transport.rs (target/debug/deps/dependency_correction_transport-a73d85b46b6bf1df)
+
+running 1 test
+test http_and_cli_reconcile_the_same_decision_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.93s
+
+     Running tests/dependency_corrections.rs (target/debug/deps/dependency_corrections-3d0f1e43471a2162)
+
+running 4 tests
+test correction_after_readback_requires_new_operation_and_reuses_originals ... ok
+test correction_committed_at_actual_file_reuse_blocks_changed_language_context ... ok
+test inherited_sibling_selection_adds_cumulative_proof_without_rewriting_values ... ok
+test missing_original_field_is_unknown_and_new_deficient_execution_is_mismatch ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.43s
+
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 10 tests
+test adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... ok
+test inherited_receipt_deletions_survive_process_loss_without_repeating_work ... ok
+test nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test receipt_processing_survives_process_loss_without_original_input ... ok
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... ok
+test receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.64s
+
+     Running tests/exports.rs (target/debug/deps/exports-4441b6c55cd33e6a)
+
+running 11 tests
+test empty_snapshot_keeps_standalone_schema_and_explicit_policy ... ok
+test cli_compaction_and_offline_restore_share_the_application_paths ... ok
+test independent_parquet_contains_only_authorized_columns_and_exact_occurrences ... ok
+test http_exports_compaction_and_restore_points_use_the_shared_services ... ok
+test memory_driven_footer_limit_preserves_prior_selection_and_can_resume ... ok
+test killed_export_workers_resume_without_repeating_completed_work ... ok
+test primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... ok
+test small_read_batches_export_exact_data_with_bounded_footer ... ok
+test replacements_deletions_and_old_downloads_follow_their_exact_snapshots ... ok
+test stale_authority_and_channel_keep_completed_output_without_promotion ... ok
+test validation_and_selection_resume_without_opening_the_source_again ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.58s
+
+     Running tests/grant_retirement_transport.rs (target/debug/deps/grant_retirement_transport-1fa40629b4b0e7d9)
+
+running 2 tests
+test grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry ... ok
+test foreign_seal_protects_old_scalar_origins_after_cache_keys_are_recomputed ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
+
+     Running tests/http_read.rs (target/debug/deps/http_read-f692d827ad3b731b)
+
+running 5 tests
+test empty_streams_keep_schema_and_known_failures_return_structured_errors ... ok
+test catalog_free_cli_uses_the_shared_group_reader ... ok
+test in_flight_response_keeps_workspace_ownership_until_canceled ... ok
+test http_reads_exact_historical_source_and_combined_values_in_bounded_frames ... ok
+test rebound_catalog_results_cannot_change_an_exact_version_url ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s
+
+     Running tests/input_generations.rs (target/debug/deps/input_generations-6ec96f25e5f0cf8b)
+
+running 8 tests
+test cli_and_http_use_the_same_generation_guards ... ok
+test independent_release_verification_rejects_rewritten_producer_relationships ... ok
+test invalid_seals_and_rebound_input_keys_refuse ... ok
+test offline_relationship_checks_need_only_captured_manifests_and_detect_tampering ... ok
+test independent_and_coupled_inputs_follow_the_entire_consumed_member_map ... ok
+test omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base ... ok
+test stable_family_membership_and_exact_retry_survive_restart_and_invalidation ... ok
+test updates_and_backfills_inherit_but_resealing_requires_exact_new_members ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.02s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 24 tests
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+test cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test dependency_correction_fences_adoption_without_output_change ... ok
+test comparison_preserves_duplicates_and_historical_release ... ok
+test empty_output_keeps_schema_and_readable_history ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test independent_reader_rejects_same_size_corruption ... ok
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test plan_and_run_apply_the_same_definition_fence ... ok
+test relocated_build_retry_keeps_the_original_readback_request ... ok
+test routine_checks_reject_damaged_footer_and_declared_counts ... ok
+test routine_checks_report_scope_and_deep_checks_find_same_size_input_damage ... ok
+test routine_samples_allow_several_individually_bounded_wide_batches ... ok
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.54s
+
+     Running tests/operation_retirement.rs (target/debug/deps/operation_retirement-30ad0f77da721e71)
+
+running 3 tests
+test active_operation_must_be_abandoned_and_its_phases_remain_independent ... ok
+test all_explicit_a_promises_retire_while_independent_selected_b_stays_protected ... ok
+test completed_recovery_retirement_keeps_phases_reusable_and_creator_evidence_readable ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+     Running tests/operation_retirement_transport.rs (target/debug/deps/operation_retirement_transport-13684c17f1b548ac)
+
+running 1 test
+test cli_http_retirement_preserves_selected_values_and_reconciles_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.16s
+
+     Running tests/phase_retirement.rs (target/debug/deps/phase_retirement-ba03eff11568c106)
+
+running 7 tests
+test exact_generation_retries_do_not_retire_recomputed_work ... ok
+test processing_recovers_after_admission_retirement_and_restart ... ok
+test retained_readback_selects_after_upstream_retirement_without_source ... ok
+test evidence_requires_explicit_retirement_after_source_replacement ... ok
+test scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test validation_requires_explicit_retirement_after_processing_replacement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.19s
+
+     Running tests/phase_retirement_transport.rs (target/debug/deps/phase_retirement_transport-d54b0438f0857867)
+
+running 2 tests
+test availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests/physical_removal_process.rs (target/debug/deps/physical_removal_process-55c64a133547db59)
+
+running 1 test
+test sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.05s
+
+     Running tests/physical_removal_transport.rs (target/debug/deps/physical_removal_transport-8a4777cd7d7c3f52)
+
+running 1 test
+test cli_http_preview_agrees_and_keeps_protected_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests/rebuild.rs (target/debug/deps/rebuild-71cd6360fd02d8fc)
+
+running 7 tests
+test failed_or_invalidated_rebuild_keeps_previous_complete_selection ... ok
+test full_rebuild_requalifies_source_and_every_group_without_changing_history ... ok
+test independent_rebuild_verifier_rejects_false_composition_and_input_claims ... ok
+test later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work ... ok
+test rebuild_retry_identity_includes_base_and_self_base_refuses_before_admission ... ok
+test reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names ... ok
+test rebuild_resumes_source_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.85s
+
+     Running tests/rebuild_completion.rs (target/debug/deps/rebuild_completion-e2c166ebcfc744bd)
+
+running 5 tests
+test abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.92s
+
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 9 tests
+test failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+test relocated_retry_preserves_original_request_and_readback ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.63s
+
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+
+thread 'incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests' (31533326) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test related_refresh`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6` (signal: 6, SIGABRT: process abort signal)
+Traceback (most recent call last):
+  File "<stdin>", line 14, in <module>
+  File "<stdin>", line 6, in run
+  File "/Users/mikewolfd/.pyenv/versions/3.12.9/lib/python3.12/subprocess.py", line 573, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['cargo', 'test', '--locked', '--all-features', '--test', 'dependency_correction_transport', '--test', 'dependency_corrections', '--test', 'evidence_updates', '--test', 'exports', '--test', 'grant_retirement_transport', '--test', 'http_read', '--test', 'input_generations', '--test', 'lifecycle', '--test', 'operation_retirement', '--test', 'operation_retirement_transport', '--test', 'phase_dependencies', '--test', 'phase_retirement', '--test', 'phase_retirement_transport', '--test', 'physical_removal_process', '--test', 'physical_removal_transport', '--test', 'rebuild', '--test', 'rebuild_completion', '--test', 'refresh', '--test', 'related_refresh', '--test', 'restore', '--test', 'restore_catalog', '--test', 'retention_inspection', '--test', 'scalar_bindings', '--test', 'schema', '--test', 'succession', '--test', 'updates', '--test', 'worker_initialization']' returned non-zero exit status 101.

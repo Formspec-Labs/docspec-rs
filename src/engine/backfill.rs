@@ -5,7 +5,9 @@ use super::*;
 use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
-mod expressions;
+#[cfg(all(test, feature = "test-util"))]
+mod correction_tests;
+pub(in crate::engine) mod expressions;
 pub(in crate::engine) mod origins;
 mod preparation;
 #[cfg(all(test, feature = "test-util"))]
@@ -18,7 +20,7 @@ pub(super) use verification::{verify_binding_dependencies, verify_groups};
 // Batches acknowledgments without retaining payloads or creating one lifecycle
 // transaction per row/file. A crash may repeat only the unacknowledged bundle.
 const COMPLETION_BUNDLE: usize = 16;
-const PROCESSOR: &str = "docspec.scalar-backfill.v2";
+pub(in crate::engine) const PROCESSOR: &str = "docspec.scalar-backfill.v2";
 
 pub(super) struct PreparedGroup {
     pub origins: Option<ObjectRef>,
@@ -114,7 +116,7 @@ pub(super) fn validate(spec: &BackfillSpec) -> Result<()> {
     validate_definition(&spec.group_definition())
 }
 
-fn validate_definition(spec: &GroupDefinition) -> Result<()> {
+pub(in crate::engine) fn validate_definition(spec: &GroupDefinition) -> Result<()> {
     let ids: BTreeSet<_> = spec.fields.iter().map(|field| field.id).collect();
     let names: BTreeSet<_> = spec
         .fields
@@ -331,7 +333,6 @@ impl Engine {
             failures: BTreeMap::new(),
             promotion_refusal: None,
         };
-        let mut retained_target = false;
         let operation = old.clone().unwrap_or(Operation {
             request_digest: request,
             eligibility,
@@ -359,18 +360,19 @@ impl Engine {
                 base_manifest: base.manifest.clone(),
                 related: base.dataset.related.clone(),
             });
-        if old.is_some() {
-            retained_target = self
-                .retained_backfill_readback(
-                    spec,
-                    &operation,
-                    &capture,
-                    &base,
-                    &mut super::verification::Checks::composition(),
-                )
-                .await?
-                .is_some();
-        }
+        let retained_readback = if old.is_some() {
+            self.retained_backfill_readback(
+                spec,
+                &operation,
+                &capture,
+                &base,
+                &mut super::verification::Checks::composition(),
+            )
+            .await?
+        } else {
+            None
+        };
+        let retained_target = retained_readback.is_some();
         plan.promotion_refusal =
             check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
                 .and_then(|()| {
@@ -395,6 +397,22 @@ impl Engine {
                 .await
                 .err()
                 .map(|error| error.code().to_owned());
+        }
+        if plan.promotion_refusal.is_none() {
+            plan.promotion_refusal = if let Some(readback) = &retained_readback {
+                self.guard_corrections(&view, &readback.dataset, None)
+                    .await
+                    .err()
+                    .map(|error| error.code().to_owned())
+            } else if self
+                .requirements(&view, &spec.group_definition())
+                .await?
+                .is_some()
+            {
+                Some("correction_required".into())
+            } else {
+                None
+            };
         }
         let objects = source_objects(&base.dataset.groups["source"]);
         let mut files_completed = 0;
@@ -620,6 +638,11 @@ impl Engine {
         let mut retained_readback = self
             .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
             .await?;
+        if let Some(readback) = &retained_readback {
+            let view = lifecycle.open(&spec.dataset).await?;
+            self.guard_corrections(&view, &readback.dataset, None)
+                .await?;
+        }
         let (prepared, binding, prepared_protections) = if let Some(readback) = &retained_readback {
             (
                 readback
@@ -670,6 +693,7 @@ impl Engine {
             .await?;
             let binding = ComputedGroup {
                 origins: prepared.origins,
+                qualification: None,
                 definition,
                 input_fields: prepared.input_fields,
                 request: request.clone(),
@@ -734,6 +758,17 @@ impl Engine {
                 .computed
                 .insert(spec.group.to_string(), binding.clone());
             check_names(&dataset)?;
+            Box::pin(self.qualify_corrections(
+                &request,
+                &operation,
+                &mut dataset,
+                &mut readback_protections,
+                &mut checks,
+            ))
+            .await?;
+            if let Some(readback) = &retained_readback {
+                check_retained_target(&readback.dataset, &dataset, spec.group.as_str())?;
+            }
             verify_groups(&dataset, &lifecycle.budget, &mut checks).await?;
             super::evidence::verify(&dataset, &lifecycle.budget, &mut checks).await?;
             let serialized = serde_json::to_vec_pretty(&dataset)?;
@@ -807,6 +842,11 @@ impl Engine {
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
                 self.check_completion(&view, &operation, &spec.operation)
+                    .await?;
+                // Other workers or a prior loop iteration may already have
+                // retained this operation's target. Check in the commit view so
+                // a late correction cannot silently change that target.
+                self.check_backfill_target(&view, spec, &release.dataset)
                     .await?;
                 if let Some(value) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
                     Retained {
@@ -961,6 +1001,32 @@ impl Engine {
             Ok(None)
         }
     }
+
+    async fn check_backfill_target(
+        &self,
+        view: &View,
+        spec: &BackfillSpec,
+        candidate: &DatasetPin,
+    ) -> Result<()> {
+        let lifecycle = &self.inner.lifecycle;
+        let rows = lifecycle.rows(view).await?;
+        let prefix = format!("backfill-readback/{}/", spec.operation);
+        for (key, _, json) in rows.prefix(&prefix) {
+            let _memory = rows.reserve_decoded(&lifecycle.budget, &[key])?;
+            let retained: ReleasePin = serde_json::from_str(json)?;
+            check_retained_target(&retained.dataset, candidate, spec.group.as_str())?;
+        }
+        Ok(())
+    }
+}
+
+fn check_retained_target(retained: &DatasetPin, candidate: &DatasetPin, group: &str) -> Result<()> {
+    if retained.groups.get(group) != candidate.groups.get(group)
+        || retained.computed.get(group) != candidate.computed.get(group)
+    {
+        return Err(super::corrections::required());
+    }
+    Ok(())
 }
 
 fn promotion(

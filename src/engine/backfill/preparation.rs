@@ -166,6 +166,8 @@ impl Engine {
                             .await?
                             .map(Arc::new),
                     };
+                    #[cfg(feature = "test-util")]
+                    self.scalar_file_reused(request).await;
                     if let Err(error) = assembly
                         .append(
                             vec![retained],
@@ -186,6 +188,23 @@ impl Engine {
                         return Err(error);
                     }
                     continue;
+                }
+                // A new execution of the same deficient definition cannot create
+                // a qualifying historical baseline after its omission is known.
+                let correction_view = lifecycle.open(request.dataset()).await?;
+                if self
+                    .requirements(&correction_view, definition)
+                    .await?
+                    .is_some()
+                {
+                    self.acknowledge_files(
+                        request,
+                        operation,
+                        &mut completions,
+                        source_protections,
+                    )
+                    .await?;
+                    return Err(super::super::corrections::mismatch());
                 }
                 let result = self
                     .compute_file(
@@ -343,6 +362,15 @@ impl Engine {
                 &lifecycle.budget,
             )
             .await?;
+        let correction_view = lifecycle.open(request.dataset()).await?;
+        self.check_prepared_correction(
+            &correction_view,
+            origins.as_ref(),
+            source,
+            definition,
+            checks,
+        )
+        .await?;
         stop_after(stop, "processing")?;
         let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
         let view = lifecycle.open(request.dataset()).await?;

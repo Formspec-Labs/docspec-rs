@@ -5,8 +5,8 @@
 The full [implementation plan](PLAN.md) remains **incomplete**. Local processing,
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
-specific limits. Remaining delivery includes [scoped dependency correction](dependency-corrections.md) and
-continuous-ingestion cutover; change-history composition; remaining protection
+specific limits. Remaining delivery includes broader dependency correction beyond
+the local scalar case and continuous-ingestion cutover; change-history composition; remaining protection
 lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and the remaining
 Q1–Q8 and update/backfill/recovery performance qualification. The defined full
@@ -18,6 +18,83 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## Dependency efficiency audit
+
+The [package audit](dependency-efficiency-audit-2026-10-10.md) covers direct Rust
+and Python dependencies, enabled Rust features and material transitive APIs.
+It supports keeping the current stack. The next reader improvement is to pass
+requested columns into Iceberg before decoding; the
+[reviewed design](reviews/native-column-selection-design-review.md) preserves
+stable field IDs, defaults, output order and occurrence identities.
+
+Further candidates reuse immutable metadata and captured inventories, avoid a
+large-input cardinality scan when the constrained side has unique keys, and use
+maintained BLAKE3/Serde APIs for hash-only work. Native row-group layout needs
+separate reader-memory qualification. These are researched opportunities, not
+implemented changes or measured speedups. Each has a bounded verification step;
+the audit does not justify additional concurrency, caches or blanket upgrades.
+
+## Scoped scalar dependency correction
+
+The local engine now records omitted source-field requirements for one exact
+scalar group definition. Corrections preserve original execution records,
+selected output and unrelated reuse eligibility. CLI and HTTP use the same
+service; identical retries reconcile, including a lost native commit response.
+
+Eligible retained outputs can acquire a small inline qualification without
+rewriting values. Qualification compares the same immutable source files and
+stable primitive field interpretations with the original executions. Missing
+history and changed context refuse distinctly. New executions of a known
+deficient definition cannot manufacture a qualifying baseline. Final dataset
+selection checks all included computed groups in its guarded lifecycle view;
+new exports check only the group they consume. Completed replay and ordinary
+historical reads preserve their original meaning.
+
+A retained readback keeps its target binding. If a correction requires new
+qualification, the caller uses a new operation ID and reuses eligible outputs.
+Independent review found and resolved a race between the initial reuse check
+and readback acknowledgment: the commit now compares the target with existing
+readbacks in that same locked view. Qualification also reuses compact captured
+source-file facts, avoiding a repeated native inventory read for the same
+metadata. Both caches preserve caller-specific object checks. No throughput or
+memory improvement is claimed without a controlled measurement.
+
+The shared protection inventory follows inline and recovery qualifications to
+original execution evidence and exact source snapshots. Qualification recovery
+can retire without retiring correction authority or weakening selected results.
+The [design and limits](dependency-corrections.md),
+[record review](reviews/dependency-correction-records-review.md),
+[proof design review](reviews/dependency-correction-proof-design.md) and
+[adoption review](reviews/dependency-correction-adoption-review.md) retain the
+reasoning. The [complete repository gate](reviews/dependency-correction-full-check-2.log)
+passes formatting, strict Clippy and all-feature tests with normal stack limits.
+The fixtures cover actual file-cache reuse during a correction, CLI/HTTP retries,
+export interruption, and selected qualification through retirement and restore.
+
+The [first gate](reviews/dependency-correction-full-check-1.log) caught an incorrect
+test-array downcast, corrected without changing production behavior. The
+[continuation](reviews/dependency-correction-check-continuation.log) then exposed
+stack pressure while planning an incremental join. The
+[retained trace](reviews/dependency-correction-stack-backtrace-full.log) and
+[focused passing check](reviews/dependency-correction-stack-boxed.log) support
+boxing the new qualification futures, following existing preparation calls.
+The adoption review covers that fix and the empty-group return, which avoids a
+correction lookup when the dataset has no computed groups. No stack or resource
+limit was raised.
+
+The independent [retention review](reviews/dependency-correction-retention-review.md)
+approves with a coverage warning: standalone qualification has not been isolated
+as the only remaining root after overlapping scalar records disappear or are
+replaced. Its original-owner lookup path also needs that focused qualification
+in the remaining retention work. The selected-result restore fixture does not
+establish those isolated cases.
+
+This first case does not qualify correspondence across rewritten source files,
+nested omitted fields, arbitrary classifier correctness or remote execution.
+It uses original acknowledgment revisions as a conservative pre-correction
+cutoff, rather than inferring when computation began. Broader Q1–Q8 and performance
+qualification remain open; the full-data acceptance benchmark was not repeated.
 
 ## Original scalar execution metadata
 
@@ -58,9 +135,9 @@ grants after phase replacement, validation-only retention and restore without
 old file/prepared/validation roots. No full-data performance run was repeated.
 
 This completes the retained-originals prerequisite for
-[scoped dependency correction](dependency-corrections.md). The correction service,
-supplemental field evaluator, adoption guards and Q4 qualification remain
-unfinished.
+[scoped dependency correction](dependency-corrections.md). The subsequent
+[correction checkpoint](#scoped-scalar-dependency-correction) records the service,
+supplemental evaluator, adoption guards and local qualification.
 
 ## Canonical scalar file completions
 
@@ -83,8 +160,8 @@ distinct nonempty protection scopes; no performance improvement was measured.
 
 This is a prerequisite for [scoped dependency correction](dependency-corrections.md).
 Original execution descriptors and their retention integration are now covered
-by the checkpoint above; the correction service and Q4 qualification remain
-unfinished. The
+by the checkpoint above; the [correction checkpoint](#scoped-scalar-dependency-correction)
+records later service and Q4 work. The
 [retention seam review](reviews/scalar-origins-retention-seams.md) maps the next
 changes onto the existing protection inventory.
 
@@ -1360,7 +1437,7 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies and Q4 discovered-dependency correction; continuous-ingestion catch-up and cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; continuous-ingestion catch-up and cutover |
 | R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes | Change-history composition, lineage certificates and explicit unavailable-history fallback |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |

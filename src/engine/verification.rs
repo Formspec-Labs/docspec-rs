@@ -41,6 +41,36 @@ impl Checks {
         self.inspect_tables = false;
     }
 
+    /// Validates only immutable supplemental evidence, never current corrections.
+    pub async fn scalar_qualification(
+        &mut self,
+        binding: &ComputedGroup,
+        source: &TablePin,
+        group: &TablePin,
+        budget: &Budget,
+    ) -> Result<()> {
+        if let Some(proof) = &binding.qualification {
+            self.scalar_originals
+                .get_or_insert_with(Default::default)
+                .qualification(proof, binding, source, group, budget)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Shares supplemental metadata checks performed before prepared-value validation.
+    pub async fn scalar_correspondence(
+        &mut self,
+        proof: &DependencyQualification,
+        source: &TablePin,
+        budget: &Budget,
+    ) -> Result<()> {
+        self.scalar_originals
+            .get_or_insert_with(Default::default)
+            .correspondence(proof, source, budget)
+            .await
+    }
+
     /// Shares canonical file descriptors between assembly and metadata qualification.
     pub async fn scalar_file(
         &mut self,

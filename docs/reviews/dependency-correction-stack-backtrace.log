@@ -1,0 +1,85 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) settings set -- target.run-args  "incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests" "--exact" "--nocapture"
+(lldb) settings set target.process.stop-on-sharedlibrary-events false
+(lldb) run
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFzr6nH/workspace/objects/comments/1b741aeef00f487a88c74abfc518d30e/data/7a68ca44-1039-44c1-b903-2dd0d5280853-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFzr6nH/workspace/objects/dockets/b79a0a0c4ac440118eb8f5049995fab5/data/326a45ff-6ce5-418c-a93c-9bd18e7e8761-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFzr6nH/workspace/objects/joined/0f137390b10847b19f84923ec8073397/data/e9683d72-5cd2-4933-bc04-1456b2b2b16c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFzr6nH/workspace/objects/joined/08c9e08a97834d049c87cad534f0b6e0/data/bc977006-ccca-463e-9f93-33880dcab361-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFzr6nH/workspace/objects/dockets/12de19e7c4a546769dd236746ee3a7bb/data/data/57d694d0-ab21-4951-9348-cff8432e4f77-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 8893 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 8893 stopped
+* thread #2, name = 'incremental::incremental_phase_reuse_fences_rebased_outputs_and', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03b40)
+    frame #0: 0x0000000104968cb4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c + 36
+related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c:
+->  0x104968cb4 <+36>: str    xzr, [sp]
+    0x104968cb8 <+40>: sub    x9, x29, #0x20
+    0x104968cbc <+44>: str    x9, [sp, #0x568]
+    0x104968cc0 <+48>: add    x9, sp, #0xc, lsl #12     ; =0xc000 
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.
+(lldb) thread backtrace -c 35
+* thread #2, name = 'incremental::incremental_phase_reuse_fences_rebased_outputs_and', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03b40)
+  * frame #0: 0x0000000104968cb4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c + 36
+    frame #1: 0x00000001048c4f20 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::h4a95d5780147dbd6 + 52
+    frame #2: 0x000000010499a0f4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::h70fe648a565d0172 + 60
+    frame #3: 0x00000001048c31cc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 1428
+    frame #4: 0x00000001048d17dc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #5: 0x0000000104902140 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::_$u7b$$u7b$closure$u7d$$u7d$::h364fc05f32d272b8 + 80
+    frame #6: 0x000000010499b154 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::he8f3ae1bc2c98981 + 56
+    frame #7: 0x00000001048ace7c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h0c845ba6572b9080 + 40
+    frame #8: 0x00000001049013a0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::h40693becc326e5d7 + 572
+    frame #9: 0x00000001048d1a04 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 816
+    frame #10: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #11: 0x00000001048b4630 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 13452
+    frame #12: 0x00000001048d1eec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #13: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #14: 0x0000000104adb050 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hc135016bc223f1f8 + 24
+    frame #15: 0x00000001049810d8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::hae348042fb8246f6 + 96
+    frame #16: 0x0000000104916a44 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated::h81bfc7e7d6e16b31 + 20
+    frame #17: 0x00000001048c54d8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hd3ff2ec3b61f8255 + 16
+    frame #18: 0x00000001048ac550 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::with_state::h3b588a3db529ddbe + 44
+    frame #19: 0x00000001048c3c98 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 4192
+    frame #20: 0x00000001048d17dc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #21: 0x00000001048b38e8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 10052
+    frame #22: 0x00000001048d1eec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #23: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #24: 0x000000010491bc44 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_join_constraint::hf8b926000aafbaa5 + 132
+    frame #25: 0x00000001048b78d4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_joins::hb00ccc5199936bba + 2996
+    frame #26: 0x000000010491e92c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_and_joins::h07086e6e26d9498b + 192
+    frame #27: 0x0000000104adafe4 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hb1c44cf9b20ffe60 + 24
+    frame #28: 0x000000010497fcb0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::h9dca7c8cde5fcf72 + 104
+    frame #29: 0x000000010492deec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_with_joins::h9abc692b496f2d50 + 64
+    frame #30: 0x00000001048c744c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_select::h5961a7f0220e9894 + 5276
+    frame #31: 0x00000001048df05c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query_body::hee12bf7aac49c476 + 104
+    frame #32: 0x00000001048b9268 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::_$u7b$$u7b$closure$u7d$$u7d$::h645a63b12e5bf522 + 1068
+    frame #33: 0x00000001048b8e18 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::h1268472b367ce16d + 200
+    frame #34: 0x00000001048da8a4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_statement::h86503e952b8f30a8 + 4204

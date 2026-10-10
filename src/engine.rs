@@ -28,6 +28,7 @@ mod backfill;
 pub use backfill::{BackfillPlan, read_combined};
 mod changes;
 mod compaction;
+mod corrections;
 mod evidence;
 mod export;
 #[doc(inline)]
@@ -71,6 +72,17 @@ struct Inner {
     maintenance: Arc<RwLock<()>>,
     closing: AtomicBool,
     owned_catalog: bool,
+    #[cfg(feature = "test-util")]
+    scalar_reuse_pause: Mutex<Option<ScalarReusePause>>,
+}
+
+#[cfg(feature = "test-util")]
+#[derive(Debug)]
+struct ScalarReusePause {
+    dataset: Id,
+    operation: Id,
+    reached: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
 }
 
 // A retained value and its protection always come from the same native view.
@@ -228,6 +240,8 @@ impl Engine {
                 maintenance: Arc::new(RwLock::new(())),
                 closing: AtomicBool::new(false),
                 owned_catalog,
+                #[cfg(feature = "test-util")]
+                scalar_reuse_pause: Mutex::new(None),
             }),
         })
     }
@@ -244,6 +258,48 @@ impl Engine {
 
     fn context(&self) -> SessionContext {
         self.inner.lifecycle.budget.context()
+    }
+
+    /// Pauses the next actual scalar file reuse for this operation in tests.
+    ///
+    /// The first channel signals the hit; sending or dropping the second resumes
+    /// work. Installing a pause replaces any unused pause on this engine.
+    #[cfg(feature = "test-util")]
+    pub async fn pause_scalar_file_reuse(
+        &self,
+        dataset: Id,
+        operation: Id,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (reached, receiver) = tokio::sync::oneshot::channel();
+        let (sender, release) = tokio::sync::oneshot::channel();
+        *self.inner.scalar_reuse_pause.lock().await = Some(ScalarReusePause {
+            dataset,
+            operation,
+            reached,
+            release,
+        });
+        (receiver, sender)
+    }
+
+    #[cfg(feature = "test-util")]
+    async fn scalar_file_reused(&self, request: &OperationRequest) {
+        let pause = {
+            let mut pending = self.inner.scalar_reuse_pause.lock().await;
+            if pending.as_ref().is_some_and(|pause| {
+                &pause.dataset == request.dataset() && &pause.operation == request.operation()
+            }) {
+                pending.take()
+            } else {
+                None
+            }
+        };
+        if let Some(pause) = pause {
+            let _ = pause.reached.send(());
+            let _ = pause.release.await;
+        }
     }
 
     /// Explains retained phases without opening large input payloads.
@@ -1534,6 +1590,7 @@ impl Engine {
                     computed.insert(
                         name.clone(),
                         ComputedGroup {
+                            qualification: None,
                             origins: prepared.origins,
                             definition: previous.definition.clone(),
                             input_fields: prepared.input_fields,
@@ -1595,7 +1652,7 @@ impl Engine {
                 }
             }
             stop_after(stop, "groups")?;
-            let dataset = DatasetPin {
+            let mut dataset = DatasetPin {
                 format: operation.result_format,
                 dataset: spec.dataset().clone(),
                 version: spec.operation().clone(),
@@ -1619,6 +1676,14 @@ impl Engine {
                 validation: VerificationLevel::Routine,
             };
             checks.compose();
+            Box::pin(self.qualify_corrections(
+                &captured_request,
+                &operation,
+                &mut dataset,
+                &mut readback_protections,
+                &mut checks,
+            ))
+            .await?;
             backfill::verify_groups(&dataset, &lifecycle.budget, &mut checks).await?;
             evidence::verify(&dataset, &lifecycle.budget, &mut checks).await?;
             // Readback has an operation-specific manifest because coverage can advance

@@ -22,6 +22,12 @@ struct CheckedGroup {
     dependencies: String,
 }
 
+#[derive(Debug, Serialize)]
+struct SourceFile {
+    bytes: u64,
+    rows: u64,
+}
+
 /// Parsed and qualified immutable facts shared across one operation's checks.
 #[derive(Default)]
 pub(in crate::engine) struct Checks {
@@ -29,16 +35,134 @@ pub(in crate::engine) struct Checks {
     originals: BTreeMap<String, Arc<ScalarOrigins>>,
     declarations: BTreeMap<String, Arc<OriginalDeclaration>>,
     schemas: BTreeMap<String, Arc<TableMetadata>>,
+    source_files: BTreeMap<String, Arc<BTreeMap<String, SourceFile>>>,
     compiled: BTreeMap<(String, String), Arc<Compiled>>,
     associations: BTreeMap<(String, String), Arc<Compiled>>,
     files: BTreeMap<String, CheckedFile>,
     verified: BTreeMap<String, CheckedGroup>,
+    qualified: BTreeSet<String>,
     bytes: usize,
     // Each parsing worker also holds its permit if the caller is canceled.
     memory: Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 impl Checks {
+    /// Checks supplemental fields using the same admitted original metadata cache.
+    pub(in crate::engine) async fn qualification(
+        &mut self,
+        proof: &DependencyQualification,
+        binding: &ComputedGroup,
+        source: &TablePin,
+        group: &TablePin,
+        budget: &Budget,
+    ) -> Result<()> {
+        crate::engine::corrections::check_association(proof, binding, source)?;
+        self.check(
+            &proof.origins,
+            source,
+            group,
+            &binding.definition,
+            &binding.input_fields,
+            &binding.native_field_ids,
+            budget,
+        )
+        .await?;
+        self.correspondence(proof, source, budget).await
+    }
+
+    pub(in crate::engine) async fn correspondence(
+        &mut self,
+        proof: &DependencyQualification,
+        source: &TablePin,
+        budget: &Budget,
+    ) -> Result<()> {
+        crate::engine::corrections::validate_qualification(proof)?;
+        if proof.target != source.into() {
+            return Err(invalid_group());
+        }
+        let key = crate::engine::corrections::qualification_key(proof)?;
+        let originals = self.original(&proof.origins, budget).await?;
+        // No file generations means there is no retained pre-correction context
+        // from which to establish these previously undeclared requirements.
+        if originals.files.is_empty() {
+            return Err(crate::engine::corrections::unknown());
+        }
+        // A cached immutable proof never qualifies a different caller's object
+        // list, including a target whose schema metadata differs from the originals.
+        let objects = source_objects(source);
+        if objects.len() != source.objects.len()
+            || originals.files.iter().any(|original| {
+                objects.get(original.completion.source.path.as_str())
+                    != Some(&&original.completion.source)
+            })
+        {
+            return Err(crate::engine::corrections::mismatch());
+        }
+        if self.qualified.contains(&key) {
+            return Ok(());
+        }
+        let target = self.table(&proof.target, budget).await?;
+        let files = self.source_files(&target, budget).await?;
+        let mut remaining = files
+            .iter()
+            .map(|(path, file)| (path.as_str(), file))
+            .collect::<BTreeMap<_, _>>();
+        for original in &originals.files {
+            let file = &original.completion;
+            let selected = remaining
+                .remove(file.source.path.as_str())
+                .ok_or_else(crate::engine::corrections::mismatch)?;
+            if selected.bytes != file.source.bytes || selected.rows != file.rows {
+                return Err(crate::engine::corrections::mismatch());
+            }
+            self.correction_file(original, target.metadata().current_schema(), proof, budget)
+                .await?;
+        }
+        if !remaining.is_empty() {
+            return Err(crate::engine::corrections::mismatch());
+        }
+        self.admit(key.len() as u64, budget)?;
+        self.qualified.insert(key);
+        Ok(())
+    }
+
+    async fn correction_file(
+        &mut self,
+        original: &FileOrigin,
+        target: &Schema,
+        proof: &DependencyQualification,
+        budget: &Budget,
+    ) -> Result<()> {
+        use crate::engine::corrections::{mismatch, unknown};
+        if original.generation.revision <= 0 || original.generation.revision >= proof.first_revision
+        {
+            return Err(mismatch());
+        }
+        let execution = original.completion.execution.as_ref().ok_or_else(unknown)?;
+        let declaration = self.declaration(&execution.declaration, budget).await?;
+        if declaration.processor != PROCESSOR {
+            return Err(unknown());
+        }
+        let metadata = original
+            .completion
+            .source_metadata
+            .as_ref()
+            .ok_or_else(unknown)?;
+        let metadata = self.metadata(metadata, budget).await?;
+        for id in &proof.fields {
+            let old = expressions::field_interpretation(metadata.current_schema(), *id, true)
+                .map_err(|_| unknown())?;
+            let current =
+                expressions::field_interpretation(target, *id, true).map_err(|_| mismatch())?;
+            if !matches!(old.field_type.as_ref(), iceberg::spec::Type::Primitive(_))
+                || old != current
+            {
+                return Err(mismatch());
+            }
+        }
+        Ok(())
+    }
+
     fn identity(&mut self, object: &ObjectRef) -> Result<()> {
         match self.identities.get(&object.path) {
             Some(previous) if previous != object => Err(invalid_group()),
@@ -128,6 +252,41 @@ impl Checks {
             .runtime(iceberg::Runtime::try_current()?)
             .readonly(true)
             .build()?)
+    }
+
+    async fn source_files(
+        &mut self,
+        table: &Table,
+        budget: &Budget,
+    ) -> Result<Arc<BTreeMap<String, SourceFile>>> {
+        // Callers first resolve the immutable identity and snapshot/schema through
+        // self.table. The cache retains only facts these scalar checks consume.
+        let key = table.metadata_location_result()?;
+        if let Some(files) = self.source_files.get(key) {
+            return Ok(files.clone());
+        }
+        let inventory = storage::snapshot_files(table, budget).await?;
+        let files = inventory
+            .data
+            .iter()
+            .map(|file| {
+                (
+                    file.file_path().to_owned(),
+                    SourceFile {
+                        bytes: file.file_size_in_bytes(),
+                        rows: file.record_count(),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        if files.len() != inventory.data.len() {
+            return Err(invalid_group());
+        }
+        let size = inputs::metadata_size(&(&key, &files), budget.limits.max_metadata_bytes)?;
+        self.admit(size as u64, budget)?;
+        let files = Arc::new(files);
+        self.source_files.insert(key.to_owned(), files.clone());
+        Ok(files)
     }
 
     async fn compile(
@@ -332,7 +491,7 @@ impl Checks {
         {
             return Err(invalid_group());
         }
-        let source_files = storage::snapshot_files(&captured, budget).await?;
+        let source_files = self.source_files(&captured, budget).await?;
         let output_files = storage::snapshot_files(&output, budget).await?;
         if objects.get(group.metadata.path.as_str()) != Some(&&group.metadata)
             || objects.len() != output_files.paths.len()
@@ -344,16 +503,15 @@ impl Checks {
             return Err(invalid_group());
         }
         let mut sources: BTreeMap<_, _> = source_files
-            .data
             .iter()
-            .map(|file| (file.file_path(), file))
+            .map(|(path, file)| (path.as_str(), file))
             .collect();
         let mut outputs: BTreeMap<_, _> = output_files
             .data
             .iter()
             .map(|file| (file.file_path(), file))
             .collect();
-        if sources.len() != source_files.data.len() || outputs.len() != output_files.data.len() {
+        if outputs.len() != output_files.data.len() {
             return Err(invalid_group());
         }
         let mut rows = 0u64;
@@ -364,8 +522,8 @@ impl Checks {
             let captured_file = sources
                 .remove(file.source.path.as_str())
                 .ok_or_else(invalid_group)?;
-            if file.source.bytes != captured_file.file_size_in_bytes()
-                || file.rows != captured_file.record_count()
+            if file.source.bytes != captured_file.bytes
+                || file.rows != captured_file.rows
                 || !generations.insert(original.generation.key.as_str())
                 || original.generation.revision <= 0
             {
@@ -522,6 +680,16 @@ mod tests {
             )
             .await
             .unwrap();
+        let source_reference: NativeSnapshotRef = (&source).into();
+        let cached_inventory = checks.source_files[&source.metadata.path].clone();
+        let admitted = checks.bytes;
+        let source_table = checks.table(&source_reference, budget).await.unwrap();
+        let reused_inventory = checks.source_files(&source_table, budget).await.unwrap();
+        assert!(Arc::ptr_eq(&cached_inventory, &reused_inventory));
+        assert_eq!(
+            checks.bytes, admitted,
+            "source facts are admitted once per request"
+        );
         let mut changed: serde_json::Value = serde_json::to_value(native.metadata()).unwrap();
         let schema = changed["schemas"]
             .as_array_mut()

@@ -8,10 +8,10 @@ use crate::{
     evidence::EvidenceSpec,
     export::{ExportPin, ExportSpec},
     model::{
-        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, GenerationSeal, Id,
-        InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan, RemovalStatus,
-        RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec, SuccessionProof,
-        UpdateSpec, VersionRef,
+        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, CorrectionDecision,
+        DependencyCorrection, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
+        ReleasePin, RemovalPlan, RemovalStatus, RetentionInspection, RetentionPlan, Retirement,
+        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
     },
     restore::RestorePointRef,
 };
@@ -48,6 +48,7 @@ pub fn router(engine: Engine) -> Router {
         .route("/succession", post(succession))
         .route("/generations/seal", post(seal_generation))
         .route("/inputs/capture", post(capture_inputs))
+        .route("/dependencies/corrections", post(correct_dependencies))
         .route("/retention/inspect", post(inspect_retention))
         .route("/retention/removal/plan", post(plan_removal))
         .route("/retention/removal/execute", post(remove_objects))
@@ -334,6 +335,10 @@ impl IntoResponse for HttpError {
             "no_release" | "no_export" | "no_operation" | "no_phase" | "no_removal"
             | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
             "operation_conflict"
+            | "correction_conflict"
+            | "correction_required"
+            | "correction_mismatch"
+            | "correction_unknown"
             | "selected_result"
             | "operation_active"
             | "operation_completed"
@@ -384,6 +389,12 @@ async fn capture_inputs(
     Json(inputs): Json<std::collections::BTreeMap<Id, VersionRef>>,
 ) -> Result<Json<InputCoverage>, HttpError> {
     Ok(Json(engine.capture_inputs(&inputs).await?))
+}
+async fn correct_dependencies(
+    State(engine): State<Engine>,
+    Json(correction): Json<DependencyCorrection>,
+) -> Result<Json<CorrectionDecision>, HttpError> {
+    Ok(Json(engine.correct_dependencies(&correction).await?))
 }
 async fn plan(
     State(engine): State<Engine>,
@@ -650,4 +661,28 @@ async fn read(
         Body::from_stream(stream),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn correction_refusals_preserve_codes_and_return_conflict() {
+        for code in [
+            "correction_conflict",
+            "correction_required",
+            "correction_mismatch",
+            "correction_unknown",
+        ] {
+            let response =
+                HttpError(Error::refusal(code, "correction needs review")).into_response();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            let refusal: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(refusal["code"], code);
+        }
+    }
 }

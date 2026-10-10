@@ -31,6 +31,7 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
             .any(|suffix| key.ends_with(suffix)))
         || key.starts_with("backfill-prepared/")
         || key.starts_with("backfill-validation/")
+        || key.starts_with("dependency-qualification/")
         || key.starts_with("groups/")
 }
 

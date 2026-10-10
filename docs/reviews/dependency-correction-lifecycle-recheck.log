@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 3.82s
+     Running tests/dependency_correction_lifecycle.rs (target/debug/deps/dependency_correction_lifecycle-e7da6dc54f245454)
+
+running 3 tests
+test correction_after_export_validation_blocks_selection_and_keeps_completed_output ... ok
+test corrected_computed_export_admission_preserves_completed_replay_and_source_exports ... ok
+test qualified_inherited_group_restores_original_evidence_after_recovery_retirement ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.59s
+

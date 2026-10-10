@@ -135,17 +135,7 @@ impl Expressions {
         }
         let dependencies = input_fields
             .values()
-            .map(|id| {
-                let field = &native_source.as_struct().fields()[root_index(native_source, *id)?];
-                let mut interpretation = field.as_ref().clone();
-                interpretation.name = String::new();
-                // Future omission policy cannot change this immutable file's values.
-                interpretation.write_default = None;
-                if !observes_metadata {
-                    interpretation.doc = None;
-                }
-                Ok(interpretation)
-            })
+            .map(|id| field_interpretation(native_source, *id, observes_metadata))
             .collect::<Result<Vec<_>>>()?;
         let dependencies = blake3::hash(&serde_json::to_vec(&(
             PROCESSOR,
@@ -221,6 +211,24 @@ impl Expressions {
         }
         Ok(RecordBatch::try_new(self.schema.clone(), columns)?)
     }
+}
+
+/// Normalizes material read interpretation while preserving stable field identity.
+pub(in crate::engine) fn field_interpretation(
+    schema: &iceberg::spec::Schema,
+    id: i32,
+    observes_metadata: bool,
+) -> Result<iceberg::spec::NestedField> {
+    let mut field = schema.as_struct().fields()[root_index(schema, id)?]
+        .as_ref()
+        .clone();
+    field.name.clear();
+    // Future omission policy cannot change this immutable file's values.
+    field.write_default = None;
+    if !observes_metadata {
+        field.doc = None;
+    }
+    Ok(field)
 }
 
 fn root_index(schema: &iceberg::spec::Schema, id: i32) -> Result<usize> {

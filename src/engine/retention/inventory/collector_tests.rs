@@ -283,6 +283,7 @@ async fn closure_collects_history_computation_coverage_seals_and_changes_without
     selected.dataset.computed.insert(
         "computed".into(),
         ComputedGroup {
+            qualification: None,
             origins: None,
             definition: GroupDefinition {
                 group: id("computed"),

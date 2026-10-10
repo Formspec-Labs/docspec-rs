@@ -814,6 +814,30 @@ pub struct GroupDefinition {
     pub fields: Vec<ComputedField>,
 }
 
+/// Records omitted source-field dependencies for one exact scalar definition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyCorrection {
+    pub dataset: Id,
+    /// Stable retry identity; changed content requires a new identifier.
+    pub id: Id,
+    pub definition: GroupDefinition,
+    /// Positive stable source-field IDs, separate from the original SQL bindings.
+    pub fields: std::collections::BTreeSet<i32>,
+    pub reason: String,
+}
+
+/// Immutable acknowledgment of a correction and its actual native commit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorrectionDecision {
+    pub request: DependencyCorrection,
+    /// Exact scalar implementation whose material dependency scope was corrected.
+    pub processor: String,
+    /// Native lifecycle revision that atomically retained this decision and requirements.
+    pub revision: i64,
+}
+
 impl BackfillSpec {
     /// Returns the material definition reused across source refreshes.
     pub fn group_definition(&self) -> GroupDefinition {
@@ -831,6 +855,9 @@ pub struct ComputedGroup {
     /// Immutable original file executions; absence means unknown historical origins.
     #[serde(default)]
     pub origins: Option<ObjectRef>,
+    /// Immutable supplemental correspondence; original SQL bindings stay unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualification: Option<Box<DependencyQualification>>,
     pub definition: GroupDefinition,
     /// SQL input names bound to root field IDs in this exact source interpretation.
     pub input_fields: BTreeMap<String, i32>,
@@ -839,6 +866,20 @@ pub struct ComputedGroup {
     pub native_field_ids: BTreeMap<i32, i32>,
     pub source_metadata: ObjectRef,
     pub base_manifest: ObjectRef,
+}
+
+/// Retained correspondence between original execution context and selected source fields.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyQualification {
+    pub checker: String,
+    /// Digest-addressed scope of the exact scalar processor and group definition.
+    pub scope: String,
+    pub fields: std::collections::BTreeSet<i32>,
+    /// Original file acknowledgments must precede this dataset lifecycle revision.
+    pub first_revision: i64,
+    pub origins: ObjectRef,
+    pub target: NativeSnapshotRef,
 }
 
 /// A typed request sharing the same recovery and guarded selection path.

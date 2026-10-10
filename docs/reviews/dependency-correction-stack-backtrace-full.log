@@ -1,0 +1,147 @@
+(lldb) target create "target/debug/deps/related_refresh-36f3e2d2ba35a1a6"
+Current executable set to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64).
+(lldb) settings set -- target.run-args  "incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests" "--exact" "--nocapture"
+(lldb) run
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTDEVO5/workspace/objects/comments/8c9409af84f84f4886a722f4aa7cff71/data/339fde9e-a27b-4f5d-bf80-afe9ddce1d1e-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTDEVO5/workspace/objects/dockets/ffdcd4b5e8f9423cb3686aaa60deebc6/data/5f93970e-7e19-49a5-97af-d0ee834b533a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTDEVO5/workspace/objects/joined/808c7f868ddb41849c370a6310bfbbe2/data/d41a23c2-d17c-43b1-b3aa-9dba2c6d9ed0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTDEVO5/workspace/objects/joined/0e7e87916ba34995b5231130c6d1143f/data/9a194df0-7732-459a-a562-67d0579bf446-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTDEVO5/workspace/objects/dockets/969cd4b136fd499c8a151e7ba04008c7/data/data/8e8a2454-379e-447e-88d9-b1c0bdd521ca-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+Process 10802 launched: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6' (arm64)
+Process 10802 stopped
+* thread #2, name = 'incremental::incremental_phase_reuse_fences_rebased_outputs_and', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03b40)
+    frame #0: 0x0000000104968cb4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c + 36
+related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c:
+->  0x104968cb4 <+36>: str    xzr, [sp]
+    0x104968cb8 <+40>: sub    x9, x29, #0x20
+    0x104968cbc <+44>: str    x9, [sp, #0x568]
+    0x104968cc0 <+48>: add    x9, sp, #0xc, lsl #12     ; =0xc000 
+Target 0: (related_refresh-36f3e2d2ba35a1a6) stopped.
+(lldb) thread backtrace -c 100
+* thread #2, name = 'incremental::incremental_phase_reuse_fences_rebased_outputs_and', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fe03b40)
+  * frame #0: 0x0000000104968cb4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr_prefix_by_reserved_word::hd28287294779b88c + 36
+    frame #1: 0x00000001048c4f20 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::h4a95d5780147dbd6 + 52
+    frame #2: 0x000000010499a0f4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::h70fe648a565d0172 + 60
+    frame #3: 0x00000001048c31cc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 1428
+    frame #4: 0x00000001048d17dc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #5: 0x0000000104902140 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::_$u7b$$u7b$closure$u7d$$u7d$::h364fc05f32d272b8 + 80
+    frame #6: 0x000000010499b154 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::try_parse::he8f3ae1bc2c98981 + 56
+    frame #7: 0x00000001048ace7c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::maybe_parse::h0c845ba6572b9080 + 40
+    frame #8: 0x00000001049013a0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_compound_expr::h40693becc326e5d7 + 572
+    frame #9: 0x00000001048d1a04 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 816
+    frame #10: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #11: 0x00000001048b4630 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 13452
+    frame #12: 0x00000001048d1eec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #13: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #14: 0x0000000104adb050 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hc135016bc223f1f8 + 24
+    frame #15: 0x00000001049810d8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::hae348042fb8246f6 + 96
+    frame #16: 0x0000000104916a44 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated::h81bfc7e7d6e16b31 + 20
+    frame #17: 0x00000001048c54d8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::_$u7b$$u7b$closure$u7d$$u7d$::hd3ff2ec3b61f8255 + 16
+    frame #18: 0x00000001048ac550 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::with_state::h3b588a3db529ddbe + 44
+    frame #19: 0x00000001048c3c98 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_prefix::h61873fa0544962b2 + 4192
+    frame #20: 0x00000001048d17dc related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 264
+    frame #21: 0x00000001048b38e8 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_infix::haddfc64d1a9b1333 + 10052
+    frame #22: 0x00000001048d1eec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_subexpr::h6f9cdc3cf5c5a6af + 2072
+    frame #23: 0x00000001048aa750 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_expr::haca106a695b42110 + 56
+    frame #24: 0x000000010491bc44 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_join_constraint::hf8b926000aafbaa5 + 132
+    frame #25: 0x00000001048b78d4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_joins::hb00ccc5199936bba + 2996
+    frame #26: 0x000000010491e92c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_and_joins::h07086e6e26d9498b + 192
+    frame #27: 0x0000000104adafe4 related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnMut::call_mut::hb1c44cf9b20ffe60 + 24
+    frame #28: 0x000000010497fcb0 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_comma_separated_with_trailing_commas::h9dca7c8cde5fcf72 + 104
+    frame #29: 0x000000010492deec related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_table_with_joins::h9abc692b496f2d50 + 64
+    frame #30: 0x00000001048c744c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_select::h5961a7f0220e9894 + 5276
+    frame #31: 0x00000001048df05c related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query_body::hee12bf7aac49c476 + 104
+    frame #32: 0x00000001048b9268 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::_$u7b$$u7b$closure$u7d$$u7d$::h645a63b12e5bf522 + 1068
+    frame #33: 0x00000001048b8e18 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_query::h1268472b367ce16d + 200
+    frame #34: 0x00000001048da8a4 related_refresh-36f3e2d2ba35a1a6`sqlparser::parser::Parser::parse_statement::h86503e952b8f30a8 + 4204
+    frame #35: 0x0000000101be7e60 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_and_handle_statement::h18cb9b30f1f61f14 + 40
+    frame #36: 0x0000000101be5754 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statement::h0fe2bee314f72f03 + 172
+    frame #37: 0x0000000101be6b14 related_refresh-36f3e2d2ba35a1a6`datafusion_sql::parser::DFParser::parse_statements::h052a996030a87e41 + 292
+    frame #38: 0x0000000101a30b00 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::sql_to_statement::h90fa2bea0499a095 + 604
+    frame #39: 0x0000000101a321d4 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::session_state::SessionState::create_logical_plan::_$u7b$$u7b$closure$u7d$$u7d$::h42908669bc3b8376 + 272
+    frame #40: 0x00000001018ed4ec related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql_with_options::_$u7b$$u7b$closure$u7d$$u7d$::h5e19e3eabd5497cd + 452
+    frame #41: 0x00000001018f9190 related_refresh-36f3e2d2ba35a1a6`datafusion::execution::context::SessionContext::sql::_$u7b$$u7b$closure$u7d$$u7d$::hcf8c6cf50f8a3cdf + 448
+    frame #42: 0x0000000100d08570 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_plan::_$u7b$$u7b$closure$u7d$$u7d$::hebf23ca76f0068ba + 1904
+    frame #43: 0x0000000100cfb060 related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::join_registered::_$u7b$$u7b$closure$u7d$$u7d$::h481b32300bb1b527 + 320
+    frame #44: 0x0000000100b72520 related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental_join::_$u7b$$u7b$closure$u7d$$u7d$::h24da57142a7db73c + 17368
+    frame #45: 0x0000000100a1d358 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hda3592962196bd98 + 36
+    frame #46: 0x0000000100b6c1b4 related_refresh-36f3e2d2ba35a1a6`docspec::engine::incremental::_$LT$impl$u20$docspec..engine..Engine$GT$::process_incremental::_$u7b$$u7b$closure$u7d$$u7d$::hbc7e7f6cdc6b9a77 + 7552
+    frame #47: 0x0000000100a1d478 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hf06f6d7114383815 + 36
+    frame #48: 0x0000000100d0350c related_refresh-36f3e2d2ba35a1a6`docspec::engine::refresh::_$LT$impl$u20$docspec..engine..Engine$GT$::process_refresh::_$u7b$$u7b$closure$u7d$$u7d$::hbc5c2ec80c9d8af9 + 1244
+    frame #49: 0x0000000100a1d1c8 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::hc1d7275d06cd4339 + 36
+    frame #50: 0x0000000100c9f318 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_source::_$u7b$$u7b$closure$u7d$$u7d$::h464dde02493f9665 + 22920
+    frame #51: 0x0000000100a1c8e0 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h1a86e51eb70b0301 + 44
+    frame #52: 0x0000000100cadec8 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::prepare_and_select::_$u7b$$u7b$closure$u7d$$u7d$::h4941eeced5b890b2 + 30964
+    frame #53: 0x0000000100a1ccb0 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h737866f7a4232f23 + 44
+    frame #54: 0x0000000100c98444 related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_admitted::_$u7b$$u7b$closure$u7d$$u7d$::hda2585d1b78d9357 + 1404
+    frame #55: 0x0000000100c9974c related_refresh-36f3e2d2ba35a1a6`docspec::engine::Engine::run_internal::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h0b06bc532306b895 + 416
+    frame #56: 0x0000000100dafbec related_refresh-36f3e2d2ba35a1a6`docspec::engine::worker::_$LT$impl$u20$docspec..engine..Engine$GT$::spawn_work::_$u7b$$u7b$closure$u7d$$u7d$::hfc0264f3b88f5501 + 440
+    frame #57: 0x0000000100a1cdd0 related_refresh-36f3e2d2ba35a1a6`_$LT$core..pin..Pin$LT$P$GT$$u20$as$u20$core..future..future..Future$GT$::poll::h886a19fcc63d86b8 + 36
+    frame #58: 0x00000001009e96f4 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::_$u7b$$u7b$closure$u7d$$u7d$::h5cc001f023616f19 + 164
+    frame #59: 0x00000001009db698 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::core::Core$LT$T$C$S$GT$::poll::h51f10d28d9d92424 + 64
+    frame #60: 0x00000001007f5dc4 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::_$u7b$$u7b$closure$u7d$$u7d$::he629d4a0cc45bd0f + 96
+    frame #61: 0x0000000100476918 related_refresh-36f3e2d2ba35a1a6`_$LT$core..panic..unwind_safe..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h9ce49e2e4f8e595a + 52
+    frame #62: 0x0000000100d35b9c related_refresh-36f3e2d2ba35a1a6`std::panicking::catch_unwind::do_call::h91d6e8cca25f1427 + 68
+    frame #63: 0x0000000100af9748 related_refresh-36f3e2d2ba35a1a6`__rust_try + 32
+    frame #64: 0x0000000100acaf64 related_refresh-36f3e2d2ba35a1a6`std::panic::catch_unwind::hc7821406f64c3391 + 120
+    frame #65: 0x00000001007d9c5c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::poll_future::h7abdaf3d6528dd0e + 112
+    frame #66: 0x0000000100800bc0 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll_inner::h64106a60a7e774e4 + 164
+    frame #67: 0x0000000100829648 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::harness::Harness$LT$T$C$S$GT$::poll::h6bb76157a91dc5db + 28
+    frame #68: 0x0000000100e23b24 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::poll::h3dfe67e1011086ce + 16
+    frame #69: 0x0000000104856d10 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::raw::RawTask::poll::h7c27b50b01ddfe51 + 44
+    frame #70: 0x000000010484c3dc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::task::LocalNotified$LT$S$GT$::run::h34a3e7f7e295ea61 + 28
+    frame #71: 0x0000000104845d58 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h84c7f60d7fde3220 + 12
+    frame #72: 0x0000000104845cdc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::_$u7b$$u7b$closure$u7d$$u7d$::h0d3b60cfa95cccb7 + 208
+    frame #73: 0x0000000104845700 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::enter::h3d52629b0772696d + 280
+    frame #74: 0x0000000104845b44 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::Context::run_task::hdc46a7bba6e20a90 + 252
+    frame #75: 0x000000010008e144 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h02b6d0a012903510 + 1972
+    frame #76: 0x000000010008d894 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::enter::_$u7b$$u7b$closure$u7d$$u7d$::hf5dc5717365b22b5 + 28
+    frame #77: 0x000000010012550c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::scoped::Scoped$LT$T$GT$::set::hfd1ac0cbdaedd4a3 + 140
+    frame #78: 0x00000001000f0300 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::set_scheduler::_$u7b$$u7b$closure$u7d$$u7d$::hca5ecd0d3bb446f1 + 48
+    frame #79: 0x000000010011eb9c related_refresh-36f3e2d2ba35a1a6`std::thread::local::LocalKey$LT$T$GT$::try_with::h620cbde1b4241c2c + 172
+    frame #80: 0x000000010011e424 related_refresh-36f3e2d2ba35a1a6`std::thread::local::LocalKey$LT$T$GT$::with::hef6c7e435933bee3 + 16
+    frame #81: 0x00000001000f027c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::set_scheduler::h16c63408a760cbde + 52
+    frame #82: 0x000000010008d3fc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::enter::h9a457c69a04632ab + 340
+    frame #83: 0x000000010008d958 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CoreGuard::block_on::hb746a86963e16c56 + 64
+    frame #84: 0x000000010008bdb8 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::_$u7b$$u7b$closure$u7d$$u7d$::h4cbfdf28726e689d + 348
+    frame #85: 0x000000010008b49c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::context::runtime::enter_runtime::h84909fd1ea363e27 + 180
+    frame #86: 0x000000010008bc4c related_refresh-36f3e2d2ba35a1a6`tokio::runtime::scheduler::current_thread::CurrentThread::block_on::hd5b02c1308e8252f + 108
+    frame #87: 0x000000010004d7dc related_refresh-36f3e2d2ba35a1a6`tokio::runtime::runtime::Runtime::block_on_inner::h7aa76221904842f6 + 160
+    frame #88: 0x000000010004d938 related_refresh-36f3e2d2ba35a1a6`tokio::runtime::runtime::Runtime::block_on::h7f8f60ba73784b2e + 268
+    frame #89: 0x00000001000a6384 related_refresh-36f3e2d2ba35a1a6`related_refresh::incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests::h676e1f5df64cbc49 + 308
+    frame #90: 0x00000001000a6410 related_refresh-36f3e2d2ba35a1a6`related_refresh::incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests::_$u7b$$u7b$closure$u7d$$u7d$::h4d5e14f641ef3705 + 20
+    frame #91: 0x00000001000017dc related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnOnce::call_once::h921ffb1e4fee0680 + 20
+    frame #92: 0x0000000100146184 related_refresh-36f3e2d2ba35a1a6`test::__rust_begin_short_backtrace::ha0e48c1a0658e118 + 24
+    frame #93: 0x0000000100155270 related_refresh-36f3e2d2ba35a1a6`test::run_test::_$u7b$$u7b$closure$u7d$$u7d$::hb3350d8e162b7432 + 908
+    frame #94: 0x00000001001366f0 related_refresh-36f3e2d2ba35a1a6`std::sys::backtrace::__rust_begin_short_backtrace::he121e5b5ae94324a + 132
+    frame #95: 0x00000001001396bc related_refresh-36f3e2d2ba35a1a6`core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h3cdfab2e71d5a0b4 + 64
+    frame #96: 0x00000001060b86c0 related_refresh-36f3e2d2ba35a1a6`std::sys::thread::unix::Thread::new::thread_start::hb5c7d2a38fab9e31 + 408
+    frame #97: 0x000000018d48fc58 libsystem_pthread.dylib`_pthread_start + 136

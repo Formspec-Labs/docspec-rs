@@ -822,7 +822,7 @@ pub(super) async fn confirm_creation(
 }
 
 // Original file completions survive cache-key replacement inside immutable
-// origins retained by prepared groups, validation completions or releases.
+// origins retained by prepared groups, validation, qualifications or releases.
 // Consult these only after the direct creation pass misses a requested object,
 // and stop once it is found.
 async fn visit_original_creation(
@@ -842,7 +842,8 @@ async fn visit_original_creation(
             || key.starts_with("backfill-validation/")
             || key.starts_with("result/")
             || key.starts_with("readback/")
-            || key.starts_with("backfill-readback/"))
+            || key.starts_with("backfill-readback/")
+            || key.starts_with("dependency-qualification/"))
         {
             continue;
         }
@@ -852,7 +853,17 @@ async fn visit_original_creation(
         if revision <= 0 || revision > view.revision {
             return Err(invalid());
         }
-        let retained = if key.starts_with("backfill-prepared/") {
+        let retained = if key.starts_with("dependency-qualification/") {
+            let qualification: DependencyQualification = serde_json::from_str(json)?;
+            crate::engine::corrections::validate_qualification(&qualification)?;
+            if key != crate::engine::corrections::qualification_key(&qualification)?
+                || crate::catalog::lifecycle_ident(&qualification.origins.owner).to_string()
+                    != view.table.identifier().to_string()
+            {
+                return Err(invalid());
+            }
+            vec![qualification.origins]
+        } else if key.starts_with("backfill-prepared/") {
             let phase: PreparedCompletion = serde_json::from_str(json)?;
             phase.origins.into_iter().collect::<Vec<_>>()
         } else if key.starts_with("backfill-validation/") {
@@ -864,7 +875,12 @@ async fn visit_original_creation(
                 .dataset
                 .computed
                 .into_values()
-                .filter_map(|group| group.origins)
+                .flat_map(|group| {
+                    group
+                        .origins
+                        .into_iter()
+                        .chain(group.qualification.map(|proof| proof.origins))
+                })
                 .collect::<Vec<_>>()
         };
         for anchor in retained {

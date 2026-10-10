@@ -15,7 +15,7 @@ pub(in crate::engine) async fn verify_binding_dependencies(
     let mut history = History::new(budget)?;
     let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
     for (name, binding) in &dataset.computed {
-        verify_binding_history(dataset, name, &mut history).await?;
+        verify_binding_history(dataset, name, &mut history, checks).await?;
         checks
             .scalar_origins(
                 binding.origins.as_ref(),
@@ -141,7 +141,7 @@ pub(crate) async fn verify_groups(
             inherited.remove(spec.group.as_str());
             let mut expected = parent.computed.clone();
             expected.remove(spec.group.as_str());
-            if inherited != expected {
+            if !super::super::corrections::inherits_groups(&inherited, &expected) {
                 return Err(invalid_group());
             }
             for name in inherited.keys() {
@@ -216,7 +216,7 @@ pub(crate) async fn verify_groups(
                 || base.version != spec.base
                 || inherited_inputs != base.inputs
                 || dataset.groups != base.groups
-                || dataset.computed != base.computed
+                || !super::super::corrections::inherits_groups(&dataset.computed, &base.computed)
                 || dataset.related != base.related
                 || dataset.relationship != base.relationship
                 || dataset.changes.is_some()
@@ -241,7 +241,7 @@ pub(crate) async fn verify_groups(
         {
             return Err(invalid_group());
         }
-        verify_binding_history(dataset, name, &mut history).await?;
+        verify_binding_history(dataset, name, &mut history, checks).await?;
         checks
             .scalar_origins(
                 binding.origins.as_ref(),
@@ -308,7 +308,10 @@ async fn compatible_input_history(
             OperationRequest::Evidence(spec) => {
                 if spec.base != previous.version
                     || current.groups != previous.groups
-                    || current.computed != previous.computed
+                    || !super::super::corrections::inherits_groups(
+                        &current.computed,
+                        &previous.computed,
+                    )
                 {
                     return Err(invalid_group());
                 }
@@ -405,6 +408,7 @@ async fn verify_binding_history(
     dataset: &DatasetPin,
     name: &str,
     history: &mut History<'_>,
+    checks: &mut super::super::verification::Checks,
 ) -> Result<()> {
     let mut retained = None;
     let mut visited = BTreeSet::new();
@@ -420,12 +424,25 @@ async fn verify_binding_history(
         {
             return Err(invalid_group());
         }
+        // Validate each owning selection's immutable proof, including intermediate
+        // inherited bindings. Historical verification never reads current corrections.
+        checks
+            .scalar_qualification(
+                binding,
+                source,
+                owner.groups.get(name).ok_or_else(invalid_group)?,
+                history.budget,
+            )
+            .await?;
         if matches!(&owner.request, OperationRequest::Evidence(_)) {
             let parent = history
                 .read(owner.parent_manifest.as_ref().ok_or_else(invalid_group)?)
                 .await?;
             if parent.dataset != owner.dataset
-                || parent.computed.get(name) != Some(binding)
+                || !parent
+                    .computed
+                    .get(name)
+                    .is_some_and(|previous| super::super::corrections::inherits(binding, previous))
                 || parent.groups.get("source") != Some(source)
                 || parent.groups.get(name) != owner.groups.get(name)
             {
@@ -459,7 +476,10 @@ async fn verify_binding_history(
                 .read(owner.parent_manifest.as_ref().ok_or_else(invalid_group)?)
                 .await?;
             if parent.dataset != owner.dataset
-                || parent.computed.get(name) != Some(binding)
+                || !parent
+                    .computed
+                    .get(name)
+                    .is_some_and(|previous| super::super::corrections::inherits(binding, previous))
                 || parent.groups.get("source") != Some(source)
                 || parent.groups.get(name) != owner.groups.get(name)
             {

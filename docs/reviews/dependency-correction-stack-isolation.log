@@ -1,0 +1,42 @@
+    Finished `test` profile [unoptimized] target(s) in 1.12s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpPknxzy/workspace/objects/comments/227b1280425243f49a7bfa62d557dc41/data/1a20b926-1797-47aa-b488-e9085b181ded-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpPknxzy/workspace/objects/dockets/ca8f6dfc9eab4ddd88886193c2441062/data/ee9563cf-ba6b-4b2a-90b8-73facfad1158-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpPknxzy/workspace/objects/joined/8eef3ebcbe4d4ebfac20ee83f30ed493/data/55a47824-c7b6-4617-beaa-00daeb56b1b2-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpPknxzy/workspace/objects/joined/ed5c954985754a6fbf21511b17d89b74/data/aba974e1-66f0-44b4-81df-759b227ceafd-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpPknxzy/workspace/objects/dockets/29b3a29105814ca5a1d9cd44eeb59633/data/data/48fb5beb-7aa9-4d8c-a388-69bbb17a01bf-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests' (31609264) has overflowed its stack
+fatal runtime error: stack overflow, aborting
+error: test failed, to rerun pass `--test related_refresh`
+
+Caused by:
+  process didn't exit successfully: `/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6 'incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests' --exact --nocapture` (signal: 6, SIGABRT: process abort signal)

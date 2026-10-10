@@ -1,0 +1,19 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.26s
+     Running tests/dependency_correction_transport.rs (target/debug/deps/dependency_correction_transport-a73d85b46b6bf1df)
+
+running 1 test
+test http_and_cli_reconcile_the_same_decision_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.05s
+
+     Running tests/dependency_corrections.rs (target/debug/deps/dependency_corrections-3d0f1e43471a2162)
+
+running 4 tests
+test missing_original_field_is_unknown_and_new_deficient_execution_is_mismatch ... ok
+test correction_after_readback_requires_new_operation_and_reuses_originals ... ok
+test inherited_sibling_selection_adds_cumulative_proof_without_rewriting_values ... ok
+test correction_committed_at_actual_file_reuse_blocks_changed_language_context ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.13s
+
