@@ -298,6 +298,7 @@ enum PausedOperation {
     Update,
     Evidence,
     Backfill,
+    ContinuousBackfill,
     Refresh,
     Schema,
     Removal,
@@ -408,6 +409,13 @@ async fn main() -> anyhow::Result<()> {
                             .map(|_| ()),
                         PausedOperation::Backfill => engine
                             .backfill_until(&read_json::<BackfillSpec>(spec)?, &phase)
+                            .await
+                            .map(|_| ()),
+                        PausedOperation::ContinuousBackfill => engine
+                            .continuous_backfill_until(
+                                &read_json::<ContinuousBackfillSpec>(spec)?,
+                                &phase,
+                            )
                             .await
                             .map(|_| ()),
                         PausedOperation::Refresh => engine

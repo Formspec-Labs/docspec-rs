@@ -36,7 +36,10 @@ fn evaluate(expressions: &Expressions, schema: &Schema, values: Vec<ArrayRef>) -
     values.push(Arc::new(Int64Array::from(vec![0])));
     expressions
         .evaluate(
-            RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), values).unwrap(),
+            RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), values)
+                .unwrap()
+                .project(&expressions.projection)
+                .unwrap(),
             1 << 20,
         )
         .unwrap()
@@ -59,6 +62,8 @@ async fn rename_reorder_and_name_reuse_preserve_bound_values_and_material_identi
     ]);
     let bound = Expressions::compile(&context, &evolved, &spec, Some(&first.input_fields)).unwrap();
     let fresh = Expressions::compile(&context, &evolved, &spec, None).unwrap();
+    assert_eq!(first.projection, vec![0, 2, 3]);
+    assert_eq!(bound.projection, vec![1, 3, 4]);
     assert_eq!(first.dependencies, bound.dependencies);
     assert_ne!(fresh.dependencies, bound.dependencies);
     let values = vec![
@@ -111,7 +116,7 @@ async fn constants_ignore_schema_but_consumed_types_and_metadata_observers_inval
     original.doc = Some("before".into());
     let before = schema(vec![Arc::new(original.clone())]);
     original.doc = Some("after".into());
-    let after = schema(vec![Arc::new(original.clone()), field(20, "unused")]);
+    let after = schema(vec![field(20, "unused"), Arc::new(original.clone())]);
     for (expression, same) in [("value + 1", true), ("arrow_metadata(value, 'doc')", false)] {
         let spec = definition(expression);
         let first = Expressions::compile(&context, &before, &spec, None).unwrap();
@@ -128,8 +133,8 @@ async fn constants_ignore_schema_but_consumed_types_and_metadata_observers_inval
                 &second,
                 &after,
                 vec![
-                    Arc::new(Int64Array::from(vec![1])),
                     Arc::new(Int64Array::from(vec![2])),
+                    Arc::new(Int64Array::from(vec![1])),
                 ],
             );
             assert_eq!(
@@ -168,6 +173,14 @@ async fn constants_ignore_schema_but_consumed_types_and_metadata_observers_inval
         Some(&first.input_fields),
     )
     .unwrap();
+    assert_eq!(first.projection, vec![1, 2]);
+    assert_eq!(second.projection, vec![1, 2]);
+    let null = evaluate(
+        &second,
+        &schema(vec![field(99, "other")]),
+        vec![Arc::new(Int64Array::from(vec![3]))],
+    );
+    assert_eq!(null.column(2).null_count(), 1);
     assert!(first.input_fields.is_empty());
     assert_eq!(first.dependencies, second.dependencies);
 }

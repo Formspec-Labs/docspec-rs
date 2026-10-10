@@ -22,6 +22,7 @@ pub(super) struct Expressions {
     pub dependencies: String,
     pub logical: Vec<Expr>,
     expressions: Vec<Arc<dyn PhysicalExpr>>,
+    pub projection: Vec<usize>,
     source_fields: usize,
 }
 
@@ -50,7 +51,6 @@ impl Expressions {
         } else {
             df_schema.clone()
         };
-        let mut expressions = Vec::new();
         let mut logical = Vec::new();
         let mut input_fields = BTreeMap::new();
         let mut observes_metadata = false;
@@ -125,14 +125,38 @@ impl Expressions {
                     }
                 })?
                 .data;
-            let physical = context.create_physical_expr(expression.clone(), &df_schema)?;
-            fields.push(Field::new(&field.name, physical.data_type(&source)?, true));
             logical.push(expression);
-            expressions.push(physical);
         }
         if binding.is_some_and(|binding| binding != &input_fields) {
             return Err(invalid_binding());
         }
+        // Match the shared reader's native order while keeping authored names
+        // bound to stable IDs. Arrow projection retains field metadata used by
+        // immutable functions such as arrow_metadata.
+        let ids = input_fields.values().copied().collect::<BTreeSet<_>>();
+        let mut projection = native_source
+            .as_struct()
+            .fields()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| ids.contains(&field.id).then_some(index))
+            .collect::<Vec<_>>();
+        let selected = source.project(&projection)?;
+        let selected_schema = DFSchema::try_from(selected.clone())?;
+        let mut expressions = Vec::with_capacity(logical.len());
+        for (field, expression) in spec.fields.iter().zip(&logical) {
+            let physical = context.create_physical_expr(expression.clone(), &selected_schema)?;
+            fields.push(Field::new(
+                &field.name,
+                physical.data_type(&selected)?,
+                true,
+            ));
+            expressions.push(physical);
+        }
+        let source_fields = projection.len();
+        // Occurrence locations are always needed, even for literal-only SQL.
+        // Selection also brings stored origins into the native read when needed.
+        projection.extend([source.fields().len(), source.fields().len() + 1]);
         let dependencies = input_fields
             .values()
             .map(|id| field_interpretation(native_source, *id, observes_metadata))
@@ -179,7 +203,8 @@ impl Expressions {
             dependencies,
             logical,
             expressions,
-            source_fields: source.fields().len(),
+            projection,
+            source_fields,
         })
     }
 

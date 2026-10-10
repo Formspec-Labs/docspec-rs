@@ -675,9 +675,9 @@ impl Engine {
         spec: &BackfillSpec,
         attempt: Option<&Attempt>,
         records: &mut Vec<Record>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let Some(attempt) = attempt else {
-            return Ok(());
+            return Ok(false);
         };
         self.check_continuous_child(view, spec, Some(attempt))
             .await?;
@@ -695,19 +695,16 @@ impl Engine {
         }
         let authority: CaptureAuthority =
             lifecycle.get(view, "authority").await?.unwrap_or_default();
-        if authority
+        // A stale capture is still a valid exact, protected input. Retain its
+        // child with the parent so bounded fallback can fence intake, then have
+        // the caller recapture without computing this obsolete candidate.
+        let stale_capture = authority
             .release
             .as_ref()
             .map(ReleasePin::version_ref)
             .as_ref()
             != Some(&child.capture)
-            || authority.boundary != child.admission_boundary
-        {
-            return Err(Error::refusal(
-                "stale_source_boundary",
-                "source changed before child admission",
-            ));
-        }
+            || authority.boundary != child.admission_boundary;
         self.continuous_target(
             view,
             &attempt.intent,
@@ -733,7 +730,7 @@ impl Engine {
         }
         records.push(record(child_key(&child.child), child)?);
         records.push(record(state_key(&child.parent), child)?);
-        Ok(())
+        Ok(stale_capture)
     }
 
     fn continuous_terminal_child(

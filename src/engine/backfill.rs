@@ -517,7 +517,7 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&spec.dataset).await;
         let mut admission: Option<super::admission::PreparedAdmission> = None;
-        let (operation, capture, base) = loop {
+        let (operation, capture, base, stale_capture) = loop {
             let guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
             let old: Option<Operation> = lifecycle
@@ -565,7 +565,7 @@ impl Engine {
                     .get(&view, &format!("backfill/{}", spec.operation))
                     .await?
                     .ok_or_else(invalid_group)?;
-                break (operation, capture, base);
+                break (operation, capture, base, false);
             } else {
                 let Some(protected) = &admission else {
                     let boundary = view.table.metadata_location_result()?.to_owned();
@@ -621,16 +621,26 @@ impl Engine {
                         serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}),
                     )?,
                 ];
-                self.continuous_admission_records(&view, spec, continuous, &mut records)
+                let stale_capture = self
+                    .continuous_admission_records(&view, spec, continuous, &mut records)
                     .await?;
                 protected.records(&view, &request, &mut records)?;
                 lifecycle.commit(&view, records).await?;
-                break (operation, capture, base);
+                break (operation, capture, base, stale_capture);
             }
         };
         drop(admission);
         if continuous.is_some() {
             stop_after(stop, "continuous-admission")?;
+        }
+        if stale_capture {
+            // Preserve protected first admission before retrying. Otherwise a
+            // hot source can exhaust optimistic attempts with no retained parent
+            // eligible to acquire the bounded intake fence. Skip obsolete work.
+            return Err(Error::refusal(
+                "stale_source_boundary",
+                "source changed before protected child admission; recapture before processing",
+            ));
         }
         let source = base
             .dataset

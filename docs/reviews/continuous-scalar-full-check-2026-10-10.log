@@ -1,0 +1,15 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0603]: struct `OccurrenceScan` is private
+   --> tests/scalar_dependency_reads.rs:232:25
+    |
+232 |     let scan = storage::OccurrenceScan::open(&native, &budget)
+    |                         ^^^^^^^^^^^^^^ private struct
+    |
+note: the struct `OccurrenceScan` is defined here
+   --> src/storage.rs:15:30
+    |
+ 15 | pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
+    |                              ^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `docspec` (test "integration") due to 1 previous error

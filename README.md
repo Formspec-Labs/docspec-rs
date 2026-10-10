@@ -485,6 +485,11 @@ new source can reuse unchanged file computations. Independent groups merge into
 the latest selection; competing replacements of one group reject a stale target.
 Combined reads join group values to exact source-file row positions.
 
+Scalar computation selects its input columns through the native reader when
+captured file metadata establishes a physical dependency. Other cases keep the
+existing full-batch memory check before selecting columns. This preserves field
+identity, defaults and occurrence addresses without an extra payload pass.
+
 For a single resumable request while source intake continues, wrap that request
 in `continuous-backfill.json`:
 

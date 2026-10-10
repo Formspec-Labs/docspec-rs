@@ -19,6 +19,64 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Continuous backfill recovery and obsolete-file removal
+
+The first source capture now survives an admission race. If ingestion advances
+before protected admission, the engine retains the exact parent and child with
+their input protection, then recaptures before computing obsolete work. This
+keeps the bounded intake-fence fallback available under repeated source movement.
+The regression covers both a new accepted input and a newly selected source.
+
+Actual SIGKILL tests at acknowledged admission, file completion, assembly,
+validation, readback and selection boundaries resume through a fresh CLI process.
+They compare exact values, occurrence coverage and retained evidence, including
+source edits between attempts. Work traces confirm that recovery executes only
+missing phases; completed retries do no payload work.
+
+The retention case supersedes a child, independently retires its recovery,
+phase and readback promises, and physically removes only its obsolete output.
+An output reused by the selected child remains protected and readable after
+reopening the catalog. Retirement itself does not delete bytes, and removal
+retries preserve the exact recorded outcome.
+
+The [independent review](reviews/continuous-process-retention-design-review-2026-10-10.md)
+found the admission race and approved its repair. The
+[targeted run](reviews/continuous-lifecycle-scalar-targeted-2026-10-10.log)
+passes strict lint and the affected unit, recovery and retention cases.
+These checks do not qualify death while a live intake fence is held, death inside
+a native commit, concurrent reader/removal races or large-history performance.
+
+## Scalar reads select consumed columns
+
+Missing scalar file computations now use the existing native selected-column
+reader and DataFusion physical expressions compiled against that selected schema.
+Authored field IDs, field metadata, defaults, nulls and stored occurrence origins
+retain their interpretation. Completed work still resolves before payload reads.
+This adds no reader implementation, payload pass, cache or retained data.
+
+The [independent review](reviews/scalar-dependency-read-review-2026-10-10.md)
+found that Iceberg decodes every column when none of the requested fields exists
+physically. The scalar path now authorizes native selection only when its captured
+file descriptor contains a selected primitive field's column metric, including
+stored origins. Without that evidence, it retains the previous full-batch check
+and then selects Arrow columns before evaluation. Metric sizes do not estimate
+decoded memory; their field IDs rely on the existing admitted native-file trust
+boundary. This is not a general raw-decoder allocation bound.
+
+Fixtures cover exact values and addresses with reordered/reused names, repeated
+dependencies, field metadata, wide unused values and compacted origins. New
+constant-only and absent optional/default-field cases check the conservative
+memory refusal and exact results with adequate allowance. Native requested-byte,
+elapsed-time and whole-process memory improvements remain unmeasured.
+
+The [complete repository gate](reviews/continuous-scalar-full-check-2026-10-10-2.log)
+passes formatting, strict lint and all-feature tests, including the new scalar
+fallback, continuous recovery and retention cases. The earlier
+[attempt](reviews/continuous-scalar-full-check-2026-10-10.log) stopped at an
+integration fixture's private-type reference; the fixture now uses public native
+manifest APIs. Production visibility was not widened. The external full-data
+physical-plan probe remains ignored; no performance workload was repeated.
+
 ## One recoverable scalar backfill across advancing source versions
 
 The local engine now implements `continuous_backfill` and
@@ -437,12 +495,15 @@ concurrency, row-group layout and the known selected-page memory limit are uncha
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) covers direct Rust
 and Python dependencies, enabled Rust features and material transitive APIs.
-The latest [feature-utilization coverage](reviews/dependency-feature-utilization-audit-2026-10-10.md)
-reconfirms the remaining priorities without identifying another replacement:
-scalar dependency selection, duplicate-first cardinality proof, and controlled
-native row-group/spill-compression experiments. It distinguishes delivered changes
-from unmeasured opportunities and covers the direct Rust/Python declarations plus
-material transitive integration families.
+The latest [utilization followthrough](reviews/dependency-utilization-followthrough-2026-10-10.md)
+confirms coverage of every direct Rust declaration and Python import, reusing
+feature evidence from the unchanged manifests. Scalar dependency selection is
+implemented above. Remaining priorities are duplicate-first cardinality proof
+and controlled native row-group/spill-compression experiments. Native Avro writer
+codec configuration is an upstream opportunity only if metadata growth proves
+material. No replacement dependency or measured speedup is established. The audit
+covers material transitive integrations; it does not inspect every transitive
+implementation or freeze the complete installed Python environment.
 
 The audit supports keeping the current stack. The reader change above implements passing
 requested columns into Iceberg before decoding; the
@@ -2099,9 +2160,9 @@ DocSpec conformance.
 ## Delivery gates
 
 The local foundation and retained Parquet path are implemented and tested. The
-first milestone's wider capacity and durability qualifications are still open;
-the Comments milestone still needs its complete evidence and consumer path beyond
-the measured retained source-processing slice.
+defined full local Comments workload passes, including joins/summaries, evidence,
+native and flat outputs, selection and exact independent readback. Wider capacity,
+durability and actual application-consumer qualification remain open.
 
 The required sequence continues with incremental updates and backfill, maintenance
 and restore, then R2 and Dagster. Provider credentials and actual deployment behavior

@@ -380,10 +380,58 @@ impl OccurrenceScan {
                 )
             })
             .transpose()?;
+        self.read_selection_file(task, file, budget, selection)
+    }
+
+    /// Selects scalar columns only when a requested physical column is evidenced.
+    ///
+    /// The boolean tells the caller whether batches already have its projection.
+    /// Missing metrics or only absent/nested fields retain full-batch admission.
+    ///
+    /// # Errors
+    /// Refuses invalid selections, uncaptured files, or exhausted capacity.
+    pub(crate) fn read_scalar_file(
+        &self,
+        path: &str,
+        budget: &Budget,
+        projection: &[usize],
+    ) -> Result<(impl Stream<Item = Result<RecordBatch>> + Send + use<>, bool)> {
+        let (task, file) = self.tasks.get(path).ok_or_else(|| {
+            Error::refusal("occurrence_tasks", "file is outside the captured source")
+        })?;
+        let selection = super::selection::Selection::new(
+            &self.native_schema,
+            &self.schema,
+            projection,
+            self.located,
+            true,
+            budget,
+        )?;
+        // Iceberg falls back to decoding all columns when every requested ID
+        // is absent. Only admitted native primitive-column metrics establish
+        // a nonempty physical mask; compressed sizes do not estimate memory.
+        let projected = self.native_schema.as_struct().fields().iter().any(|field| {
+            field.field_type.is_primitive()
+                && selection.fields.contains(&field.id)
+                && file.column_sizes().contains_key(&field.id)
+        });
+        let stream =
+            self.read_selection_file(task, file, budget, projected.then_some(selection))?;
+        Ok((stream, projected))
+    }
+
+    fn read_selection_file(
+        &self,
+        task: &FileScanTask,
+        file: &DataFile,
+        budget: &Budget,
+        selection: Option<super::selection::Selection>,
+    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
         let mut task = task.clone();
         if let Some(selection) = &selection {
             task.project_field_ids = selection.fields.clone();
         }
+        let expected = BTreeMap::from([(task.data_file_path.clone(), file.clone())]);
         let state = Occurrences {
             tasks: futures::stream::iter([Ok(task)]).boxed(),
             reader: self.reader.clone(),
@@ -391,7 +439,7 @@ impl OccurrenceScan {
             native_schema: self.native_schema.clone(),
             selection,
             located: self.located,
-            expected: BTreeMap::from([(path.to_owned(), file.clone())]),
+            expected,
             current: None,
             limit: budget.limits.max_batch_bytes,
             _batches: budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?,

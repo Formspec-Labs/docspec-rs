@@ -612,9 +612,19 @@ impl Engine {
         }
         let _execution = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
         let limit = budget.limits.max_batch_bytes;
-        let stream = scan
-            .read_file(&source.path, budget)?
-            .map(move |batch| expressions.evaluate(batch?, limit));
+        let (stream, projected) =
+            scan.read_scalar_file(&source.path, budget, &expressions.projection)?;
+        let stream = stream.map(move |batch| {
+            let batch = batch?;
+            // The conservative fallback checks the full native batch first.
+            // Physical expressions still require their compiled column order.
+            let batch = if projected {
+                batch
+            } else {
+                batch.project(&expressions.projection)?
+            };
+            expressions.evaluate(batch, limit)
+        });
         let files = storage::write_batches(output, stream, budget).await?;
         if files.iter().map(DataFile::record_count).sum::<u64>() != rows {
             return Err(invalid_group());

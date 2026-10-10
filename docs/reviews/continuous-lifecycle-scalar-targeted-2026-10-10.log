@@ -1,0 +1,57 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 14.22s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 16.64s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 18 tests
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::expressions::tests::rename_reorder_and_name_reuse_preserve_bound_values_and_material_identity ... ok
+test engine::backfill::expressions::tests::constants_ignore_schema_but_consumed_types_and_metadata_observers_invalidate ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::verification::tests::history_reuses_exact_manifests_and_bounds_combined_admission ... ok
+test engine::backfill::origins::checks::tests::cached_originals_reuse_metadata_and_recheck_caller_association ... ok
+test engine::backfill::preparation::tests::completion_descriptors_refuse_duplicate_outputs_and_changed_bytes ... ok
+test engine::backfill::preparation::tests::concurrent_acknowledgments_assemble_one_winner_with_its_own_scope ... ok
+test engine::backfill::preparation::tests::retired_completion_gets_a_new_generation_and_retry_keeps_that_winner ... ok
+test engine::backfill::continuous::tests::parent_abandoned_after_intent_capture_cannot_acquire_a_fence ... ok
+test engine::backfill::tests::completed_plan_qualifies_admission_and_result_without_opening_inputs ... ok
+test engine::backfill::tests::native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning ... ok
+test engine::backfill::continuous::tests::optimistic_same_parent_worker_adopts_live_fence_and_closes_it_with_selection ... ok
+test engine::backfill::continuous::tests::completed_parent_cannot_reacquire_a_fence_from_its_captured_intent ... ok
+test engine::backfill::correction_tests::fresh_readback_view_fences_target_proof_changes_but_allows_siblings ... ok
+test engine::backfill::continuous::tests::corrupted_child_request_association_refuses_before_and_after_selection ... ok
+test engine::backfill::continuous::tests::first_capture_race_retains_protected_admission_without_computing_obsolete_work ... ok
+test engine::backfill::protection_tests::scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 221 filtered out; finished in 5.60s
+
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.84s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 12 tests
+test continuous_backfill::parent_identity_conflicts_and_public_child_entry_points_refuse ... ok
+test continuous_backfill::parent_abandonment_survives_reopen_and_keeps_completed_files ... ok
+test continuous_backfill::expired_drain_returns_pending_ids_reopens_intake_and_preserves_work ... ok
+test continuous_backfill::restore_point_recovers_unfinished_parent_and_protects_active_and_selected_outputs ... ok
+test continuous_backfill::selected_parent_retries_exact_child_after_successor_and_honors_availability ... ok
+test continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source ... ok
+test continuous_backfill_retention::superseded_child_promises_retire_independently_before_exact_removal ... ok
+test continuous_backfill::absent_target_refuses_same_type_source_field_id_remapping ... ok
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... ok
+test continuous_backfill_process::killed_parent_catches_up_source_edits_and_keeps_original_file_evidence ... ok
+test continuous_backfill::cold_retry_recovers_every_durable_handoff_with_exact_parent_result ... ok
+test continuous_backfill_process::killed_parent_resumes_only_missing_work_and_selects_exact_child ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 14.38s
+
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 2 tests
+test scalar_dependency_reads::wide_unused_values_do_not_consume_the_scalar_batch_allowance ... ok
+test scalar_dependency_reads::literal_only_reads_preserve_stored_origins_after_compaction ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 277 filtered out; finished in 2.12s
+

@@ -284,3 +284,103 @@ async fn corrupted_child_request_association_refuses_before_and_after_selection(
         );
     }
 }
+
+#[tokio::test]
+async fn first_capture_race_retains_protected_admission_without_computing_obsolete_work() {
+    for selected in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (engine, spec) = fixture(root.path()).await;
+        let intent = intent(&engine, &spec).await;
+        let (request, attempt) = engine.continuous_attempt(&intent).await.unwrap();
+        let source = root.path().join("input.parquet");
+        let advance = RunSpec {
+            dataset: spec.backfill.dataset.clone(),
+            operation: id("advance"),
+            base: Some(spec.backfill.base.clone()),
+            relationship: None,
+            input: source.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&source).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        };
+        if selected {
+            engine.run(&advance).await.unwrap();
+        } else {
+            assert_eq!(
+                engine
+                    .run_until(&advance, "admission")
+                    .await
+                    .unwrap_err()
+                    .code(),
+                "injected_failure"
+            );
+        }
+        // Force source movement between capture and the first protected admission.
+        // The admission-only case changes the boundary without changing the head.
+        assert_eq!(
+            engine
+                .prepare_backfill(&request, None, Some(&attempt))
+                .await
+                .unwrap_err()
+                .code(),
+            "stale_source_boundary"
+        );
+        let view = engine
+            .inner
+            .lifecycle
+            .open(&spec.backfill.dataset)
+            .await
+            .unwrap();
+        let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+        let revision = rows
+            .revision(&intent_key(&spec.backfill.operation))
+            .unwrap();
+        for key in [
+            child_key(&request.operation),
+            state_key(&spec.backfill.operation),
+            format!("operation/{}", request.operation),
+            format!("request/{}", request.operation),
+            format!("request-dependencies/{}", request.operation),
+            format!("backfill/{}", request.operation),
+        ] {
+            assert_eq!(rows.revision(&key), Some(revision), "{key}");
+        }
+        let dependencies = engine
+            .admitted_dependencies(&view, &request.operation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(dependencies.base, Some(attempt.child.capture.clone()));
+        let before = engine.inspect(&spec.backfill.dataset).await.unwrap();
+        assert!(!before.keys().any(|key| key.starts_with("phase/backfill/")
+            || key.starts_with("backfill-prepared/")
+            || key.starts_with("backfill-validation/")
+            || key.starts_with("backfill-readback/")));
+        assert!(!before.contains_key(&format!("result/{}", request.operation)));
+        let fence = engine.acquire_continuous_fence(&intent).await.unwrap();
+        let advanced = engine.run(&advance).await.unwrap();
+        let release = engine.continuous_backfill(&spec).await.unwrap();
+        assert_ne!(release.id, request.operation);
+        assert_eq!(
+            release.dataset.groups["source"],
+            advanced.dataset.groups["source"]
+        );
+        let after = engine.inspect(&spec.backfill.dataset).await.unwrap();
+        assert!(after.contains_key(&format!("abandoned/{}", request.operation)));
+        assert!(!after.contains_key(&format!("result/{}", request.operation)));
+        assert_eq!(after["source-fence"]["token"], fence.token);
+        assert_eq!(after["source-fence"]["closed"], true);
+        assert_eq!(
+            after[&completed_key(&spec.backfill.operation)]["selected"]["version"],
+            release.id.as_str()
+        );
+        let mut stream = engine.read_group(&release, "length").await.unwrap();
+        let mut values = Vec::new();
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            let array = arrow::compute::cast(batch.column(2), &DataType::Int64).unwrap();
+            values.extend(array.as_any().downcast_ref::<Int64Array>().unwrap().iter());
+        }
+        values.sort();
+        assert_eq!(values, vec![None, Some(2)]);
+    }
+}

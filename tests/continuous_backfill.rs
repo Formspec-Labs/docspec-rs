@@ -18,7 +18,7 @@ use scalar::{fixture, id, input, limits, spec};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
-fn continuous(base: &ReleasePin) -> ContinuousBackfillSpec {
+pub(super) fn continuous(base: &ReleasePin) -> ContinuousBackfillSpec {
     ContinuousBackfillSpec {
         backfill: spec(base, "continuous", "length", "text_length", "length(text)"),
         optimistic_rounds: 2,
@@ -56,7 +56,7 @@ fn deletion_keys(path: &Path, ids: Vec<Option<i64>>) -> docspec::model::InputSpe
     }
 }
 
-fn completed_work(records: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+pub(super) fn completed_work(records: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
     records
         .iter()
         .filter(|(key, _)| {
@@ -69,7 +69,7 @@ fn completed_work(records: &BTreeMap<String, Value>) -> BTreeMap<String, Value> 
         .collect()
 }
 
-fn assert_retained(before: &BTreeMap<String, Value>, after: &BTreeMap<String, Value>) {
+pub(super) fn assert_retained(before: &BTreeMap<String, Value>, after: &BTreeMap<String, Value>) {
     for (key, value) in before {
         assert_eq!(&after[key], value, "completed work changed: {key}");
     }
@@ -84,7 +84,7 @@ fn child_request(records: &BTreeMap<String, Value>, child: &docspec::model::Id) 
     }
 }
 
-async fn assert_values(engine: &Engine, release: &ReleasePin, rows: Vec<scalar::Row>) {
+pub(super) async fn assert_values(engine: &Engine, release: &ReleasePin, rows: Vec<scalar::Row>) {
     let mut stream = engine.read_combined(release).await.unwrap();
     let mut actual = Vec::new();
     while let Some(batch) = stream.try_next().await.unwrap() {
