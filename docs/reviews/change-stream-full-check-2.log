@@ -1,0 +1,34 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 9.71s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 39.04s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 187 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test engine::aggregation::tests::qualified_row_limit_bounds_every_signed_partial_sum ... ok
+test catalog::tests::cold_reservation_validation_rejects_malformed_and_dangling_states ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+test engine::backfill::expressions::tests::rename_reorder_and_name_reuse_preserve_bound_values_and_material_identity ... ok
+test engine::backfill::expressions::tests::constants_ignore_schema_but_consumed_types_and_metadata_observers_invalidate ... ok
+test catalog::tests::invalid_removal_references_refuse_before_native_commit ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test catalog::tests::cold_and_warm_reservations_count_only_current_states ... ok
+test engine::backfill::origins::checks::tests::cached_originals_reuse_metadata_and_recheck_caller_association ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::preparation::tests::completion_descriptors_refuse_duplicate_outputs_and_changed_bytes ... ok
+test catalog::tests::ordinary_commit_preserves_exact_terminal_headroom ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::verification::tests::history_reuses_exact_manifests_and_bounds_combined_admission ... ok
+test engine::backfill::preparation::tests::concurrent_acknowledgments_assemble_one_winner_with_its_own_scope ... ok
+test engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel ... ok
+test engine::admission::tests::provisional_managed_file_refuses_before_request_acknowledgment ... ok
+test engine::backfill::preparation::tests::retired_completion_gets_a_new_generation_and_retry_keeps_that_winner ... ok
+test engine::corrections::records::tests::invalid_requests_leave_native_revision_unchanged ... ok
+test engine::corrections::records::tests::concurrent_corrections_preserve_both_fields_and_retry_generations ... ok
+test engine::corrections::records::tests::lost_commit_response_reconciles_actual_native_generation ... ok
+test engine::admission::tests::lost_initial_request_reply_retains_exact_dependencies_without_reacquiring_owners ... 

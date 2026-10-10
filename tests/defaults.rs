@@ -82,7 +82,7 @@ async fn unchanged_edit(base: &ReleasePin, operation: &str) -> SchemaSpec {
         .as_struct()
         .fields()
         .iter()
-        .filter(|f| !f.name.starts_with("__docspec_supplied_"))
+        .filter(|f| !f.name.starts_with("__docspec_"))
         .map(|f| SchemaField {
             id: f.id,
             name: f.name.clone(),
@@ -500,7 +500,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
             .unwrap()
             .metadata()
             .current_schema(),
-        storage::open_pin(&changed.dataset.groups["source"])
+        storage::open_pin(&updated.dataset.groups["source"])
             .await
             .unwrap()
             .metadata()

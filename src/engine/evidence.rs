@@ -102,7 +102,7 @@ pub(super) fn adopts_receipts(
 }
 
 impl Engine {
-    pub(super) fn receipt_replacement<'a>(
+    pub(super) fn source_replacement<'a>(
         &'a self,
         base: &'a ReleasePin,
         directory: &'a Path,
@@ -116,9 +116,7 @@ impl Engine {
                 .get("source")
                 .ok_or_else(|| invalid("base lacks source"))?;
             let mut native = storage::open_pin(source).await?;
-            let before = if base.dataset.evidence.is_some()
-                && !storage::identity::has_origins(native.metadata().current_schema())?
-            {
+            let before = if !storage::identity::has_origins(native.metadata().current_schema())? {
                 let pin = self
                     .source_with_origins(
                         &base.dataset.dataset,
@@ -131,18 +129,13 @@ impl Engine {
             } else {
                 source.clone()
             };
-            let replacement = if storage::identity::has_origins(native.metadata().current_schema())?
-            {
-                schema::normalize(
-                    replacement,
-                    native.metadata().current_schema(),
-                    keys,
-                    &self.inner.lifecycle.budget,
-                )
-                .await?
-            } else {
-                replacement
-            };
+            let replacement = schema::normalize(
+                replacement,
+                native.metadata().current_schema(),
+                keys,
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
             Ok((before, replacement))
         })
     }

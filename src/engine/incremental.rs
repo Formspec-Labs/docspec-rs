@@ -69,12 +69,10 @@ impl Engine {
             // complete value result and contributor occurrences remain unchanged.
             let before = source(&base)?;
             let native = storage::open_pin(before).await?;
+            // Preserve the current native schema ID as well as its fields;
+            // fresh creation can renumber an evolved source's schema.
             let empty = self
-                .create_output(
-                    &spec.dataset,
-                    &directory.join("empty-changes"),
-                    native.metadata().current_schema().as_ref().clone(),
-                )
+                .replacement_output(&spec.dataset, &directory.join("empty-changes"), &native)
                 .await?;
             let empty = storage::pin(&spec.dataset, &empty, 0, budget, &[]).await?;
             let key_field_ids = refresh::output_keys(&spec.transform)
@@ -277,9 +275,9 @@ impl Engine {
             .collect::<Result<Vec<_>>>()?;
         let keys = TUPLE.map(str::to_owned);
         let (write_before, replacement) = self
-            .receipt_replacement(base, directory, replacement, &keys)
+            .source_replacement(base, directory, replacement, &keys)
             .await?;
-        let mut applied = self
+        let applied = self
             .replace_keys(Replacement {
                 dataset: &spec.dataset,
                 directory: &directory.join("replacement"),
@@ -289,6 +287,9 @@ impl Engine {
                 replacement,
                 replacement_bytes: None,
             })
+            .await?;
+        let mut applied = self
+            .finish_source_replacement(&spec.dataset, directory, before, applied)
             .await?;
         applied.metrics.files_scanned += discovery.files_scanned;
         applied.metrics.data_files_written += discovery.data_files_written;

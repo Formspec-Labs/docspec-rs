@@ -408,7 +408,7 @@ async fn identical_competing_updates_reconcile_and_noop_preserves_files() {
 }
 
 #[tokio::test]
-async fn affected_base_with_incompatible_physical_schema_refuses_during_read() {
+async fn affected_base_with_changed_file_size_refuses_before_rewrite() {
     let root = TempDir::new().unwrap();
     let (engine, _, before, _) = fixture(root.path()).await;
     let pin = &before.dataset.groups["source"];
@@ -417,17 +417,18 @@ async fn affected_base_with_incompatible_physical_schema_refuses_during_read() {
         .iter()
         .find(|object| object.path.ends_with(".parquet"))
         .unwrap();
-    // Replacing native output with ordinary Parquet loses the required field IDs.
-    // The native processing read refuses it without a preliminary payload hash.
+    // Replacing native output changes its recorded size. Preparing retained
+    // origins refuses the shared file without a preliminary payload hash.
     input(
         Path::new(&file.path),
         &[(Some(1), Some("corrupt".into()))],
         false,
     );
+    assert_ne!(std::fs::metadata(&file.path).unwrap().len(), file.bytes);
     let mutation = update(root.path(), "initial", "changed", &[(Some(1), None)], &[]);
     assert_eq!(
         engine.update(&mutation).await.unwrap_err().code(),
-        "iceberg"
+        "unavailable_phase"
     );
     assert_eq!(engine.latest(&mutation.dataset).await.unwrap(), before);
 }
@@ -760,9 +761,16 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
     let native = storage::open_pin(&result.dataset.groups["source"])
         .await
         .unwrap();
+    let original_fields = old_table.metadata().current_schema().as_struct().fields();
+    let current_fields = native.metadata().current_schema().as_struct().fields();
+    assert_eq!(&current_fields[..original_fields.len()], original_fields);
+    // Origins follow every nested field ID; existing typed fields remain exact.
     assert_eq!(
-        old_table.metadata().current_schema(),
-        native.metadata().current_schema()
+        current_fields[original_fields.len()..]
+            .iter()
+            .map(|field| (field.name.as_str(), field.id))
+            .collect::<Vec<_>>(),
+        vec![("__docspec_origin_file", 6), ("__docspec_origin_row", 7)]
     );
     let budget = Budget::new(limits()).unwrap();
     let stream = storage::read_batches(&native, &budget).await.unwrap();

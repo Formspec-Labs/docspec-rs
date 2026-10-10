@@ -686,9 +686,94 @@ pub struct RemovalStatus {
     pub reconciled_absent_bytes: u64,
 }
 
-/// Full multiset comparison of one field group; duplicate observations count separately.
+/// Equality used to cancel matching rows in a comparison.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonIdentity {
+    /// Compare typed visible values and their multiplicities.
+    Values,
+    /// Also compare each row's stable occurrence address.
+    #[default]
+    Occurrences,
+}
+
+/// Selects comparison identity and an explicit full reconstruction.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ComparisonOptions {
+    pub identity: ComparisonIdentity,
+    pub force_full: bool,
+}
+
+/// The work actually selected for a comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonPath {
+    /// The exact retained field-group pin is shared by both endpoints.
+    Unchanged,
+    /// Reconstruct differences from both complete endpoint relations.
+    Full,
+}
+
+/// Why the comparison selected full reconstruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonFallback {
+    Forced,
+    /// Retained forward-chain composition is not yet qualified by this service.
+    HistoryNotQualified,
+    /// Differing schemas cannot be compared through an implicit cast.
+    SchemaChanged,
+}
+
+/// Exact metadata differences, independent of the requested row identity.
+///
+/// Changed references are conservative signals, not proof of unequal payload values.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComparisonEffects {
+    pub schema_changed: bool,
+    pub input_refs_changed: bool,
+    pub coverage_changed: bool,
+    pub definition_changed: bool,
+    /// Source receipts, contributor references, or computed execution evidence/bindings changed.
+    pub evidence_refs_changed: bool,
+    pub relationship_changed: bool,
+    /// Computed groups whose declared definitions were added, removed or changed.
+    pub changed_group_definitions: Vec<String>,
+}
+
+/// Describes a streamed difference between two exact retained endpoints.
+///
+/// Arrow schema metadata `docspec.change` contains this JSON. Each output row has
+/// `side` (before/after), `file`, `row`, and a typed `values` struct. The address is
+/// an occurrence in the corresponding endpoint, not necessarily a current file
+/// location after compaction. Value mode chooses deterministic representatives
+/// of surplus equal values; it does not assert which occurrence disappeared.
+/// Completeness requires successful end of stream. This is not a portable
+/// applied-write certificate or a retained availability promise.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeDescriptor {
+    pub format: u32,
+    pub before: VersionRef,
+    pub after: VersionRef,
+    pub group: String,
+    pub identity: ComparisonIdentity,
+    pub path: ComparisonPath,
+    pub fallback: Option<ComparisonFallback>,
+    /// Native identifiers of the visible value fields in output order.
+    pub field_ids: Vec<i32>,
+    /// Whether visible field identities and types permit a comparison without casts.
+    pub comparable_values: bool,
+    /// Native declared identifier sets, sorted; empty establishes no key here.
+    pub before_key_field_ids: Vec<i32>,
+    pub after_key_field_ids: Vec<i32>,
+    pub effects: ComparisonEffects,
+}
+
+/// Multiset comparison counts and the exact comparison semantics.
 #[derive(Clone, Debug, Serialize)]
 pub struct Comparison {
+    pub descriptor: ChangeDescriptor,
     pub same_schema: bool,
     pub same_inputs: bool,
     pub added_rows: Option<u64>,

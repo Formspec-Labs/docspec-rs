@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.50s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+ProjectionExec: expr=[CASE WHEN net@1 < 0 THEN before ELSE after END as side, member_file@2 as file, member_row@3 as row, c0@0 as c0]
+  FilterExec: net@1 != 0
+    ProjectionExec: expr=[c0@0 as c0, net@2 as net, member_file@3 as member_file, member_row@4 as member_row]
+      AggregateExec: mode=FinalPartitioned, gby=[c0@0 as c0, ordinal@1 as ordinal], aggr=[net, member_file, member_row]
+        RepartitionExec: partitioning=Hash([c0@0, ordinal@1], 2), input_partitions=2
+          AggregateExec: mode=Partial, gby=[c0@0 as c0, ordinal@4 as ordinal], aggr=[net, member_file, member_row], ordering_mode=PartiallySorted([0])
+            BoundedWindowAggExec: wdw=[ordinal: Field { "ordinal": UInt64 }, frame: ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW], mode=[Sorted]
+              SortExec: expr=[c0@0 ASC NULLS LAST, weight@3 ASC NULLS LAST, file@1 ASC, row@2 ASC], preserve_partitioning=[true]
+                RepartitionExec: partitioning=Hash([c0@0, weight@3], 2), input_partitions=2
+                  DataSourceExec: partitions=2, partition_sizes=[65, 64]
+
+test engine::comparison::tests::duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 185 filtered out; finished in 0.10s
+

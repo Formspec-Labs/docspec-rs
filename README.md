@@ -6,8 +6,8 @@ completed phases, selects an immutable release, and reads that release without
 the producing catalog.
 
 This repository implements the local foundation and a recoverable Parquet path
-from the [accepted greenfield plan](docs/PLAN.md). **The complete dataset lifecycle and the
-10-million-Comments performance target remain unfinished.** See
+from the [accepted greenfield plan](docs/PLAN.md). **The complete dataset lifecycle
+remains unfinished; the defined full local 10-million-Comments gate passes.** See
 [implementation status](docs/STATUS.md) for the requirement and qualification map.
 
 ## Local exports, compaction and restore
@@ -470,12 +470,34 @@ stream the requested result. Complete-path backfill latency remains unmeasured.
 target/debug/docspec --workspace workspaces/comments latest comments
 target/debug/docspec --workspace workspaces/comments release comments initial
 target/debug/docspec --workspace workspaces/comments compare old.json new.json
+target/debug/docspec --workspace workspaces/comments changes old.json new.json changes.arrow
 target/debug/docspec --workspace workspaces/comments check-succession old.json new.json
 target/debug/docspec --workspace workspaces/comments invalidate comments "dependency correction"
 target/debug/docspec --workspace workspaces/comments serve
 ```
 
-`compare` performs a full, duplicate-aware value comparison, not a write journal.
+`compare` returns duplicate-aware value counts and a description of the compared
+endpoints. `--occurrences` also distinguishes replacement by an equal value with
+a new occurrence identity. `changes` streams the actual before/after members as
+Arrow IPC; it defaults to occurrence identity, with `--values` for value-only
+comparison. Both accept `--group` and `--force-full`. When consuming the row
+stream, derive counts from those rows instead of running a second comparison.
+
+Each change row contains `side`, `file`, `row`, and typed `values`. The address
+identifies an occurrence in that endpoint; after compaction it may name its
+original location. Schema metadata `docspec.change` records exact endpoints,
+identity, path and metadata effects. In value mode, addresses are deterministic
+representatives of surplus values. Read through successful end of stream before
+treating the result as complete. Default-only schema changes can report a schema
+effect with zero value differences; incompatible fields refuse streamed comparison.
+
+HTTP `POST /compare` and `POST /changes` accept `before` and `after` release pins,
+an optional `group` (default `source`), and optional `options` containing `identity`
+(`values` or `occurrences`) and `force_full`. Omitted options follow the respective
+CLI defaults. Identical field-group pins skip payload reads unless forced; other
+comparisons reconstruct both endpoints. Retained-chain acceleration, portable
+change certificates and independent change-history retirement remain unfinished.
+
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement
 definition explicitly. A new operation is required after invalidation. Incremental

@@ -8,10 +8,11 @@ use crate::{
     evidence::EvidenceSpec,
     export::{ExportPin, ExportSpec},
     model::{
-        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, CorrectionDecision,
-        DependencyCorrection, GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec,
-        ReleasePin, RemovalPlan, RemovalStatus, RetentionInspection, RetentionPlan, Retirement,
-        RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
+        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, Comparison,
+        ComparisonIdentity, ComparisonOptions, CorrectionDecision, DependencyCorrection,
+        GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan,
+        RemovalStatus, RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec,
+        SuccessionProof, UpdateSpec, VersionRef,
     },
     restore::RestorePointRef,
 };
@@ -32,6 +33,8 @@ pub fn router(engine: Engine) -> Router {
     Router::new()
         .route("/plan", post(plan))
         .route("/run", post(run))
+        .route("/compare", post(compare))
+        .route("/changes", post(changes))
         .route("/updates/plan", post(plan_update))
         .route("/updates/run", post(update))
         .route("/receipts/plan", post(plan_evidence))
@@ -119,6 +122,60 @@ pub fn router(engine: Engine) -> Router {
 }
 
 struct HttpError(Error);
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ComparisonRequest {
+    before: ReleasePin,
+    after: ReleasePin,
+    #[serde(default = "source_group")]
+    group: String,
+    // Omission preserves value-summary compatibility; streaming defaults to occurrences.
+    options: Option<ComparisonOptions>,
+}
+
+fn source_group() -> String {
+    "source".into()
+}
+
+async fn compare(
+    State(engine): State<Engine>,
+    Json(request): Json<ComparisonRequest>,
+) -> Result<Json<Comparison>, HttpError> {
+    let options = request.options.unwrap_or(ComparisonOptions {
+        identity: ComparisonIdentity::Values,
+        force_full: false,
+    });
+    Ok(Json(
+        engine
+            .compare_with_options(&request.before, &request.after, &request.group, &options)
+            .await?,
+    ))
+}
+
+async fn changes(
+    State(engine): State<Engine>,
+    Json(request): Json<ComparisonRequest>,
+) -> Result<Response, HttpError> {
+    let batches = engine
+        .changes(
+            &request.before,
+            &request.after,
+            &request.group,
+            &request.options.unwrap_or_default(),
+        )
+        .await?;
+    let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
+        // Retain workspace ownership until the response completes or is canceled.
+        let _owner = &engine;
+        chunk
+    });
+    Ok((
+        [("content-type", "application/vnd.apache.arrow.stream")],
+        Body::from_stream(stream),
+    )
+        .into_response())
+}
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]

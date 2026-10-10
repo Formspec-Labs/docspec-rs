@@ -8,9 +8,9 @@ use docspec::{
     evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
-        BackfillSpec, CompactionSpec, DependencyCorrection, GenerationSeal, Id, InputCoverage,
-        ObjectRef, RefreshSpec, ReleasePin, RemovalPlan, RetentionPlan, RunSpec, SchemaSpec,
-        UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, CompactionSpec, ComparisonIdentity, ComparisonOptions, DependencyCorrection,
+        GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan,
+        RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
     },
     restore::RestorePointRef,
     storage,
@@ -216,6 +216,26 @@ enum Command {
         after: PathBuf,
         #[arg(long, default_value = "source")]
         group: String,
+        /// Compare stable source occurrences instead of row values.
+        #[arg(long)]
+        occurrences: bool,
+        /// Reconstruct the comparison from the complete endpoints.
+        #[arg(long)]
+        force_full: bool,
+    },
+    /// Stream row changes and their exact comparison description as Arrow IPC.
+    Changes {
+        before: PathBuf,
+        after: PathBuf,
+        output: PathBuf,
+        #[arg(long, default_value = "source")]
+        group: String,
+        /// Compare row values instead of stable source occurrences.
+        #[arg(long)]
+        values: bool,
+        /// Reconstruct the comparison from the complete endpoints.
+        #[arg(long)]
+        force_full: bool,
     },
     /// Invalidate pending reuse and preserve the reason.
     Invalidate {
@@ -671,15 +691,63 @@ async fn main() -> anyhow::Result<()> {
                     before,
                     after,
                     group,
+                    occurrences,
+                    force_full,
                 } => print_json(
                     &engine
-                        .compare(
+                        .compare_with_options(
                             &read_json::<ReleasePin>(before)?,
                             &read_json::<ReleasePin>(after)?,
                             &group,
+                            &ComparisonOptions {
+                                identity: if occurrences {
+                                    ComparisonIdentity::Occurrences
+                                } else {
+                                    ComparisonIdentity::Values
+                                },
+                                force_full,
+                            },
                         )
                         .await?,
                 )?,
+                Command::Changes {
+                    before,
+                    after,
+                    output,
+                    group,
+                    values,
+                    force_full,
+                } => {
+                    let before = read_json::<ReleasePin>(before)?;
+                    let after = read_json::<ReleasePin>(after)?;
+                    let mut stream = engine
+                        .changes(
+                            &before,
+                            &after,
+                            &group,
+                            &ComparisonOptions {
+                                identity: if values {
+                                    ComparisonIdentity::Values
+                                } else {
+                                    ComparisonIdentity::Occurrences
+                                },
+                                force_full,
+                            },
+                        )
+                        .await?;
+                    let file = std::fs::OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(output)?;
+                    let mut writer = arrow::ipc::writer::StreamWriter::try_new(
+                        BufWriter::new(file),
+                        &stream.schema(),
+                    )?;
+                    while let Some(batch) = stream.try_next().await? {
+                        writer.write(&batch)?;
+                    }
+                    writer.finish()?;
+                }
                 Command::Invalidate {
                     dataset,
                     reason,

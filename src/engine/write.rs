@@ -49,7 +49,7 @@ impl Engine {
         .await
     }
 
-    async fn replacement_output(
+    pub(super) async fn replacement_output(
         &self,
         dataset: &Id,
         directory: &Path,
@@ -196,15 +196,14 @@ impl Engine {
         // a newer physical representation after the request has been retained.
         let captured_before = captured_source.unwrap_or(canonical_before);
         let before_with_origins;
-        let before = if base.dataset.evidence.is_some()
-            && !storage::identity::has_origins(
-                storage::open_pin(captured_before)
-                    .await?
-                    .metadata()
-                    .current_schema(),
-            )? {
-            // Receipt associations survive the first value rewrite as well as
-            // compaction. Add optional origin fields through native metadata;
+        let before = if !storage::identity::has_origins(
+            storage::open_pin(captured_before)
+                .await?
+                .metadata()
+                .current_schema(),
+        )? {
+            // Source occurrences survive the first value rewrite even without
+            // receipts. Add optional origin fields through native metadata;
             // the existing reader fills original file/row before filtering.
             before_with_origins = self
                 .source_with_origins(
@@ -363,7 +362,9 @@ impl Engine {
             removed,
             added,
             metrics,
-        } = applied;
+        } = self
+            .finish_source_replacement(&spec.dataset, directory, captured_before, applied)
+            .await?;
         let changes = ChangePin {
             base_version: spec.base.clone(),
             base_manifest: base.manifest,
@@ -380,6 +381,34 @@ impl Engine {
             schema_input: None,
         })
     }
+
+    /// Retains the captured source and its change schema when no rows were applied.
+    pub(super) async fn finish_source_replacement(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        captured: &TablePin,
+        mut applied: Applied,
+    ) -> Result<Applied> {
+        if applied.metrics.rows_removed == 0
+            && applied.metrics.rows_added == 0
+            && applied.table.metadata != captured.metadata
+        {
+            // Optional origins must not fork an unchanged captured source. The
+            // empty change relations use its schema too, as endpoint verification
+            // requires the added and removed schemas to match the result.
+            applied.table = captured.clone();
+            let native = storage::open_pin(captured).await?;
+            let empty = self
+                .replacement_output(dataset, &directory.join("unchanged-changes"), &native)
+                .await?;
+            applied.removed =
+                storage::pin(dataset, &empty, 0, &self.inner.lifecycle.budget, &[]).await?;
+            applied.added = applied.removed.clone();
+        }
+        Ok(applied)
+    }
+
     /// Replaces complete key groups and retains actual applied rows with shared files.
     // Keep shared replacement state out of nested application poll frames.
     pub(super) fn replace_keys<'a>(

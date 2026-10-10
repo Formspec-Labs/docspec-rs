@@ -1,0 +1,39 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0599]: no method named `read_occurrences` found for reference `&Engine` in the current scope
+  --> tests/comparison.rs:72:10
+   |
+71 |       let batches: Vec<RecordBatch> = engine
+   |  _____________________________________-
+72 | |         .read_occurrences(release)
+   | |_________-^^^^^^^^^^^^^^^^
+   |
+help: there is a method `read_source_occurrences` with a similar name
+   |
+72 |         .read_source_occurrences(release)
+   |               +++++++
+
+error[E0282]: type annotations needed
+  --> tests/comparison.rs:71:37
+   |
+71 |       let batches: Vec<RecordBatch> = engine
+   |  _____________________________________^
+72 | |         .read_occurrences(release)
+73 | |         .await
+   | |______________^ cannot infer type
+
+error[E0282]: type annotations needed
+  --> tests/comparison.rs:71:37
+   |
+71 |       let batches: Vec<RecordBatch> = engine
+   |  _____________________________________^
+72 | |         .read_occurrences(release)
+73 | |         .await
+74 | |         .unwrap()
+75 | |         .try_collect()
+76 | |         .await
+   | |______________^ cannot infer type
+
+Some errors have detailed explanations: E0282, E0599.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `docspec` (test "comparison") due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

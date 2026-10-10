@@ -1,0 +1,532 @@
+Continuation of full-check-3 after test-only defaults expectation correction.
+Defaults separately passed in change-stream-defaults-check.log; production sources unchanged.
+cargo test --locked --all-features --test dependency_correction_lifecycle --test dependency_correction_transport --test dependency_corrections --test evidence_updates --test exports --test grant_retirement_transport --test http_read --test input_generations --test lifecycle --test operation_retirement --test operation_retirement_transport --test phase_dependencies --test phase_retirement --test phase_retirement_transport --test physical_removal_process --test physical_removal_transport --test qualification_roots --test rebuild --test rebuild_completion --test refresh --test related_refresh --test restore --test restore_catalog --test retention_inspection --test scalar_bindings --test schema --test succession --test updates --test worker_initialization
+    Finished `test` profile [unoptimized] target(s) in 0.70s
+     Running tests/dependency_correction_lifecycle.rs (target/debug/deps/dependency_correction_lifecycle-e7da6dc54f245454)
+
+running 3 tests
+test correction_after_export_validation_blocks_selection_and_keeps_completed_output ... ok
+test corrected_computed_export_admission_preserves_completed_replay_and_source_exports ... ok
+test qualified_inherited_group_restores_original_evidence_after_recovery_retirement ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.19s
+
+     Running tests/dependency_correction_transport.rs (target/debug/deps/dependency_correction_transport-a73d85b46b6bf1df)
+
+running 1 test
+test http_and_cli_reconcile_the_same_decision_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.65s
+
+     Running tests/dependency_corrections.rs (target/debug/deps/dependency_corrections-3d0f1e43471a2162)
+
+running 4 tests
+test missing_original_field_is_unknown_and_new_deficient_execution_is_mismatch ... ok
+test correction_after_readback_requires_new_operation_and_reuses_originals ... ok
+test inherited_sibling_selection_adds_cumulative_proof_without_rewriting_values ... ok
+test correction_committed_at_actual_file_reuse_blocks_changed_language_context ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.26s
+
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 10 tests
+test nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test receipt_processing_survives_process_loss_without_original_input ... ok
+test receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test inherited_receipt_deletions_survive_process_loss_without_repeating_work ... ok
+test receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+test evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+test active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... ok
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.97s
+
+     Running tests/exports.rs (target/debug/deps/exports-4441b6c55cd33e6a)
+
+running 11 tests
+test independent_parquet_contains_only_authorized_columns_and_exact_occurrences ... ok
+test empty_snapshot_keeps_standalone_schema_and_explicit_policy ... ok
+test primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... ok
+test validation_and_selection_resume_without_opening_the_source_again ... ok
+test small_read_batches_export_exact_data_with_bounded_footer ... ok
+test stale_authority_and_channel_keep_completed_output_without_promotion ... ok
+test memory_driven_footer_limit_preserves_prior_selection_and_can_resume ... ok
+test cli_compaction_and_offline_restore_share_the_application_paths ... ok
+test replacements_deletions_and_old_downloads_follow_their_exact_snapshots ... ok
+test http_exports_compaction_and_restore_points_use_the_shared_services ... ok
+test killed_export_workers_resume_without_repeating_completed_work ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.29s
+
+     Running tests/grant_retirement_transport.rs (target/debug/deps/grant_retirement_transport-1fa40629b4b0e7d9)
+
+running 2 tests
+test grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry ... ok
+test foreign_seal_protects_old_scalar_origins_after_cache_keys_are_recomputed ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.42s
+
+     Running tests/http_read.rs (target/debug/deps/http_read-f692d827ad3b731b)
+
+running 5 tests
+test empty_streams_keep_schema_and_known_failures_return_structured_errors ... ok
+test catalog_free_cli_uses_the_shared_group_reader ... ok
+test in_flight_response_keeps_workspace_ownership_until_canceled ... ok
+test rebound_catalog_results_cannot_change_an_exact_version_url ... ok
+test http_reads_exact_historical_source_and_combined_values_in_bounded_frames ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s
+
+     Running tests/input_generations.rs (target/debug/deps/input_generations-6ec96f25e5f0cf8b)
+
+running 8 tests
+test invalid_seals_and_rebound_input_keys_refuse ... ok
+test offline_relationship_checks_need_only_captured_manifests_and_detect_tampering ... ok
+test cli_and_http_use_the_same_generation_guards ... ok
+test omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base ... ok
+test independent_release_verification_rejects_rewritten_producer_relationships ... ok
+test stable_family_membership_and_exact_retry_survive_restart_and_invalidation ... ok
+test updates_and_backfills_inherit_but_resealing_requires_exact_new_members ... ok
+test independent_and_coupled_inputs_follow_the_entire_consumed_member_map ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.55s
+
+     Running tests/lifecycle.rs (target/debug/deps/lifecycle-d2f3e4a38e3612bb)
+
+running 24 tests
+test native_snapshot_guard_rejects_stale_application_state ... ok
+test bad_input_and_non_query_sql_never_select_a_release ... ok
+test dependency_correction_fences_adoption_without_output_change ... ok
+test local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test native_readers_hold_shared_admission_until_stream_drop ... ok
+test independent_reader_rejects_same_size_corruption ... ok
+test live_workspace_owner_and_conflicting_operation_refuse ... ok
+test exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test every_acknowledged_metadata_update_survives_cache_loss ... ok
+test new_operation_reuses_qualified_values_and_original_generation ... ok
+test empty_output_keeps_schema_and_readable_history ... ok
+test comparison_preserves_duplicates_and_historical_release ... ok
+test oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test older_preparation_cannot_replace_newer_coverage ... ok
+test relocated_build_retry_keeps_the_original_readback_request ... ok
+test plan_and_run_apply_the_same_definition_fence ... ok
+test routine_checks_reject_damaged_footer_and_declared_counts ... ok
+test routine_checks_report_scope_and_deep_checks_find_same_size_input_damage ... ok
+test simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test routine_samples_allow_several_individually_bounded_wide_batches ... ok
+test unstable_functions_do_not_become_reusable_results ... ok
+test every_durable_phase_survives_reopen_and_source_loss ... ok
+test killed_cli_worker_resumes_every_completed_handoff ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.85s
+
+     Running tests/operation_retirement.rs (target/debug/deps/operation_retirement-30ad0f77da721e71)
+
+running 3 tests
+test active_operation_must_be_abandoned_and_its_phases_remain_independent ... ok
+test completed_recovery_retirement_keeps_phases_reusable_and_creator_evidence_readable ... ok
+test all_explicit_a_promises_retire_while_independent_selected_b_stays_protected ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
+
+     Running tests/operation_retirement_transport.rs (target/debug/deps/operation_retirement_transport-13684c17f1b548ac)
+
+running 1 test
+test cli_http_retirement_preserves_selected_values_and_reconciles_after_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.81s
+
+     Running tests/phase_retirement.rs (target/debug/deps/phase_retirement-ba03eff11568c106)
+
+running 7 tests
+test retained_readback_selects_after_upstream_retirement_without_source ... ok
+test processing_recovers_after_admission_retirement_and_restart ... ok
+test exact_generation_retries_do_not_retire_recomputed_work ... ok
+test validation_requires_explicit_retirement_after_processing_replacement ... ok
+test scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test evidence_requires_explicit_retirement_after_source_replacement ... ok
+test retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.46s
+
+     Running tests/phase_retirement_transport.rs (target/debug/deps/phase_retirement_transport-d54b0438f0857867)
+
+running 2 tests
+test availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running tests/physical_removal_process.rs (target/debug/deps/physical_removal_process-55c64a133547db59)
+
+running 1 test
+test sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.89s
+
+     Running tests/physical_removal_transport.rs (target/debug/deps/physical_removal_transport-8a4777cd7d7c3f52)
+
+running 1 test
+test cli_http_preview_agrees_and_keeps_protected_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/qualification_roots.rs (target/debug/deps/qualification_roots-b20d1f291f2bc053)
+
+running 2 tests
+test sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+test qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.37s
+
+     Running tests/rebuild.rs (target/debug/deps/rebuild-71cd6360fd02d8fc)
+
+running 7 tests
+test rebuild_retry_identity_includes_base_and_self_base_refuses_before_admission ... ok
+test reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names ... ok
+test independent_rebuild_verifier_rejects_false_composition_and_input_claims ... ok
+test failed_or_invalidated_rebuild_keeps_previous_complete_selection ... ok
+test later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work ... ok
+test full_rebuild_requalifies_source_and_every_group_without_changing_history ... ok
+test rebuild_resumes_source_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.40s
+
+     Running tests/rebuild_completion.rs (target/debug/deps/rebuild_completion-e2c166ebcfc744bd)
+
+running 5 tests
+test lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.85s
+
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 9 tests
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test relocated_retry_preserves_original_request_and_readback ... ok
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.24s
+
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... FAILED
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... FAILED
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... FAILED
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+failures:
+
+---- aggregation::summaries_share_unaffected_files_and_selected_computed_groups stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/comments/f9b07180d9024bc6aa410df57731638b/data/77ae5616-8a54-4e8d-b002-da4befd4f7b0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/dockets/896ca983f1fa48dc892d45f06aefbf15/data/f42ae923-46b8-41b8-86dc-b70a82558c0a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/30c793b698da4a07956361494bf7f59e/data/c5315c62-9189-46b3-9bb5-cc2c0bd13fb7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/f00683293302463daa528d28529fe22b/data/7b18ad48-4f94-44dc-9f8e-0bb16c90806a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/52549300e1554e47b189e5672098f4c6/data/bb14cbc3-6630-4801-8873-d05eab9b5ddc-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/comments/dcaabc94e40f4f9ba0d703eae71a5f78/data/data/ff44dadc-33d5-4f45-83d6-f5109439f645-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/724ceae46cc8494a81c3407555af895b/replacement/data/data/fb6a11a8-836e-48a2-81da-50b6a4a677dc-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/adfd4c47eb7842b19da4c81c96c187a9/data/data/bfcd4043-6dd2-4230-931d-06fd18f87362-00000.parquet
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKBAu3N/workspace/objects/summary/bb7207285c0445bab0d394d79c6b6e30/data/2ec89523-a033-4230-a84f-d08e3a0ca86f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+
+thread 'aggregation::summaries_share_unaffected_files_and_selected_computed_groups' (33412409) panicked at tests/related_refresh/aggregation.rs:362:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_changes", message: "applied rows, native schemas or endpoint counts disagree", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMiCtqF/workspace/objects/input/e0f421686e4249fc91218e1b798547ea/data/data/fa41db7f-646f-4a44-8d8c-bd14bc551b58-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMiCtqF/workspace/objects/summary/0b52ee1b5e4c43f18ee8445716954e10/replacement/data/data/a81411e3-f858-4ef4-8445-b648639dac49-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMiCtqF/workspace/objects/summary/98a1e2d0a2904e278c58062afdcd8f0e/data/data/77ddf492-c134-44ef-ae66-35356f6b42d4-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMiCtqF/workspace/objects/input/9cf0475971224e9e8f6ad7ab2cecfeba/removed/data/2e6d1e3e-be4f-40a7-a001-21a0f8d34506-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpMiCtqF/workspace/objects/summary/f91dcc106f364fca9cbda40d6526bed4/replacement/removed/data/4faae79d-3556-4f0f-a395-2262c29982fe-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+
+thread 'aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact' (33412405) panicked at tests/related_refresh/aggregation.rs:270:18:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_changes", message: "applied rows, native schemas or endpoint counts disagree", source: None, backtrace: <disabled> }
+
+---- incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/comments/a5bf966dc42847e7bd38e3d577fc7d45/data/fa49a1fa-eab1-4a0e-af36-09c518cc815e-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/dockets/233d9c32ac8e480a9b308a94fd506946/data/55d9f1be-d4af-44c6-b7e2-6f690b79c7fc-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/8cdeaa04783543bcae71a285939e0e79/data/474b324d-5fbd-4822-830b-ae7c012f8583-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/dfe5ffc524074b02876fb89b902c770e/data/39c0ccca-f0e9-40fd-8c69-7226e6d385bf-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/a1a927042eb34e47aca4d5f86b8eba9b/data/de07cb52-2c10-4675-846a-cc103c373ae0-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/comments/a2fa56db6ead450194cc53262a0749d3/data/data/3196a96e-2b65-45dc-9026-decd105e5756-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/dockets/ef6ff656f1cc40f399db5e7fd551a61f/data/data/1f305e30-0934-4211-be32-659e74ed33e5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/8a0310bb7ab8483eb464fef1e58d809f/replacement/data/data/f962d60a-659a-4a9c-83bd-0bcc2cc648e4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/7983e6657d0545628cc9a70ff55c4acc/data/data/db5b338e-315a-4c96-8f3b-ea043b8746c0-00000.parquet
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/98b23f2215224c3db11205b2a7932138/data/428bff0a-708c-4aa5-8f9b-5946cf66a371-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/comments/c064c46e50a14bdab30cca2608f75c8a/data/data/7ff3b48c-3ac0-46b5-b468-9c4d799ea302-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/comments/c064c46e50a14bdab30cca2608f75c8a/removed/data/4333e4f3-80e4-45a9-8291-9ae50099679a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/ea8498ca1b3344aa8298a70c1c701ab2/replacement/data/data/e1f3986c-81ba-48dd-b002-ea05b83ce66f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/ea8498ca1b3344aa8298a70c1c701ab2/replacement/removed/data/b6840a45-fc0e-47a2-85e2-7d4133f55e46-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/174d740bcd8347c1bcaefbb68447c942/data/data/4fc2af99-0620-4e29-85cb-00b7e45288fa-00000.parquet
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN9VuKR/workspace/objects/joined/032fec19a2304da9976a42c5658974ea/data/cc838300-1d74-4d3b-b299-10663b1548dd-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+
+thread 'incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins' (33415843) panicked at tests/related_refresh/incremental.rs:353:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_changes", message: "applied rows, native schemas or endpoint counts disagree", source: None, backtrace: <disabled> }
+
+
+failures:
+    aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact
+    aggregation::summaries_share_unaffected_files_and_selected_computed_groups
+    incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins
+
+test result: FAILED. 26 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 114.69s
+
+error: test failed, to rerun pass `--test related_refresh`

@@ -1,0 +1,102 @@
+Continuation after schema fixture accounts for retained origins while forbidding reuse of hidden field ID2.
+cargo fmt --all
+cargo test --locked --all-features --test schema --test succession --test updates --test worker_initialization
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.04s
+     Running tests/schema.rs (target/debug/deps/schema-8c6a4c5f9c33822e)
+
+running 9 tests
+test rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test cached_related_result_checks_schema_input_history ... ok
+test invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... ok
+test schema_cutover_fences_old_workers_and_later_admissions ... ok
+test schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+test http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test killed_schema_workers_resume_only_missing_phases ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+
+     Running tests/succession.rs (target/debug/deps/succession-beeee1111db26b76)
+
+running 6 tests
+test small_history_budget_refuses_and_transports_share_the_proof_service ... ok
+test identity_mismatch_and_orphan_branches_cannot_establish_coverage ... ok
+test admission_and_prepared_releases_do_not_create_accepted_history ... ok
+test selected_head_cannot_predeclare_a_future_commit_or_disagree_with_its_release ... ok
+test every_selection_records_actual_predecessor_in_the_same_native_commit ... ok
+test missing_malformed_rebound_and_cyclic_history_refuses_without_payload_reads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.20s
+
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 14 tests
+test affected_base_with_incompatible_physical_schema_refuses_during_read ... FAILED
+test nested_replacements_preserve_values_and_native_field_ids ... FAILED
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test routine_verification_inspects_shared_change_files_once ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test update_creation_inspects_only_new_files_without_duplicate_change_checks ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+
+failures:
+
+---- affected_base_with_incompatible_physical_schema_refuses_during_read stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuxPoel/workspace/objects/comments/09598298b0584c5dbc49c7c8b141e826/data/bc17190c-595e-4409-89ba-9bcb1796da84-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuxPoel/workspace/objects/comments/09598298b0584c5dbc49c7c8b141e826/data/bc17190c-595e-4409-89ba-9bcb1796da84-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuxPoel/workspace/objects/comments/09598298b0584c5dbc49c7c8b141e826/data/bc17190c-595e-4409-89ba-9bcb1796da84-00002.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuxPoel/workspace/objects/comments/09598298b0584c5dbc49c7c8b141e826/data/bc17190c-595e-4409-89ba-9bcb1796da84-00003.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'affected_base_with_incompatible_physical_schema_refuses_during_read' (33526771) panicked at tests/updates.rs:428:5:
+assertion `left == right` failed
+  left: "unavailable_phase"
+ right: "iceberg"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- nested_replacements_preserve_values_and_native_field_ids stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpV0Y10M/workspace/objects/comments/7c2888354fbe427a9d8fe57480329b62/data/c7816668-aefa-4c5f-b236-82f8a6f56992-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpV0Y10M/workspace/objects/comments/8679cf724ebf4cec9a50462a5b3a0eff/data/data/a70bfa2a-1b2c-4c2b-a354-886adb05d16b-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpV0Y10M/workspace/objects/comments/8679cf724ebf4cec9a50462a5b3a0eff/data/data/b3a617da-80c8-41fb-b3b1-7f40ec9b8c0f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpV0Y10M/workspace/objects/comments/8679cf724ebf4cec9a50462a5b3a0eff/removed/data/7103f3d7-85cf-4d29-98c1-031f061451a5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'nested_replacements_preserve_values_and_native_field_ids' (33526778) panicked at tests/updates.rs:763:5:
+assertion `left == right` failed
+  left: Schema { struct: StructType { fields: [NestedField { id: 1, name: "id", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, NestedField { id: 2, name: "details", required: false, field_type: Struct(StructType { fields: [NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }, schema_id: 0, highest_field_id: 5, identifier_field_ids: {}, alias_to_id: {}, id_to_field: {4: NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }, 1: NestedField { id: 1, name: "id", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, 5: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, 2: NestedField { id: 2, name: "details", required: false, field_type: Struct(StructType { fields: [NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }), doc: None, initial_default: None, write_default: None }, 3: NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }}, name_to_id: {"details.tags": 4, "details.tags.element": 5, "details": 2, "id": 1, "details.city": 3}, lowercase_name_to_id: {"details.tags.element": 5, "details.tags": 4, "id": 1, "details.city": 3, "details": 2}, id_to_name: {5: "details.tags.element", 1: "id", 3: "details.city", 4: "details.tags", 2: "details"}, field_id_to_accessor: {1: StructAccessor { position: 0, type: Long, inner: None }, 3: StructAccessor { position: 1, type: String, inner: Some(StructAccessor { position: 0, type: String, inner: None }) }} }
+ right: Schema { struct: StructType { fields: [NestedField { id: 1, name: "id", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, NestedField { id: 2, name: "details", required: false, field_type: Struct(StructType { fields: [NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }), doc: None, initial_default: None, write_default: None }, NestedField { id: 6, name: "__docspec_origin_file", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, NestedField { id: 7, name: "__docspec_origin_row", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }, schema_id: 1, highest_field_id: 7, identifier_field_ids: {}, alias_to_id: {}, id_to_field: {1: NestedField { id: 1, name: "id", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, 6: NestedField { id: 6, name: "__docspec_origin_file", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, 7: NestedField { id: 7, name: "__docspec_origin_row", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, 3: NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, 5: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None }, 4: NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }, 2: NestedField { id: 2, name: "details", required: false, field_type: Struct(StructType { fields: [NestedField { id: 3, name: "city", required: false, field_type: Primitive(String), doc: None, initial_default: None, write_default: None }, NestedField { id: 4, name: "tags", required: false, field_type: List(ListType { element_field: NestedField { id: 5, name: "element", required: false, field_type: Primitive(Long), doc: None, initial_default: None, write_default: None } }), doc: None, initial_default: None, write_default: None }], id_lookup: OnceLock(<uninit>), name_lookup: OnceLock(<uninit>) }), doc: None, initial_default: None, write_default: None }}, name_to_id: {"__docspec_origin_file": 6, "details.tags": 4, "id": 1, "details.tags.element": 5, "__docspec_origin_row": 7, "details.city": 3, "details": 2}, lowercase_name_to_id: {"__docspec_origin_row": 7, "details": 2, "details.city": 3, "details.tags.element": 5, "details.tags": 4, "__docspec_origin_file": 6, "id": 1}, id_to_name: {6: "__docspec_origin_file", 4: "details.tags", 7: "__docspec_origin_row", 3: "details.city", 5: "details.tags.element", 2: "details", 1: "id"}, field_id_to_accessor: {1: StructAccessor { position: 0, type: Long, inner: None }, 3: StructAccessor { position: 1, type: String, inner: Some(StructAccessor { position: 0, type: String, inner: None }) }, 7: StructAccessor { position: 3, type: Long, inner: None }, 6: StructAccessor { position: 2, type: String, inner: None }} }
+
+
+failures:
+    affected_base_with_incompatible_physical_schema_refuses_during_read
+    nested_replacements_preserve_values_and_native_field_ids
+
+test result: FAILED. 12 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.94s
+
+error: test failed, to rerun pass `--test updates`

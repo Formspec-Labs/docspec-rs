@@ -264,9 +264,9 @@ impl Engine {
             })
             .collect::<Result<Vec<_>>>()?;
         let (write_before, replacement) = self
-            .receipt_replacement(base, directory, replacement, &key_names)
+            .source_replacement(base, directory, replacement, &key_names)
             .await?;
-        let mut applied = self
+        let applied = self
             .replace_keys(Replacement {
                 dataset: &spec.dataset,
                 directory: &directory.join("replacement"),
@@ -276,6 +276,9 @@ impl Engine {
                 replacement,
                 replacement_bytes: None,
             })
+            .await?;
+        let mut applied = self
+            .finish_source_replacement(&spec.dataset, directory, before, applied)
             .await?;
         applied.metrics.files_scanned += scanned;
         applied.metrics.data_files_written += discovery_files;

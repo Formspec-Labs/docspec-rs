@@ -1,0 +1,22 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.57s
+     Running tests/change_transport.rs (target/debug/deps/change_transport-cf7ff43a7d60680a)
+
+running 2 tests
+test http_defaults_and_explicit_options_preserve_engine_comparisons ... ok
+test cli_changes_preserves_descriptor_and_values_selection ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.47s
+
+     Running tests/comparison.rs (target/debug/deps/comparison-49c24bb187e5a28a)
+
+running 6 tests
+test unchanged_pins_skip_payloads_and_force_full_preserves_read_failures ... ok
+test returned_change_stream_holds_maintenance_admission_until_drop ... ok
+test schema_changes_are_explicit_in_counts_and_refused_for_streams ... ok
+test streaming_values_and_occurrences_match_independent_bags_in_both_directions ... ok
+test default_only_changes_report_schema_rules_without_inventing_value_changes ... ok
+test computed_groups_use_retained_addresses_and_report_added_definitions ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.27s
+

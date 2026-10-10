@@ -1,0 +1,23 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0308]: mismatched types
+    --> src/engine/comparison.rs:631:67
+     |
+ 631 |         let output = datafusion::physical_plan::collect(physical, context)
+     |                      ----------------------------------           ^^^^^^^ expected `Arc<TaskContext>`, found `TaskContext`
+     |                      |
+     |                      arguments to this function are incorrect
+     |
+     = note: expected struct `std::sync::Arc<TaskContext>`
+                found struct `TaskContext`
+note: function defined here
+    --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-physical-plan-53.1.0/src/execution_plan.rs:1201:14
+     |
+1201 | pub async fn collect(
+     |              ^^^^^^^
+help: call `Into::into` on this expression to convert `TaskContext` into `std::sync::Arc<TaskContext>`
+     |
+ 631 |         let output = datafusion::physical_plan::collect(physical, context.into())
+     |                                                                          +++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `docspec` (lib test) due to 1 previous error

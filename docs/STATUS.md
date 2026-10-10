@@ -19,6 +19,73 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Exact streamed endpoint comparison
+
+The Rust engine, CLI and HTTP now expose changed members with typed values,
+before/after occurrence addresses and a versioned description of the exact
+endpoints, comparison identity and chosen path. Value comparison preserves
+duplicate counts; occurrence comparison also detects equal-valued replacement
+with a new birth identity. Counts and row streams use the same admission and
+metadata interpretation. Consumers needing both should count the streamed rows,
+without requesting another full comparison.
+
+Identical field-group pins skip payload reads unless full comparison is requested.
+Other comparisons explicitly report `full` and `history_not_qualified` (or
+`forced`). Metadata effects distinguish input references, coverage, definitions,
+schema rules, source/contributor evidence and computed execution evidence.
+Default-only rule edits can report a schema effect and no value difference.
+Computed groups use their retained source addresses. Incompatible visible field
+identities/types refuse streamed comparison instead of silently casting values.
+
+Source updates, incremental joins and summaries preserve stored origins on kept
+rows through the shared replacement path, including receipt-free datasets.
+Zero applied rows preserve the exact captured source and matching empty change
+schemas. Related refresh currently discovers affected keys from changed physical
+files; it can deliberately recompute equal-valued groups. Those applied outputs
+receive new birth identities, while rows outside the applied scope retain theirs.
+Narrowing discovery remains separate optimization work.
+
+The [package audit](dependency-efficiency-audit-2026-10-10.md) caught whole-partition
+window buffering outside DataFusion's memory pool. The comparison now uses
+maintained sorted `ROW_NUMBER` and grouped signed `SUM`/vectorized `MAX`, scanning
+each endpoint once. A narrow input adapter checks actual sorted batch bytes and
+rows before window execution and retains its buffer/bookkeeping allowance. It
+preserves physical ordering and partitioning; it implements no sort, merge or
+window logic. The metadata and window allowances are admission estimates, not a
+whole-process memory guarantee. Native reader page bounds and population-scale
+memory, spill and disk qualification remain open.
+
+The [focused checks](reviews/change-stream-targeted-6.log) pass independent Rust
+value/address expectations, duplicates/nulls, forward/reverse comparison,
+computed groups, default-only edits, failure propagation, unchanged payload
+avoidance, source/related origin preservation, CLI/HTTP and reader lifetime.
+The [resource checks](reviews/change-stream-window-plan-5.log),
+[repository gate](reviews/change-stream-full-check-3.log),
+[corrected defaults check](reviews/change-stream-defaults-check.log) and
+[gate continuation](reviews/change-stream-gate-continuation.log) retain the
+verification evidence. The gate exposed a stale defaults-fixture expectation;
+the continuation exposed a real related-refresh no-op bug that reset evolved
+native schema IDs in empty change tables. The correction reuses the existing
+metadata-preserving constructor without changing validation or the related tests.
+The existing [related-refresh suite](reviews/change-stream-gate-continuation-2.log)
+passes after that correction; the same run records restore, retention and scalar
+binding passes before the schema-fixture failure. Later continuations correct schema-fixture
+expectations for added origin IDs and the earlier retained-file size refusal:
+[schema and succession](reviews/change-stream-gate-continuation-3.log),
+[updates, remaining tests, formatting and strict Clippy](reviews/change-stream-gate-continuation-4.log).
+All gate components are covered across these runs; this is not a claim that one
+uninterrupted gate passed. Unchanged passing suites were not repeated. Earlier
+logs retain fixture/API setup failures, the corrected Clippy predicate, and an
+interrupted build superseded by the final resource-admission correction. The
+[independent review](reviews/change-stream-implementation-review.md) records
+resolved findings and remaining qualification limits.
+
+This delivers the full-comparison foundation of R4. Forward-chain composition,
+versioned applied-write certificates and trusted admission, shared R5 accelerated
+discovery, independent optional-history retirement, schema-mapping comparisons,
+portable trust and the remaining R4/R7 scaling cases are unfinished. No full-data
+performance rerun or speedup claim accompanies this increment.
+
 ## Native column selection
 
 SQL column selection now reaches the maintained Iceberg reader before value
@@ -1494,10 +1561,10 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; continuous-ingestion catch-up and cutover |
-| R4 Verified changes | Full comparison preserving duplicate counts, schemas and input identity; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes | Change-history composition, lineage certificates and explicit unavailable-history fallback |
+| R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes | Forward-chain composition and shared R5 accelerated discovery; versioned applied-write certificates and trusted admission; independent optional-history retirement; schema-mapping comparison, portable trust and remaining scaling/failure qualification |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
-| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |
+| R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare/changes, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |
 
 The CLI exposes implemented operations only. Source updates support complete key
 replacement and deletion against an exact base; unsupported transformations require

@@ -1,0 +1,170 @@
+Continuation after fixing no-op related refresh to retain exact source native schema metadata.
+Rerun affected related_refresh target; run remaining gate targets. Existing related tests unchanged.
+cargo test --locked --all-features --test related_refresh
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.49s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 111.84s
+
+cargo test --locked --all-features --test restore --test restore_catalog --test retention_inspection --test scalar_bindings --test schema --test succession --test updates --test worker_initialization
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 15.77s
+     Running tests/restore.rs (target/debug/deps/restore-3a394b6257246dbd)
+
+running 13 tests
+test delayed_writer_child ... ok
+DOCSPEC_TEST_WORK admission
+test corruption_and_foreign_workspace_refuse_before_catalog_selection ... ok
+DOCSPEC_TEST_WORK processing
+test explicit_retirement_ends_restore_admission_and_preserves_creation_evidence ... ok
+test live_engine_and_held_stream_keep_the_storage_fence ... ok
+test catalog_loss_requires_explicit_artifact_import ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeChLSB/workspace/objects/comments/d5884aa5ac794b5e8d6d54384bf7e0ff/data/bec3b5cf-32c8-4b62-8c93-214d1e570aab-00000.parquet
+DOCSPEC_TEST_WORK readback
+test explicitly_retired_shared_preparation_refuses_same_point_retry ... ok
+test interrupted_shared_capture_protects_reuse_after_older_point_retires ... ok
+test independent_delayed_writer_must_finish_before_restore_can_select ... ok
+test restores_exact_catalog_and_missing_originals_from_retained_copies ... ok
+test scalar_origins_restore_after_file_prepared_and_validation_retirement ... ok
+test completed_capture_reconciles_manifest_and_commit_response_without_recopying ... ok
+test repeated_points_reuse_source_backups_and_do_not_clone_backup_trees ... ok
+test failed_capture_retries_reuse_one_reservation_and_bounded_partial_files ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.64s
+
+     Running tests/restore_catalog.rs (target/debug/deps/restore_catalog-930613c850bc237e)
+
+running 1 test
+test restore_reconstructs_an_unpromised_native_registration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s
+
+     Running tests/retention_inspection.rs (target/debug/deps/retention_inspection-a93ba5b57e41f0bf)
+
+running 8 tests
+test family_only_namespace_retains_external_release_dependencies_once ... ok
+test admitted_refresh_request_protects_inputs_before_any_phase_completes ... ok
+test selected_and_prepared_roots_retain_original_executions_without_old_phases ... ok
+test unknown_and_legacy_roots_refuse_instead_of_reporting_unprotected ... ok
+test completed_and_interrupted_roots_protect_without_opening_payloads ... ok
+test schema_admission_and_evolved_group_metadata_preserve_native_interpretation ... ok
+test each_backfill_completion_independently_protects_its_consumed_source ... ok
+test candidate_identity_capacity_and_transport_boundaries_are_explicit ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.55s
+
+     Running tests/scalar_bindings.rs (target/debug/deps/scalar_bindings-54c1e5341b6b343e)
+
+running 3 tests
+test opposite_boolean_outputs_cannot_hide_each_other_in_value_comparison ... ok
+test cached_readback_requires_older_binding_manifests_and_origin_schemas ... ok
+test redirected_rehashed_ancestor_does_not_change_an_authored_expression ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.89s
+
+     Running tests/schema.rs (target/debug/deps/schema-8c6a4c5f9c33822e)
+
+running 9 tests
+test rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test cached_related_result_checks_schema_input_history ... ok
+test invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... FAILED
+test schema_cutover_fences_old_workers_and_later_admissions ... ok
+test killed_schema_workers_resume_only_missing_phases ... ok
+test schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+
+failures:
+
+---- hidden_fields_stay_historical_and_new_writes_use_the_selected_schema stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/720f0145c15d45a2a53ab06e9777b29a/data/cf1f1262-d463-46ee-80ee-1fbe379e4a0a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/720f0145c15d45a2a53ab06e9777b29a/data/cf1f1262-d463-46ee-80ee-1fbe379e4a0a-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/720f0145c15d45a2a53ab06e9777b29a/data/cf1f1262-d463-46ee-80ee-1fbe379e4a0a-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/dea6a1a0a9fa4488ac94a6246e6a565a/data/270362ad-7752-40d4-9258-ebba8d559c7f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/dea6a1a0a9fa4488ac94a6246e6a565a/data/7945b42b-45fd-49d1-8700-f6b7a5f99dae-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/dea6a1a0a9fa4488ac94a6246e6a565a/data/ab75f385-9128-4577-ab9b-3aef116cbea8-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/69b52211851446e185de76bf98edd328/data/data/7776867a-12ab-4fca-a6e5-beb9a710581c-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/69b52211851446e185de76bf98edd328/data/data/e27ce3ed-d338-418e-a01f-9ae3b9c31148-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/69b52211851446e185de76bf98edd328/removed/data/26cd1931-15e0-45ba-ad73-04e5df77ea08-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/cbbab00e623e4a7d971b8a720626f66f/data/259c778c-7c82-4eac-9cf4-2970500777d3-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpItl5le/workspace/objects/comments/cbbab00e623e4a7d971b8a720626f66f/data/aeb333be-b34d-4eca-9b83-a410187fcef5-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'hidden_fields_stay_historical_and_new_writes_use_the_selected_schema' (33498289) panicked at tests/schema.rs:350:5:
+assertion `left == right` failed
+  left: 4
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    hidden_fields_stay_historical_and_new_writes_use_the_selected_schema
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.82s
+
+error: test failed, to rerun pass `--test schema`

@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: function `spec` is never used
+   --> tests/support/scalar.rs:117:15
+    |
+117 | pub(super) fn spec(
+    |               ^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (test "change_origins") generated 1 warning (1 duplicate)
+warning: `docspec` (test "change_transport") generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 16.38s
+     Running tests/change_origins.rs (target/debug/deps/change_origins-69efaef06e75bbb9)
+
+running 1 test
+test receipt_free_updates_preserve_original_addresses_and_new_births ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.13s
+
+     Running tests/change_transport.rs (target/debug/deps/change_transport-cf7ff43a7d60680a)
+
+running 2 tests
+test http_defaults_and_explicit_options_preserve_engine_comparisons ... ok
+test cli_changes_preserves_descriptor_and_values_selection ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.56s
+

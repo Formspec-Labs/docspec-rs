@@ -347,7 +347,23 @@ async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() 
     let native = storage::open_pin(&updated.dataset.groups["source"])
         .await
         .unwrap();
-    assert_eq!(native.metadata().last_column_id(), 2);
+    // Origin fields extend the high-water mark without reusing hidden field 2.
+    assert_eq!(native.metadata().last_column_id(), 4);
+    assert_eq!(
+        native
+            .metadata()
+            .current_schema()
+            .as_struct()
+            .fields()
+            .iter()
+            .map(|field| (field.name.as_str(), field.id))
+            .collect::<Vec<_>>(),
+        vec![
+            ("comment_id", 1),
+            ("__docspec_origin_file", 3),
+            ("__docspec_origin_row", 4),
+        ]
+    );
     verify_release(&updated, limits()).await.unwrap();
 }
 
