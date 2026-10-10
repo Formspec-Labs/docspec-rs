@@ -1,7 +1,7 @@
 # DataFusion and Arrow efficiency decisions
 
 Research date: 2026-10-10. Initial implementation baseline: `ce3ad6b`;
-follow-up inspected `9c818a0` and the current reader/writer source. The lockfile
+follow-ups inspected `9c818a0` and `89c2eaf` reader/writer source. The lockfile
 resolves DataFusion 53.1.0, Arrow/Parquet 58.4.0, Iceberg 0.10.1 and Tokio 1.53.2.
 
 **The documented changes now pass the full local performance gate:** native
@@ -17,7 +17,8 @@ is to push column selection down so narrow queries avoid decoding unused values.
 reader, then reduce repeated work and output overhead.** Official documentation
 and independent source investigations support these changes; they do not provide
 a measured speedup for DocSpec. This follow-up ran no new performance experiment
-and read no corpus payloads.
+and read no corpus payloads. A [blind source review](reviews/native-efficiency-followup-review-2026-10-10.md)
+independently confirmed the reader gaps and approved the updated guidance.
 
 The [accepted measurements](../experiments/comments-e2e/acceptance-oracle-threads4-20261010.json)
 separate the costs. Engine command stages total 127.42–129.75 seconds; the exact
@@ -32,6 +33,8 @@ or a specific investigation, as [AGENTS](../AGENTS.md) already requires.
 | Next | Share one captured file-task inventory for the same immutable selection within an operation. | Repeated queries avoid repeated metadata traversal as retained history grows. Reuse the existing bounded `Arc<OccurrenceScan>`; keep values streamed. | Count inventory/planning work and actual metadata requests as history grows; confirm exact selection, admission and reader lifetime. |
 | Next | Check constrained-side duplicate keys before consulting the other side of a join. Reuse the existing matched-key check when duplicates exist. | A unique Dockets key set can establish many-to-one cardinality without a second scan of all Comments. The main join still reads its required inputs. | Compare matched/unmatched duplicates, composite and null-safe keys; measure both unique and duplicate-present inputs. The latter may pay an extra small-side grouping pass. |
 | Next | Separate native Parquet row-group limits from execution batch rows. Keep Iceberg's maintained rolling writer. | Reduce footer work and potentially compressed output size without enlarging processing batches. | Compare write plus subsequent read time, writer/process memory, serialized metadata, peak disk and retained bytes under the same limits. |
+| Before larger groups or more readers | Account for selected Parquet row-group buffers as well as emitted batches. | Preserve a usable memory budget as file layout and concurrency change. | A large-row-group fixture with small output batches establishes reader working set and refusal behavior; emitted batch size alone is insufficient. |
+| If source reading limits throughput | Expose bounded file partitions through the existing native adapter. | Allow independent file reads and decoding to overlap without another scheduler. | Compare one, two and four admitted readers after column selection; measure CPU, read bytes, RSS and complete-stage time. Preserve physical identities and any required order. |
 | As needed | Make CLI runtime configuration follow the selected resource profile; keep blocking work bounded. | Avoid misleading thread settings and preserve responsiveness under simultaneous operations. | Verify actual worker settings, cancellation/permit lifetime and mixed-operation memory. Do not describe partition count as a process-wide thread cap. |
 | When measured | Reuse immutable metadata and enable safe selective pruning through the adapter that actually reads the files. | Reduce repeated footer/range requests for small or remote reads. | Prove cache hits/request reduction, byte bounds, exact snapshot/schema interpretation and unchanged occurrence identities. |
 
@@ -103,6 +106,48 @@ update, so include a fixed-size update in the comparison.
 [ArrowWriter memory behavior](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/arrow/arrow_writer/mod.rs),
 [Iceberg writer](https://github.com/apache/iceberg-rust/blob/04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9/crates/iceberg/src/writer/file_writer/parquet_writer.rs).
 
+### Bound reader working memory before increasing concurrency
+
+Small batches do not establish small reader buffers. The pinned Parquet async
+reader buffers the selected pages of a row group before decoding its batches.
+Iceberg uses that reader. Our native paths reserve capacity based on
+`max_batch_bytes` and inspect each returned batch; they do not separately account
+for the selected row-group pages. This is a source-confirmed accounting gap,
+not an observed failure of the accepted workload. Larger row groups can improve
+compression while increasing this working set. Include reader buffers, decoded
+batches and writer memory in the layout decision. Reuse available footer metadata
+and conservative admission; use the lower-level decoder only if its extra
+integration work solves a measured limitation.
+[Parquet 58.4 buffering](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/arrow/async_reader/mod.rs#L690-L706),
+[Iceberg reader pipeline](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/pipeline.rs),
+[local admission](../src/storage.rs#L86-L111).
+
+`NativePartition` reports one partition and does not implement source
+repartitioning. Both native reader paths limit file concurrency to one, and
+captured files are consumed sequentially. DataFusion can parallelize later
+operators, but increasing `target_partitions` alone does not parallelize this
+source decoding. If it limits throughput after narrow reads are fixed, expose a
+small number of file partitions using the existing `DataSource` interface and
+shared captured inventory. Admission must cover each live reader. Retain serial
+behavior where order matters; occurrence positions must stay relative to their
+original file. More concurrent streams can overlap I/O, but do not by themselves
+establish parallel CPU decoding or better throughput.
+[Local source](../src/query.rs#L195-L320),
+[pinned repartitioning interface](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/datasource/src/source.rs),
+[upstream partitioning guidance](https://datafusion.apache.org/library-user-guide/custom-table-providers.html#partitioning-strategies).
+
+### Use the reader's existing measurements
+
+Iceberg 0.10.1 already returns `ScanResult` with clonable `ScanMetrics`; our calls
+immediately consume `.stream()` and discard access to those measurements. Keep
+the metrics handle for the projection experiment instead of adding another
+counting reader or rereading files. This can establish whether narrow queries
+request fewer data-file bytes. The counter increments requested range lengths
+before I/O, so label it requested scan bytes: it is not physical disk traffic,
+successful network delivery, or complete catalog/manifest traffic. Capture it
+in qualification or requested diagnostics, without adding routine user reports.
+[Pinned metric implementation](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/scan_metrics.rs).
+
 ### Keep the efficient paths already present
 
 The engine already streams batches, shares a `RuntimeEnv` across query contexts,
@@ -154,6 +199,23 @@ dynamic joins until the replacement passes them. Custom joins, blanket indexes,
 another SQL backend and distributed scheduling have no measured justification
 for this workload. [DataFusion 55 improvements](https://datafusion.apache.org/blog/2026/08/25/datafusion-55.0.0/),
 [55.2 dependency manifest](https://raw.githubusercontent.com/apache/datafusion/55.2.0/Cargo.toml).
+
+Do not assume an upgrade supplies spilling hash joins. On this research date,
+the upstream [spilling effort](https://github.com/apache/datafusion/issues/24768)
+is open and the inspected [sort-merge fallback](https://github.com/apache/datafusion/pull/26015)
+is a draft. These are future candidates, not capabilities in our pinned release.
+Continue using accurate build-side statistics and qualify a maintained
+sort-merge path when the actual join cannot fit.
+
+The CLI already uses mimalloc and release optimization; its release profile keeps
+debug information for profiling. Rust cross-crate thin link-time optimization
+is a later controlled candidate if profiles show CPU-bound work. Cargo documents
+the optimization versus linking-time tradeoff; it promises no workload-specific
+speedup. Count the build time and additional build artifacts too. There is no
+present evidence for unsafe kernels, replacing the allocator, or writing a new
+task scheduler. [Current profile](../Cargo.toml),
+[Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html#lto),
+[DataFusion profiling](https://datafusion.apache.org/library-user-guide/profiling.html).
 
 Qualify one change at a time against retained inputs. First establish exact
 behavior and eliminated work with bounded fixtures and physical plans; then use

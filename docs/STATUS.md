@@ -98,8 +98,11 @@ Column pushdown and cardinality-query changes remain separate work.
 
 The [updated official-source research](datafusion-performance-research-2026-10-10.md#current-decisions-and-next-work)
 prioritizes reader column selection, reuse of captured file-task metadata,
-cardinality scan reduction and native writer layout. It also records the pinned
-reader's defaults/pruning limits and whole-process resource caveats. These remain
+cardinality scan reduction and native writer layout. It also identifies selected
+Parquet row-group buffers missing from batch-based admission, serial native file
+reads, and existing Iceberg scan metrics that can measure requested bytes without
+another read. It records the pinned reader's defaults/pruning limits and
+whole-process resource caveats. These remain
 research-backed candidates; no new speedup or storage reduction is claimed.
 
 The [baseline plan](reviews/native-join-plan-baseline.log) builds the main join
