@@ -21,6 +21,7 @@ ROUTES = frozenset(
         "/plan",
         "/run",
         "/updates/run",
+        "/receipts/run",
         "/schemas/run",
         "/backfills/run",
         "/refreshes/run",

@@ -42,8 +42,8 @@ worker must reach the same host through its loopback address. Container loopback
 addresses name that container; this adapter does not establish cross-host access.
 
 The allowlisted POST routes are `/plan`, `/run`, `/updates/run`, `/schemas/run`,
-`/backfills/run`, `/refreshes/run` and `/exports/run`. `/plan` accepts a native
-`RunSpec`; each other route accepts its corresponding Rust request type. The
+`/receipts/run`, `/backfills/run`, `/refreshes/run` and `/exports/run`. `/plan`
+accepts a native `RunSpec`; each other route accepts its corresponding Rust request type. The
 adapter checks bounded JSON and identity fields, and Rust validates the operation.
 It does not expose maintenance, deletion, restore or arbitrary HTTP routes.
 
@@ -102,7 +102,7 @@ unchanged requests and refusal handling. Without Dagster, those native tests are
 reported as skipped. Their HTTP peer is a protocol fixture; these tests do not
 qualify the Rust lifecycle, multi-host recovery, hosted authentication or R2/Basin.
 
-The optional real-host test requires an already built Rust executable and a tiny
+The optional real-host tests require an already built Rust executable and a tiny
 Parquet fixture (at most 1 MiB). It adds no PyArrow runtime dependency:
 
 ```sh
@@ -111,17 +111,46 @@ DOCSPEC_TEST_INPUT=/absolute/path/to/tiny.parquet \
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-That test obtains the input digest from `docspec hash`, starts the real host in a
-temporary workspace with the Rust correctness-fixture resource profile, and runs
-the same request through native Dagster twice. It compares the small results,
-native latest pin, lifecycle records and retained native/object file digests.
-It sends SIGINT and requires graceful host shutdown; forced cleanup fails the
-test. Without both explicit paths, the integration test is skipped. Passing this
-fixture establishes one local build/reconciliation path, not broader lifecycle
-or hosted qualification.
+These tests obtain the input digest from `docspec hash` and start the real host
+in a temporary workspace with the Rust correctness-fixture resource profile.
+They cover clean replay, native Dagster retry after a lost completion response,
+and a fresh Python worker reconciling that response loss. A loopback relay
+forwards the unchanged request to Rust, consumes the entire successful native
+response, captures the selected pin, lifecycle rows and retained files, then
+closes the Python worker connection without returning response headers. The
+recovery request must have exactly the same bytes, and the recovered full native
+pin must match. File hashes, sizes and modification times and lifecycle records
+must remain unchanged, detecting new retained output and rewrites. This is local
+filesystem evidence; it does not measure native input reads or CPU work.
 
-The retained [focused run](../../docs/reviews/dagster-adapter-check.log) passes
-with Python 3.13 and Dagster 1.13.16, including the real Rust host fixture and
-structured uncertainty for rejected responses. The [independent review](../../docs/reviews/dagster-adapter-review.md)
-approves this local adapter scope. Native lost-response/worker replacement and
-real-provider qualification remain separate work.
+The first replacement-fixture worker exhausts its configured zero retries and
+reports `outcome: unknown`, then exits. A separate Python process loads the
+original request configuration and reconciles it. Their process IDs must differ.
+Passing this fixture qualifies replacement after a worker failed to learn native completion;
+it does not simulate a killed worker during Rust processing or a Rust host crash.
+The Rust host stays alive and owns the same workspace throughout.
+
+The relay accepts at most two requests, with the same 1 MiB request and 32 MiB
+response ceilings used by the adapter. Each replacement worker has a 90-second
+fixture deadline and is killed on expiry; expiry fails the test. Native readbacks
+and relay socket operations have 30-second timeouts. The file comparison refuses
+more than 64 MiB or 2,048 retained files in this tiny fixture. These test limits
+are failure bounds, not performance or whole-process memory claims; in-process
+Dagster execution has no aggregate elapsed-operation deadline. Host readiness and
+graceful shutdown each have a 30-second deadline; forced host cleanup fails the
+test. Without both explicit paths, native integration is skipped.
+
+`/receipts/run` uses the same native release acknowledgment as other selected
+results. Transport coverage checks its unchanged identity summary. The real-host
+fixture sends a well-shaped receipt request with a missing base and requires
+Rust's structured `stale_base` refusal; this proves route forwarding and native
+refusal handling, not successful receipt materialization. Native receipt
+processing remains covered by the Rust evidence-update tests.
+
+The retained [recovery run](../../docs/reviews/dagster-recovery-check.log) passes
+with Python 3.13 and Dagster 1.13.16 against the `ce3ad6b` Rust executable,
+including both native completion-response recovery cases without skips.
+The [independent review](../../docs/reviews/dagster-recovery-review.md) approves
+this scoped local qualification. Mid-operation worker loss, Rust host crashes,
+successful receipt materialization through Dagster and real-provider recovery
+remain separate qualification work.

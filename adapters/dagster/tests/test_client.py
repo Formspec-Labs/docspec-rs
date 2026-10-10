@@ -27,6 +27,7 @@ class ClientTests(unittest.TestCase):
     def test_plan_and_export_acknowledgments_keep_the_same_identity(self):
         fixtures = [
             ("/plan", {"dataset": "comments", "operation": "stable-op", "completed": False, "limits": {"ignored": True}}, "planned"),
+            ("/receipts/run", RELEASE, "completed"),
             ("/exports/run", {"dataset": "comments", "id": "stable-op"}, "completed"),
         ]
         for route, body, outcome in fixtures:
