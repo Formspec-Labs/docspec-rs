@@ -17,12 +17,14 @@ and its qualification; earlier audit snapshots describe the code when inspected.
 
 ## Current follow-up: 2026-10-10
 
-This follow-up inspected `bd6eadecb9ac052fcd2b6090075501b0e2e08290` and the
-identified working changes in source update/incremental refresh. It parsed all
-direct Rust declarations, Cargo.lock, the Dagster manifest and Python imports;
-rechecked active call sites and relevant installed upstream source; browsed
-official pinned Rust source and current package documentation; and ran only
-offline, locked Cargo metadata/tree inspection. It ran no builds, tests,
+This follow-up now covers `a3d695fa9b4644d046f202a90de9c7ad9d9678a3` and the
+inspected working compaction-recovery retirement changes. The renewed check
+parsed every direct Rust declaration, Cargo.lock, the Dagster manifest and Python
+imports; confirmed unchanged manifest digests and complete package dispositions;
+rechecked the remaining opportunity call sites; and compared the maintenance
+adapter with exact installed Iceberg source and version-pinned official sources.
+It reused the earlier offline, locked Cargo metadata/tree evidence because no
+dependency declaration or lockfile changed. The audit ran no builds, tests,
 benchmarks, corpus reads or asset downloads and changed only this report.
 Coverage means every **direct** production/development/build package and the
 material transitive facilities listed here. It does not mean every transitive
@@ -55,18 +57,26 @@ that a crate is compiled or linked for this target.
   implementation drops the completed child before opening the next one. Keep
   selected-column providers underneath this already-shaped stream composition;
   no custom scheduler, concatenation engine or fan-out queue is needed.
-- **In progress at inspection:** the root-owned
+- **Implemented at `a3d695f`:** the root-owned
   [open_captured_source](../src/engine/write.rs#L43) helper is shared by source
   replacement and [incremental discovery](../src/engine/incremental.rs#L64).
   It checks logical identity, row count and public schema before reading an
   admitted compacted representation. This consolidates interpretation checks;
   it is not a general metadata cache or elimination of every metadata open.
-  After this audit, the implementation owner completed the
-  [focused checks](reviews/compacted-related-targeted-2-2026-10-10.log) and
+  The implementation owner retained passing
+  [focused checks](reviews/compacted-related-targeted-2-2026-10-10.log) and a
   [repository gate](reviews/compacted-related-full-check-2026-10-10.log), with an
   [independent review](reviews/compacted-related-review-2026-10-10.md). These are
   implementation evidence, not execution by this audit or a speed measurement.
   Do not duplicate this change from an earlier audit's recommendation.
+- **In progress at this refresh:** [compaction recovery retirement](../src/engine/retention/compaction_recovery.rs)
+  separates recoverability of an old rewrite from the selected replacement's
+  lifetime. The working [protection helper](../src/engine/compaction.rs#L16) and
+  [inventory handling](../src/engine/retention/inventory.rs#L1230) preserve the
+  replacement and logical metadata without automatically retaining every old
+  payload through that selection. Other promises remain independent roots.
+  This addresses retained disk amplification through existing lifecycle rules;
+  this audit establishes neither safe reclamation nor measured disk savings.
 
 ### Complete current direct-package matrix
 
@@ -77,11 +87,11 @@ older call-site status.
 
 | Direct package / resolved version | Current maintained use and disposition |
 | --- | --- |
-| `anyhow` 1.0.104 | [CLI result boundary](../src/main.rs#L295), `bail!` and `ensure!`. Keep stable library refusal codes; no additional error framework or feature is justified. |
+| `anyhow` 1.0.104 | [CLI result boundary](../src/main.rs#L304), `bail!` and `ensure!`. Keep stable library refusal codes; no additional error framework or feature is justified. |
 | `arrow` 58.4.0 | [Selected arrays](../src/storage/selection.rs), shared batch columns, compute and [IPC](../src/http/ipc.rs). Keep zero-copy handles; scalar input selection remains below. Array-handle cloning is not a payload copy, while slices can retain their backing allocation. |
 | `async-trait` 0.1.92 | [Native catalog](../src/catalog.rs#L567) and [TableProvider](../src/query.rs#L147) implement upstream dynamic async interfaces. Keep the required adapter; a local syntax replacement cannot change those interfaces. |
 | `axum` 0.8.9 | [Router](../src/http.rs#L32), bounded JSON extraction and streamed Arrow bodies. Keep native framing/backpressure. Unused direct defaults are identified below; no new transport is needed. |
-| `blake3` 1.8.7 | [Reader](../src/storage.rs#L424), [Serde writer](../src/storage.rs#L56), admission copy/hash and [export sink](../src/engine/export.rs#L806). Maintained replacements are adopted. Keep required write-and-hash boundaries; defer Rayon/mmap without evidence. |
+| `blake3` 1.8.7 | [Reader](../src/storage.rs#L418), [Serde writer](../src/storage.rs#L56), admission copy/hash and [export sink](../src/engine/export.rs#L806). Maintained replacements are adopted. Keep required write-and-hash boundaries; defer Rayon/mmap without evidence. |
 | `clap` 4.6.7 | [Derived CLI](../src/main.rs#L29). Native parsing/help already replace custom parsing. No pipeline efficiency change is justified. |
 | `datafusion` 53.1.0 | [Shared runtime](../src/budget.rs#L85), [physical statistics](../src/query.rs#L284), relational execution and [stream composition](../src/query/sequence.rs#L27). Keep optimizer correctness guards and admitted comparison ranking. Duplicate-first cardinality proof is the remaining relational opportunity. |
 | `fs2` 0.4.3 | [OS-held lock](../src/budget.rs#L191) and [free-space check](../src/engine/export.rs#L476). Standard-library locking alone would not remove the free-space dependency; no replacement is justified. |
@@ -95,7 +105,7 @@ older call-site status.
 | `sqlx` 0.8.6 | [Native SQLite restore copy](../src/engine/restore.rs#L807) uses `VACUUM INTO`, then integrity checks; SQL catalog uses its `Any` driver. Keep native backup/database facilities. MySQL/Postgres are not active host production dependencies. |
 | `tokio` 1.53.2 | [Owned semaphore/blocking admission](../src/budget.rs#L131), [worker lifetime](../src/engine/worker.rs), network and cooperative yields. Keep permits inside work that survives caller cancellation. CLI workers, DataFusion partitions and native file/range concurrency are distinct controls. |
 | `tracing` 0.1.44 | [Structured capacity/lock diagnostics](../src/budget.rs#L206) and lifecycle events. Keep bounded fields and phase-level diagnostics; no per-row logging or replacement backend. |
-| `tracing-subscriber` 0.3.23 | [Environment-filtered stderr setup](../src/main.rs#L296). Keep maintained filtering; no measured need to narrow its behavior or enable another output format. |
+| `tracing-subscriber` 0.3.23 | [Environment-filtered stderr setup](../src/main.rs#L305). Keep maintained filtering; no measured need to narrow its behavior or enable another output format. |
 | `uuid` 1.27.0 | [Native file IDs](../src/storage.rs#L281), operation/object names and parsing. Keep random immutable naming; v7 is not a demonstrated storage optimization here. |
 | `tempfile` 3.27.0 — dev | [Isolated test workspace](../tests/worker_initialization.rs#L4), maintained cleanup. Keep; durable completed phases must retain their different lifetime. |
 | `tower` 0.5.3 — dev direct | [HTTP ServiceExt/oneshot tests](../tests/http_read.rs#L18). Keep maintained service harness. Runtime transitive retry/timeout features do not mean DocSpec installs mutation-retry middleware. |
@@ -126,7 +136,7 @@ executable path reconstructs it.
 
 | Priority | Current evidence and maintained option | Smallest validation before acceptance |
 | --- | --- | --- |
-| **First: skip the common redundant cardinality scan.** | [join_queries](../src/engine/refresh.rs#L679) still semi-joins constrained-side keys against the other input before grouping duplicates. Prove constrained-side uniqueness with maintained DataFusion grouping first; no duplicates means the large-side proof scan is unnecessary. Keep the matched-key proof when duplicates exist. This removes an O(N) probe scan in the unique branch; the duplicate branch adds constrained-side work. Inventory capture already removes repeated metadata discovery, not these payload scans. | Exact results/refusals for unmatched and matched duplicates, composite keys, both null modes and both constrained sides; inspect actual scan execution counts for unique and duplicate branches. Measure both branches before claiming a speedup. |
+| **First: skip the common redundant cardinality scan.** | [join_queries](../src/engine/refresh.rs#L585) still semi-joins constrained-side keys against the other input before grouping duplicates. Prove constrained-side uniqueness with maintained [DataFusion grouping](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/core/src/dataframe/mod.rs) first; no duplicates means the large-side proof scan is unnecessary. Keep the matched-key proof when duplicates exist. This removes an O(N) probe scan in the unique branch; the duplicate branch adds constrained-side work. Inventory capture already removes repeated metadata discovery, not these payload scans. | Exact results/refusals for unmatched and matched duplicates, composite keys, both null modes and both constrained sides; inspect actual scan execution counts for unique and duplicate branches. Measure both branches before claiming a speedup. |
 | **Next: select scalar input dependencies.** | [File preparation](../src/engine/backfill/preparation.rs#L609) still reads the complete file before [evaluating expressions](../src/engine/backfill/expressions.rs#L128). Reuse `read_projected_file` for required value/origin columns and rebind DataFusion physical expressions to that selected schema. Work can scale with selected width instead of full row width; rows still need evaluation. | Cover renamed/reordered fields, defaults, nulls, constant-only expressions, metadata-sensitive functions and stored origins. A damaged-unused-column fixture plus native requested-byte counters can establish excluded decoding without a full benchmark. |
 | **Then: qualify native row-group sizing.** | [Native writer](../src/storage.rs#L268) still sets row-group rows equal to processing batch rows. [Parquet's pinned properties](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/file/properties.rs) support separate row/encoded-byte bounds. Larger groups can reduce footer overhead and retained bytes, but increase writer and selected-page reader memory. | First test large row groups with small returned batches under admission. Then compare write/read costs, footer/output bytes, RSS, scratch, peak additional disk and retained bytes. Include old/new coexistence and failed attempts; the flat-export result is not native-writer proof. |
 | **Bounded follow-up: reuse remaining repeated metadata opens.** | [open_pin](../src/storage.rs#L714) still hashes metadata, then `StaticTable` rereads it. Prefer an already admitted immutable table/capture at repeated call sites. For a later single-read implementation, use the native [table metadata setter](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/table.rs) with exact identity and selected schema/snapshot checks; preserve compressed-metadata decoding. Do not redo the completed join capture or metadata-Arc fix. | Count opens/planning requests as history/file count grows; verify corruption, gzip metadata, exact pin binding, final-owner permit release and failures. Keep independent verification boundaries. A process-wide cache is not needed. |
@@ -188,6 +198,27 @@ The [HTTP IPC adapter](../src/http/ipc.rs#L73) uses maintained Arrow StreamWrite
 Axum bodies and `Bytes::from_owner`; its custom piece retains the permit with the
 chunk and bounds serialization. Neither a producer queue nor another stream
 format removes that ownership requirement.
+
+The working compaction-retirement path still needs application-owned lifetime
+rules. Pinned [Iceberg transactions](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/transaction/mod.rs)
+expose native append and snapshot-expiration actions; they do not own DocSpec's
+selected representation, recovery records or cross-dataset object grants.
+[ExpireSnapshotsAction](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/transaction/expire_snapshots.rs)
+updates metadata and leaves physical file removal to higher-level maintenance.
+It also combines explicitly named snapshots with age-based expiry by default;
+calling it is not equivalent to removing only a reviewed set of DocSpec objects.
+Do not substitute it for the current protection inventory and exact deletion
+reconciliation, or claim freed disk from expiration alone.
+
+The [compaction writer](../src/engine/compaction.rs#L410) already delegates
+encoding, compression and rolling files to the maintained native writer; its
+batch adapter shares Arrow arrays. [Equivalence checking](../src/engine/compaction.rs#L580)
+compares sequential batch slices across differing chunk boundaries and retains
+completion for reuse. That small adapter expresses required value/order/origin
+semantics; replacing it with a full relational sort or another decoder would add
+work. Existing selected file sizes supply rewrite/input/output accounting. Disk
+reclamation additionally depends on ending every applicable lifetime and actual
+removal outcomes, not a compression setting or lower replacement-file count.
 
 ### Enabled defaults, duplicate packages and build footprint
 
