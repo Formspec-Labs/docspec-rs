@@ -1,0 +1,587 @@
+{
+  "artifact_directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa",
+  "build_receipt": "release-build-20261010.json",
+  "source_commit": "ce3ad6b88ed748bdcc56cf33ce0da43a78ac2752",
+  "captured_binary_matches_build": true,
+  "execution_capture": {
+    "format": "comments-e2e-execution-v1",
+    "complete": true,
+    "started_at": 1791639428.823201,
+    "artifacts": {
+      "runner": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807787,
+          "size": 21309,
+          "mtime_ns": 1791587027905655220,
+          "ctime_ns": 1791587027905655220,
+          "mode": 33188
+        },
+        "bytes": 21309,
+        "sha256": "723dd2fb7b7545ba94d9b5ba8f5b0d5b1681c7cd79ff9fffb0af3fee6d6aaf88",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/run.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479615,
+          "size": 21309,
+          "mtime_ns": 1791639428823318699,
+          "ctime_ns": 1791639428823373365,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "workload": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/workload.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803312,
+          "size": 4864,
+          "mtime_ns": 1791585824108655838,
+          "ctime_ns": 1791585824108655838,
+          "mode": 33188
+        },
+        "bytes": 4864,
+        "sha256": "c44f2fedf9d1990d0d61db3e391aa3c80fc2b6f20282ee5c9aab05ba0f9bd0a3",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/workload.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479616,
+          "size": 4864,
+          "mtime_ns": 1791639428823450239,
+          "ctime_ns": 1791639428823492614,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "integrity": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/integrity.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766879064,
+          "size": 3760,
+          "mtime_ns": 1791586936069824459,
+          "ctime_ns": 1791586936069824459,
+          "mode": 33188
+        },
+        "bytes": 3760,
+        "sha256": "6ebbbc347173d0e70576d01acabb8e3fcd9f974f9ff487b35ff8ab84086a964b",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/integrity.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479617,
+          "size": 3760,
+          "mtime_ns": 1791639428823562697,
+          "ctime_ns": 1791639428823597946,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "comments_input_monitor": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 759489030,
+          "size": 18490,
+          "mtime_ns": 1791585964192078142,
+          "ctime_ns": 1791585964192078142,
+          "mode": 33188
+        },
+        "bytes": 18490,
+        "sha256": "8bb7b248c3ee20df009a844092fbdc2612aa2cb08dc58695fa7b2b318a237cc8",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/comments-input-monitor.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479618,
+          "size": 18490,
+          "mtime_ns": 1791639428823689737,
+          "ctime_ns": 1791639428823740362,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "binary": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767461283,
+          "size": 181760760,
+          "mtime_ns": 1791639320665809610,
+          "ctime_ns": 1791639320734736447,
+          "mode": 33261
+        },
+        "bytes": 181760760,
+        "sha256": "15456ea636d890a5ec640ee6dbc4020c4b991300a2c68146ae5634f4fd34b4f4",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/docspec",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479619,
+          "size": 181760760,
+          "mtime_ns": 1791639428994038531,
+          "ctime_ns": 1791639428997128881,
+          "mode": 33133
+        }
+      },
+      "oracle": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/oracle.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803313,
+          "size": 20874,
+          "mtime_ns": 1791586698402375624,
+          "ctime_ns": 1791586698402375624,
+          "mode": 33188
+        },
+        "bytes": 20874,
+        "sha256": "aa140f1bbbc31c9e9ef9bf591f6db33e301a0605273dbf153e2867b64b4b4e81",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/oracle.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479620,
+          "size": 20874,
+          "mtime_ns": 1791639428997543003,
+          "ctime_ns": 1791639428997617128,
+          "mode": 33060
+        }
+      },
+      "protocol": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/protocol.md",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807788,
+          "size": 13438,
+          "mtime_ns": 1791587027926873302,
+          "ctime_ns": 1791587027926873302,
+          "mode": 33188
+        },
+        "bytes": 13438,
+        "sha256": "a5a0dd9503e325330cf02401ba5a9758e7ae15a6fa372b67f347a69057d22a0c",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/protocol.md",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479621,
+          "size": 13438,
+          "mtime_ns": 1791639428999539237,
+          "ctime_ns": 1791639428999605820,
+          "mode": 33060
+        }
+      },
+      "lock": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/Cargo.lock",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 757661924,
+          "size": 130931,
+          "mtime_ns": 1791484279971238840,
+          "ctime_ns": 1791484279971238840,
+          "mode": 33188
+        },
+        "bytes": 130931,
+        "sha256": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/Cargo.lock",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479622,
+          "size": 130931,
+          "mtime_ns": 1791639429000136816,
+          "ctime_ns": 1791639429000242982,
+          "mode": 33060
+        }
+      },
+      "prepared": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/preparation-20261009.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767014769,
+          "size": 8918,
+          "mtime_ns": 1791587198822526130,
+          "ctime_ns": 1791587198822526130,
+          "mode": 33188
+        },
+        "bytes": 8918,
+        "sha256": "be82b5999be8b1a7514e2059a3c6220e333d8ef5ce702f40ae766d1e27647a6e",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/prepared.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479623,
+          "size": 8918,
+          "mtime_ns": 1791639429000406189,
+          "ctime_ns": 1791639429000466022,
+          "mode": 33060
+        }
+      },
+      "build_receipt": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/release-build-20261010.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767461284,
+          "size": 14362,
+          "mtime_ns": 1791639320829492081,
+          "ctime_ns": 1791639320829492081,
+          "mode": 33188
+        },
+        "bytes": 14362,
+        "sha256": "6368fe86bdcc0ea15c38853a754433a34ccc57cf9cfaed469438f63909fd41e3",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/build-receipt.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 767479624,
+          "size": 14362,
+          "mtime_ns": 1791639429000884310,
+          "ctime_ns": 1791639429000955268,
+          "mode": 33060
+        }
+      }
+    },
+    "scope": "series-owned read-only files; protection from normal worktree drift",
+    "worktree_diff": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/worktree.diff",
+      "bytes": 19812,
+      "sha256": "749d00b9eb401a786c3e49a9fee83ff4571ad7e7660e1d328d538716988242ca"
+    },
+    "finished_at": 1791639429.068761,
+    "elapsed_seconds": 0.24556329197366722
+  },
+  "environment": {
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "python": "3.12.9 (main, Mar 29 2025, 16:43:11) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "executable": "/Users/mikewolfd/.pyenv/versions/3.12.9/bin/python3.12",
+    "libraries": {
+      "pyarrow": "23.0.0",
+      "duckdb": "1.4.4",
+      "pyiceberg": "0.12.0",
+      "psutil": "7.0.0",
+      "blake3": "1.0.11"
+    },
+    "cpu_count": 14,
+    "load_average": [
+      9.21630859375,
+      8.76416015625,
+      6.23095703125
+    ],
+    "physical_memory_bytes": 51539607552,
+    "source_commit": "ce3ad6b88ed748bdcc56cf33ce0da43a78ac2752",
+    "worktree_status": " M adapters/dagster/README.md\n M adapters/dagster/src/docspec_dagster/client.py\n M adapters/dagster/tests/test_client.py\n M adapters/dagster/tests/test_rust_integration.py\n?? adapters/dagster/tests/native_worker.py\n?? docs/reviews/comments-collection-review.md\n?? docs/reviews/comments-e2e-acceptance-20261010.log\n?? docs/reviews/comments-e2e-release-build-20261010.log\n?? docs/reviews/dagster-recovery-author.md\n?? experiments/comments-e2e/release-build-20261010.json\n",
+    "binary": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/docspec",
+    "oracle": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-20261010/20261010T093708-acceptance-1aae15fa/frozen/oracle.py",
+    "mode": "acceptance",
+    "execution_capture": "execution-capture.json",
+    "cache": "OS caches are not cleared; frozen inputs may be warm; application workspaces are fresh",
+    "background_load_note": "DocSpec builds and tests stopped before collection. Observed stack-common Cargo test and clippy completed before launch. Desktop applications and static agent reviews remain active; operating-system caches are not cleared.",
+    "background_processes": "  PID  PPID  %CPU    RSS COMM\n    1     0   0.1  23488 /sbin/launchd\n  253 77724   0.0  77424 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n  255 77724   0.0 124880 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n  256 77724   0.0  52064 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n  257 77724   0.0  21184 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n  272 77724   0.0 103968 npm exec @playwright/mcp@latest\n  330     1   0.5  56944 /usr/libexec/logd\n  332     1   0.2  12688 /usr/libexec/UserEventAgent\n  334     1   0.4  14160 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd\n  335     1   0.0   8480 /System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoted\n  338     1   0.0  10368 /usr/sbin/systemstats\n  342     1   0.0  10448 /usr/libexec/configd\n  344     1   0.0  10512 /System/Library/CoreServices/powerd.bundle/powerd\n  345     1   0.0   2624 /usr/libexec/IOMFB_bics_daemon\n  349     1   0.0   3856 /usr/libexec/remoted\n  353     1   0.0   1616 /System/Library/PrivateFrameworks/CoreSpeech.framework/corespeechd_system\n  355     1   0.0   3072 /usr/libexec/watchdogd\n  359     1   0.1  50752 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds\n  360   256   0.0  21168 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n  361     1   0.0   6464 /usr/libexec/kernelmanagerd\n  362     1   0.0   5296 /usr/libexec/diskarbitrationd\n  366     1   0.0   2592 /usr/sbin/syslogd\n  368     1   0.0   4704 /usr/libexec/thermalmonitord\n  369     1   0.0  11312 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/contextstored\n  370     1   0.0  21792 /usr/libexec/xprotectd\n  371     1   0.3  16656 /usr/libexec/opendirectoryd\n  372     1   0.0  15632 /System/Library/PrivateFrameworks/ApplePushService.framework/apsd\n  373     1   0.0  18272 /System/Library/CoreServices/launchservicesd\n  374     1   0.0   6656 /usr/libexec/timed\n  375     1   0.0   2864 /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/Resources/usbmuxd\n  376     1   0.0  12032 /usr/sbin/securityd\n  378     1   0.0  26464 /usr/libexec/locationd\n  381     1   0.0   2592 autofsd\n  382     1   0.0  25280 /usr/libexec/dasd\n  383     1   0.0   4256 /System/Library/PrivateFrameworks/Heimdal.framework/Helpers/kdc\n  384     1   0.0   3568 /usr/libexec/corerepaird\n  386     1   0.0   3728 /usr/sbin/distnoted\n  390     1   0.0   5008 /System/Library/CoreServices/logind\n  391     1   0.0   7456 /System/Library/PrivateFrameworks/GenerationalStorage.framework/Versions/A/Support/revisiond\n  392     1   0.0   1984 /usr/sbin/KernelEventAgent\n  396     1   0.0  20864 /usr/sbin/bluetoothd\n  397     1   0.1   6048 /usr/sbin/notifyd\n  399     1   0.1   9104 /usr/libexec/corebrightnessd\n  400     1   0.0   6384 /usr/libexec/AirPlayXPCHelper\n  401     1   0.0   8800 /System/Library/Frameworks/CoreMediaIO.framework/Versions/A/Resources/com.apple.cmio.registerassistantservice\n  404     1  29.9 133584 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer\n  405     1   2.4  15984 /System/Library/PrivateFrameworks/TCC.framework/Support/tccd\n  406     1   0.0   6288 /usr/sbin/cfprefsd\n  407     1   0.0  66416 /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow\n  411     1   0.0  16096 /usr/libexec/runningboardd\n  412     1   0.0  14352 /System/Library/CoreServices/coreservicesd\n  413     1   2.3  13216 /usr/libexec/trustd\n  414     1   0.0  21712 /System/Library/PrivateFrameworks/CoreAnalytics.framework/Support/analyticsd\n  415     1   0.4  14704 /usr/sbin/mDNSResponder\n  417     1   0.0  31680 /usr/sbin/coreaudiod\n  418     1   0.0   8624 /usr/libexec/nsurlsessiond\n  419     1   0.0   4688 /usr/libexec/apfsd\n  424     1   0.0  22832 /usr/libexec/lsd\n  431     1   0.0  33232 /usr/libexec/airportd\n  435     1   0.0   2416 /usr/sbin/distnoted\n  437     1   0.0  14592 /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/authd.xpc/Contents/MacOS/authd\n  438     1   0.0   7952 /usr/libexec/eligibilityd\n  441     1   0.0   2560 /usr/sbin/distnoted\n  442     1   0.0   2416 /usr/sbin/distnoted\n  454     1   0.0   3232 /usr/sbin/mDNSResponderHelper\n  455     1   0.0  35776 /usr/libexec/mobileassetd\n  467     1   0.0   2960 /usr/libexec/ApplicationFirewall/socketfilterfw\n  476     1   0.0   9792 /System/Library/PrivateFrameworks/BiomeStreams.framework/Support/biomed\n  503     1   5.6  42032 /usr/libexec/syspolicyd\n  507     1   0.0   6480 /System/Library/CoreServices/TimeMachine/backupd\n  508     1   0.0  10432 Core Audio Driver (MSTeamsAudioDevice.driver)\n  511     1   0.0   8416 /usr/libexec/audiomxd\n  512     1   0.1  14608 /usr/libexec/symptomsd\n  521     1   0.0   8160 /usr/sbin/WirelessRadioManagerd\n  522     1   0.0   3024 /usr/libexec/audioclocksyncd\n  527     1   0.0   6752 /System/Library/CoreServices/appleeventsd\n  529     1   0.0   2416 /usr/sbin/distnoted\n  530     1   0.0  19184 /usr/libexec/modelmanagerd\n  535     1   0.0  27264 /System/Library/CoreServices/Software Update.app/Contents/Resources/softwareupdated\n  538     1   0.0   5856 /usr/libexec/com.apple.cmio.videodriverkithostextension.systemextension/Contents/MacOS/com.apple.cmio.videodriverkithostextension\n  540     1   0.0  10496 /usr/libexec/cameracaptured\n  541     1   0.0   6512 /System/Library/Frameworks/CoreMediaIO.framework/Versions/A/Resources/UVCAssistant.systemextension/Contents/MacOS/UVCAssistant\n  544     1   0.0   2432 /usr/sbin/distnoted\n  551     1   0.0   2544 /usr/sbin/distnoted\n  557     1   0.0   2384 /usr/sbin/distnoted\n  571     1   0.0   8768 /usr/libexec/searchpartyd\n  578     1   0.0   2416 /usr/sbin/distnoted\n  582     1   0.0   7200 /System/Library/CoreServices/SubmitDiagInfo\n  585     1   0.0  14720 /usr/libexec/gamepolicyd\n  588     1   0.0   6400 /usr/sbin/distnoted\n  593     1   0.0   7792 /usr/libexec/mobileactivationd\n  608     1   0.0  10656 /System/Library/CoreServices/sharedfilelistd\n  614   338   0.0   4672 /usr/sbin/systemstats\n  616     1   0.0   2512 /usr/sbin/distnoted\n  620     1   0.0   6000 Core Audio Driver (ParrotAudioPlugin.driver)\n  624     1   0.0   6016 /System/Library/CoreServices/Software Update.app/Contents/Resources/suhelperd\n  626     1   0.0   2384 /usr/sbin/distnoted\n  635     1   4.1  47984 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN\n  636     1   0.0   1584 /System/Library/DriverExtensions/com.apple.DriverKit-IOUserDockChannelSerial.dext/com.apple.DriverKit-IOUserDockChannelSerial\n  637     1   0.0   1600 /System/Library/DriverExtensions/IOUserBluetoothSerialDriver.dext/IOUserBluetoothSerialDriver\n  638     1   0.0   2192 /System/Library/DriverExtensions/com.apple.AppleUserHIDDrivers.dext/com.apple.AppleUserHIDDrivers\n  643     1   0.0  10240 /System/Library/Frameworks/LocalAuthentication.framework/Support/coreauthd\n  645     1   0.0   8864 /usr/sbin/cfprefsd\n  647     1   0.0  21968 /usr/libexec/secd\n  649     1   0.0  12896 /usr/libexec/UserEventAgent\n  654     1   0.0  11120 /System/Library/CoreServices/audioaccessoryd\n  657     1   0.0  10240 /usr/sbin/universalaccessd\n  659     1   0.0   7440 /usr/libexec/containermanagerd\n  660     1   0.0   5712 /usr/libexec/pboard\n  661     1   0.0  22752 /System/Library/CoreServices/WindowManager.app/Contents/MacOS/WindowManager\n  662     1   0.0  14624 /System/Library/PrivateFrameworks/BiomeStreams.framework/Support/BiomeAgent\n  663     1   0.0  13312 /usr/libexec/lsd\n  664     1   0.0  11856 /System/Library/PrivateFrameworks/UserNotificationsCore.framework/Support/usernotificationsd\n  668     1   0.0   7792 /usr/libexec/ContinuityCaptureAgent\n  669     1   0.7  16016 /System/Library/PrivateFrameworks/TCC.framework/Support/tccd\n  671     1   0.0  35728 /System/Library/Frameworks/Accounts.framework/Versions/A/Support/accountsd\n  672     1   0.0  34800 /System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/Contents/MacOS/identityservicesd\n  673     1   1.9  17104 /usr/libexec/trustd\n  674     1   0.0   2432 /usr/sbin/distnoted\n  678     1   0.0  10816 /System/Library/Frameworks/ApplicationServices.framework/Frameworks/ATS.framework/Support/fontd\n  679     1   0.0 468160 /Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta\n  681     1   0.0   6336 /System/Library/Frameworks/CryptoTokenKit.framework/ctkd\n  682     1   0.0   3792 /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/ATS.framework/Versions/A/Support/fontworker\n  683     1   0.0   3440 /System/Library/Frameworks/CryptoTokenKit.framework/ctkd\n  687     1   0.0  46880 /usr/libexec/sharingd\n  688     1   0.0 245984 /Applications/Cursor.app/Contents/MacOS/Cursor\n  689     1   0.1 231280 /Applications/iTerm.app/Contents/MacOS/iTerm2\n  698     1   0.0  67264 /System/Applications/Notes.app/Contents/MacOS/Notes\n  702     1   0.0  53264 /System/Library/CoreServices/Dock.app/Contents/MacOS/Dock\n  703     1   0.0  59520 /System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter\n  704     1   0.0  13456 /System/Library/CoreServices/SystemUIServer.app/Contents/MacOS/SystemUIServer\n  705     1   0.1 173616 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder\n  706     1   0.0  18272 /usr/libexec/rapportd\n  709     1   0.0  13440 /System/Library/CoreServices/AccessibilityUIServer.app/Contents/MacOS/AccessibilityUIServer\n  710     1   0.0  12640 /System/Library/CoreServices/sharedfilelistd\n  712     1   0.0  22352 /usr/sbin/usernoted\n  714     1   0.0  24480 /System/Library/CoreServices/WallpaperAgent.app/Contents/MacOS/WallpaperAgent\n  721     1   0.0   8224 /usr/sbin/filecoordinationd\n  724     1   0.0   8496 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/chrome_crashpad_handler\n  726     1   0.0   3744 automountd\n  730     1   0.0   9424 /System/Library/PrivateFrameworks/ViewBridge.framework/Versions/A/XPCServices/ViewBridgeAuxiliary.xpc/Contents/MacOS/ViewBridgeAuxiliary\n  734     1   0.7  24832 /System/Library/PrivateFrameworks/FileProvider.framework/Support/fileproviderd\n  735     1   0.0   3424 /System/Library/PrivateFrameworks/AMPDevices.framework/Versions/A/Support/AMPDeviceDiscoveryAgent\n  738     1   0.0  15776 /Applications/Utilities/Adobe Sync/CoreSync/Core Sync.app/Contents/PlugIns/ACCFinderSync.appex/Contents/MacOS/ACCFinderSync\n  745     1   0.0  29552 /System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod\n  747     1   0.0  99760 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd\n  750     1   0.0  19488 /System/Library/PrivateFrameworks/IMCore.framework/imagent.app/Contents/MacOS/imagent\n  751     1   0.0  23152 /System/Library/ExtensionKit/Extensions/WallpaperAerialsExtension.appex/Contents/MacOS/WallpaperAerialsExtension\n  755     1   0.0   2544 /usr/libexec/rosetta/oahd\n  760     1   0.0   9568 /usr/libexec/nearbyd\n  767   679   0.0 124736 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper\n  768   679   0.0 109984 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper\n  769     1   0.0   5056 /System/Library/PrivateFrameworks/CommunicationsFilter.framework/CMFSyncAgent\n  774     1   0.0   7440 /System/Library/PrivateFrameworks/StatusKit.framework/StatusKitAgent\n  777     1   0.0  58432 /System/Library/CoreServices/NotificationCenter.app/Contents/MacOS/NotificationCenter\n  781     1   0.0  10736 /System/Library/PrivateFrameworks/FamilyCircle.framework/Versions/A/Resources/familycircled\n  784     1   0.0  21824 /System/Library/PrivateFrameworks/AuthKit.framework/Versions/A/Support/akd\n  785     1   0.0   8000 /System/Library/PrivateFrameworks/UserActivity.framework/Agents/useractivityd\n  787     1   0.0  24384 /System/Library/CoreServices/Dock.app/Contents/XPCServices/com.apple.dock.extra.xpc/Contents/MacOS/com.apple.dock.extra\n  788     1   0.0  20960 /System/Library/CoreServices/Dock.app/Contents/XPCServices/com.apple.dock.external.extra.arm64.xpc/Contents/MacOS/com.apple.dock.external.extra.arm64\n  808     1   0.0  10048 /Applications/Microsoft Teams.app/Contents/PlugIns/TeamsWidgetExtension.appex/Contents/MacOS/TeamsWidgetExtension\n  809     1   0.0  13712 /System/Library/CoreServices/Diagnostics Reporter.app/Contents/MacOS/Diagnostics Reporter\n  811     1   0.0   2896 /System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoteagent\n  812     1   0.0   7424 /usr/libexec/avconferenced\n  815     1   0.0  10064 /System/Applications/FindMy.app/Contents/PlugIns/FindMyWidgetItems.appex/Contents/MacOS/FindMyWidgetItems\n  818     1   0.0  10896 /System/Applications/Podcasts.app/Contents/PlugIns/PodcastsWidget.appex/Contents/MacOS/PodcastsWidget\n  821     1   0.0  10400 /System/Library/CoreServices/Batteries.app/Contents/PlugIns/BatteriesAvocadoWidgetExtension.appex/Contents/MacOS/BatteriesAvocadoWidgetExtension\n  829     1   0.0   9952 /System/Library/CoreServices/Screen Time.app/Contents/PlugIns/ScreenTimeWidgetExtension.appex/Contents/MacOS/ScreenTimeWidgetExtension\n  832     1   0.0  20128 /System/Library/CoreServices/WiFiAgent.app/Contents/MacOS/WiFiAgent\n  835     1   0.0   9616 /System/Applications/VoiceMemos.app/Contents/PlugIns/RecordWidgetExtension.appex/Contents/MacOS/RecordWidgetExtension\n  840     1   0.0  10448 /System/Applications/Journal.app/Contents/PlugIns/JournalWidgetsSecure.appex/Contents/MacOS/JournalWidgetsSecure\n  842     1   0.0  11056 /System/Applications/Home.app/Contents/PlugIns/HomeEnergyWidgetsExtension.appex/Contents/MacOS/HomeEnergyWidgetsExtension\n  846     1   0.0   9856 /System/Library/CoreServices/Screen Time.app/Contents/PlugIns/ScreenTimeWidgetIntentsExtension.appex/Contents/MacOS/ScreenTimeWidgetIntentsExtension\n  850     1   0.0  41072 /System/Applications/Weather.app/Contents/PlugIns/WeatherWidget.appex/Contents/MacOS/WeatherWidget\n  851     1   0.0  11680 /System/Applications/News.app/Contents/PlugIns/NewsTag.appex/Contents/MacOS/NewsTag\n  852     1   0.0  11776 /System/Applications/Stocks.app/Contents/PlugIns/StocksWidget.appex/Contents/MacOS/StocksWidget\n  858     1   0.0   9664 /System/Applications/VoiceMemos.app/Contents/PlugIns/VoiceMemosSettingsWidgetExtension.appex/Contents/MacOS/VoiceMemosSettingsWidgetExtension\n  872     1   0.0  10224 /System/Applications/FindMy.app/Contents/PlugIns/FindMyWidgetPeople.appex/Contents/MacOS/FindMyWidgetPeople\n  873   679   0.0  41648 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper\n  875     1   0.0  10992 /System/Library/PrivateFrameworks/CloudDocs.framework/PlugIns/com.apple.CloudDocs.iCloudDriveFileProvider.appex/Contents/MacOS/com.apple.CloudDocs.iCloudDriveFileProvider\n  876     1   0.0  10896 /System/Applications/Home.app/Contents/PlugIns/HomeWidget.appex/Contents/MacOS/HomeWidget\n  877     1   0.0  41024 /System/Library/CoreServices/Spotlight.app/Contents/MacOS/Spotlight\n  878     1   0.0  10464 /System/Applications/Journal.app/Contents/PlugIns/JournalWidgets.appex/Contents/MacOS/JournalWidgets\n  879     1   0.0  10848 /System/Applications/Clock.app/Contents/PlugIns/WorldClockWidget.appex/Contents/MacOS/WorldClockWidget\n  880     1   0.0   9584 /System/Applications/Weather.app/Contents/PlugIns/WeatherIntents.appex/Contents/MacOS/WeatherIntents\n  881     1   0.0  11904 /System/Applications/News.app/Contents/PlugIns/NewsToday2.appex/Contents/MacOS/NewsToday2\n  882     1   0.0   6192 /System/Library/Frameworks/InputMethodKit.framework/Resources/imklaunchagent\n  883     1   0.0  18640 /System/Library/PrivateFrameworks/TextInputUIMacHelper.framework/Versions/A/XPCServices/CursorUIViewService.xpc/Contents/MacOS/CursorUIViewService\n  884     1   0.0   9792 /System/Library/Input Methods/PressAndHold.app/Contents/PlugIns/PAH_Extension.appex/Contents/MacOS/PAH_Extension\n  887     1   0.0  10544 /Applications/iTerm.app/Contents/XPCServices/pidinfo.xpc/Contents/MacOS/pidinfo\n  898     1   0.0   9712 /System/Applications/Photos.app/Contents/PlugIns/PhotosReliveWidget.appex/Contents/MacOS/PhotosReliveWidget\n  900     1   0.0  11088 /System/Applications/News.app/Contents/PlugIns/NewsTodayIntents.appex/Contents/MacOS/NewsTodayIntents\n  905     1   0.0   6784 /System/Applications/Calendar.app/Contents/PlugIns/CalendarWidgetExtension.appex/Contents/MacOS/CalendarWidgetExtension\n  912     1   0.0   4368 /System/Applications/Tips.app/Contents/PlugIns/TipsWidgetExtension.appex/Contents/MacOS/TipsWidgetExtension\n  913     1   0.0   4080 /System/Library/PrivateFrameworks/MobileTimer.framework/PlugIns/MobileTimerIntents.appex/Contents/MacOS/MobileTimerIntents\n  915     1   0.0  10768 /System/Applications/Shortcuts.app/Contents/PlugIns/ShortcutsWidgetExtension.appex/Contents/MacOS/ShortcutsWidgetExtension\n  917     1   0.0   4864 /System/Applications/Notes.app/Contents/PlugIns/com.apple.Notes.WidgetExtension.appex/Contents/MacOS/com.apple.Notes.WidgetExtension\n  918     1   0.0   9968 /Applications/Microsoft Excel.app/Contents/PlugIns/ExcelWidget_mac.appex/Contents/MacOS/ExcelWidget_mac\n  919   272   0.0 112096 node\n  924     1   0.0   9968 /Applications/Microsoft Word.app/Contents/PlugIns/WordWidget_mac.appex/Contents/MacOS/WordWidget_mac\n  925     1   0.0   4720 /System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/Contents/Extensions/SafariWidgetExtension.appex/Contents/MacOS/SafariWidgetExtension\n  926     1   0.0   4640 /System/Applications/Reminders.app/Contents/PlugIns/RemindersWidgetExtension.appex/Contents/MacOS/RemindersWidgetExtension\n  927     1   0.0   4688 /System/Library/CoreServices/PeopleViewService.app/Contents/PlugIns/PeopleWidget_macOSExtension.appex/Contents/MacOS/PeopleWidget_macOSExtension\n  970   679   0.0  33824 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n  991     1   0.0   4896 /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XProtectUpdateService.xpc/Contents/MacOS/XProtectUpdateService\n  993     1   0.0   9024 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n 1000     1   0.0   6928 /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/Support/accessoryupdaterd\n 1004     1   0.0   4176 /System/Library/PrivateFrameworks/AssetCacheServices.framework/Versions/A/XPCServices/AssetCacheLocatorService.xpc/Contents/MacOS/AssetCacheLocatorService\n 1016   679   0.0 128448 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n 1021     1   0.0  13408 /System/Library/PrivateFrameworks/SafariPlatformSupport.framework/Versions/A/XPCServices/com.apple.SafariPlatformSupport.Helper.xpc/Contents/MacOS/com.apple.SafariPlatformSupport.Helper\n 1024     1   0.0   7504 /System/Library/PrivateFrameworks/UsageTracking.framework/Versions/A/UsageTrackingAgent\n 1061   689   0.0   4560 /Users/mikewolfd/Library/Application Support/iTerm2/iTermServer-3.7.2\n 1087   679   0.0 295952 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n 1088     1   0.0  32496 /Users/mikewolfd/Applications/Chrome Apps.localized/Google Keep.app/Contents/MacOS/app_mode_loader\n 1094     1   0.0   8496 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/chrome_crashpad_handler\n 1119     1   0.0   2416 /usr/sbin/distnoted\n 1125     1   0.0  24832 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdbulkimport\n 1222     1   0.0  18960 /System/Library/PrivateFrameworks/HomeKitDaemon.framework/Support/homed\n 1248   679   0.0  68352 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n 1252   679   0.0  24400 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper\n 1253   679   0.0  41216 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper\n 1411     1   0.0   3712 /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/UARPUpdaterServiceDisplay.xpc/Contents/MacOS/UARPUpdaterServiceDisplay\n 1673 77724   0.0 125920 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 1674 77724   0.0  78144 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 1676 77724   0.0  22064 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 1678 77724   0.0  52016 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 1695 77724   0.0 103776 npm exec @playwright/mcp@latest\n 1758  1678   0.0  21792 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 1915     1   0.0   8944 /System/Library/PrivateFrameworks/PrivateCloudCompute.framework/privatecloudcomputed.app/Contents/MacOS/privatecloudcomputed\n 2014     1   0.0   6016 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/XPCServices/media-indexer.xpc/Contents/MacOS/media-indexer\n 2015     1   0.0  13360 /System/Library/PrivateFrameworks/AMPLibrary.framework/Versions/A/Support/AMPLibraryAgent\n 2025     1   0.0  10336 /usr/libexec/biometrickitd\n 2178  1695   0.0 112528 node\n 2378     1   0.0   6512 /usr/libexec/wifivelocityd\n 2771 77724   0.0 125408 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 2772 77724   0.0  20880 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 2774 77724   0.0  52224 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 2775 77724   0.0  78288 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 2790 77724   0.0 104016 npm exec @playwright/mcp@latest\n 2841  2774   0.0  21712 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 2916     1   0.0   2432 /usr/sbin/distnoted\n 3229  2790   0.0 112736 node\n 3390     1   0.0   2624 /usr/sbin/appleh16camerad\n 3637     1   0.0   6240 /usr/libexec/symptomsd-diag\n 3859     1   0.3  16368 /tmp/wos-source-scope-production-1791476172637267000/wos-server\n 4091     1   0.0   2048 /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/CVMServer\n 4363     1   0.0  15920 /usr/libexec/adprivacyd\n 4423     1   1.6  39136 /opt/homebrew/bin/limactl\n 4446     1   0.0  94432 /opt/homebrew/bin/limactl\n 4539     1  14.6 2274848 /System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine\n 4672     1   0.8   2656 ssh: /Users/mikewolfd/.colima/_lima/colima/ssh.sock [mux]\n 4860 77724   0.0  21440 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 4861 77724   0.0  51904 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 4862 77724   0.0 125184 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 4865 77724   0.0  77248 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 4879 77724   0.0 107104 npm exec @playwright/mcp@latest\n 4955  4861   0.0  21776 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 5406  4879   0.0 111632 node\n 5438     1   0.0   7936 /Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler\n 5483   688   0.3  76272 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper\n 5487   688   0.0  38896 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper\n 6032   688   0.0  98480 Cursor Helper: shared-process\n 6038   688   1.9 446128 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Renderer).app/Contents/MacOS/Cursor Helper (Renderer)\n 6048   688   1.3 733200 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Renderer).app/Contents/MacOS/Cursor Helper (Renderer)\n 6085     1   0.0  49808 /System/Library/PrivateFrameworks/CoreSpeech.framework/corespeechd\n 6217     1   0.0   7808 /System/Library/PrivateFrameworks/CoreRecents.framework/Versions/A/Support/recentsd\n 6454     1   0.0  24256 /usr/libexec/swcd\n 6602     1   0.0   5600 /System/Library/Image Capture/Support/icdd\n 6604     1   0.0  21312 Contents/Resources/ChatGPTHelper\n 6618     1   0.0  11312 /opt/homebrew/opt/colima/bin/colima\n 6620     1   0.0   9184 /System/Library/CoreServices/AirPlayUIAgent.app/Contents/MacOS/AirPlayUIAgent\n 6630     1   0.0   8176 /System/Library/CoreServices/diagnostics_agent\n 6634     1   0.0  12896 /System/Library/CoreServices/TextInputMenuAgent.app/Contents/MacOS/TextInputMenuAgent\n 6638     1   0.0  22432 Contents/Library/LaunchAgents/com.microsoft.teams2.agent\n 6645     1   0.0   4400 /System/Library/Frameworks/CryptoTokenKit.framework/ctkahp.bundle/Contents/MacOS/ctkahp\n 6663     1   0.4  25568 /Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Helpers/AdobeResourceSynchronizer.app/Contents/MacOS/AdobeResourceSynchronizer\n 6859   688   0.0  19376 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper\n 6870     1   0.0  28448 /Applications/Magnet.app/Contents/MacOS/Magnet\n 6918     1   0.0  22320 /Users/mikewolfd/Library/Application Support/Figma/FigmaAgent.app/Contents/MacOS/figma_agent\n 6987     1   0.0  29232 /System/Library/CoreServices/CoreServicesUIAgent.app/Contents/MacOS/CoreServicesUIAgent\n 7026     1   0.0   4576 /System/Library/Frameworks/CryptoTokenKit.framework/ctkahp.bundle/Contents/MacOS/ctkahp\n 7117   688   0.0  48464 Cursor Helper: fileWatcher [2:586d3fc8d7138b500c43356321d62b95]\n 7122   688   0.0  51152 Cursor Helper: fileWatcher [1:2b4039d464bdee6de7c05c2ad25a87bf]\n 7124     1   0.0  13584 /System/Library/PrivateFrameworks/SafariPlatformSupport.framework/Versions/A/XPCServices/com.apple.SafariPlatformSupport.Helper.xpc/Contents/MacOS/com.apple.SafariPlatformSupport.Helper\n 7139     1   0.0   2448 /usr/sbin/distnoted\n 7565   688   0.4  68400 Cursor Helper: terminal pty-host\n 7627 77724   0.0  76880 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 8423 77724   0.0 124912 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 8424 77724   0.0  51840 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 8425 77724   0.0  21488 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 8426 77724   0.0  77600 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n 8443 77724   0.0 103424 npm exec @playwright/mcp@latest\n 8451  8424   0.0  21264 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n 8789  8443   0.0 114816 node\n 8887     1   0.0   2400 /usr/sbin/distnoted\n 8921   688   0.0  53408 Cursor Helper: mcp-process\n 8923   688   0.3 302528 Cursor Helper (Plugin): extension-host (user) csfeer [2-2]\n 8926   688   0.3 214672 Cursor Helper (Plugin): extension-host (user) congressional-tech [1-3]\n 9330     1   0.0   7792 /usr/libexec/betaenrollmentd\n 9691     1   0.0  12512 /System/Library/PrivateFrameworks/IntelligencePlatformCore.framework/Versions/A/intelligenceplatformd\n 9806     1   0.0   3760 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n 9965     1   0.0   5264 /System/Library/PrivateFrameworks/AppPredictionFoundation.framework/Versions/A/XPCServices/AppPredictionIntentsHelperService.xpc/Contents/MacOS/AppPredictionIntentsHelperService\n 9966     1   0.0  25968 /System/Library/PrivateFrameworks/VoiceShortcuts.framework/Versions/A/Support/siriactionsd\n 9968     1   0.0  13248 /System/Library/PrivateFrameworks/WorkflowKit.framework/XPCServices/ShortcutsViewService.xpc/Contents/MacOS/ShortcutsViewService\n 9969     1   0.0   7008 /System/Library/PrivateFrameworks/SessionCore.framework/Support/liveactivitiesd\n 9971     1   0.0   4256 /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice\n10079 77724   0.0  77136 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n10080 77724   0.0  51872 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n10082 77724   0.0  20928 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n10083 77724   0.0 124480 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n10098 77724   0.0 103312 npm exec @playwright/mcp@latest\n10151 10080   0.0  21040 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n10254  8926   0.0  27056 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n10262  8926   0.0    656 /Users/mikewolfd/.cursor/extensions/ms-python.python-2025.6.1-darwin-arm64/python-env-tools/bin/pet\n10264  8926   0.0  24752 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n10294  8926   0.0  40192 /Applications/Cursor.app/Contents/Resources/app/resources/helpers/node\n10311  8926   0.0  32416 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n10487     1   0.0   8832 /System/Library/PrivateFrameworks/CoreFP.framework/Versions/A/fairplayd\n10601 10098   0.0 112656 node\n10623     1   0.0   3952 /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/bin/simdiskimaged\n10630     1   0.0  21248 /usr/libexec/tipsd\n10653     1   0.0  59136 /System/Library/PrivateFrameworks/DeviceCheckInternal.framework/devicecheckd\n10656     1   0.0   9328 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/formspec-server/bin/formspec-server-test-bootstrap-20261008-v1\n10659     1   0.0   2592 /usr/libexec/diskimagesiod\n10733     1   0.0   2592 /usr/libexec/diskimagesiod\n10810     1   0.0   2592 /usr/libexec/diskimagesiod\n10843     1   0.0   2176 /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/XPCServices/SimLaunchHost.arm64.xpc/Contents/MacOS/SimLaunchHost.arm64\n11285     1   0.0   3728 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n11287     1   0.0  43168 /Applications/Ollama.app/Contents/MacOS/Ollama\n11466 11287   0.0  24448 /Applications/Ollama.app/Contents/Resources/ollama\n11491  8926   0.0  11488 /Users/mikewolfd/.cursor/extensions/tombi-toml.tombi-1.7.3-darwin-arm64/server/tombi\n11649  8926   0.0  22528 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n11669     1   0.0   2432 /usr/sbin/distnoted\n11808  8926   0.0   4304 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\n11896     1   0.0   5104 /System/Library/PrivateFrameworks/AppleCredentialManager.framework/AppleCredentialManagerDaemon\n12069  8926   0.0   4320 /Users/mikewolfd/Work/congressional-tech/.venv/bin/python\n12184     1   0.0   1712 /System/Library/PrivateFrameworks/KerberosHelper/Helpers/DiskUnmountWatcher\n12380     1   0.0   7936 /usr/libexec/gamecontrollerd\n12489     1   0.0   7072 /usr/libexec/gamecontrolleragentd\n12893 11808   0.0   4304 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\n13246     1   0.0 231744 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores\n14853   688   1.2 445264 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Renderer).app/Contents/MacOS/Cursor Helper (Renderer)\n15131   688   0.4 261296 Cursor Helper (Plugin): extension-host (user) keeplist-backend [5-20]\n15164   688   0.0  35536 Cursor Helper: fileWatcher [5:363f25c70bd321c6fc4d9c347f4aa4f0]\n15281     1   0.0   3280 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n15285 15131   0.0    656 /Users/mikewolfd/.cursor/extensions/ms-python.python-2025.6.1-darwin-arm64/python-env-tools/bin/pet\n15351 15131   0.0  12656 /Applications/Cursor.app/Contents/Resources/app/resources/helpers/node\n15953     1   0.0   4400 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n15954 15953   0.0  32688 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n15957 15954   0.0  14352 /Users/mikewolfd/Work/formspec-stack/case-portal/node_modules/vite/node_modules/@esbuild/darwin-arm64/bin/esbuild\n16003 15131   0.0  16144 /Users/mikewolfd/.cursor/extensions/hashicorp.terraform-2.40.0-darwin-arm64/bin/terraform-ls\n16414     1   0.0   4368 /Users/mikewolfd/Work/formspec-stack/.cargo-target/debug/trellis-server\n16443 15131   0.0  11936 /Users/mikewolfd/.cursor/extensions/tombi-toml.tombi-1.7.3-darwin-arm64/server/tombi\n16634     1   0.0  18304 /usr/libexec/replayd\n16731 15131   0.0   4304 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\n16797 15131   0.0  23104 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n16961     1   0.0   2432 /usr/libexec/taskgated\n17045     1   0.0   6208 /System/Library/PrivateFrameworks/IMDPersistence.framework/IMAutomaticHistoryDeletionAgent.app/Contents/MacOS/IMAutomaticHistoryDeletionAgent\n17214     1   0.0   4736 /System/Library/Frameworks/AudioToolbox.framework/AudioComponentRegistrar\n17219     1   0.0   5456 /System/Library/PrivateFrameworks/Ecosystem.framework/Support/ecosystemd\n17245 16731   0.0   4304 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\n17264     1   0.0   2576 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdwrite\n17314 15131   0.0   4320 /Users/mikewolfd/Work/keeplist-backend/.venv/bin/python\n17487 77724   0.0  21296 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n17488 77724   0.0  51616 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n17490 77724   0.0 124704 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n17492 77724   0.0  77776 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n17506 77724   0.0 103680 npm exec @playwright/mcp@latest\n17581 17488   0.0  21392 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n17832 17506   0.0 111968 node\n18030     1   0.0  36160 /Users/mikewolfd/.codex/packages/app-server-daemon/releases/0.162.1-aarch64-apple-darwin/bin/codex\n18758  8921   0.0   6912 npm exec @playwright/mcp@latest\n18901 77026   0.0 234624 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n18903 77026   0.0 106448 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n18949     1   0.0   3760 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n18986  8923   0.0    656 /Users/mikewolfd/.cursor/extensions/ms-python.python-2025.6.1-darwin-arm64/python-env-tools/bin/pet\n19223  8923   0.0  20896 /Applications/Cursor.app/Contents/Resources/app/resources/helpers/node\n19270     1   0.0  23664 /System/Library/Frameworks/QuickLookThumbnailing.framework/Support/com.apple.quicklook.ThumbnailsAgent\n19274     1   0.0   9360 /usr/libexec/storagekitd\n19278     1   0.0   8112 /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice\n19280     1   0.0   6496 /System/Library/ExtensionKit/Extensions/ImageThumbnailExtension.appex/Contents/MacOS/ImageThumbnailExtension\n19286     1   0.0   6752 /System/Library/PrivateFrameworks/PackageKit.framework/Resources/system_installd\n19549  8923   0.0   4304 /Users/mikewolfd/Work/csfeer/.venv/bin/python\n19837 18758   0.0  24096 node\n20188  8923   0.0   7920 /Users/mikewolfd/Work/csfeer/.venv/bin/ruff\n20415  8921   0.0   6912 npm exec chrome-devtools-mcp@1.9.0\n20522     1   0.0  69808 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n20530 20522   0.0  25744 /Users/mikewolfd/Work/formspec-stack/formspec-web/node_modules/@esbuild/darwin-arm64/bin/esbuild\n20804 20415   0.0  59312 chrome-devtools-mcp\n20926 20804   0.0  15056 /Applications/Cursor.app/Contents/Resources/app/resources/helpers/node\n20954  8921   0.0  11232 /opt/homebrew/share/flutter/bin/cache/dart-sdk/bin/dart\n21056  8923   0.0  34848 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n21153     1   0.0  29264 /System/Library/CoreServices/UserNotificationCenter.app/Contents/MacOS/UserNotificationCenter\n21352     1   0.0    992 ssh\n21621     1   0.0   5536 /System/Library/PrivateFrameworks/AppleAccountTransparency.framework/Versions/A/Resources/appleaccounttransparencyd\n21864     1   0.0  13424 /System/Library/CoreServices/ReportCrash\n21865     1   0.0   3584 /System/Library/CoreServices/ReportSystemMemory\n22482     1   0.0  53760 /System/Library/PrivateFrameworks/CoreEmbeddedSpeechRecognition.framework/Versions/A/XPCServices/com.apple.siri.embeddedspeech.xpc/Contents/MacOS/com.apple.siri.embeddedspeech\n22506     1   0.0  17952 /System/Library/PrivateFrameworks/CloudSubscriptionFeatures.framework/FeatureAccessAgent\n22516     1   0.0  12976 /usr/libexec/swtransparencyd\n22553     1   0.0   3712 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n22684     1   0.0   2080 /usr/bin/ssh-agent\n22851     1   0.0   8352 /Applications/Cursor.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt\n24029     1   0.0   2304 /System/Library/CoreServices/CrashReporterSupportHelper\n24037     1   0.0   2400 /usr/sbin/distnoted\n29590     1   0.0   7792 /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService\n30481     1   0.0   5344 /System/Library/Frameworks/ManagedSettings.framework/Versions/A/ManagedSettingsAgent\n30511     1   0.0  13888 cloudphotod\n31075     1   0.0  44560 node\n31125 31075   0.0  16320 /Users/mikewolfd/Work/formspec-stack/formspec-web/node_modules/@esbuild/darwin-arm64/bin/esbuild\n31265     1   0.0  10672 /System/Library/PrivateFrameworks/ScreenTimeCore.framework/Versions/A/ScreenTimeAgent\n31449     1   0.0  16368 /System/Library/PrivateFrameworks/AXAssetLoader.framework/Support/axassetsd\n31450     1   0.0  11760 /System/Library/PrivateFrameworks/TextToSpeechVoiceBankingSupport.framework/Support/voicebankingd\n31463     1   0.0   9232 /System/iOSSupport/System/Library/ExtensionKit/Extensions/SiriAUSP.appex/Contents/MacOS/SiriAUSP\n31464     1   0.0   9360 /System/iOSSupport/System/Library/ExtensionKit/Extensions/KonaSynthesizer.appex/Contents/MacOS/KonaSynthesizer\n31465     1   0.0  10736 /System/Library/PrivateFrameworks/MacinTalk.framework/PlugIns/WardaSynthesizer.appex/Contents/MacOS/WardaSynthesizer\n31467     1   0.0   5072 /System/iOSSupport/System/Library/ExtensionKit/Extensions/MauiAUSP.appex/Contents/MacOS/MauiAUSP\n31470     1   0.0   9280 /System/Library/PrivateFrameworks/MacinTalk.framework/PlugIns/MacinTalkAUSP.appex/Contents/MacOS/MacinTalkAUSP\n31833     1   0.0   7232 /System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access\n32947     1   0.0  24400 /System/Library/PrivateFrameworks/SiriInference.framework/Versions/A/siriinferenced\n33004     1   0.0  14096 /System/Library/PrivateFrameworks/SiriSuggestionsSupport.framework/Versions/A/XPCServices/SiriSuggestionsBookkeepingService.xpc/Contents/MacOS/SiriSuggestionsBookkeepingService\n33303     1   0.0  37984 /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XprotectService.xpc/Contents/MacOS/XprotectService\n33377 77724   0.0  20704 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n33378 77724   0.0  52016 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n33379 77724   0.0  78096 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n33380 77724   0.0 125712 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n33397 77724   0.0 103968 npm exec @playwright/mcp@latest\n33449     1   0.0  28592 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared\n33451 33378   0.0  20800 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n33455     1   0.0   9424 /usr/libexec/taskgated-helper\n33927 33397   0.0 113264 node\n34124 77724   0.0  51904 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n34125 77724   2.6 126304 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n34126 77724   0.0  77552 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n34127 77724   0.0  22000 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n34146 77724   0.0 103472 npm exec @playwright/mcp@latest\n34215 34124   0.0  21088 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n34226     1   0.0   6272 /usr/libexec/seserviced\n34251     1   0.0   2688 /usr/libexec/memoryanalyticsd\n34252     1   0.0   2832 /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANEStorageMaintainer.xpc/Contents/MacOS/ANEStorageMaintainer\n34274     1   0.0   2368 /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANEStorageMaintainer.xpc/Contents/MacOS/ANEStorageMaintainer\n34325     1   0.0   3424 /usr/libexec/griddatad\n34348     1   0.0   4544 /System/Library/PrivateFrameworks/GameControllerFoundation.framework/Versions/A/XPCServices/GameControllerConfigService.xpc/Contents/MacOS/GameControllerConfigService\n34349     1   0.0    544 /usr/libexec/dirhelper\n34351     1   0.0   8864 /System/Library/PrivateFrameworks/MobileAssetDaemon.framework/Versions/A/XPCServices/com.apple.MobileAsset.DownloadService.Builtin.xpc/Contents/MacOS/com.apple.MobileAsset.DownloadService.Builtin\n34356     1   0.0   3104 /System/Library/PrivateFrameworks/StreamingZip.framework/Versions/A/XPCServices/com.apple.StreamingUnzipService.privileged.xpc/Contents/MacOS/com.apple.StreamingUnzipService.privileged\n34419     1   0.0  16224 /usr/libexec/triald_system\n34513     1   0.0  17552 /System/Library/PrivateFrameworks/IntelligencePlatformCore.framework/Versions/A/knowledgeconstructiond\n34522     1   0.0  22640 /System/Cryptexes/App/usr/libexec/AuthenticationServicesAgent\n34523     1   0.0   5920 /usr/libexec/keychainsharingmessagingd\n34654     1   0.0   4560 /System/Cryptexes/App/usr/libexec/PasswordBreachAgent\n34661     1   0.0  15104 /System/Library/PrivateFrameworks/SiriAnalytics.framework/Versions/A/XPCServices/SAExtensionOrchestrator.xpc/Contents/MacOS/SAExtensionOrchestrator\n34662     1   0.0  13456 /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice\n34663     1   0.0   9424 /System/Library/ExtensionKit/Extensions/GMSSELFIngestor.appex/Contents/MacOS/GMSSELFIngestor\n34664     1   0.0   8576 /System/Library/ExtensionKit/Extensions/IFTelemetrySELFIngestor.appex/Contents/MacOS/IFTelemetrySELFIngestor\n34665     1   0.0   8992 /System/Library/ExtensionKit/Extensions/IFTranscriptSELFIngestor.appex/Contents/MacOS/IFTranscriptSELFIngestor\n34666     1   0.0   8960 /System/Library/ExtensionKit/Extensions/BiomeSELFIngestor.appex/Contents/MacOS/BiomeSELFIngestor\n34716     1   0.6  16096 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/workspec-server/binaries/wos-server-pg-start-2bd53c2fe2018715\n34841 34146   0.0 112144 node\n34897     1   0.0  15600 /System/Library/PrivateFrameworks/OnDeviceStorage.framework/Support/amsondevicestoraged\n34953     1   0.0  35072 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/formspec-server/binaries/formspec-server-reload-optional-case-20261009-v1\n35095     1   0.0   9632 /System/Library/PrivateFrameworks/SiriTTSService.framework/sirittsd\n35461     1   0.0  17376 /System/Library/PrivateFrameworks/IntelligencePlatformCompute.framework/Versions/A/XPCServices/IntelligencePlatformComputeService.xpc/Contents/MacOS/IntelligencePlatformComputeService\n35623     1   0.0   7968 /usr/libexec/nesessionmanager\n35775     1   0.0   6160 /usr/libexec/metrickitd\n35795     1   0.0   4144 /usr/sbin/netbiosd\n35836     1   0.0   9056 /System/Library/CoreServices/pbs\n36065     1   0.0  68320 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n36066     1   0.0  10080 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n36067     1   0.0   8608 /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XProtectBridgeService.xpc/Contents/MacOS/XProtectBridgeService\n36068 36065   0.0  25568 /Users/mikewolfd/Work/formspec-stack/formspec-web/node_modules/@esbuild/darwin-arm64/bin/esbuild\n36078     1   0.0   3008 /usr/libexec/smd\n36759     1   0.0   3376 /usr/libexec/aneuserd\n36775     1   0.0   4944 /usr/libexec/AssetCache/AssetCache\n36776     1   0.0   2784 /System/Library/PrivateFrameworks/AssetCacheServicesExtensions.framework/XPCServices/AssetCacheTetheratorService.xpc/Contents/MacOS/AssetCacheTetheratorService\n36794     1   0.0   3248 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n37416     1   0.0  21408 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/ContextStoreAgent\n37632     1   0.0  17552 /System/Library/PrivateFrameworks/GenerativeExperiencesRuntime.framework/Versions/A/generativeexperiencesd\n37633     1   0.0  15040 /System/Library/PrivateFrameworks/ModelCatalogRuntime.framework/Versions/A/modelcatalogd\n37780     1   0.0  13472 /System/Library/PrivateFrameworks/SafariPlatformSupport.framework/Versions/A/XPCServices/com.apple.SafariPlatformSupport.Helper.xpc/Contents/MacOS/com.apple.SafariPlatformSupport.Helper\n37910     1   0.0  24784 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared\n38090     1   0.0   6192 /usr/libexec/trustd\n38329     1   0.0  12576 /usr/libexec/PowerUIAgent\n39189     1   0.0  10512 /usr/libexec/textunderstandingd\n39191     1   0.0   3168 /System/Library/PrivateFrameworks/PowerLog.framework/Versions/A/XPCServices/PerfPowerTelemetryClientRegistrationService.xpc/Contents/MacOS/PerfPowerTelemetryClientRegistrationService\n39284     1   0.0   9424 /System/Library/PrivateFrameworks/ContinuousDialogManagerService.framework/assistant_cdmd\n39371     1   0.0  11552 /usr/libexec/milod\n39452     1   0.0  38784 /System/Library/PrivateFrameworks/Noticeboard.framework/Versions/A/Resources/nbagent.app/Contents/MacOS/nbagent\n39667 77026  32.8 110896 /Applications/Xcode.app/Contents/Developer/usr/bin/git\n39941 77724   0.0 153344 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n39942 77724   0.0  76720 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n39944 77724   0.0  52048 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n39945 77724   0.0  22176 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n39959 77724   0.0 104032 npm exec @playwright/mcp@latest\n40055     1   0.0   4576 /usr/libexec/dprivacyd\n40056     1   0.0   4816 /usr/libexec/dprivacyd\n40074 39944   0.0  20944 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n40153     1   0.0  30224 /usr/libexec/PerfPowerServices\n40179 39959   0.0 114288 node\n40823     1   0.0   6448 /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/UARPUpdaterServiceUSBPD.xpc/Contents/MacOS/UARPUpdaterServiceUSBPD\n40838     1   0.0  13136 /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod\n40839     1   0.0   4400 /usr/libexec/secinitd\n40840     1   0.0   6128 /usr/libexec/trustd\n40841     1   0.0   3504 /usr/libexec/trustdFileHelper\n40842     1   0.0   3616 /usr/libexec/containermanagerd\n40948     1   0.0  21312 /usr/libexec/transparencyd\n40950     1   0.0   6000 /System/Library/PrivateFrameworks/CoreFollowUp.framework/Versions/A/Support/followupd\n40951     1   0.0   7680 /System/Library/PrivateFrameworks/ProtectedCloudStorage.framework/Helpers/ProtectedCloudKeySyncing\n41173     1   0.0  13920 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared\n41416     1   0.0   2560 /System/Library/PrivateFrameworks/CoreKDL.framework/Support/corekdld\n41679     1   0.0  24240 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared\n41680     1   0.0  24688 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared\n42700 77724   0.0  76576 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n42701 77724   0.0  21152 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n42702 77724   0.0 153248 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n42703 77724   0.0  51728 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n42718 77724   0.0 140784 npm exec @playwright/mcp@latest\n42719 42703   0.0  20896 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n42754 42718   0.0 114496 node\n43342 77724   0.0  76784 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n43343 77724   0.0  51792 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n43344 77724   0.0 153248 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n43346 77724   0.0  21728 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n43361 77724   0.0 140384 npm exec @playwright/mcp@latest\n43472 43343   0.0  21408 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n43549 43361   0.0 135216 node\n43906   887   0.4   9504 /Applications/iTerm.app/Contents/XPCServices/pidinfo.xpc/Contents/MacOS/pidinfo\n44062     1   0.0  11024 /usr/libexec/audioanalyticsd\n44063     1   0.0  13056 /System/Library/PrivateFrameworks/Categories.framework/Versions/A/XPCServices/CategoriesService.xpc/Contents/MacOS/CategoriesService\n44064     1   0.0   9408 /System/Library/PrivateFrameworks/ContextKit.framework/Versions/A/XPCServices/ContextService.xpc/Contents/MacOS/ContextService\n44065     1   0.0   9968 /System/Library/PrivateFrameworks/ContextKit.framework/Versions/A/XPCServices/ContextService.xpc/Contents/MacOS/ContextService\n44145   887   0.4   7824 /Applications/iTerm.app/Contents/XPCServices/pidinfo.xpc/Contents/MacOS/pidinfo\n44146   887   0.6   7280 /Applications/iTerm.app/Contents/XPCServices/pidinfo.xpc/Contents/MacOS/pidinfo\n44225 77724  31.3  35792 /Users/mikewolfd/.pyenv/versions/3.12.9/bin/python3.12\n44232 44225   0.0   2032 ps\n44572     1   0.0   9552 /usr/libexec/keyboardservicesd\n45582     1   0.0  34064 /System/Library/PrivateFrameworks/CalendarDaemon.framework/Support/calaccessd\n45683     1   0.0   9072 /System/Library/PrivateFrameworks/MobileTimer.framework/Executables/mobiletimerd\n45684     1   0.0   1392 aslmanager\n45695     1   0.0   5888 /System/Library/PrivateFrameworks/CalendarWeatherKit.framework/Versions/A/XPCServices/com.apple.CalendarWeatherKitService.xpc/Contents/MacOS/com.apple.CalendarWeatherKitService\n46294     1   0.0   3808 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n46541     1   0.0  10000 /System/Library/Frameworks/LocalAuthentication.framework/Support/coreauthd\n47075     1   0.0   4496 /usr/libexec/mobilerepaird\n47230     1   0.0  14128 adb\n47365     1   0.0   2496 /usr/sbin/distnoted\n48290     1   0.0   6544 /usr/libexec/powerexperienced\n49201     1   0.0   7456 /usr/libexec/findmydeviced\n49203     1   0.0   3648 /usr/libexec/containermanagerd_system\n49527     1   0.0  28768 /System/Library/PrivateFrameworks/SoftwareUpdate.framework/Resources/SoftwareUpdateNotificationManager.app/Contents/MacOS/SoftwareUpdateNotificationManager\n49538     1   0.0  36736 /System/Library/PrivateFrameworks/UIFoundation.framework/Versions/A/XPCServices/nsattributedstringagent.xpc/Contents/MacOS/nsattributedstringagent\n49542     1   0.0   3424 /System/Library/Frameworks/MediaAccessibility.framework/Versions/A/XPCServices/com.apple.accessibility.mediaaccessibilityd.xpc/Contents/MacOS/com.apple.accessibility.mediaaccessibilityd\n49545     1   0.0   3424 /usr/libexec/uarpassetmanagerd\n49546     1   0.0   3104 /System/Library/PrivateFrameworks/UARPAssetManager.framework/XPCServices/UARPAssetManagerServiceMobileAsset.xpc/Contents/MacOS/UARPAssetManagerServiceMobileAsset\n49551     1   0.0   4112 /System/Library/PrivateFrameworks/IASUtilities.framework/Versions/A/Resources/installerauthagent\n49552     1   0.0   9616 /usr/libexec/NRDUpdated\n49554     1   0.0   7440 /System/Library/AssetsV2/com_apple_MobileAsset_RecoveryOSUpdateBrain/28f9b40aedc0bda53bdc29e31682c998de89e5cb.asset/AssetData/com.apple.NRD.UpdateBrainService.xpc/Contents/MacOS/com.apple.NRD.UpdateBrainService\n49556     1   0.0  32736 /System/Library/PrivateFrameworks/UIFoundation.framework/Versions/A/XPCServices/nsattributedstringagent.xpc/Contents/MacOS/nsattributedstringagent\n49557     1   0.0   3568 /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice\n49561     1   0.0   3184 /System/Library/Frameworks/MediaAccessibility.framework/Versions/A/XPCServices/com.apple.accessibility.mediaaccessibilityd.xpc/Contents/MacOS/com.apple.accessibility.mediaaccessibilityd\n50343     1   0.0  12816 /System/Cryptexes/App/usr/libexec/SafariBookmarksSyncAgent\n50344     1   0.0   8784 /System/Library/PrivateFrameworks/SocialLayer.framework/sociallayerd.app/Contents/MacOS/sociallayerd\n50349     1   0.0   6752 /System/Cryptexes/App/usr/libexec/SafariLaunchAgent\n50566     1   0.0   5200 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n51189     1   0.0   3472 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n52318     1   0.1  44592 /System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/com.apple.appkit.xpc.openAndSavePanelService.xpc/Contents/MacOS/com.apple.appkit.xpc.openAndSavePanelService\n52329     1   0.0  16112 /Applications/Utilities/Adobe Sync/CoreSync/Core Sync.app/Contents/PlugIns/ACCFinderSync.appex/Contents/MacOS/ACCFinderSync\n52563     1   0.0  31552 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd\n53554     1   0.0   1920 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/XPCServices/csnameddatad.xpc/Contents/MacOS/csnameddatad\n55816     1   0.0  13952 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n56570     1   0.0   3264 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n57104     1   0.0  20640 /System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd\n57426     1   0.0  32128 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/workspec-server/binaries/wos-server-accepted-command-9d8eda3343a04486\n57706     1   0.0  66960 /opt/homebrew/Cellar/node/26.9.0/bin/node\n57707 57706   0.0  24976 /Users/mikewolfd/Work/formspec-stack/case-portal/node_modules/vite/node_modules/@esbuild/darwin-arm64/bin/esbuild\n57791     1   0.0   3808 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n57891     1   0.0   3888 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect\n57892     1   0.0   6496 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/XPCServices/XProtectPluginService.xpc/Contents/MacOS/XProtectPluginService\n57899     1   0.0  29488 /usr/libexec/remindd\n57927     1   0.0   2592 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect\n57928     1   0.0   4624 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/XPCServices/XProtectPluginService.xpc/Contents/MacOS/XProtectPluginService\n58076     1   0.0 120992 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n58082 58076   0.0  36544 /Users/mikewolfd/Work/formspec-stack/formspec-web/node_modules/@esbuild/darwin-arm64/bin/esbuild\n58721     1   0.0  49136 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/formspec-server/binaries/formspec-server-intake-bounded-local-demo-20261009-v1\n59043     1   0.0   8912 /usr/libexec/trustd\n59593     1   0.0   8368 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.27/Helpers/browser_crashpad_handler\n59595     1   0.0   6512 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.27/Helpers/browser_crashpad_handler\n59965     1   0.0  69200 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n59968 59965   0.0  25792 /Users/mikewolfd/Work/formspec-stack/formspec-web/node_modules/@esbuild/darwin-arm64/bin/esbuild\n60167     1   0.0 101808 /System/Applications/Calendar.app/Contents/MacOS/Calendar\n60567     1   0.0   9248 /System/Library/PrivateFrameworks/JetCore.framework/Support/jetpackassetd\n61513     1   0.0   3504 /usr/libexec/microstackshot\n61632     1   0.0   9824 /usr/libexec/intelligentroutingd\n61633     1   0.0  20352 /System/Library/CoreServices/UIKitSystem.app/Contents/MacOS/UIKitSystem\n61692     1   0.0   2432 /System/Library/PrivateFrameworks/CacheDelete.framework/deleted_helper\n61693     1   0.0   2864 /System/Library/PrivateFrameworks/GeoServices.framework/geodMachServiceBridge\n61694     1   0.0   3568 /System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd\n62075     1   0.0  15808 /System/Library/PrivateFrameworks/DoNotDisturbServer.framework/Support/donotdisturbd\n62321     1   0.0   5088 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n62575     1   0.0  69136 /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd\n62804     1   0.0   6160 /usr/libexec/MTLAssetUpgraderD\n62805     1   0.0   7520 /usr/libexec/dmd\n62806     1   0.0   6080 /System/Library/Frameworks/MediaExtension.framework/Versions/A/Helpers/MENotificationAgent\n62807     1   0.0  16160 /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Support/BackgroundTaskManagementAgent.app/Contents/MacOS/BackgroundTaskManagementAgent\n62808     1   0.0 248432 /Applications/Claude.app/Contents/MacOS/Claude\n62810     1   0.0  13184 /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Resources/backgroundtaskmanagementd\n62816     1   0.0   9136 /Applications/Claude.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler\n62818 62808   0.9  60736 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper\n62820 62808   0.0  63344 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper\n62836 62808   0.0  73920 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)\n62847 62808   0.1 355312 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)\n63475     1   0.0  14464 /System/Library/Frameworks/StoreKit.framework/Support/storekitagent\n63482 62808   0.0  57760 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Plugin).app/Contents/MacOS/Claude Helper (Plugin)\n63483 62808   0.0  57760 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Plugin).app/Contents/MacOS/Claude Helper (Plugin)\n63491 62808   0.0  60112 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper\n63751     1   0.0  11664 /System/Library/PrivateFrameworks/FileProviderDaemon.framework/XPCServices/FPCKService.xpc/Contents/MacOS/FPCKService\n63835     1   0.0   6544 /usr/libexec/inputanalyticsd\n63836     1   0.0   9360 /System/Library/PrivateFrameworks/Stickers.framework/Support/stickersd\n63838     1   0.0  41856 /usr/sbin/spindump\n63907     1   0.0   2448 /usr/libexec/logd_helper\n64312     1   0.0   5840 /usr/libexec/proactiveeventtrackerd\n64964     1   0.0  13760 /System/Library/PrivateFrameworks/CommunicationTrust.framework/Support/communicationtrustd\n65182     1   0.0  25696 /System/iOSSupport/System/Library/PrivateFrameworks/HomeEnergyDaemon.framework/Support/homeenergyd\n65553     1   0.0   3808 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n65915     1   0.0  12288 /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/TrustedPeersHelper.xpc/Contents/MacOS/TrustedPeersHelper\n66003  8923   0.0  46080 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n66183   679   0.0 165968 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n66441     1   0.0  11120 /System/Library/Frameworks/CoreTelephony.framework/Support/CommCenter\n66444     1   0.0   6288 /System/Library/PrivateFrameworks/CoreAnalytics.framework/Support/analyticsagent\n67131     1   0.0   6400 /System/Library/PrivateFrameworks/ManagedBackgroundAssets.framework/Versions/A/XPCServices/Managed Background Assets Helper Service.xpc/Contents/MacOS/Managed Background Assets Helper Service\n67150     1   0.0   4272 /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService\n67152     1   0.0   2448 /usr/sbin/distnoted\n67154     1   0.0   5040 /System/Library/ExtensionKit/Extensions/GenerativeExperiencesSafetyInferenceProvider.appex/Contents/MacOS/GenerativeExperiencesSafetyInferenceProvider\n67811     1   0.0   9248 /System/Library/PrivateFrameworks/CoreParsec.framework/parsecd\n67812     1   0.0  12272 /System/Library/PrivateFrameworks/iTunesCloud.framework/Support/itunescloudd\n68484     1   0.0   6352 /usr/libexec/mmaintenanced\n68766     1   0.0   3184 /usr/sbin/cfprefsd\n68772     1   0.0   3200 /usr/sbin/cfprefsd\n68795     1   0.0   3824 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n69499     1   0.0  13184 /System/Library/CoreServices/PowerChime.app/Contents/MacOS/PowerChime\n69861     1   0.1  15360 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/formspec-server/bin/formspec-server-application-native-draft-20261008-v1\n70458     1   0.0   8480 /System/Library/PrivateFrameworks/CascadeSets.framework/Versions/A/XPCServices/SetStoreUpdateService.xpc/Contents/MacOS/SetStoreUpdateService\n70473     1   0.0  13168 /usr/libexec/proactived\n70773     1   0.0  12464 /usr/libexec/nsurlsessiond\n70841     1   0.0   4832 /System/Library/CoreServices/iconservicesd\n71254     1   0.0  10448 /usr/libexec/secinitd\n72403     1   0.0   6848 /usr/libexec/countryd\n73595     1   0.0  23248 /usr/libexec/knowledge-agent\n73745     1   0.0  23600 /Users/mikewolfd/.pyenv/versions/3.12.9/bin/python3\n74112     1   0.0   3968 /System/Library/PrivateFrameworks/IntelligenceTasksEngine.framework/Support/intelligencetasksd\n74297     1   0.0  33008 /System/Library/CoreServices/iconservicesagent\n74338 73745   0.0  22080 /private/tmp/trellis-native-provenance-qualified-v1-20261009/execution/trellis-server-oidc-qualified-v4\n74513     1   0.0  10496 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n74663     1   0.0  18560 /System/Library/CoreServices/IOUIAgent.app/Contents/MacOS/IOUIAgent\n75142     1   0.0  12128 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService\n75160     1   0.0  10064 /System/Library/Frameworks/Security.framework/Versions/A/Resources/CloudKeychainProxy.bundle/Contents/MacOS/CloudKeychainProxy\n75162     1   0.0   2928 /usr/libexec/applekeystored\n75163     1   0.0  12592 /System/Volumes/Update/MobileAsset/AssetsV2/com_apple_MobileAsset_MobileSoftwareUpdate_MacUpdateBrain/c465df17221c99409f7253ea733fdff3432f3c66.asset/AssetData/com.apple.MobileSoftwareUpdate.UpdateBrainService.xpc/Contents/MacOS/com.apple.MobileSoftwareUpdate.UpdateBrainService\n75164     1   0.0   5904 /System/Library/PrivateFrameworks/IntlPreferences.framework/Support/localizationswitcherd\n75168     1   0.0  11360 /System/Library/PrivateFrameworks/Synapse.framework/Support/contentlinkingd\n75177     1   0.0   9840 /System/Library/PrivateFrameworks/IntelligenceFlowContextRuntime.framework/Versions/A/intelligencecontextd\n75185     1   0.0   9904 /System/Library/PrivateFrameworks/CascadeSets.framework/Versions/A/XPCServices/SetStoreUpdateService.xpc/Contents/MacOS/SetStoreUpdateService\n75190     1   0.0   3312 /System/Library/CryptoTokenKit/com.apple.ifdreader.slotd/Contents/MacOS/com.apple.ifdreader\n75196     1   0.0  92112 /System/Library/Services/AppleSpell.service/Contents/MacOS/AppleSpell\n75203     1   0.0  14912 /usr/libexec/trustd\n75204     1   0.0  11104 /usr/libexec/filevaultd\n75205     1   0.0   6992 /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService\n75213   688   0.3 159952 Cursor Helper (Plugin): extension-host (retrieval) csfeer [2-58]\n75214   688   0.7 181184 Cursor Helper (Plugin): extension-host (always-local) csfeer [2-59]\n75215   688   1.1 232320 Cursor Helper (Plugin): extension-host (agent-exec) csfeer [2-60]\n75228 75214   0.0  63328 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n76035     1   0.0  10944 /System/Library/CoreServices/osanalyticshelper\n76061     1   0.0  34640 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd\n76616     1   0.0  12672 /usr/libexec/wifip2pd\n77026     1  11.4 934336 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT\n77047     1   0.0   9776 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/browser_crashpad_handler\n77049     1   0.0   9568 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/browser_crashpad_handler\n77063 77026  14.2 215792 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)\n77065 77026   0.4 211344 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)\n77068 77026   0.0  95536 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)\n77273     1   0.0  15632 /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird\n77291     1   0.0   6736 /System/Library/PrivateFrameworks/iCloudDriveService.framework/XPCServices/ContainerMetadataExtractor.xpc/Contents/MacOS/ContainerMetadataExtractor\n77713 77026   0.0  30752 /Applications/ChatGPT.app/Contents/Resources/native/bare-modifier-monitor\n77724 77026   8.2 1478496 /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex\n77728 77026  72.4 2381472 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n77785 77026   0.0  66464 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)\n77858 77026   2.4  92192 /Users/mikewolfd/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService\n77943     1   0.0  39376 /System/Library/PrivateFrameworks/SafariPlatformSupport.framework/Versions/A/XPCServices/com.apple.SafariPlatformSupport.Helper.xpc/Contents/MacOS/com.apple.SafariPlatformSupport.Helper\n77954     1   0.0  21152 /System/Library/PrivateFrameworks/EmailDaemon.framework/Versions/A/maild\n78077 77724   0.0  77632 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78079 77724   0.0  21136 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n78080 77724   0.0 125472 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78081 77724   0.0  52048 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78095 77724   0.0 103536 npm exec @playwright/mcp@latest\n78096     1   0.0  11680 /System/Library/PrivateFrameworks/MobileSoftwareUpdate.framework/Support/softwareupdated\n78142 78081   0.0  22032 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n78164 77724   0.0  21600 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n78167 77724   0.0  77664 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78168 77724   0.0 124416 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78173 77724   0.0  52032 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n78184 77724   0.0 104224 npm exec @playwright/mcp@latest\n78256 78173   0.0  21664 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n78262     1   0.0  10320 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/formspec-server/bin/formspec-server-application-native-draft-20261008-v1\n78263     1   0.0  16400 /tmp/wos-application-native-draft-production-1791482914556285000/wos-server\n78477 78095   0.0 112832 node\n78481     1   0.0  11088 /System/Library/PrivateFrameworks/GeoAnalytics.framework/geoanalyticsd\n78948 78184   0.0 112192 node\n79521     1   0.0   3840 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n79648     1   0.5  16480 /Users/mikewolfd/Work/formspec-stack/thoughts/plans/benefits-scenarios/execution/reports/workspec-server/binaries/wos-server-pg-start-2bd53c2fe2018715\n80385     1   0.0   5248 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n80411     1   0.0   2416 /System/Library/CoreServices/liquiddetectiond.app/liquiddetectiond\n80447     1   0.0   8976 /usr/libexec/ciphermld\n80507     1   0.0  18800 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTEncoderXPCService.xpc/Contents/MacOS/VTEncoderXPCService\n80528     1   0.0  16512 /usr/libexec/linkd\n80892     1   0.0  18016 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService\n80976 77026   0.0  82688 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Service).app/Contents/MacOS/Codex (Service)\n81114     1   0.0  19440 /System/Library/PrivateFrameworks/ModelCatalogRuntime.framework/Versions/A/ModelCatalogAgent\n81169     1   0.0   3120 /usr/libexec/online-auth-agent\n81281     1   0.0  10112 /usr/libexec/ospredictiond\n81642     1   0.0   7232 /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/com.apple.CodeSigningHelper.xpc/Contents/MacOS/com.apple.CodeSigningHelper\n81645     1   0.0   8432 /usr/libexec/keybagd\n81665     1   0.0   9888 /System/Library/PrivateFrameworks/MapsSync.framework/mapssyncd\n81671     1   0.0  13280 /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod\n81673     1   0.0  20976 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd\n81674     1   0.0  11920 /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod\n81675     1   0.0   8656 /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod\n81689     1   0.0  11648 /usr/libexec/rtcreportingd\n81693     1   0.0   5424 /usr/libexec/spindump_agent\n81700     1   0.0  10128 /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService\n81701     1   0.0   3328 /usr/libexec/usermanagerd\n81710     1   0.0   3776 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n81731     1   0.0  17360 /System/Library/PrivateFrameworks/AppleMediaServices.framework/Resources/amsaccountsd\n81732     1   0.0  73168 /System/Library/PrivateFrameworks/AppleMediaServicesUI.framework/amsengagementd\n81735     1   0.0   8912 /System/Library/PrivateFrameworks/SyncedDefaults.framework/Support/syncdefaultsd\n81741     1   0.0  15632 /System/Library/CoreServices/CoreLocationAgent.app/Contents/MacOS/CoreLocationAgent\n81742     1   0.0   7440 /usr/libexec/nehelper\n81743     1   0.0   6048 /usr/libexec/securityd_system\n81744     1   0.0  18832 /usr/libexec/networkserviceproxy\n81746     1   0.0  11184 /usr/libexec/neagent\n81751     1   0.0  14816 /usr/libexec/appleaccountd\n81755     1   0.0   7008 /System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/Resources/commerce\n82103     1   0.0   6656 /System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/XPCServices/CredentialProviderExtensionHelper.xpc/Contents/MacOS/CredentialProviderExtensionHelper\n82104     1   0.0  11088 /usr/libexec/nfcd\n82108     1   0.0  51104 /System/Library/Frameworks/AuthenticationServices.framework/Versions/A/XPCServices/com.apple.AuthenticationServices.Helper.xpc/Contents/MacOS/com.apple.AuthenticationServices.Helper\n82110     1   0.0   6992 /System/Library/PrivateFrameworks/NearFieldPrivateServices.framework/Versions/A/XPCServices/NFStorageServer.xpc/Contents/MacOS/NFStorageServer\n82125     1   0.0  22368 /System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha\n82161     1   0.0  18880 /System/Library/PrivateFrameworks/HearingCore.framework/heard\n82242     1   0.0  69696 /System/Library/Frameworks/Contacts.framework/Support/contactsd\n82279 82275   0.0  44512 /Users/mikewolfd/.nvm/versions/node/v22.21.1/bin/node\n82320 77026   0.0 149920 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82323 77026   0.0 150288 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82327 77026   0.0 492432 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82332 77026   1.9 752464 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82333 77026   0.4 286288 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82339     1   0.0  16336 /System/Library/CoreServices/Siri.app/Contents/MacOS/Siri\n82346     1   0.0   9264 /System/Library/PrivateFrameworks/CoreCDP.framework/Versions/A/Resources/cdpd\n82422   679   0.0 104784 /Applications/Google Chrome Beta.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.4/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)\n82476 77026   0.0 144416 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82595 77026   0.0  51104 /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex\n82716     1   0.0   6352 /System/Library/PrivateFrameworks/CoreADI.framework/adid\n82748     1   0.0   9536 /System/Library/Frameworks/GSS.framework/Helpers/GSSCred\n82749     1   0.0  23616 /System/Library/PrivateFrameworks/AppSSO.framework/Support/AppSSOAgent.app/Contents/MacOS/AppSSOAgent\n82753     1   0.0  16576 /System/Library/PrivateFrameworks/AppSSO.framework/Support/AppSSODaemon\n82758     1   0.0   3584 /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice\n82800 77026   0.0 152176 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82802 77026   0.0 466976 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82803 77026   0.0 142896 /Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/Versions/155.0.8059.40/Helpers/Codex (Renderer).app/Contents/MacOS/Codex (Renderer)\n82857     1   0.0  47536 /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService\n82858     1   0.0  41776 /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService\n82946 77724   0.0  20528 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n82947 77724   0.0 124864 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n82948 77724   0.0  51888 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n82950 77724   0.0  80928 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n82965 77724   0.0 103408 npm exec @playwright/mcp@latest\n82966 82948   0.0  20528 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n83107     1   0.0   3184 /usr/sbin/cfprefsd\n83108     1   0.0   3328 /usr/sbin/cfprefsd\n83109     1   0.0   3008 /usr/sbin/cfprefsd\n83110     1   0.0  13376 /usr/libexec/searchpartyuseragent\n83113     1   0.0   3008 /usr/sbin/cfprefsd\n83115     1   0.0   8752 /System/Library/PrivateFrameworks/AssetCacheServices.framework/Versions/A/XPCServices/AssetCacheLocatorService.xpc/Contents/MacOS/AssetCacheLocatorService\n83116     1   0.0  10016 /usr/libexec/findmylocateagent\n83121     1   0.0   7008 /usr/libexec/findmybeaconingd\n83211     1   0.0  15984 /usr/libexec/pkd\n83230 82965   0.0 112176 node\n83289     1   0.0   5744 /System/Library/CoreServices/TimeMachine/backupd-helper\n83328     1   0.0  21872 /System/Library/PrivateFrameworks/PhotoLibraryServices.framework/Versions/A/Support/photolibraryd\n83329     1   0.0  15200 /usr/libexec/spotlightknowledged.updater\n83331     1   0.0  13072 /usr/libexec/triald\n83339     1   0.0   6960 /System/Library/PrivateFrameworks/TrialServer.framework/Versions/A/XPCServices/TrialArchivingService.xpc/Contents/MacOS/TrialArchivingService\n83494     1   0.0  12112 /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd\n83502     1   0.0  28592 /System/Library/PrivateFrameworks/AppStoreDaemon.framework/Support/appstoreagent\n83510     1   0.0  14752 /usr/libexec/promotedcontentd\n83518     1   0.0  21376 /System/Library/PrivateFrameworks/IMDPersistence.framework/XPCServices/IMDPersistenceAgent.xpc/Contents/MacOS/IMDPersistenceAgent\n83530     1   0.0  14032 /System/Library/CoreServices/Siri.app/Contents/XPCServices/SiriNCService.xpc/Contents/MacOS/SiriNCService\n83541     1   0.0  19584 /usr/libexec/siriknowledged\n84026     1   0.0   6784 /usr/libexec/feedbackd\n84228     1   0.0   4976 /usr/libexec/assessmentagent\n84672 77724   0.0  20896 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n84673 77724   0.0 123776 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n84674 77724   0.0  51872 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n84675 77724   0.0  77600 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n84691 77724   0.0 103936 npm exec @playwright/mcp@latest\n84744 84674   0.0  21328 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n84939     1   0.0  25456 /usr/libexec/amfid\n85075 84691   0.0 109536 node\n85524     1   0.0   9376 /usr/libexec/naturallanguaged\n85621     1   0.0   6656 /usr/libexec/aned\n85626 77724   0.1  41520 /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host\n85769 77724   0.0  52016 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n85770 77724   0.0  22144 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n85771 77724   0.0 124768 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n85772 77724   0.0  77904 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n85788 77724   0.0 104128 npm exec @playwright/mcp@latest\n85836 85769   0.0  21808 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n86144     1   0.0   2992 /usr/sbin/cfprefsd\n86146     1   0.0   2976 /usr/sbin/cfprefsd\n86147     1   0.0   3200 /usr/sbin/cfprefsd\n86148     1   0.0   3008 /usr/sbin/cfprefsd\n86149     1   0.0   3088 /usr/sbin/cfprefsd\n86153     1   0.0   2976 /usr/sbin/cfprefsd\n86154     1   0.0   2976 /usr/sbin/cfprefsd\n86208 85788   0.0 112528 node\n86668 77724   0.0  51840 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n86670 77724   0.0  78336 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n86671 77724   0.0 124032 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n86672 77724   0.0  22368 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n86687 77724   0.0 103904 npm exec @playwright/mcp@latest\n86711 86668   0.0  20864 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n87140 86687   0.0 114768 node\n87621     1   0.0  31424 /Users/mikewolfd/Library/Application Support/Formspec Stack/local-demos/full-d1-render-009-20261008-v1/source-reload-hotfix-adoption-v1/formspec-server-test-support\n88246     1   0.0  29072 /System/Library/PrivateFrameworks/SafariSafeBrowsing.framework/com.apple.Safari.SafeBrowsing.Service\n88814     1   0.0 217312 /System/Library/CoreServices/ReportCrash\n88816     1   0.0   2512 /System/Library/PrivateFrameworks/CoreSymbolication.framework/coresymbolicationd\n89028     1   0.0  11936 /usr/libexec/betaenrollmentagent\n89057     1   0.0  12304 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/managedcorespotlightd\n89058     1   0.0  13216 /System/Library/PrivateFrameworks/CacheDelete.framework/deleted\n89086     1   0.0   6752 /System/Library/CoreServices/EscrowSecurityAlert.app/Contents/MacOS/EscrowSecurityAlert\n89106     1   0.0  12432 /System/Library/PrivateFrameworks/CloudServices.framework/Helpers/com.apple.sbd\n89134  8923   0.0  30736 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n89205     1   0.0   6944 /System/Library/CoreServices/diagnosticservicesd\n89358     1   0.0   5488 /System/Library/PrivateFrameworks/SystemStatusServer.framework/Support/systemstatusd\n89710 77724   0.0 124896 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n89712 77724   0.0  52160 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n89713 77724   0.0  78016 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n89714 77724   0.0  21872 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n89728 77724   0.0 103360 npm exec @playwright/mcp@latest\n89738 89712   0.0  21504 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n90069 89728   0.0 112640 node\n90492     1   0.0   1520 ssh\n91560     1   0.0  45776 /usr/libexec/duetexpertd\n91683     1   0.0   3568 /usr/libexec/sysmond\n92565 18030   0.0 251488 /Users/mikewolfd/.codex/packages/app-server-daemon/releases/0.162.1-aarch64-apple-darwin/bin/codex\n92711 77724   0.0  20640 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n92712 77724   0.0  77168 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n92714 77724   0.0 124480 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n92716 77724   0.0  51536 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n92731 77724   0.0 103888 npm exec @playwright/mcp@latest\n92784 92716   0.0  21264 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n93079 92731   0.0 112112 node\n93095     1   0.0  27184 /System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd\n93098     1   0.0  12784 /System/Library/PrivateFrameworks/People.framework/peopled\n94043     1   0.0  11168 /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice\n94228     1   0.0  38704 /System/Library/PrivateFrameworks/PhotoAnalysis.framework/Versions/A/Support/photoanalysisd\n94230     1   0.0   5920 /System/Library/CoreServices/ScopedBookmarkAgent\n94232     1   0.0   5392 /usr/libexec/sandboxd\n94733 77724   0.0  51744 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n94734 77724   0.0 125056 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n94736 77724   0.0  77152 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n94737 77724   0.0  21472 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n94754 77724   0.0 104336 npm exec @playwright/mcp@latest\n94809 94733   0.0  20944 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n94862     1   0.0  34336 /usr/libexec/routined\n95105 15131   0.0  24256 /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)\n95170 94754   0.0 112384 node\n95218     1   0.0   9088 /System/Library/Frameworks/CoreSpotlight.framework/spotlightknowledged\n95330     1   0.0  15312 /usr/libexec/mlhostd\n95333     1   0.0  11552 /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice\n96176     1   0.0  21088 /usr/libexec/coreduetd\n96290 77724   0.0  51648 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n96291 77724   0.0  21392 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n96293 77724   0.0  77632 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n96294 77724   0.0 124560 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n96308 77724   0.0 103280 npm exec @playwright/mcp@latest\n96362 96290   0.0  21504 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n96561     1   0.0  12192 /System/Library/Frameworks/ManagedAppDistribution.framework/Support/managedappdistributiond\n96562     1   0.0  13712 /System/Library/Frameworks/ManagedAppDistribution.framework/Support/managedappdistributionagent\n96605     1   0.0   3280 /Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git\n96917 96308   0.0 113072 node\n97540 77724   0.0 124432 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n97545 77724   0.0  22016 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n97548 77724   0.0  77344 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n97549 77724   0.0  51872 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n97556 77724   0.0 103968 npm exec @playwright/mcp@latest\n97610 97549   0.0  21792 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n98121 77724   0.0  22192 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n98122 77724   0.0 125168 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98123 77724   0.0  52064 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98130 77724   0.0  77936 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98143 77724   0.0 104176 npm exec @playwright/mcp@latest\n98200 98123   0.0  22128 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n98281 97556   0.0 112656 node\n98540     1   0.0  10464 /usr/libexec/fskitd\n98576     1   0.0   1648 /usr/libexec/seputil\n98789 77724   0.0  77840 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98790 77724   0.0  52160 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98791 77724   0.0  22272 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n98792 77724   0.0 124896 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\n98809 77724   0.0 104032 npm exec @playwright/mcp@latest\n98913 98790   0.0  22080 /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl\n98967 98143   0.0 114800 node\n99255     1   0.0  13456 /System/Library/CoreServices/talagentd\n99629 98809   0.0 112288 node\n 1064  1061   0.0   5520 /usr/bin/login\n 1066  1064   0.0    752 -zsh\n 1600  1061   0.0   5520 /usr/bin/login\n 1646  1600   0.0    752 -zsh\n 3004  1061   0.0   5520 /usr/bin/login\n 3048  3004   0.0    752 -zsh\n 3333  1061   0.0   5520 /usr/bin/login\n 3362  3333   0.0    752 -zsh\n 3775  1061   0.0   5520 /usr/bin/login\n 3815  3775   0.0    752 -zsh\n 3979  1061   0.0   5520 /usr/bin/login\n 4006  3979   0.0    752 -zsh\n 5632  1061   0.0   5536 /usr/bin/login\n 5669  5632   0.0   4480 -zsh\n82132  5669   6.9 526048 claude\n82168 82132   0.0 103168 npm exec chrome-devtools-mcp@1.9.0\n82169 82132   0.0  35216 /opt/homebrew/share/flutter/bin/cache/dart-sdk/bin/dart\n82176 82132   0.0 103120 npm exec @playwright/mcp@latest\n82248 82176   0.0 114928 node\n82275 82168   0.0 163440 chrome-devtools-mcp\n 8993  7565   0.0   4768 /opt/homebrew/bin/zsh\n10289  7565   0.0    736 /opt/homebrew/bin/zsh\n10980  7565   0.0    736 /opt/homebrew/bin/zsh\n15136  7565   0.0    928 /bin/zsh\n11637  7565   0.0    736 /opt/homebrew/bin/zsh\n81638  7565   0.0    736 /opt/homebrew/bin/zsh\n15347  7565   0.0    736 /opt/homebrew/bin/zsh\n",
+    "limits": {
+      "compute_threads": 12,
+      "memory_bytes": 25769803776,
+      "scratch_bytes": 34359738368,
+      "batch_rows": 4096,
+      "max_batch_bytes": 805306368,
+      "max_metadata_bytes": 33554432
+    },
+    "oracle_memory_bytes": 19327352832,
+    "retained_bytes_per_run_allowance": 25769803776,
+    "retained_allowance_is_estimate": true,
+    "sampling": {
+      "rss_free_seconds": 1,
+      "disk_seconds": 5,
+      "scope": "runner and descendants; peaks are sampled lower bounds; time -l also records child RSS",
+      "scratch": "all series run workspace/scratch and oracle-scratch directories"
+    },
+    "digests": {
+      "runner": "723dd2fb7b7545ba94d9b5ba8f5b0d5b1681c7cd79ff9fffb0af3fee6d6aaf88",
+      "workload": "c44f2fedf9d1990d0d61db3e391aa3c80fc2b6f20282ee5c9aab05ba0f9bd0a3",
+      "integrity": "6ebbbc347173d0e70576d01acabb8e3fcd9f974f9ff487b35ff8ab84086a964b",
+      "comments_input_monitor": "8bb7b248c3ee20df009a844092fbdc2612aa2cb08dc58695fa7b2b318a237cc8",
+      "binary": "15456ea636d890a5ec640ee6dbc4020c4b991300a2c68146ae5634f4fd34b4f4",
+      "oracle": "aa140f1bbbc31c9e9ef9bf591f6db33e301a0605273dbf153e2867b64b4b4e81",
+      "protocol": "a5a0dd9503e325330cf02401ba5a9758e7ae15a6fa372b67f347a69057d22a0c",
+      "lock": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+      "prepared": "be82b5999be8b1a7514e2059a3c6220e333d8ef5ce702f40ae766d1e27647a6e",
+      "build_receipt": "6368fe86bdcc0ea15c38853a754433a34ccc57cf9cfaed469438f63909fd41e3"
+    },
+    "free_bytes_before": 144127447040,
+    "required_free_bytes": 113816633344
+  },
+  "results": {
+    "mode": "acceptance",
+    "required_fresh_runs": 3,
+    "runs": [
+      {
+        "run": 1,
+        "passed": false,
+        "stages": {
+          "comments-dockets": {
+            "sampled_peak_tree_rss_bytes": 9540452352,
+            "min_volume_free_bytes": 138347974656,
+            "sampled_peak_workspace_bytes": 5660666772,
+            "sampled_peak_allocated_bytes": 5790150656,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.06146550000994466,
+            "before": {
+              "catalog_and_other": {
+                "files": 218,
+                "bytes": 5660513171,
+                "allocated_bytes": 5789937664
+              },
+              "total": {
+                "files": 218,
+                "bytes": 5660513171,
+                "allocated_bytes": 5789937664
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 16.870032707985956,
+            "exit_code": 1,
+            "after": {
+              "catalog_and_other": {
+                "files": 249,
+                "bytes": 5660666772,
+                "allocated_bytes": 5790150656
+              },
+              "total": {
+                "files": 249,
+                "bytes": 5660666772,
+                "allocated_bytes": 5790150656
+              }
+            },
+            "volume_free_after_bytes": 138558746624,
+            "time_max_rss_bytes": 9558114304
+          },
+          "comments": {
+            "sampled_peak_tree_rss_bytes": 3359948800,
+            "min_volume_free_bytes": 138500640768,
+            "sampled_peak_workspace_bytes": 5513391981,
+            "sampled_peak_allocated_bytes": 5642551296,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.02383137500146404,
+            "before": {
+              "catalog_and_other": {
+                "files": 18,
+                "bytes": 182141353,
+                "allocated_bytes": 182190080
+              },
+              "total": {
+                "files": 18,
+                "bytes": 182141353,
+                "allocated_bytes": 182190080
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 30.495110791001935,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 85,
+                "bytes": 5513391981,
+                "allocated_bytes": 5642551296
+              },
+              "total": {
+                "files": 85,
+                "bytes": 5513391981,
+                "allocated_bytes": 5642551296
+              }
+            },
+            "volume_free_after_bytes": 138500632576,
+            "time_max_rss_bytes": 3323691008
+          },
+          "docket-receipts": {
+            "sampled_peak_tree_rss_bytes": 38748160,
+            "min_volume_free_bytes": 138469593088,
+            "sampled_peak_workspace_bytes": 5660319587,
+            "sampled_peak_allocated_bytes": 5789683712,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.009155666019069031,
+            "before": {
+              "catalog_and_other": {
+                "files": 142,
+                "bytes": 5544233158,
+                "allocated_bytes": 5673508864
+              },
+              "total": {
+                "files": 142,
+                "bytes": 5544233158,
+                "allocated_bytes": 5673508864
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.7873700000054669,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 192,
+                "bytes": 5660319587,
+                "allocated_bytes": 5789683712
+              },
+              "total": {
+                "files": 192,
+                "bytes": 5660319587,
+                "allocated_bytes": 5789683712
+              }
+            },
+            "volume_free_after_bytes": 138352373760,
+            "time_max_rss_bytes": 325697536
+          },
+          "dockets": {
+            "sampled_peak_tree_rss_bytes": 38600704,
+            "min_volume_free_bytes": 138500579328,
+            "sampled_peak_workspace_bytes": 5544203824,
+            "sampled_peak_allocated_bytes": 5673467904,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.005888165993383154,
+            "before": {
+              "catalog_and_other": {
+                "files": 89,
+                "bytes": 5513410565,
+                "allocated_bytes": 5642584064
+              },
+              "total": {
+                "files": 89,
+                "bytes": 5513410565,
+                "allocated_bytes": 5642584064
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.41454983298899606,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 138,
+                "bytes": 5544203824,
+                "allocated_bytes": 5673467904
+              },
+              "total": {
+                "files": 138,
+                "bytes": 5544203824,
+                "allocated_bytes": 5673467904
+              }
+            },
+            "volume_free_after_bytes": 138469695488,
+            "time_max_rss_bytes": 183992320
+          },
+          "seal": {
+            "sampled_peak_tree_rss_bytes": 38879232,
+            "min_volume_free_bytes": 138352259072,
+            "sampled_peak_workspace_bytes": 5660463759,
+            "sampled_peak_allocated_bytes": 5789876224,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.013086541002849117,
+            "before": {
+              "catalog_and_other": {
+                "files": 196,
+                "bytes": 5660360839,
+                "allocated_bytes": 5789736960
+              },
+              "total": {
+                "files": 196,
+                "bytes": 5660360839,
+                "allocated_bytes": 5789736960
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.09395091599435546,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 214,
+                "bytes": 5660463759,
+                "allocated_bytes": 5789876224
+              },
+              "total": {
+                "files": 214,
+                "bytes": 5660463759,
+                "allocated_bytes": 5789876224
+              }
+            },
+            "volume_free_after_bytes": 138352177152,
+            "time_max_rss_bytes": 42893312
+          }
+        },
+        "failure": "RuntimeError('comments-dockets failed: see retained logs and metrics')",
+        "deadline_seconds": 1800,
+        "input_bytes": 2744544515,
+        "elapsed_seconds": 48.763463875016896,
+        "retained_workspace": {
+          "catalog_and_other": {
+            "files": 2,
+            "bytes": 28672,
+            "allocated_bytes": 28672
+          },
+          "total": {
+            "files": 190,
+            "bytes": 5478224016,
+            "allocated_bytes": 5607542784
+          },
+          "admitted_or_prepared_data": {
+            "files": 3,
+            "bytes": 2744544515,
+            "allocated_bytes": 2760511488
+          },
+          "object_metadata": {
+            "files": 16,
+            "bytes": 89655,
+            "allocated_bytes": 118784
+          },
+          "native_data": {
+            "files": 20,
+            "bytes": 2732990877,
+            "allocated_bytes": 2846076928
+          },
+          "lifecycle": {
+            "files": 149,
+            "bytes": 570297,
+            "allocated_bytes": 806912
+          }
+        },
+        "retained_run": {
+          "catalog_and_other": {
+            "files": 237,
+            "bytes": 5478586038,
+            "allocated_bytes": 5608042496
+          },
+          "total": {
+            "files": 237,
+            "bytes": 5478586038,
+            "allocated_bytes": 5608042496
+          }
+        },
+        "retained_amplification_vs_inputs": 1.9961731384050807,
+        "sampled_peak_tree_rss_bytes": 9540452352,
+        "sampled_peak_workspace_bytes": 5660666772,
+        "sampled_peak_allocated_bytes": 5790150656,
+        "sampled_peak_scratch_bytes": 0,
+        "time_max_rss_bytes": 9558114304,
+        "peak_additional_logical_bytes": 5478526553,
+        "peak_additional_allocated_bytes": 5607968768,
+        "min_volume_free_bytes": 138347974656,
+        "inventory_sampling_seconds": 0.11342724802671
+      }
+    ],
+    "full_local_performance_acceptance_passed": false,
+    "failure": "RuntimeError('run 1 failed; retained; remaining repetitions not run')",
+    "retained_series": {
+      "catalog_and_other": {
+        "files": 252,
+        "bytes": 5660724120,
+        "allocated_bytes": 5790216192
+      },
+      "total": {
+        "files": 252,
+        "bytes": 5660724120,
+        "allocated_bytes": 5790216192
+      }
+    },
+    "volume_free_after_bytes": 138558644224
+  },
+  "join_stderr": "2026-10-10T13:37:41.190704Z  INFO docspec::engine: phase durably complete phase=\"admission\" rows=0 operation=initial\nError: query: Resources exhausted: Failed to allocate additional 8.1 MB for HashJoinInput[6] with 923.9 MB already allocated for this reservation - 854.1 KB remain available for the total pool\n\nCaused by:\n    0: Resources exhausted: Failed to allocate additional 8.1 MB for HashJoinInput[6] with 923.9 MB already allocated for this reservation - 854.1 KB remain available for the total pool\n    1: Resources exhausted: Failed to allocate additional 8.1 MB for HashJoinInput[6] with 923.9 MB already allocated for this reservation - 854.1 KB remain available for the total pool\n",
+  "join_time": "       16.83 real        14.51 user         3.20 sys\n          9558114304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              945009  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 137  voluntary context switches\n               42266  involuntary context switches\n        214190606241  instructions retired\n         68401977705  cycles elapsed\n         14215376224  peak memory footprint\n",
+  "scope": "Full acceptance series stopped after first failed run; completed preparation and source processing do not pass full lifecycle acceptance."
+}
