@@ -913,9 +913,16 @@ mod tests {
         writer.write(&batch).unwrap();
         writer.close().unwrap();
         let id = |name| Id::new(name).unwrap();
-        let engine = Engine::open(root.path().join("workspace"), Limits::default())
-            .await
-            .unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                // This two-row identity fixture does not need the production scratch budget.
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
         let source = engine
             .run(&RunSpec {
                 dataset: id("data"),
