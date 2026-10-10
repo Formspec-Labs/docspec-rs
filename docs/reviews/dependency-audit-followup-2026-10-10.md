@@ -98,3 +98,31 @@ and dependency upgrades still require the controlled evidence already specified
 by the main audit. No new package finding supersedes that ordering. Measure peak
 additional disk and retained bytes separately from execution time; the small
 hash-only cleanup above does not change disk amplification.
+
+## Build storage follow-up
+
+The root's subsequent [lifecycle gate](optional-history-full-check-2026-10-10.log)
+failed during linking with `No space left on device`. A partial inventory found
+5,855,550,000 logical bytes of test/build executables under `target/debug/deps`;
+this is build storage, not dataset amplification. The root continued one target
+at a time and reclaimed only each successfully executed test binary.
+
+The independent auditor recommends Cargo's standard integration-test grouping
+as the lasting fix: ordinary suites can be modules of fewer `[[test]]` targets,
+reducing repeated dependency linking. Existing CLI recovery tests still spawn
+the real CLI through `CARGO_BIN_EXE_docspec`. Keep `worker_initialization`
+separate because it intentionally retains a host descriptor until process exit.
+Keep `restore` separate initially: its self-spawned `--exact` child selector
+would need its new module-qualified name. Grouping also requires adjusting the
+shared `crate::scalar` import. Measure the resulting artifact size and complete
+gate time; editing one module will relink its larger group.
+[Cargo target guidance](https://raw.githubusercontent.com/rust-lang/cargo/rust-1.94.0/src/doc/src/reference/cargo-targets.md)
+explicitly describes this organization.
+
+The empty CLI unit-test harness can separately use `test = false`; integration
+tests still build the CLI. Keep the current `debug = 0` and `incremental = false`
+settings, inherited by the test profile. One build job reduces concurrent linker
+scratch, not retained executable totals. Avoid new linking flags or a permanent
+custom test runner before trying native target organization. These are researched
+recommendations; no Cargo or test-layout change was made by this audit.
+[Cargo profiles](https://raw.githubusercontent.com/rust-lang/cargo/rust-1.94.0/src/doc/src/reference/profiles.md).
