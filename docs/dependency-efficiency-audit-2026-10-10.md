@@ -9,6 +9,12 @@ the reader-concurrency constraint for composing change history. Its ranked
 actions supersede the ordering below; the detailed upstream analysis remains
 useful. Cargo target grouping changes build organization, not dependency features.
 
+The [independent coverage addendum](reviews/package-coverage-check-2026-10-10.md)
+checks the current manifests/imports and the maintained streaming-table boundary.
+It finds no omitted direct package or new reason for feature expansion. Follow
+[current status](STATUS.md#dependency-efficiency-audit) for selected-key adoption
+and its qualification; earlier audit snapshots describe the code when inspected.
+
 This is a static audit dated 2026-10-10, refreshed against base `0011f7588ab58171c0f3d71e829b4902215ab70b` and the hash-only JSON/comparison-normalization changes. The original audit at `5508a1144d872e4f72ed636eab02dc0eedc0146c` supplied the package research; subsequent refreshes reuse it and check coverage and changed call sites. The comparison findings distinguish the initially inspected implementation, the maintained replacement, and its scoped root-owned qualification. The audit subagent changed only this document and ran no builds, tests, formatting, benchmarks, downloads of data, or corpus-payload reads. Completed checks are attributed to retained root-task receipts. Performance statements distinguish structural effects from timing hypotheses.
 
 The root's [current qualification record](STATUS.md#exact-streamed-endpoint-comparison) includes formatting, strict Clippy and all executable suites in the [latest gate](reviews/dependency-normalization-full-check-2-2026-10-10.log), plus the passing [documentation continuation](reviews/dependency-normalization-doc-check-2026-10-10.log) after missing compiled dependencies were rebuilt. The [normalization review](reviews/comparison-normalization-review-2026-10-10.md) and [hash-only JSON review](reviews/hash-json-implementation-review-2026-10-10.md) approve the scoped changes. Earlier foundation evidence remains retained. These checks establish tested behavior, not a throughput improvement or complete lifecycle qualification.
