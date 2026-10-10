@@ -3,11 +3,15 @@
 Research date: 2026-10-10. Implementation baseline: `ce3ad6b`; the lockfile
 resolves DataFusion 53.1.0, Arrow/Parquet 58.4.0 and Iceberg 0.10.1.
 
-**The clearest opportunity is to expose information and column selection through
-our existing native reader.** Keep maintained execution, decoding and writing.
-First fix the adapter that prevents the optimizer from using retained row counts
-and makes narrow queries decode full-width data. Tune file layout afterward.
-This is a research decision, not a measured speedup or an implemented correction.
+**The documented changes now pass the full local performance gate:** native
+planning statistics, larger flat-export row groups and four oracle threads
+complete three fresh 10-million-Comments runs in 311.61–392.03 seconds, including
+exact independent readback. See [the current result](STATUS.md#full-local-performance-acceptance).
+Keep maintained execution, decoding and writing. The remaining reader opportunity
+is to push column selection down so narrow queries avoid decoding unused values.
+
+The initial diagnosis and priorities below are retained as research history.
+The implementation follow-up records what was subsequently changed and measured.
 
 ## What the failed run establishes
 
