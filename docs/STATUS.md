@@ -125,11 +125,17 @@ correction lookup when the dataset has no computed groups. No stack or resource
 limit was raised.
 
 The independent [retention review](reviews/dependency-correction-retention-review.md)
-approves with a coverage warning: standalone qualification has not been isolated
-as the only remaining root after overlapping scalar records disappear or are
-replaced. Its original-owner lookup path also needs that focused qualification
-in the remaining retention work. The selected-result restore fixture does not
-establish those isolated cases.
+retains a coverage warning. New [isolated qualification fixtures](../tests/qualification_roots.rs)
+pass in the [complete reader-change gate](reviews/native-column-selection-full-check-3.log).
+They test inventory expansion and original-owner
+lookup with qualification as the only completion root, including target-only
+native dependencies and mismatched-identity refusal. The
+[coverage note](reviews/qualification-roots-review.md) and
+[independent review](reviews/qualification-roots-independent-review.md)
+distinguish synthetic catalog isolation from supported retirement transitions.
+Retirement/replacement sequences, standalone restore and inherited foreign-owner
+witness lifetimes still need qualification; the selected-result restore fixture
+does not establish them.
 
 This first case does not qualify correspondence across rewritten source files,
 nested omitted fields, arbitrary classifier correctness or remote execution.
