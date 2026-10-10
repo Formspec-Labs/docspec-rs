@@ -364,6 +364,10 @@ impl Engine {
         let new_native = storage::open_pin(new).await?;
         let old_scan = storage::OccurrenceScan::open(&old_native, budget).await?;
         let new_scan = storage::OccurrenceScan::open(&new_native, budget).await?;
+        let new_indices = keys
+            .iter()
+            .map(|key| new_scan.schema().index_of(key))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let count = old_scan
             .files()
             .count()
@@ -411,12 +415,12 @@ impl Engine {
         let changed = old_files
             .keys()
             .filter(|path| !new_files.contains_key(*path))
-            .map(|path| (&old_scan, *path))
+            .map(|path| (&old_scan, *path, indices.as_slice()))
             .chain(
                 new_files
                     .keys()
                     .filter(|path| !old_files.contains_key(*path))
-                    .map(|path| (&new_scan, *path)),
+                    .map(|path| (&new_scan, *path, new_indices.as_slice())),
             )
             .collect::<Vec<_>>();
         let scanned = changed.len() as u64;
@@ -433,17 +437,11 @@ impl Engine {
             futures::stream::once(async { Ok(batch) }).boxed()
         } else {
             futures::stream::iter(changed)
-                .map(|(scan, path)| scan.read_file(path, budget))
+                .map(|(scan, path, indices)| scan.read_projected_file(path, budget, Some(indices)))
                 .try_flatten()
                 .map_ok(move |batch| {
-                    RecordBatch::try_new(
-                        key_schema.clone(),
-                        indices
-                            .iter()
-                            .map(|index| batch.column(*index).clone())
-                            .collect(),
-                    )
-                    .map_err(Error::from)
+                    RecordBatch::try_new(key_schema.clone(), batch.columns().to_vec())
+                        .map_err(Error::from)
                 })
                 .and_then(futures::future::ready)
                 .boxed()

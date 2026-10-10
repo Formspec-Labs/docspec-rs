@@ -1,0 +1,13 @@
+{
+  "purpose": "Reclaim DocSpec-owned development artifacts before changed source must be rebuilt; shared volume had about 503 MiB free.",
+  "command": "cargo clean --locked --offline --package docspec --profile dev",
+  "no_readers_lsof_exit": 1,
+  "preview_explicit_file_logical_bytes": 343087,
+  "preview_explicit_file_allocated_bytes": 2469888,
+  "preview_measurement_scope": "Only existing regular files explicitly listed by the dry run; wildcard entries are excluded. These are not complete removal totals. The Cargo output below reports the completed cleanup; volume free space also reflects allocation and unrelated activity.",
+  "volume_free_before": 423858176,
+  "volume_free_after": 1074933760,
+  "exit_code": 0,
+  "output": "     Removed 663 files, 1.1GiB total\n",
+  "scope": "Only Cargo-owned DocSpec dev artifacts; dependency builds, release artifacts, workspaces, datasets and evidence are outside this cleanup."
+}

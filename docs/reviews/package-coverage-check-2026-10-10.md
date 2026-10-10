@@ -70,10 +70,11 @@ No new finding supersedes the existing order:
 
 1. **Finish selected-key adoption.** The working-tree
    [changed-key path](../../src/engine/incremental.rs#L367) resolves each side's
-   indices, calls `read_projected_file` and shares array handles. Root reports
-   formatting and strict Clippy pass; runtime qualification is pending because
-   the shared volume cannot currently accommodate linking. No I/O or throughput
-   improvement has been measured.
+   indices, calls `read_projected_file` and shares array handles. At inspection,
+   root had passed formatting and strict Clippy, with runtime linking held for
+   shared-volume capacity. Follow [current qualification](../STATUS.md#dependency-efficiency-audit)
+   for the executing owner's results. No I/O or throughput improvement was
+   measured by this audit.
 2. **Reuse captured metadata/inventories**, preserving admission lifetime, before
    introducing another cache. The known deep metadata clone and hash-only JSON
    buffers remain small related cleanups.

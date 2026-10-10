@@ -238,10 +238,26 @@ hash-only JSON buffers that can use the existing streaming digest helper.
 
 The [utilization audit](reviews/dependency-utilization-audit-2026-10-10.md)
 rechecks every direct Rust and Python package and the material transitive APIs.
-Its additional finding is that join/summary changed-key discovery still reads
-whole changed files before selecting keys. The existing selected-column reader
-can remove unrelated decoding without another index or execution layer. Address
-that bounded adoption before broader captured-metadata reuse and join-scan work.
+Its additional finding led join/summary changed-key discovery to use the existing
+selected-column reader. Each captured schema resolves its own key indices, and
+the returned Arrow arrays are shared directly in the requested key order.
+Unchanged-file exclusion, empty-key discovery and sequential consumption remain.
+The new fixture checks reversed, non-leading composite keys through full and
+incremental joins and summaries, with independent values and contributor evidence.
+The [independent static review](reviews/selected-key-read-review-2026-10-10.md)
+approves the change. Formatting, [strict Clippy](reviews/selected-key-clippy-2026-10-10.log)
+and [all-feature tests](reviews/selected-key-test-2026-10-10.log) pass, covering
+every repository-gate component without repeating completed lint work.
+Tests started after shared-volume capacity recovered; no test was skipped for
+that temporary constraint. No throughput, whole-process memory or requested-byte
+reduction has been measured for this call-site change.
+
+The [independent coverage check](reviews/package-coverage-check-2026-10-10.md)
+confirms the current direct Rust/Python inventory and finds no reason to expand
+package features. It also confirms that DataFusion's generic streaming table
+selects columns after opening its input; keep the native selected-column provider
+underneath any suitable stream-composition wrapper. The next candidates remain
+captured-metadata reuse, avoiding redundant join scans and native layout qualification.
 Scalar preparation has a similar opportunity but also needs expression indices
 rebound to the selected schema. Package features and versions remain unchanged;
 these findings establish no measured speedup.
