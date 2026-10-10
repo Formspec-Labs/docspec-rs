@@ -1,10 +1,6 @@
 //! CLI and HTTP share exact owner-grant retirement decisions and refusals.
 
 #[path = "support/scalar.rs"]
-#[expect(
-    dead_code,
-    reason = "This transport fixture does not need scalar backfill specs."
-)]
 mod scalar;
 
 use axum::{
@@ -203,5 +199,164 @@ async fn grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry(
     assert_eq!(
         serde_json::from_slice::<Retirement>(&repeated.stdout).unwrap(),
         decision
+    );
+}
+
+#[tokio::test]
+async fn foreign_seal_protects_old_scalar_origins_after_cache_keys_are_recomputed() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let family = id("family");
+    let generation = id("g1");
+    let source = scalar::input(
+        &root.path().join("source.parquet"),
+        &[(Some(1), Some("é🎉".into())), (Some(2), None)],
+    );
+    let base = engine
+        .run(&RunSpec {
+            dataset: id("comments"),
+            operation: id("initial"),
+            base: None,
+            relationship: Some(docspec::model::SourceRelationship::Coupled {
+                family: family.clone(),
+                generation: generation.clone(),
+            }),
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+    let request = scalar::spec(&base, "lengths", "length", "text_length", "length(text)");
+    let enriched = engine.backfill(&request).await.unwrap();
+    let origins_ref = enriched.dataset.computed["length"].origins.clone().unwrap();
+    let origins: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(&origins_ref.path).unwrap()).unwrap();
+    let mut originals = std::collections::BTreeMap::new();
+    originals.insert(origins_ref.path.clone(), origins_ref.clone());
+    for origin in origins["files"].as_array().unwrap() {
+        let completion = &origin["completion"];
+        for value in [
+            &completion["execution"]["declaration"],
+            &completion["descriptor"],
+            &completion["source_metadata"],
+        ] {
+            let object: ObjectRef = serde_json::from_value(value.clone()).unwrap();
+            originals.insert(object.path.clone(), object);
+        }
+    }
+    assert!(originals.len() > 1);
+    let records = engine.inspect(&request.dataset).await.unwrap();
+    let prefixes = [
+        "phase/backfill/",
+        "backfill-prepared/",
+        "backfill-validation/",
+    ];
+    for prefix in prefixes {
+        assert!(records.keys().any(|key| key.starts_with(prefix)));
+    }
+    let keys = records
+        .keys()
+        .filter(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let retirement = engine
+        .plan_phase_retirement(
+            &request.dataset,
+            &id("retire-scalar-cache"),
+            &keys,
+            "replace scalar recovery generations while retaining the selected result",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&retirement).await.unwrap();
+    let replacement = scalar::spec(
+        &enriched,
+        "recomputed-lengths",
+        "length",
+        "text_length",
+        "length(text)",
+    );
+    let newer = engine.backfill(&replacement).await.unwrap();
+    assert_ne!(
+        newer.dataset.computed["length"].origins.as_ref(),
+        Some(&origins_ref)
+    );
+    let replaced_records = engine.inspect(&request.dataset).await.unwrap();
+    for key in &keys {
+        assert_ne!(replaced_records[key], records[key]);
+    }
+    let seal = docspec::model::GenerationSeal {
+        family: family.clone(),
+        generation,
+        members: std::collections::BTreeMap::from([(
+            request.dataset.clone(),
+            enriched.version_ref(),
+        )]),
+    };
+    assert_eq!(engine.seal_generation(&seal).await.unwrap(), seal);
+    let owner_records = engine.inspect(&request.dataset).await.unwrap();
+    let (grant_key, grant) = owner_records
+        .iter()
+        .find(|(key, value)| {
+            key.starts_with("owner-protection/") && value["consumer"] == family.as_str()
+        })
+        .unwrap();
+    let granted: Vec<ObjectRef> = serde_json::from_value(grant["objects"].clone()).unwrap();
+    for original in originals.values() {
+        assert!(
+            granted.contains(original),
+            "foreign grant omitted {}",
+            original.path
+        );
+        storage::verify_object(original).unwrap();
+    }
+    let family_records = engine.inspect(&family).await.unwrap();
+    let binding = family_records
+        .iter()
+        .find(|(key, value)| {
+            key.starts_with("reference-binding/") && value["key"] == "generation/g1"
+        })
+        .unwrap()
+        .1;
+    assert!(
+        binding["protections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| {
+                reference["owner"] == request.dataset.as_str()
+                    && reference["token"] == grant_key.as_str()
+            })
+    );
+    assert_eq!(
+        engine
+            .plan_grant_retirement(
+                &request.dataset,
+                &id("old-origins-in-use"),
+                std::slice::from_ref(grant_key),
+                "probe the foreign family promise",
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "grant_in_use"
+    );
+    let objects = originals.into_values().collect::<Vec<_>>();
+    assert!(
+        engine
+            .inspect_retention(&objects)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some())
+    );
+    assert_eq!(engine.seal_generation(&seal).await.unwrap(), seal);
+    assert_eq!(
+        engine.inspect(&request.dataset).await.unwrap(),
+        owner_records
     );
 }

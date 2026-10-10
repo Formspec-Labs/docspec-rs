@@ -1,7 +1,10 @@
 //! Exact references and candidate protection from retained metadata, never payload scans.
 
 use super::*;
-use crate::engine::backfill::{Capture, FileCompletion, PreparedCompletion, ValidationCompletion};
+use crate::engine::backfill::{
+    Capture, FileCompletion, GroupDependencies, PreparedCompletion, ValidationCompletion,
+    origins::{OriginalDeclaration, ScalarOrigins},
+};
 use iceberg::{NamespaceIdent, TableIdent, spec::TableMetadata, table::Table};
 use serde::de::DeserializeOwned;
 
@@ -449,6 +452,8 @@ pub(super) fn reference_roots(
 }
 
 enum Expansion {
+    Origins,
+    Declaration,
     Release,
     Restore(crate::restore::RestorePointRef),
     Native(Option<(Option<i64>, i32)>),
@@ -462,6 +467,8 @@ struct Pending {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MetadataKind {
+    Origins,
+    Declaration,
     Release,
     Restore,
     Native,
@@ -792,6 +799,8 @@ impl Inventory {
     ) -> Result<()> {
         self.object(object, origin)?;
         let (tag, binding) = match kind {
+            Expansion::Origins => (MetadataKind::Origins, None),
+            Expansion::Declaration => (MetadataKind::Declaration, None),
             Expansion::Release => (MetadataKind::Release, None),
             Expansion::Restore(_) => (MetadataKind::Restore, None),
             Expansion::Native(binding) => (MetadataKind::Native, binding),
@@ -900,7 +909,43 @@ impl Inventory {
 
     fn computed(&mut self, computed: &ComputedGroup, origin: &RetentionBlocker) -> Result<()> {
         self.object(&computed.source_metadata, origin)?;
+        if let Some(origins) = &computed.origins {
+            self.enqueue(origins, Expansion::Origins, origin)?;
+        }
         self.release(&computed.base_manifest, origin)
+    }
+
+    fn file_completion(&mut self, phase: &FileCompletion, origin: &RetentionBlocker) -> Result<()> {
+        self.object(&phase.source, origin)?;
+        // This metadata records one file's schema interpretation. Its old table
+        // snapshot may contain unrelated files, so retain only the metadata.
+        self.object(
+            phase
+                .source_metadata
+                .as_ref()
+                .ok_or_else(unknown_dependencies)?,
+            origin,
+        )?;
+        self.object(&phase.descriptor, origin)?;
+        for object in &phase.outputs {
+            self.object(object, origin)?;
+        }
+        if let Some(execution) = &phase.execution {
+            self.enqueue(&execution.declaration, Expansion::Declaration, origin)?;
+        }
+        Ok(())
+    }
+
+    fn group_dependencies(
+        &mut self,
+        dependencies: &GroupDependencies,
+        origin: &RetentionBlocker,
+    ) -> Result<()> {
+        self.snapshot(&dependencies.source, origin)?;
+        if let Some(logical) = &dependencies.source_logical_metadata {
+            self.object(logical, origin)?;
+        }
+        self.snapshot(&dependencies.output, origin)
     }
 
     fn related(&mut self, related: &RelatedResult, origin: &RetentionBlocker) -> Result<()> {
@@ -1120,18 +1165,7 @@ impl Inventory {
             self.release(&pin.source.manifest, origin)?;
         } else if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = decode(json)?;
-            self.object(&phase.source, origin)?;
-            self.object(
-                phase
-                    .source_metadata
-                    .as_ref()
-                    .ok_or_else(unknown_dependencies)?,
-                origin,
-            )?;
-            self.object(&phase.descriptor, origin)?;
-            for object in &phase.outputs {
-                self.object(object, origin)?;
-            }
+            self.file_completion(&phase, origin)?;
         } else if key.starts_with("phase/") {
             let phase: PhaseResult = decode(json)?;
             if !matches!(
@@ -1175,11 +1209,10 @@ impl Inventory {
                 .dependencies
                 .as_ref()
                 .ok_or_else(unknown_dependencies)?;
-            self.snapshot(&dependencies.source, origin)?;
-            if let Some(logical) = &dependencies.source_logical_metadata {
-                self.object(logical, origin)?;
+            self.group_dependencies(dependencies, origin)?;
+            if let Some(origins) = &phase.origins {
+                self.enqueue(origins, Expansion::Origins, origin)?;
             }
-            self.snapshot(&dependencies.output, origin)?;
         } else if key.starts_with("backfill-validation/") {
             let phase: ValidationCompletion = decode(json)?;
             self.object(&phase.output, origin)?;
@@ -1187,11 +1220,10 @@ impl Inventory {
                 .dependencies
                 .as_ref()
                 .ok_or_else(unknown_dependencies)?;
-            self.snapshot(&dependencies.source, origin)?;
-            if let Some(logical) = &dependencies.source_logical_metadata {
-                self.object(logical, origin)?;
+            self.group_dependencies(dependencies, origin)?;
+            if let Some(origins) = &phase.origins {
+                self.enqueue(origins, Expansion::Origins, origin)?;
             }
-            self.snapshot(&dependencies.output, origin)?;
         } else if key.starts_with("backfill/") {
             let capture: Capture = decode(json)?;
             self.release(&capture.base_manifest, origin)?;
@@ -1401,6 +1433,22 @@ impl Inventory {
             }
             let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
             match kind {
+                Expansion::Origins => {
+                    let Strict(originals): Strict<ScalarOrigins> =
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
+                            .await?;
+                    self.group_dependencies(&originals.dependencies, &origin)?;
+                    for file in &originals.files {
+                        self.file_completion(&file.completion, &origin)?;
+                    }
+                }
+                Expansion::Declaration => {
+                    // Declarations contain field identities and definitions,
+                    // with no transitive object references.
+                    let _: Strict<OriginalDeclaration> =
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
+                            .await?;
+                }
                 Expansion::Release => {
                     let Strict(dataset): Strict<DatasetPin> =
                         inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
@@ -1574,6 +1622,210 @@ fn capacity() -> Error {
         "metadata_capacity",
         "retention inspection exceeds its metadata allowance",
     )
+}
+
+#[cfg(test)]
+mod scalar_origins_tests {
+    use super::*;
+    use crate::engine::backfill::origins::OriginalExecution;
+
+    fn object(name: &str) -> ObjectRef {
+        ObjectRef {
+            owner: Id::new("owner").unwrap(),
+            path: format!("/unavailable/{name}"),
+            digest: "0".repeat(64),
+            bytes: 17,
+        }
+    }
+
+    fn origin() -> RetentionBlocker {
+        RetentionBlocker {
+            table: "owner".into(),
+            key: "phase/backfill/file".into(),
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn shallow_original_roots_keep_schema_as_a_leaf_and_do_not_queue_reads() {
+        let phase = FileCompletion {
+            execution: Some(OriginalExecution {
+                operation: Id::new("original-operation").unwrap(),
+                declaration: object("declaration.json"),
+            }),
+            source: object("source.parquet"),
+            source_metadata: Some(object("old-schema.json")),
+            rows: 1,
+            descriptor: object("output.json"),
+            outputs: vec![object("output.parquet")],
+        };
+        let mut inventory = Inventory::collecting(1 << 20).unwrap();
+        inventory.shallow = true;
+        inventory.file_completion(&phase, &origin()).unwrap();
+        let origins = object("origins.json");
+        inventory
+            .enqueue(&origins, Expansion::Origins, &origin())
+            .unwrap();
+        inventory
+            .enqueue(&origins, Expansion::Origins, &origin())
+            .unwrap();
+        assert!(inventory.pending.is_empty());
+        assert!(inventory.pending_native.is_empty());
+        assert!(
+            !inventory
+                .visited
+                .contains_key("/unavailable/old-schema.json")
+        );
+        assert_eq!(inventory.visited.len(), 2);
+        assert!(
+            inventory
+                .enqueue(&origins, Expansion::Declaration, &origin())
+                .is_err()
+        );
+        let references = inventory.into_references().unwrap();
+        for reference in [
+            phase.source,
+            phase.source_metadata.unwrap(),
+            phase.descriptor,
+            phase.outputs[0].clone(),
+            phase.execution.unwrap().declaration,
+            origins,
+        ] {
+            assert!(references.contains(&reference));
+        }
+    }
+
+    #[tokio::test]
+    async fn typed_origins_expand_once_and_retain_original_file_closure() {
+        let root = tempfile::tempdir().unwrap();
+        let budget = Budget::new(crate::budget::Limits {
+            compute_threads: 1,
+            memory_bytes: 64 << 20,
+            max_metadata_bytes: 1 << 20,
+            ..crate::budget::Limits::default()
+        })
+        .unwrap();
+        let definition = GroupDefinition {
+            group: Id::new("computed").unwrap(),
+            definition: "v1".into(),
+            fields: Vec::new(),
+        };
+        let declaration = OriginalDeclaration {
+            processor: "fixture".into(),
+            definition: definition.clone(),
+            input_fields: BTreeMap::new(),
+        };
+        let declaration = crate::engine::backfill::origins::write(
+            &Id::new("owner").unwrap(),
+            &root.path().join("declaration.json"),
+            &declaration,
+            &budget,
+        )
+        .unwrap();
+        let mut source = TablePin {
+            table: "source".into(),
+            metadata: object("source-table.json"),
+            logical_metadata: None,
+            snapshot: Some(1),
+            schema_id: 0,
+            objects: vec![object("source-table.json"), object("source.parquet")],
+            rows: 1,
+        };
+        let mut output = source.clone();
+        output.table = "output".into();
+        output.metadata = object("output-table.json");
+        output.objects = vec![output.metadata.clone(), object("output.parquet")];
+        source.logical_metadata = Some(object("logical-source.json"));
+        let completion = FileCompletion {
+            execution: Some(OriginalExecution {
+                operation: Id::new("original-operation").unwrap(),
+                declaration: declaration.clone(),
+            }),
+            source: object("source.parquet"),
+            source_metadata: Some(object("old-schema.json")),
+            rows: 1,
+            descriptor: object("output-file.json"),
+            outputs: vec![object("output.parquet")],
+        };
+        let originals = ScalarOrigins {
+            processor: "fixture".into(),
+            definition,
+            input_fields: BTreeMap::new(),
+            dependencies: GroupDependencies {
+                source: (&source).into(),
+                source_logical_metadata: source.logical_metadata.clone(),
+                output: (&output).into(),
+            },
+            files: vec![crate::engine::backfill::origins::FileOrigin {
+                generation: RetainedGeneration {
+                    key: "phase/backfill/file".into(),
+                    revision: 1,
+                },
+                completion: completion.clone(),
+            }],
+        };
+        let originals = crate::engine::backfill::origins::write(
+            &Id::new("owner").unwrap(),
+            &root.path().join("origins.json"),
+            &originals,
+            &budget,
+        )
+        .unwrap();
+        let mut inventory = Inventory::collecting(1 << 20).unwrap();
+        // Complete table inventories avoid opening native metadata or payloads.
+        inventory.table(&source, &origin()).unwrap();
+        inventory.table(&output, &origin()).unwrap();
+        inventory
+            .enqueue(&originals, Expansion::Origins, &origin())
+            .unwrap();
+        inventory
+            .enqueue(&originals, Expansion::Origins, &origin())
+            .unwrap();
+        inventory.expand(&budget, root.path()).await.unwrap();
+        assert_eq!(inventory.metadata_objects_read, 2);
+        assert!(
+            !inventory
+                .visited
+                .contains_key("/unavailable/old-schema.json")
+        );
+        assert!(
+            inventory
+                .enqueue(&originals, Expansion::Declaration, &origin())
+                .is_err()
+        );
+        let references = inventory.into_references().unwrap();
+        for reference in [
+            originals,
+            declaration,
+            completion.source,
+            completion.source_metadata.unwrap(),
+            completion.descriptor,
+            completion.outputs[0].clone(),
+            source.logical_metadata.unwrap(),
+        ] {
+            assert!(references.contains(&reference));
+        }
+    }
+
+    #[test]
+    fn legacy_execution_absence_and_null_remain_unknown_with_strict_decoding() {
+        let phase = FileCompletion {
+            execution: None,
+            source: object("source.parquet"),
+            source_metadata: Some(object("old-schema.json")),
+            rows: 1,
+            descriptor: object("output.json"),
+            outputs: vec![object("output.parquet")],
+        };
+        let mut json = serde_json::to_value(phase).unwrap();
+        let explicit_null: FileCompletion = decode(&json.to_string()).unwrap();
+        assert!(explicit_null.execution.is_none());
+        json.as_object_mut().unwrap().remove("execution");
+        let absent: FileCompletion = decode(&json.to_string()).unwrap();
+        assert!(absent.execution.is_none());
+        json["unrecognized_origins"] = serde_json::json!({"declaration": object("unknown.json")});
+        assert!(decode::<FileCompletion>(&json.to_string()).is_err());
+    }
 }
 
 #[cfg(test)]

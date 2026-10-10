@@ -828,6 +828,9 @@ impl BackfillSpec {
 /// Exact source and expression binding for a completely covered field group.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputedGroup {
+    /// Immutable original file executions; absence means unknown historical origins.
+    #[serde(default)]
+    pub origins: Option<ObjectRef>,
     pub definition: GroupDefinition,
     /// SQL input names bound to root field IDs in this exact source interpretation.
     pub input_fields: BTreeMap<String, i32>,

@@ -16,6 +16,7 @@ pub(in crate::engine) struct AcknowledgedFile {
 struct FileAssembly {
     files: Vec<DataFile>,
     inherited: Vec<ObjectRef>,
+    origins: Vec<FileOrigin>,
     protections: Option<ReferenceProtections>,
     bytes: usize,
 }
@@ -27,6 +28,7 @@ impl FileAssembly {
         expressions: &Expressions,
         eligibility: u64,
         budget: &Budget,
+        checks: &mut super::super::verification::Checks,
     ) -> Result<()> {
         for file in acknowledged {
             if file.generation.key != file_key(&file.completion.source, expressions, eligibility)? {
@@ -37,10 +39,21 @@ impl FileAssembly {
                 &file.completion,
                 budget.limits.max_metadata_bytes,
             )?;
-            self.files
-                .extend(read_completion(&file.completion, &expressions.native, budget).await?);
-            self.inherited.extend(file.completion.outputs);
+            self.bytes = self.bytes.saturating_add(inputs::metadata_size(
+                &file.generation,
+                budget.limits.max_metadata_bytes.saturating_sub(self.bytes),
+            )?);
+            let files = checks
+                .scalar_file(&file.completion, &expressions.native, budget)
+                .await?;
+            self.files.extend(files.iter().cloned());
+            self.inherited
+                .extend(file.completion.outputs.iter().cloned());
             ReferenceProtections::inherit(&mut self.protections, file.protections.as_deref())?;
+            self.origins.push(FileOrigin {
+                generation: file.generation,
+                completion: file.completion,
+            });
         }
         Ok(())
     }
@@ -84,7 +97,7 @@ impl Engine {
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);
         let prepared: Option<PreparedCompletion> =
             self.active_completion(&view, &prepared_key).await?;
-        let (prepared, mut protections) = if let Some(prepared) = prepared {
+        let (prepared, origins, mut protections) = if let Some(prepared) = prepared {
             check_group_dependencies(
                 &prepared_key,
                 prepared.dependencies.as_ref(),
@@ -94,6 +107,7 @@ impl Engine {
             storage::check_available(prepared.table.objects.clone(), &lifecycle.budget).await?;
             (
                 prepared.table,
+                prepared.origins,
                 self.retained_protections(&view, &prepared_key).await?,
             )
         } else {
@@ -109,6 +123,7 @@ impl Engine {
             let mut assembly = FileAssembly {
                 files: Vec::new(),
                 inherited: Vec::new(),
+                origins: Vec::new(),
                 protections: source_protections
                     .map(ReferenceProtections::duplicate)
                     .transpose()?,
@@ -117,6 +132,18 @@ impl Engine {
             let _assembly = lifecycle
                 .budget
                 .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
+            // One declaration serves every newly computed file in this preparation.
+            // The reserved prefix protects it before any file acknowledgment.
+            let declaration = origins::write(
+                request.dataset(),
+                &directory.join("declaration.json"),
+                &OriginalDeclaration {
+                    processor: PROCESSOR.into(),
+                    definition: definition.clone(),
+                    input_fields: expressions.input_fields.clone(),
+                },
+                &lifecycle.budget,
+            )?;
             let mut completion_view = lifecycle.open(request.dataset()).await?;
             for file in scan.files() {
                 let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
@@ -145,6 +172,7 @@ impl Engine {
                             &expressions,
                             operation.eligibility,
                             &lifecycle.budget,
+                            checks,
                         )
                         .await
                     {
@@ -172,6 +200,10 @@ impl Engine {
                 let completion = match result {
                     Ok(mut completion) => {
                         completion.source_metadata = Some(source.metadata.clone());
+                        completion.execution = Some(OriginalExecution {
+                            operation: request.operation().clone(),
+                            declaration: declaration.clone(),
+                        });
                         completion
                     }
                     Err(error) => {
@@ -215,6 +247,7 @@ impl Engine {
                             &expressions,
                             operation.eligibility,
                             &lifecycle.budget,
+                            checks,
                         )
                         .await?;
                     completion_view = lifecycle.open(request.dataset()).await?;
@@ -230,6 +263,7 @@ impl Engine {
                     &expressions,
                     operation.eligibility,
                     &lifecycle.budget,
+                    checks,
                 )
                 .await?;
             let output =
@@ -258,10 +292,28 @@ impl Engine {
                 )?;
                 (
                     existing.table,
+                    existing.origins,
                     self.retained_protections(&view, &prepared_key).await?,
                 )
             } else {
+                let origins = origins::write(
+                    request.dataset(),
+                    &directory.join("origins.json"),
+                    &ScalarOrigins {
+                        processor: PROCESSOR.into(),
+                        definition: definition.clone(),
+                        input_fields: expressions.input_fields.clone(),
+                        dependencies: GroupDependencies {
+                            source: source.into(),
+                            source_logical_metadata: source.logical_metadata.clone(),
+                            output: (&prepared).into(),
+                        },
+                        files: assembly.origins,
+                    },
+                    &lifecycle.budget,
+                )?;
                 let completed = PreparedCompletion {
+                    origins: Some(origins),
                     dependencies: Some(GroupDependencies {
                         source: source.into(),
                         source_logical_metadata: source.logical_metadata.clone(),
@@ -277,16 +329,33 @@ impl Engine {
                     assembly.protections.as_ref(),
                 )?;
                 lifecycle.commit(&view, records).await?;
-                (completed.table, assembly.protections)
+                (completed.table, completed.origins, assembly.protections)
             }
         };
+        checks
+            .scalar_origins(
+                origins.as_ref(),
+                source,
+                &prepared,
+                definition,
+                &expressions.input_fields,
+                &expressions.native_field_ids,
+                &lifecycle.budget,
+            )
+            .await?;
         stop_after(stop, "processing")?;
         let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
         let view = lifecycle.open(request.dataset()).await?;
         let validated: Option<ValidationCompletion> =
             self.active_completion(&view, &validation_key).await?;
         let validation_protections = if let Some(validated) = validated {
-            check_validation(&validation_key, &validated, source, &prepared)?;
+            check_validation(
+                &validation_key,
+                &validated,
+                source,
+                &prepared,
+                origins.as_ref(),
+            )?;
             self.retained_protections(&view, &validation_key).await?
         } else {
             let mut validation_protections = protections
@@ -313,10 +382,17 @@ impl Engine {
             let existing: Option<ValidationCompletion> =
                 self.active_completion(&view, &validation_key).await?;
             if let Some(existing) = existing {
-                check_validation(&validation_key, &existing, source, &prepared)?;
+                check_validation(
+                    &validation_key,
+                    &existing,
+                    source,
+                    &prepared,
+                    origins.as_ref(),
+                )?;
                 self.retained_protections(&view, &validation_key).await?
             } else {
                 let completed = ValidationCompletion {
+                    origins: origins.clone(),
                     output: prepared.metadata.clone(),
                     dependencies: Some(GroupDependencies {
                         source: source.into(),
@@ -338,6 +414,7 @@ impl Engine {
         ReferenceProtections::inherit(&mut protections, validation_protections.as_ref())?;
         stop_after(stop, "validation")?;
         Ok(PreparedGroup {
+            origins,
             table: prepared,
             native_field_ids: expressions.native_field_ids.clone(),
             input_fields: expressions.input_fields.clone(),
@@ -534,6 +611,7 @@ impl Engine {
             })
             .await?;
         Ok(FileCompletion {
+            execution: None,
             source_metadata: None,
             source: source.clone(),
             rows,
@@ -543,7 +621,7 @@ impl Engine {
     }
 }
 
-fn check_group_dependencies(
+pub(super) fn check_group_dependencies(
     key: &str,
     dependencies: Option<&GroupDependencies>,
     source: &TablePin,
@@ -582,8 +660,9 @@ fn check_validation(
     completion: &ValidationCompletion,
     source: &TablePin,
     output: &TablePin,
+    origins: Option<&ObjectRef>,
 ) -> Result<()> {
-    if completion.output != output.metadata {
+    if completion.output != output.metadata || completion.origins.as_ref() != origins {
         return Err(generation_conflict(key));
     }
     check_group_dependencies(key, completion.dependencies.as_ref(), source, output)

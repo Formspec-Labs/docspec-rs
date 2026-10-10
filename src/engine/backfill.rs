@@ -6,11 +6,13 @@ use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
 mod expressions;
+pub(in crate::engine) mod origins;
 mod preparation;
 #[cfg(all(test, feature = "test-util"))]
 mod protection_tests;
 mod verification;
 use expressions::Expressions;
+use origins::{FileOrigin, OriginalDeclaration, OriginalExecution, ScalarOrigins};
 pub(super) use verification::{verify_binding_dependencies, verify_groups};
 
 // Batches acknowledgments without retaining payloads or creating one lifecycle
@@ -19,6 +21,7 @@ const COMPLETION_BUNDLE: usize = 16;
 const PROCESSOR: &str = "docspec.scalar-backfill.v2";
 
 pub(super) struct PreparedGroup {
+    pub origins: Option<ObjectRef>,
     pub table: TablePin,
     pub native_field_ids: BTreeMap<i32, i32>,
     pub input_fields: BTreeMap<String, i32>,
@@ -36,6 +39,9 @@ pub(in crate::engine) struct Capture {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::engine) struct FileCompletion {
+    /// Original execution identity; missing historical facts remain unknown.
+    #[serde(default)]
+    pub(in crate::engine) execution: Option<OriginalExecution>,
     pub(in crate::engine) source: ObjectRef,
     /// Exact schema/default interpretation used for this physical source file.
     /// Missing on older completions; not part of the material reuse key.
@@ -60,6 +66,9 @@ pub(in crate::engine) struct GroupDependencies {
 /// A prepared group with independently readable recovery dependencies.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::engine) struct PreparedCompletion {
+    /// Immutable canonical file executions; absence remains unknown.
+    #[serde(default)]
+    pub(in crate::engine) origins: Option<ObjectRef>,
     // Preserve the original TablePin shape for retained records and readers.
     #[serde(flatten)]
     pub(in crate::engine) table: TablePin,
@@ -71,6 +80,9 @@ pub(in crate::engine) struct PreparedCompletion {
 /// A validation acknowledgment with the exact snapshots it checked.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::engine) struct ValidationCompletion {
+    /// Immutable canonical file executions; absence remains unknown.
+    #[serde(default)]
+    pub(in crate::engine) origins: Option<ObjectRef>,
     // Preserve the original ObjectRef shape; its identity still decides reuse.
     #[serde(flatten)]
     pub(in crate::engine) output: ObjectRef,
@@ -349,7 +361,13 @@ impl Engine {
             });
         if old.is_some() {
             retained_target = self
-                .retained_backfill_readback(spec, &operation, &capture, &base)
+                .retained_backfill_readback(
+                    spec,
+                    &operation,
+                    &capture,
+                    &base,
+                    &mut super::verification::Checks::composition(),
+                )
                 .await?
                 .is_some();
         }
@@ -598,8 +616,9 @@ impl Engine {
             .ok_or_else(invalid_group)?;
         // Issued readbacks retain their qualified target even when earlier phase
         // promises retire. Resolve them before reopening those preparation paths.
+        let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
         let mut retained_readback = self
-            .retained_backfill_readback(spec, &operation, &capture, &base)
+            .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
             .await?;
         let (prepared, binding, prepared_protections) = if let Some(readback) = &retained_readback {
             (
@@ -635,7 +654,6 @@ impl Engine {
                 return Err(invalid_group());
             }
             let definition = spec.group_definition();
-            let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
             checks.trust(&base, &lifecycle.budget).await?;
             let view = lifecycle.open(&spec.dataset).await?;
             let source_protections = self.request_protections(&view, &spec.operation).await?;
@@ -651,6 +669,7 @@ impl Engine {
             ))
             .await?;
             let binding = ComputedGroup {
+                origins: prepared.origins,
                 definition,
                 input_fields: prepared.input_fields,
                 request: request.clone(),
@@ -660,6 +679,7 @@ impl Engine {
             };
             (prepared.table, binding, prepared.protections)
         };
+        checks.compose();
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
         loop {
@@ -714,18 +734,8 @@ impl Engine {
                 .computed
                 .insert(spec.group.to_string(), binding.clone());
             check_names(&dataset)?;
-            verify_groups(
-                &dataset,
-                &lifecycle.budget,
-                &mut super::verification::Checks::composition(),
-            )
-            .await?;
-            super::evidence::verify(
-                &dataset,
-                &lifecycle.budget,
-                &mut super::verification::Checks::composition(),
-            )
-            .await?;
+            verify_groups(&dataset, &lifecycle.budget, &mut checks).await?;
+            super::evidence::verify(&dataset, &lifecycle.budget, &mut checks).await?;
             let serialized = serde_json::to_vec_pretty(&dataset)?;
             if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
                 return Err(Error::refusal(
@@ -758,12 +768,14 @@ impl Engine {
                 if recorded.dataset != dataset {
                     return Err(invalid_group());
                 }
-                check_release_available(&recorded, &lifecycle.budget).await?;
+                check_release_available_with_checks(&recorded, &lifecycle.budget, &mut checks)
+                    .await?;
                 recorded
             } else {
                 if let Some(readback) = retained_readback.take() {
                     // A sibling changed composition, not this completed target.
-                    check_release_available(&readback, &lifecycle.budget).await?;
+                    check_release_available_with_checks(&readback, &lifecycle.budget, &mut checks)
+                        .await?;
                 }
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");
@@ -863,6 +875,7 @@ impl Engine {
         operation: &Operation,
         capture: &Capture,
         base: &ReleasePin,
+        checks: &mut super::verification::Checks,
     ) -> Result<Option<Retained<ReleasePin>>> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
@@ -872,6 +885,7 @@ impl Engine {
         if readbacks.peek().is_none() {
             return Ok(None);
         }
+        checks.compose();
         let _memory = lifecycle
             .budget
             .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
@@ -920,18 +934,8 @@ impl Engine {
             {
                 return Err(invalid_group());
             }
-            verify_groups(
-                dataset,
-                &lifecycle.budget,
-                &mut super::verification::Checks::composition(),
-            )
-            .await?;
-            super::evidence::verify(
-                dataset,
-                &lifecycle.budget,
-                &mut super::verification::Checks::composition(),
-            )
-            .await?;
+            verify_groups(dataset, &lifecycle.budget, checks).await?;
+            super::evidence::verify(dataset, &lifecycle.budget, checks).await?;
             if let Some((_, _, previous)) = &retained
                 && (previous.dataset.groups.get(spec.group.as_str()) != Some(table)
                     || previous.dataset.computed.get(spec.group.as_str()) != Some(binding))
@@ -1078,28 +1082,53 @@ async fn read_completion(
             "file descriptor exceeds reader allowance",
         ));
     }
-    let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
+    let metadata = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     storage::check_available(completion.outputs.clone(), budget).await?;
-    storage::verify_objects(vec![completion.descriptor.clone()], budget).await?;
-    let files = iceberg::spec::read_data_files_from_avro(
-        &mut std::fs::File::open(&completion.descriptor.path)?,
-        schema,
-        0,
-        &StructType::new(vec![]),
-        FormatVersion::V2,
-    )?;
+    let descriptor = completion.descriptor.clone();
+    let schema = schema.clone();
+    let size = usize::try_from(descriptor.bytes).map_err(|_| invalid_group())?;
+    let buffer = budget.reserve(size.saturating_add(1))?;
+    let files = budget
+        .blocking(move || {
+            use std::io::Read;
+            // Keep input and decoder admission with the worker after cancellation.
+            let (_metadata, _buffer) = (metadata, buffer);
+            let mut bytes = Vec::with_capacity(size.saturating_add(1));
+            std::fs::File::open(&descriptor.path)?
+                .take(descriptor.bytes.saturating_add(1))
+                .read_to_end(&mut bytes)?;
+            if bytes.len() != size || blake3::hash(&bytes).to_hex().as_str() != descriptor.digest {
+                return Err(Error::refusal(
+                    "corrupt_object",
+                    "scalar completion descriptor differs from its retained identity",
+                ));
+            }
+            Ok(iceberg::spec::read_data_files_from_avro(
+                &mut bytes.as_slice(),
+                &schema,
+                0,
+                &StructType::new(vec![]),
+                FormatVersion::V2,
+            )?)
+        })
+        .await?;
     let known: BTreeMap<_, _> = completion
         .outputs
         .iter()
         .map(|object| (object.path.as_str(), object.bytes))
         .collect();
     let paths: BTreeSet<_> = files.iter().map(DataFile::file_path).collect();
-    if paths.len() != files.len()
+    let rows = files.iter().try_fold(0u64, |rows, file| {
+        rows.checked_add(file.record_count())
+            .ok_or_else(invalid_group)
+    })?;
+    if known.len() != completion.outputs.len()
+        || paths.len() != files.len()
         || paths.len() != known.len()
         || files
             .iter()
             .any(|file| known.get(file.file_path()) != Some(&file.file_size_in_bytes()))
-        || files.iter().map(DataFile::record_count).sum::<u64>() != completion.rows
+        || rows != completion.rows
     {
         return Err(invalid_group());
     }
@@ -1135,7 +1164,10 @@ fn check_names(dataset: &DatasetPin) -> Result<()> {
 fn charge_assembly(bytes: usize, completion: &FileCompletion, limit: usize) -> Result<usize> {
     let bytes = bytes
         .saturating_add(completion.descriptor.bytes as usize)
-        .saturating_add(serde_json::to_vec(&completion.outputs)?.len())
+        .saturating_add(inputs::metadata_size(
+            completion,
+            limit.saturating_sub(bytes),
+        )?)
         .saturating_add(completion.outputs.len().saturating_mul(512));
     if bytes > limit {
         return Err(Error::refusal(
@@ -1482,6 +1514,7 @@ mod tests {
             bytes: 600,
         };
         let completion = FileCompletion {
+            execution: None,
             source_metadata: None,
             source: object.clone(),
             rows: 0,

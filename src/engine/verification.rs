@@ -8,6 +8,7 @@ type Key = (Id, Id);
 pub(super) struct Checks {
     pub report: VerificationReport,
     inspect_tables: bool,
+    scalar_originals: Option<Box<backfill::origins::Checks>>,
     known: BTreeMap<String, storage::CheckedFile>,
     _memory: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
@@ -21,6 +22,7 @@ impl Checks {
                 ..VerificationReport::default()
             },
             inspect_tables: true,
+            scalar_originals: None,
             known: BTreeMap::new(),
             _memory: None,
         }
@@ -32,6 +34,55 @@ impl Checks {
             inspect_tables: false,
             ..Self::new(VerificationLevel::Routine)
         }
+    }
+
+    /// Keep immutable metadata checks when moving from components to composition.
+    pub fn compose(&mut self) {
+        self.inspect_tables = false;
+    }
+
+    /// Shares canonical file descriptors between assembly and metadata qualification.
+    pub async fn scalar_file(
+        &mut self,
+        completion: &backfill::FileCompletion,
+        schema: &iceberg::spec::Schema,
+        budget: &Budget,
+    ) -> Result<Arc<Vec<iceberg::spec::DataFile>>> {
+        self.scalar_originals
+            .get_or_insert_with(Default::default)
+            .file(completion, schema, budget)
+            .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "One descriptor is associated with one selected source and field group"
+    )]
+    pub async fn scalar_origins(
+        &mut self,
+        origins: Option<&ObjectRef>,
+        source: &TablePin,
+        group: &TablePin,
+        definition: &GroupDefinition,
+        input_fields: &BTreeMap<String, i32>,
+        native_field_ids: &BTreeMap<i32, i32>,
+        budget: &Budget,
+    ) -> Result<()> {
+        if let Some(origins) = origins {
+            self.scalar_originals
+                .get_or_insert_with(Default::default)
+                .check(
+                    origins,
+                    source,
+                    group,
+                    definition,
+                    input_fields,
+                    native_field_ids,
+                    budget,
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     pub fn deep(&self) -> bool {

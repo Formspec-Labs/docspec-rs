@@ -1,0 +1,91 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0425]: cannot find type `Table` in crate `iceberg`
+   --> src/engine/backfill/origins/checks.rs:118:26
+    |
+118 |     ) -> Result<iceberg::Table> {
+    |                          ^^^^^ not found in `iceberg`
+    |
+    = note: struct `crate::storage::tests::Table` exists but is inaccessible
+help: consider importing this struct
+    |
+  3 + use iceberg::table::Table;
+    |
+help: if you import `Table`, refer to it directly
+    |
+118 -     ) -> Result<iceberg::Table> {
+118 +     ) -> Result<Table> {
+    |
+
+error[E0433]: failed to resolve: could not find `Table` in `iceberg`
+   --> src/engine/backfill/origins/checks.rs:125:21
+    |
+125 |         Ok(iceberg::Table::builder()
+    |                     ^^^^^ could not find `Table` in `iceberg`
+    |
+    = note: struct `crate::storage::tests::Table` exists but is inaccessible
+help: consider importing this struct
+    |
+  3 + use iceberg::table::Table;
+    |
+help: if you import `Table`, refer to it directly
+    |
+125 -         Ok(iceberg::Table::builder()
+125 +         Ok(Table::builder()
+    |
+
+error[E0282]: type annotations needed for `std::sync::Arc<_>`
+  --> src/engine/backfill/origins/checks.rs:79:13
+   |
+79 |         let value = Arc::new(read(object, budget, &mut 0, &memory).await?);
+   |             ^^^^^
+80 |         self.originals.insert(object.path.clone(), value.clone());
+   |                                                    ----- type must be known at this point
+   |
+help: consider giving `value` an explicit type, where the placeholders `_` are specified
+   |
+79 |         let value: std::sync::Arc<T> = Arc::new(read(object, budget, &mut 0, &memory).await?);
+   |                  +++++++++++++++++++
+
+error[E0282]: type annotations needed for `std::sync::Arc<_>`
+  --> src/engine/backfill/origins/checks.rs:94:13
+   |
+94 |         let value = Arc::new(read(object, budget, &mut 0, &memory).await?);
+   |             ^^^^^
+95 |         self.declarations.insert(object.path.clone(), value.clone());
+   |                                                       ----- type must be known at this point
+   |
+help: consider giving `value` an explicit type, where the placeholders `_` are specified
+   |
+94 |         let value: std::sync::Arc<T> = Arc::new(read(object, budget, &mut 0, &memory).await?);
+   |                  +++++++++++++++++++
+
+error[E0282]: type annotations needed for `std::sync::Arc<_>`
+   --> src/engine/backfill/origins/checks.rs:109:13
+    |
+109 |         let value = Arc::new(read(object, budget, &mut 0, &memory).await?);
+    |             ^^^^^
+110 |         self.schemas.insert(object.path.clone(), value.clone());
+    |                                                  ----- type must be known at this point
+    |
+help: consider giving `value` an explicit type, where the placeholders `_` are specified
+    |
+109 |         let value: std::sync::Arc<T> = Arc::new(read(object, budget, &mut 0, &memory).await?);
+    |                  +++++++++++++++++++
+
+error[E0282]: type annotations needed
+   --> src/engine/backfill/origins/checks.rs:325:13
+    |
+325 |         let captured = self.table(&originals.dependencies.source, budget).await?;
+    |             ^^^^^^^^
+...
+328 |             captured.metadata().current_schema(),
+    |             -------- type must be known at this point
+    |
+help: consider giving `captured` an explicit type
+    |
+325 |         let captured: /* Type */ = self.table(&originals.dependencies.source, budget).await?;
+    |                     ++++++++++++
+
+Some errors have detailed explanations: E0282, E0425, E0433.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `docspec` (lib test) due to 6 previous errors

@@ -19,6 +19,49 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Original scalar execution metadata
+
+Scalar groups now retain the actual file-completion generations, original
+operations, declarations and source-schema references in immutable metadata.
+Prepared work, validation and selected results keep the same descriptor through
+reuse and recovery. Older records remain explicitly unknown; a later adopting
+operation does not become their original execution.
+
+Assembly and qualification share bounded metadata checks within the operation.
+Avro descriptors are read and hashed from the same buffer, and unchanged facts
+are reused through direct recovery and composition. Caller-specific associations
+still check material dependencies. Ordinary data reads do not traverse these
+original executions. Related dependency traversal retains its existing separate
+bounded check context; no complete-path speedup is claimed.
+
+The shared retention inventory and restore points follow the descriptor's exact
+references. Owner lookup can recover original creation evidence from retained
+prepared, validation and result records after same-key file completions have
+been retired and replaced. Source-schema references for individual original
+files remain metadata leaves, avoiding unrelated historical payload retention.
+
+Formatting, Clippy and all repository test targets pass across the
+[full-gate run](reviews/scalar-origins-full-check-3.log) and
+[focused continuation](reviews/scalar-origins-check-continuation.log). The full
+run stopped at an older deep-value fixture now rejected earlier by the origins
+check. After correcting that test-only setup, the continuation reran its target,
+the remaining integration targets and doc tests, plus formatting and Clippy.
+Earlier attempts retain compilation/lint failures and a two-row export fixture
+that requested the production scratch allowance; that fixture now uses 16 MiB.
+Production limits and the performance acceptance protocol are unchanged.
+
+Independent [capture and retention](reviews/scalar-origins-capture-retention-review.md)
+and [verification](reviews/scalar-origins-verification-review.md) reviews approve
+after corrections. Tests cover mixed original/adopted file generations, reuse
+and recovery, legacy unknowns, metadata association refusals, historical owner
+grants after phase replacement, validation-only retention and restore without
+old file/prepared/validation roots. No full-data performance run was repeated.
+
+This completes the retained-originals prerequisite for
+[scoped dependency correction](dependency-corrections.md). The correction service,
+supplemental field evaluator, adoption guards and Q4 qualification remain
+unfinished.
+
 ## Canonical scalar file completions
 
 Scalar preparation now assembles the file completion that actually won its
@@ -39,8 +82,9 @@ this increment. They record nonblocking gaps for a mixed existing/new bundle and
 distinct nonempty protection scopes; no performance improvement was measured.
 
 This is a prerequisite for [scoped dependency correction](dependency-corrections.md).
-Original execution descriptors, their retention integration, the correction
-service and Q4 qualification remain unfinished. The
+Original execution descriptors and their retention integration are now covered
+by the checkpoint above; the correction service and Q4 qualification remain
+unfinished. The
 [retention seam review](reviews/scalar-origins-retention-seams.md) maps the next
 changes onto the existing protection inventory.
 

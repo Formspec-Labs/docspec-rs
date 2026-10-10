@@ -100,8 +100,9 @@ async fn completed_and_interrupted_roots_protect_without_opening_payloads() {
         assert!(result.objects.iter().all(|object| object.blocker.is_some()));
         assert_eq!(result.unmatched_bytes, 0);
         assert_eq!(
-            result.metadata_objects_read, 0,
-            "complete retained pins need no metadata reread"
+            result.metadata_objects_read,
+            if empty { 1 } else { 2 },
+            "read the shared origins and any declaration once; complete pins need no native reread"
         );
         let expected: BTreeMap<_, _> = candidates.iter().map(|o| (&o.path, o.bytes)).collect();
         assert_eq!(result.protected_bytes, expected.values().sum::<u64>());
@@ -125,6 +126,70 @@ async fn isolated(
         .await
         .unwrap();
     engine.inspect_retention(candidates).await
+}
+
+#[tokio::test]
+async fn selected_and_prepared_roots_retain_original_executions_without_old_phases() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, _) = fixture(root.path(), false).await;
+    let request = spec(&base, "derived", "length", "text_length", "length(text)");
+    let selected = engine.backfill(&request).await.unwrap();
+    let reference = selected.dataset.computed["length"]
+        .origins
+        .as_ref()
+        .unwrap();
+    let origins: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&reference.path).unwrap()).unwrap();
+    let mut candidates = BTreeMap::from([(reference.path.clone(), reference.clone())]);
+    for file in origins["files"].as_array().unwrap() {
+        let completion = &file["completion"];
+        for value in [
+            &completion["source"],
+            &completion["source_metadata"],
+            &completion["descriptor"],
+            &completion["execution"]["declaration"],
+        ]
+        .into_iter()
+        .chain(completion["outputs"].as_array().unwrap())
+        {
+            let object: ObjectRef = serde_json::from_value(value.clone()).unwrap();
+            candidates.insert(object.path.clone(), object);
+        }
+    }
+    let candidates = candidates.into_values().collect::<Vec<_>>();
+    let records = engine.inspect(&request.dataset).await.unwrap();
+    let (prepared_key, prepared) = records
+        .iter()
+        .find(|(key, _)| key.starts_with("backfill-prepared/"))
+        .unwrap();
+    // Each isolated catalog has only this one root, without file completions,
+    // operation recovery, or grants that could mask a missing transitive reference.
+    for (key, value) in [
+        (prepared_key.clone(), prepared.clone()),
+        (
+            format!("result/{}", selected.id),
+            serde_json::to_value(&selected).unwrap(),
+        ),
+    ] {
+        let inspected = isolated(&key, &value, &candidates).await.unwrap();
+        assert!(
+            inspected
+                .objects
+                .iter()
+                .all(|entry| entry.blocker.is_some()),
+            "{key}"
+        );
+        assert_eq!(inspected.unmatched_bytes, 0);
+    }
+    for candidate in &candidates {
+        if candidate.path.ends_with(".parquet") {
+            std::fs::remove_file(&candidate.path).unwrap();
+        }
+    }
+    assert!(
+        isolated(prepared_key, prepared, &candidates).await.is_ok(),
+        "protection discovery must not open original or computed values"
+    );
 }
 
 #[tokio::test]
@@ -193,8 +258,8 @@ async fn each_backfill_completion_independently_protects_its_consumed_source() {
             let result = isolated(key, value, &[consumed]).await.unwrap();
             assert_eq!(result.objects[0].blocker.as_ref().unwrap().key, *key);
             assert_eq!(
-                result.metadata_objects_read, 0,
-                "file computation binds its source file directly"
+                result.metadata_objects_read, 1,
+                "source is bound directly; the original declaration is a typed metadata leaf"
             );
         }
         let (key, value) = records

@@ -69,7 +69,11 @@ winner's outputs and protection. This prerequisite fixes the earlier mismatch
 between an attempt's physical outputs and the retained winner's generation.
 Bundled acknowledgment and bounded descriptor buffering remain; see the
 [implementation checkpoint](STATUS.md#canonical-scalar-file-completions).
-Persisting those original generations in shared descriptors remains future work.
+Those original generations now persist in shared immutable descriptors, with
+original declarations and source-schema references retained through prepared,
+validation and result records. See the
+[original execution checkpoint](STATUS.md#original-scalar-execution-metadata).
+The correction service and supplemental evaluator below remain future work.
 
 The current requirement key is derived from the exact deficient processor and
 group definition, independently of source writer definitions or adoption IDs.

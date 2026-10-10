@@ -7,13 +7,26 @@ use arrow::array::{Array, Int64Array, StringArray};
 pub(in crate::engine) async fn verify_binding_dependencies(
     dataset: &DatasetPin,
     budget: &Budget,
+    checks: &mut super::super::verification::Checks,
 ) -> Result<()> {
     if dataset.computed.is_empty() {
         return Ok(());
     }
     let mut history = History::new(budget)?;
-    for name in dataset.computed.keys() {
+    let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
+    for (name, binding) in &dataset.computed {
         verify_binding_history(dataset, name, &mut history).await?;
+        checks
+            .scalar_origins(
+                binding.origins.as_ref(),
+                source,
+                dataset.groups.get(name).ok_or_else(invalid_group)?,
+                &binding.definition,
+                &binding.input_fields,
+                &binding.native_field_ids,
+                budget,
+            )
+            .await?;
     }
     Ok(())
 }
@@ -229,6 +242,17 @@ pub(crate) async fn verify_groups(
             return Err(invalid_group());
         }
         verify_binding_history(dataset, name, &mut history).await?;
+        checks
+            .scalar_origins(
+                binding.origins.as_ref(),
+                source,
+                dataset.groups.get(name).ok_or_else(invalid_group)?,
+                &binding.definition,
+                &binding.input_fields,
+                &binding.native_field_ids,
+                budget,
+            )
+            .await?;
         verify_group_data(
             source,
             dataset.groups.get(name).ok_or_else(invalid_group)?,

@@ -114,6 +114,9 @@ async fn forge_values(
         .dataset
         .groups
         .insert("derived".into(), alternate.dataset.groups["source"].clone());
+    // Exercise deep value comparison for a legacy binding. Modern origins
+    // reject this substituted output earlier, through its metadata association.
+    forged.dataset.computed.get_mut("derived").unwrap().origins = None;
     rehash(root, "wrong_values", forged)
 }
 

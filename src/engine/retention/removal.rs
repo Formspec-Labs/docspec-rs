@@ -243,13 +243,7 @@ impl Engine {
             self.check_object_owner(rows, owner, object)?;
             super::owners::available(rows, view, object)?;
         }
-        super::owners::confirm_creation(
-            rows,
-            view,
-            objects,
-            self.inner.lifecycle.budget.limits.max_metadata_bytes,
-        )
-        .await
+        super::owners::confirm_creation(rows, view, objects, &self.inner.lifecycle.budget).await
     }
 
     /// Executes only previewed files that remain eligible, or reconciles the saved intent.

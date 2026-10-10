@@ -62,6 +62,11 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
     // The additive shape remains readable as the original TablePin/ObjectRef.
     let prepared: TablePin = serde_json::from_value(prepared_value.clone()).unwrap();
     assert_dependencies(prepared_value, &base.dataset.groups["source"], &prepared);
+    let origins_ref: ObjectRef = serde_json::from_value(prepared_value["origins"].clone()).unwrap();
+    let origins_bytes = std::fs::read(&origins_ref.path).unwrap();
+    let origins: Value = serde_json::from_slice(&origins_bytes).unwrap();
+    assert_eq!(origins["files"].as_array().unwrap().is_empty(), empty);
+    assert_dependencies(&origins, &base.dataset.groups["source"], &prepared);
     let validation = retained
         .iter()
         .find(|(key, _)| key.starts_with("backfill-validation/"));
@@ -70,6 +75,7 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
         let output: ObjectRef = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(output, prepared.metadata);
         assert_dependencies(value, &base.dataset.groups["source"], &prepared);
+        assert_eq!(value["origins"], prepared_value["origins"]);
     }
     if legacy {
         // Retire the modern generations before replacing their record shapes;
@@ -101,6 +107,7 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
             .iter_mut()
             .map(|(key, value)| {
                 value.as_object_mut().unwrap().remove("dependencies");
+                value.as_object_mut().unwrap().remove("origins");
                 record(key, value).unwrap()
             })
             .collect();
@@ -116,6 +123,13 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
     };
     assert_eq!(work, expected, "completed work must not run again");
     assert_eq!(release.dataset.groups[request.group.as_str()], prepared);
+    assert_eq!(
+        release.dataset.computed[request.group.as_str()]
+            .origins
+            .as_ref(),
+        if legacy { None } else { Some(&origins_ref) }
+    );
+    assert_eq!(std::fs::read(&origins_ref.path).unwrap(), origins_bytes);
 
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
@@ -128,6 +142,12 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
         );
         if legacy {
             assert!(after[&key].get("dependencies").is_none());
+            assert!(after[&key].get("origins").is_none());
+        } else {
+            assert_eq!(
+                after[&key]["origins"],
+                serde_json::to_value(&origins_ref).unwrap()
+            );
         }
     }
     if phase == "processing" {
@@ -139,6 +159,14 @@ async fn recover(empty: bool, phase: &str, legacy: bool) {
             .unwrap()
             .1;
         assert_dependencies(validation, &base.dataset.groups["source"], &prepared);
+        assert_eq!(
+            validation["origins"],
+            if legacy {
+                Value::Null
+            } else {
+                serde_json::to_value(&origins_ref).unwrap()
+            }
+        );
     }
     verify_release(&release, limits()).await.unwrap();
     assert_eq!(engine.backfill(&request).await.unwrap(), release);
@@ -158,4 +186,87 @@ async fn legacy_group_completions_resume_and_keep_unknown_dependencies() {
         recover(true, phase, true).await;
     }
     recover(false, "validation", true).await;
+}
+
+#[tokio::test]
+async fn legacy_file_reuse_keeps_original_execution_unknown() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, _) = fixture(root.path(), false).await;
+    let request = spec(
+        &base,
+        "legacy-files",
+        "length",
+        "text_length",
+        "length(text)",
+    );
+    assert_eq!(
+        engine
+            .backfill_until(&request, "files")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let mut retained: BTreeMap<_, _> = engine
+        .inspect(&request.dataset)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|(key, _)| key.starts_with("phase/backfill/"))
+        .collect();
+    assert!(!retained.is_empty());
+    let plan = engine
+        .plan_phase_retirement(
+            &request.dataset,
+            &id("legacy-file-shapes"),
+            &retained.keys().cloned().collect::<Vec<_>>(),
+            "replace fixture file completions with unknown legacy executions",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&plan).await.unwrap();
+    drop(engine);
+    let lifecycle = Lifecycle::new(
+        storage::local_catalog(&root.path().join("workspace"))
+            .await
+            .unwrap(),
+        Budget::new(limits()).unwrap(),
+    );
+    let view = lifecycle.open(&request.dataset).await.unwrap();
+    let changes = retained
+        .iter_mut()
+        .map(|(key, value)| {
+            value.as_object_mut().unwrap().remove("execution");
+            value.as_object_mut().unwrap().remove("source_metadata");
+            record(key, value).unwrap()
+        })
+        .collect();
+    lifecycle.commit(&view, changes).await.unwrap();
+    drop(lifecycle);
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let plan = engine.plan_backfill(&request).await.unwrap();
+    assert_eq!(plan.files_completed, Some(retained.len()));
+    assert_eq!(plan.files_pending, Some(0));
+    let release = engine.backfill(&request).await.unwrap();
+    let origins_ref = release.dataset.computed["length"].origins.as_ref().unwrap();
+    let origins: Value =
+        serde_json::from_slice(&std::fs::read(&origins_ref.path).unwrap()).unwrap();
+    let files = origins["files"].as_array().unwrap();
+    assert_eq!(files.len(), retained.len());
+    for origin in files {
+        let key = origin["generation"]["key"].as_str().unwrap();
+        let mut expected = retained[key].clone();
+        // Reading an older shape supplies unknown optional fields, never a
+        // declaration or operation inferred from the adopting request.
+        expected["execution"] = Value::Null;
+        expected["source_metadata"] = Value::Null;
+        assert_eq!(origin["completion"], expected);
+    }
+    let after = engine.inspect(&request.dataset).await.unwrap();
+    for (key, value) in retained {
+        assert_eq!(after[&key], value);
+    }
+    assert_eq!(engine.backfill(&request).await.unwrap(), release);
 }

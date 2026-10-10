@@ -106,6 +106,20 @@ async fn fixture(engine: &Engine) -> Fixture {
             .await
             .unwrap();
         completion.source_metadata = Some(source.metadata.clone());
+        completion.execution = Some(OriginalExecution {
+            operation: request.operation().clone(),
+            declaration: origins::write(
+                &dataset,
+                &directory.join("declaration.json"),
+                &OriginalDeclaration {
+                    processor: PROCESSOR.into(),
+                    definition: spec.group_definition(),
+                    input_fields: expressions.input_fields.clone(),
+                },
+                &engine.inner.lifecycle.budget,
+            )
+            .unwrap(),
+        });
         candidates.push(completion);
     }
     let second = candidates.pop().unwrap();
@@ -129,11 +143,58 @@ fn assembly(engine: &Engine, dataset: &Id) -> FileAssembly {
     FileAssembly {
         files: Vec::new(),
         inherited: Vec::new(),
+        origins: Vec::new(),
         protections: Some(
             ReferenceProtections::empty(dataset, &engine.inner.lifecycle.budget).unwrap(),
         ),
         bytes: 0,
     }
+}
+
+#[tokio::test]
+async fn completion_descriptors_refuse_duplicate_outputs_and_changed_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let fixture = fixture(&engine).await;
+    let mut duplicate = fixture.first.clone();
+    duplicate.outputs.push(duplicate.outputs[0].clone());
+    assert_eq!(
+        read_completion(
+            &duplicate,
+            &fixture.expressions.native,
+            &engine.inner.lifecycle.budget
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "invalid_group"
+    );
+    let mut changed = fixture.first.clone();
+    changed.descriptor.digest = "0".repeat(64);
+    assert_eq!(
+        read_completion(
+            &changed,
+            &fixture.expressions.native,
+            &engine.inner.lifecycle.budget
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "corrupt_object"
+    );
+    changed = fixture.first.clone();
+    changed.descriptor.bytes -= 1;
+    assert_eq!(
+        read_completion(
+            &changed,
+            &fixture.expressions.native,
+            &engine.inner.lifecycle.budget
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "corrupt_object"
+    );
 }
 
 #[tokio::test]
@@ -184,6 +245,7 @@ async fn concurrent_acknowledgments_assemble_one_winner_with_its_own_scope() {
     // Only the canonical descriptor may be read, even when the loser is unavailable.
     std::fs::remove_file(&loser.descriptor.path).unwrap();
     let expected = winner.outputs.clone();
+    let execution = winner.execution.clone();
     let generation = first[0].generation.clone();
     let mut first_assembly = assembly(&engine, fixture.request.dataset());
     let mut second_assembly = assembly(&engine, fixture.request.dataset());
@@ -193,6 +255,7 @@ async fn concurrent_acknowledgments_assemble_one_winner_with_its_own_scope() {
             &fixture.expressions,
             0,
             &engine.inner.lifecycle.budget,
+            &mut crate::engine::verification::Checks::composition(),
         )
         .await
         .unwrap();
@@ -202,11 +265,18 @@ async fn concurrent_acknowledgments_assemble_one_winner_with_its_own_scope() {
             &fixture.expressions,
             0,
             &engine.inner.lifecycle.budget,
+            &mut crate::engine::verification::Checks::composition(),
         )
         .await
         .unwrap();
     assert_eq!(first_assembly.inherited, expected);
     assert_eq!(second_assembly.inherited, expected);
+    for assembled in [&first_assembly, &second_assembly] {
+        assert_eq!(assembled.origins.len(), 1);
+        assert_eq!(assembled.origins[0].generation, generation);
+        assert_eq!(assembled.origins[0].completion.execution, execution);
+        assert_eq!(assembled.origins[0].completion.outputs, expected);
+    }
     assert_eq!(
         first_assembly.protections.is_some(),
         second_assembly.protections.is_some()
@@ -291,6 +361,7 @@ async fn retired_completion_gets_a_new_generation_and_retry_keeps_that_winner() 
             &fixture.expressions,
             0,
             &engine.inner.lifecycle.budget,
+            &mut crate::engine::verification::Checks::composition(),
         )
         .await
         .unwrap();

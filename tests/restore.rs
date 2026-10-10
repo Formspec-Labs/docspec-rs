@@ -504,6 +504,124 @@ async fn restores_exact_catalog_and_missing_originals_from_retained_copies() {
 }
 
 #[tokio::test]
+async fn scalar_origins_restore_after_file_prepared_and_validation_retirement() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let original = engine
+        .run(&spec(
+            root.path(),
+            "original",
+            &[(Some(1), Some("é🎉".into())), (Some(2), None)],
+        ))
+        .await
+        .unwrap();
+    let request = scalar::spec(
+        &original,
+        "lengths",
+        "length",
+        "text_length",
+        "length(text)",
+    );
+    let release = engine.backfill(&request).await.unwrap();
+    let origins_ref = release.dataset.computed["length"].origins.clone().unwrap();
+    let origins: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(&origins_ref.path).unwrap()).unwrap();
+    let mut metadata = std::collections::BTreeMap::new();
+    metadata.insert(origins_ref.path.clone(), origins_ref.clone());
+    for dependency in ["source", "output"] {
+        let object: docspec::model::ObjectRef =
+            serde_json::from_value(origins["dependencies"][dependency]["metadata"].clone())
+                .unwrap();
+        metadata.insert(object.path.clone(), object);
+    }
+    let files = origins["files"].as_array().unwrap();
+    assert!(!files.is_empty());
+    for origin in files {
+        let completion = &origin["completion"];
+        assert_eq!(
+            completion["execution"]["operation"],
+            request.operation.as_str()
+        );
+        for value in [
+            &completion["descriptor"],
+            &completion["source_metadata"],
+            &completion["execution"]["declaration"],
+        ] {
+            let object: docspec::model::ObjectRef = serde_json::from_value(value.clone()).unwrap();
+            metadata.insert(object.path.clone(), object);
+        }
+    }
+    let records = engine.inspect(&request.dataset).await.unwrap();
+    let prefixes = [
+        "phase/backfill/",
+        "backfill-prepared/",
+        "backfill-validation/",
+    ];
+    for prefix in prefixes {
+        assert!(records.keys().any(|key| key.starts_with(prefix)));
+    }
+    let keys = records
+        .keys()
+        .filter(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let retirement = engine
+        .plan_phase_retirement(
+            &request.dataset,
+            &id("retire-scalar-recovery"),
+            &keys,
+            "selected scalar result retains its original execution metadata",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&retirement).await.unwrap();
+    let reference = engine
+        .create_restore_point(&request.dataset, &id("scalar-point"))
+        .await
+        .unwrap();
+    let captured = point(&reference);
+    let expected_bytes = metadata.values().map(|object| object.bytes).sum::<u64>();
+    for required in metadata.values() {
+        let saved = captured
+            .objects
+            .iter()
+            .find(|saved| saved.original == *required)
+            .unwrap_or_else(|| panic!("restore point omitted scalar metadata {}", required.path));
+        assert_ne!(saved.original.path, saved.backup.path);
+        storage::verify_object(&saved.backup).unwrap();
+    }
+    drop(engine);
+    // Remove only original directory entries. Independently named restore
+    // copies retain the exact bytes even when hard links share an inode.
+    for object in metadata.values() {
+        std::fs::remove_file(&object.path).unwrap();
+    }
+    let restored = Engine::restore_local(&workspace, &reference, limits(), false)
+        .await
+        .unwrap();
+    assert_eq!(restored.restored_bytes, expected_bytes);
+    for object in metadata.values() {
+        storage::verify_object(object).unwrap();
+    }
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let selected = engine.latest(&request.dataset).await.unwrap();
+    assert_eq!(selected, release);
+    assert_eq!(
+        selected.dataset.computed["length"].origins.as_ref(),
+        Some(&origins_ref)
+    );
+    let report = docspec::engine::verify_release_at(
+        &selected,
+        limits(),
+        docspec::model::VerificationLevel::Routine,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.level, docspec::model::VerificationLevel::Routine);
+}
+
+#[tokio::test]
 async fn corruption_and_foreign_workspace_refuse_before_catalog_selection() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");

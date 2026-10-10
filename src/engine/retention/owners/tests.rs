@@ -985,3 +985,151 @@ async fn a_family_that_owns_a_member_needs_no_foreign_grant_for_its_own_objects(
         foreign.revision
     );
 }
+
+#[tokio::test]
+async fn validation_only_origins_qualify_original_creations_after_cache_replacement() {
+    let (root, engine) = fixture().await;
+    let base = engine.run(&request(root.path(), "comments")).await.unwrap();
+    let original = BackfillSpec {
+        dataset: base.dataset.dataset.clone(),
+        operation: id("original-scalar"),
+        base: base.id.clone(),
+        definition: "v1".into(),
+        group: id("next"),
+        group_definition: "next-v1".into(),
+        fields: vec![ComputedField {
+            id: 10,
+            name: "next_id".into(),
+            expression: "id + 1".into(),
+        }],
+    };
+    assert_eq!(
+        engine
+            .backfill_until(&original, "validation")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let before = engine.inspect(&original.dataset).await.unwrap();
+    let (validation_key, validation_json) = before
+        .iter()
+        .find(|(key, _)| key.starts_with("backfill-validation/"))
+        .unwrap();
+    let validation: ValidationCompletion = serde_json::from_value(validation_json.clone()).unwrap();
+    let origins_ref = validation.origins.as_ref().unwrap();
+    let originals: ScalarOrigins =
+        serde_json::from_slice(&std::fs::read(&origins_ref.path).unwrap()).unwrap();
+    let file = &originals.files[0].completion;
+    let mut creations = vec![
+        file.execution.as_ref().unwrap().declaration.clone(),
+        file.descriptor.clone(),
+        file.outputs[0].clone(),
+    ];
+    creations.sort_by(|left, right| left.path.cmp(&right.path));
+    let replaced_keys = before
+        .keys()
+        .filter(|key| key.starts_with("phase/backfill/") || key.starts_with("backfill-prepared/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        replaced_keys
+            .iter()
+            .any(|key| key.starts_with("phase/backfill/"))
+    );
+    assert!(
+        replaced_keys
+            .iter()
+            .any(|key| key.starts_with("backfill-prepared/"))
+    );
+    let retirement = engine
+        .plan_phase_retirement(
+            &original.dataset,
+            &id("retire-original-cache"),
+            &replaced_keys,
+            "validation independently retains the original executions",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&retirement).await.unwrap();
+    let mut replacement = original.clone();
+    replacement.operation = id("replacement-scalar");
+    // Stop before the old validation refuses this newly prepared association.
+    assert_eq!(
+        engine
+            .backfill_until(&replacement, "processing")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let after = engine.inspect(&original.dataset).await.unwrap();
+    assert_eq!(&after[validation_key], validation_json);
+    for key in &replaced_keys {
+        assert_ne!(after[key], before[key]);
+    }
+    assert!(
+        !after
+            .keys()
+            .any(|key| key.starts_with("backfill-readback/"))
+    );
+    for (key, json) in &after {
+        if key.starts_with("result/") || key.starts_with("readback/") {
+            let release: ReleasePin = serde_json::from_value(json.clone()).unwrap();
+            assert!(
+                release.dataset.computed.is_empty(),
+                "a scalar release would mask the validation-only anchor"
+            );
+        }
+    }
+    let view = engine
+        .inner
+        .lifecycle
+        .open(&original.dataset)
+        .await
+        .unwrap();
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    let mut directly_created = BTreeSet::new();
+    visit_creation(
+        &rows,
+        &view,
+        engine.inner.lifecycle.budget.limits.max_metadata_bytes,
+        |object| {
+            directly_created.insert(object.path.clone());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    for object in &creations {
+        assert!(
+            !directly_created.contains(&object.path),
+            "replacement phases must not mask original creation lookup"
+        );
+        assert_eq!(
+            engine
+                .qualified_object(&original.dataset, &object.path, &object.digest)
+                .await
+                .unwrap(),
+            *object
+        );
+    }
+    let grant = engine
+        .acquire_owner(&original.dataset, &id("fresh-consumer"), creations.clone())
+        .await
+        .unwrap();
+    let view = engine
+        .inner
+        .lifecycle
+        .open(&original.dataset)
+        .await
+        .unwrap();
+    let retained: OwnerProtection = engine
+        .inner
+        .lifecycle
+        .get(&view, &grant.token)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.objects, creations);
+}

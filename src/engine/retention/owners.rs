@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::catalog::SnapshotRows;
-use crate::engine::backfill::{FileCompletion, PreparedCompletion};
+use crate::engine::backfill::{
+    FileCompletion, PreparedCompletion, ValidationCompletion,
+    origins::{self, ScalarOrigins},
+};
 use std::path::Component;
 
 #[cfg(all(test, feature = "test-util"))]
@@ -618,21 +621,40 @@ impl Engine {
         let view = lifecycle.open(owner).await?;
         let rows = lifecycle.rows(&view).await?;
         let mut found: Option<ObjectRef> = None;
-        visit_creation(&rows, &view, limit, |object| {
-            if object.path == path {
-                if object.owner != *owner
-                    || object.digest != digest
-                    || found.as_ref().is_some_and(|previous| previous != object)
-                {
-                    return Err(invalid());
+        {
+            let mut observe = |object: &ObjectRef| {
+                if object.path == path {
+                    if object.owner != *owner
+                        || object.digest != digest
+                        || found.as_ref().is_some_and(|previous| previous != object)
+                    {
+                        return Err(invalid());
+                    }
+                    if found.is_none() {
+                        found = Some(object.clone());
+                    }
                 }
-                if found.is_none() {
-                    found = Some(object.clone());
+                Ok(())
+            };
+            visit_creation(&rows, &view, limit, &mut observe).await?;
+        }
+        if found.is_none() {
+            visit_original_creation(&rows, &view, &lifecycle.budget, None, |object| {
+                if object.path == path {
+                    if object.owner != *owner
+                        || object.digest != digest
+                        || found.as_ref().is_some_and(|previous| previous != object)
+                    {
+                        return Err(invalid());
+                    }
+                    if found.is_none() {
+                        found = Some(object.clone());
+                    }
                 }
-            }
-            Ok(())
-        })
-        .await?;
+                Ok(found.is_some())
+            })
+            .await?;
+        }
         let object = found.ok_or_else(unqualified)?;
         super::inventory::validate_object(&object)?;
         self.check_object_owner(&rows, owner, &object)?;
@@ -689,13 +711,7 @@ impl Engine {
             let _decoding = lifecycle
                 .budget
                 .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
-            confirm_creation(
-                &rows,
-                &view,
-                &grant.objects,
-                lifecycle.budget.limits.max_metadata_bytes,
-            )
-            .await?;
+            confirm_creation(&rows, &view, &grant.objects, &lifecycle.budget).await?;
         }
         if let Err(error) = lifecycle.commit(&view, vec![record(&key, &grant)?]).await {
             let after = lifecycle.open(owner).await?;
@@ -769,8 +785,9 @@ pub(super) async fn confirm_creation(
     rows: &SnapshotRows,
     view: &View,
     objects: &[ObjectRef],
-    limit: usize,
+    budget: &Budget,
 ) -> Result<()> {
+    let limit = budget.limits.max_metadata_bytes;
     let expected: BTreeMap<_, _> = objects
         .iter()
         .map(|object| (object.path.as_str(), object))
@@ -787,7 +804,137 @@ pub(super) async fn confirm_creation(
     })
     .await?;
     if !missing.is_empty() {
+        visit_original_creation(rows, view, budget, Some(&expected), |object| {
+            if let Some(expected) = expected.get(object.path.as_str()) {
+                if **expected != *object {
+                    return Err(invalid());
+                }
+                missing.remove(object.path.as_str());
+            }
+            Ok(missing.is_empty())
+        })
+        .await?;
+    }
+    if !missing.is_empty() {
         return Err(unqualified());
+    }
+    Ok(())
+}
+
+// Original file completions survive cache-key replacement inside immutable
+// origins retained by prepared groups, validation completions or releases.
+// Consult these only after the direct creation pass misses a requested object,
+// and stop once it is found.
+async fn visit_original_creation(
+    rows: &SnapshotRows,
+    view: &View,
+    budget: &Budget,
+    preferred: Option<&BTreeMap<&str, &ObjectRef>>,
+    mut observe: impl FnMut(&ObjectRef) -> Result<bool>,
+) -> Result<()> {
+    let limit = budget.limits.max_metadata_bytes;
+    let _identities = budget.reserve(limit)?;
+    let mut anchors: BTreeMap<String, ObjectRef> = BTreeMap::new();
+    let mut identity_bytes = 0usize;
+    for (key, revision, json) in rows.prefix("") {
+        tokio::task::consume_budget().await;
+        if !(key.starts_with("backfill-prepared/")
+            || key.starts_with("backfill-validation/")
+            || key.starts_with("result/")
+            || key.starts_with("readback/")
+            || key.starts_with("backfill-readback/"))
+        {
+            continue;
+        }
+        if json.len() > limit {
+            return Err(capacity());
+        }
+        if revision <= 0 || revision > view.revision {
+            return Err(invalid());
+        }
+        let retained = if key.starts_with("backfill-prepared/") {
+            let phase: PreparedCompletion = serde_json::from_str(json)?;
+            phase.origins.into_iter().collect::<Vec<_>>()
+        } else if key.starts_with("backfill-validation/") {
+            let phase: ValidationCompletion = serde_json::from_str(json)?;
+            phase.origins.into_iter().collect::<Vec<_>>()
+        } else {
+            let release: ReleasePin = serde_json::from_str(json)?;
+            release
+                .dataset
+                .computed
+                .into_values()
+                .filter_map(|group| group.origins)
+                .collect::<Vec<_>>()
+        };
+        for anchor in retained {
+            // Foreign dependencies are not creation facts at this owner.
+            if &crate::catalog::lifecycle_ident(&anchor.owner) != view.table.identifier() {
+                continue;
+            }
+            super::inventory::validate_object(&anchor)?;
+            if let Some(previous) = anchors.get(&anchor.path) {
+                if previous != &anchor {
+                    return Err(invalid());
+                }
+                continue;
+            }
+            match available(rows, view, &anchor) {
+                Ok(()) => (),
+                Err(error) if error.code() == "object_unavailable" => continue,
+                Err(error) => return Err(error),
+            }
+            identity_bytes = identity_bytes.saturating_add(
+                anchor
+                    .path
+                    .len()
+                    .saturating_mul(2)
+                    .saturating_add(anchor.owner.as_str().len())
+                    .saturating_add(anchor.digest.len())
+                    .saturating_add(256),
+            );
+            if identity_bytes > limit {
+                return Err(capacity());
+            }
+            anchors.insert(anchor.path.clone(), anchor);
+        }
+    }
+    let mut metadata_bytes = 0usize;
+    // A full requested closure names its own origins. Open those first, so an
+    // unrelated old descriptor need not be read to qualify the requested files.
+    for preferred_pass in [true, false] {
+        for anchor in anchors.values().filter(|anchor| {
+            preferred.is_some_and(|objects| objects.contains_key(anchor.path.as_str()))
+                == preferred_pass
+        }) {
+            tokio::task::consume_budget().await;
+            let size = usize::try_from(anchor.bytes).map_err(|_| capacity())?;
+            if size > limit {
+                return Err(capacity());
+            }
+            let memory = Arc::new(budget.reserve(size.saturating_mul(8).saturating_add(4096))?);
+            let originals: ScalarOrigins =
+                origins::read(anchor, budget, &mut metadata_bytes, &memory).await?;
+            for file in &originals.files {
+                // Only actual file creation outputs qualify. Source/schema and
+                // assembled dependency references remain inputs, not creations.
+                let completion = &file.completion;
+                if let Some(execution) = &completion.execution
+                    && execution.declaration.owner == anchor.owner
+                    && observe(&execution.declaration)?
+                {
+                    return Ok(());
+                }
+                if completion.descriptor.owner == anchor.owner && observe(&completion.descriptor)? {
+                    return Ok(());
+                }
+                for output in &completion.outputs {
+                    if output.owner == anchor.owner && observe(output)? {
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -823,6 +970,9 @@ async fn visit_creation(
             }
         } else if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = serde_json::from_str(json)?;
+            if let Some(execution) = &phase.execution {
+                observe(&execution.declaration)?;
+            }
             observe(&phase.descriptor)?;
             for object in &phase.outputs {
                 observe(object)?;
@@ -839,6 +989,9 @@ async fn visit_creation(
             }
         } else if key.starts_with("backfill-prepared/") {
             let phase: PreparedCompletion = serde_json::from_str(json)?;
+            if let Some(origins) = &phase.origins {
+                observe(origins)?;
+            }
             for object in &phase.table.objects {
                 observe(object)?;
             }

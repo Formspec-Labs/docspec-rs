@@ -24,6 +24,57 @@ use tempfile::TempDir;
 mod scalar;
 use scalar::{fixture, id, input, limits, spec};
 
+#[cfg(feature = "test-util")]
+async fn canonical_file_records(
+    root: &std::path::Path,
+) -> std::collections::BTreeMap<String, (i64, serde_json::Value)> {
+    let catalog = storage::local_catalog(&root.join("workspace"))
+        .await
+        .unwrap();
+    let budget = docspec::budget::Budget::new(limits()).unwrap();
+    let mut records = std::collections::BTreeMap::<String, (i64, serde_json::Value)>::new();
+    for namespace in catalog.list_namespaces(None).await.unwrap() {
+        for ident in catalog.list_tables(&namespace).await.unwrap() {
+            if ident.name() != "lifecycle" {
+                continue;
+            }
+            let native = catalog.load_table(&ident).await.unwrap();
+            let stream = storage::read_batches(&native, &budget).await.unwrap();
+            futures::pin_mut!(stream);
+            while let Some(batch) = stream.try_next().await.unwrap() {
+                let keys = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                let revisions = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                let values = batch
+                    .column(2)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                for row in 0..batch.num_rows() {
+                    let key = keys.value(row);
+                    let revision = revisions.value(row);
+                    if key.starts_with("phase/backfill/")
+                        && records.get(key).is_none_or(|(old, _)| *old < revision)
+                    {
+                        records.insert(
+                            key.to_owned(),
+                            (revision, serde_json::from_str(values.value(row)).unwrap()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    records
+}
+
 async fn combined(engine: &Engine, release: &ReleasePin) -> Vec<(scalar::Row, Option<i64>)> {
     let mut stream = engine.read_combined(release).await.unwrap();
     let mut result = vec![];
@@ -287,6 +338,8 @@ async fn stale_source_retains_files_and_catchup_reuses_unchanged_objects() {
             .code(),
         "injected_failure"
     );
+    let original_files = canonical_file_records(root.path()).await;
+    assert!(!original_files.is_empty());
     let replacement = vec![(Some(0), Some("changed".into()))];
     let update = UpdateSpec {
         dataset: base.dataset.dataset.clone(),
@@ -315,7 +368,99 @@ async fn stale_source_retains_files_and_catchup_reuses_unchanged_objects() {
     let plan = engine.plan_backfill(&catchup).await.unwrap();
     assert!(plan.files_completed.is_some_and(|files| files > 0));
     assert!(plan.files_pending.is_some_and(|files| files > 0));
+    assert_eq!(
+        engine
+            .backfill_until(&catchup, "processing")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let prepared_records = engine.inspect(&catchup.dataset).await.unwrap();
+    let prepared = prepared_records
+        .iter()
+        .find(|(key, value)| {
+            key.starts_with("backfill-prepared/")
+                && value.get("dependencies").is_some_and(|dependencies| {
+                    dependencies["source"]["metadata"]
+                        == serde_json::to_value(&latest.dataset.groups["source"].metadata).unwrap()
+                })
+                && value
+                    .get("origins")
+                    .is_some_and(|origins| !origins.is_null())
+        })
+        .unwrap()
+        .1;
+    let origins_ref: docspec::model::ObjectRef =
+        serde_json::from_value(prepared["origins"].clone()).unwrap();
+    let origins_bytes = std::fs::read(&origins_ref.path).unwrap();
+    assert_eq!(
+        origins_ref.digest,
+        blake3::hash(&origins_bytes).to_hex().to_string()
+    );
+    let origins: serde_json::Value = serde_json::from_slice(&origins_bytes).unwrap();
+    let canonical = canonical_file_records(root.path()).await;
+    let mut reused = 0;
+    let mut computed = 0;
+    for origin in origins["files"].as_array().unwrap() {
+        let key = origin["generation"]["key"].as_str().unwrap();
+        let (revision, completion) = &canonical[key];
+        assert_eq!(origin["generation"]["revision"], *revision);
+        assert_eq!(&origin["completion"], completion);
+        let execution = &completion["execution"];
+        if let Some(original) = original_files.get(key) {
+            assert_eq!(&canonical[key], original);
+            assert_eq!(execution["operation"], request.operation.as_str());
+            assert_eq!(
+                completion["source_metadata"],
+                serde_json::to_value(&base.dataset.groups["source"].metadata).unwrap()
+            );
+            reused += 1;
+        } else {
+            assert_eq!(execution["operation"], catchup.operation.as_str());
+            assert_eq!(
+                completion["source_metadata"],
+                serde_json::to_value(&latest.dataset.groups["source"].metadata).unwrap()
+            );
+            computed += 1;
+        }
+        let declaration_ref: docspec::model::ObjectRef =
+            serde_json::from_value(execution["declaration"].clone()).unwrap();
+        let declaration_bytes = std::fs::read(&declaration_ref.path).unwrap();
+        assert_eq!(
+            declaration_ref.digest,
+            blake3::hash(&declaration_bytes).to_hex().to_string()
+        );
+        let declaration: serde_json::Value = serde_json::from_slice(&declaration_bytes).unwrap();
+        assert_eq!(declaration["processor"], origins["processor"]);
+        assert_eq!(
+            declaration["definition"],
+            serde_json::to_value(catchup.group_definition()).unwrap()
+        );
+        assert_eq!(declaration["input_fields"], origins["input_fields"]);
+    }
+    assert!(reused > 0 && computed > 0);
+    drop(engine);
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
     let release = engine.backfill(&catchup).await.unwrap();
+    assert_eq!(
+        release.dataset.computed["length"].origins.as_ref(),
+        Some(&origins_ref)
+    );
+    assert_eq!(std::fs::read(&origins_ref.path).unwrap(), origins_bytes);
+    let after = engine.inspect(&catchup.dataset).await.unwrap();
+    let validation = after
+        .iter()
+        .find(|(key, value)| {
+            key.starts_with("backfill-validation/") && value["origins"] == prepared["origins"]
+        })
+        .unwrap()
+        .1;
+    assert_eq!(validation["origins"], prepared["origins"]);
+    assert_eq!(engine.backfill(&catchup).await.unwrap(), release);
+    assert_eq!(canonical_file_records(root.path()).await, canonical);
     let mut expected: Vec<_> = rows
         .into_iter()
         .filter(|row| row.0 != Some(0))
@@ -669,8 +814,14 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
         "mapping",
         "values",
         "binding",
+        "origins",
     ] {
         let mut forged = valid.clone();
+        if kind != "origins" {
+            // Keep the existing deep reconstruction cases reachable for older
+            // releases. The separate origins case checks the new association.
+            forged.dataset.computed.get_mut("length").unwrap().origins = None;
+        }
         if kind == "binding" {
             forged
                 .dataset
@@ -698,7 +849,7 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
                 "unknown" => paths[0] = Some("unknown.parquet".into()),
                 "range" => positions[0] = Some(i64::MAX),
                 "null" => positions[0] = None,
-                "values" => {}
+                "values" | "origins" => {}
                 _ => unreachable!(),
             }
             let mut fields = schema.fields().to_vec();

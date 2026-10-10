@@ -1534,6 +1534,7 @@ impl Engine {
                     computed.insert(
                         name.clone(),
                         ComputedGroup {
+                            origins: prepared.origins,
                             definition: previous.definition.clone(),
                             input_fields: prepared.input_fields,
                             request: captured_request.clone(),
@@ -1617,18 +1618,9 @@ impl Engine {
                 processor: PROCESSOR.into(),
                 validation: VerificationLevel::Routine,
             };
-            backfill::verify_groups(
-                &dataset,
-                &lifecycle.budget,
-                &mut verification::Checks::composition(),
-            )
-            .await?;
-            evidence::verify(
-                &dataset,
-                &lifecycle.budget,
-                &mut verification::Checks::composition(),
-            )
-            .await?;
+            checks.compose();
+            backfill::verify_groups(&dataset, &lifecycle.budget, &mut checks).await?;
+            evidence::verify(&dataset, &lifecycle.budget, &mut checks).await?;
             // Readback has an operation-specific manifest because coverage can advance
             // while the same expensive materialized values remain reusable.
             let readback_key = format!("readback/{}", spec.operation());
@@ -1643,7 +1635,8 @@ impl Engine {
                         "retained readback differs from the prepared result",
                     ));
                 }
-                check_release_available(&release, &lifecycle.budget).await?;
+                check_release_available_with_checks(&release, &lifecycle.budget, &mut checks)
+                    .await?;
                 Retained {
                     value: release,
                     protections: self
@@ -2409,6 +2402,12 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
             .values()
             .map(|group| group.base_manifest.clone()),
     );
+    objects.extend(
+        dataset
+            .computed
+            .values()
+            .filter_map(|group| group.origins.clone()),
+    );
     if let Some(changes) = &dataset.changes {
         objects.extend([
             changes.base_manifest.clone(),
@@ -2435,12 +2434,21 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
 }
 
 async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Result<()> {
+    check_release_available_with_checks(release, budget, &mut verification::Checks::composition())
+        .await
+}
+
+async fn check_release_available_with_checks(
+    release: &ReleasePin,
+    budget: &Budget,
+    checks: &mut verification::Checks,
+) -> Result<()> {
     if release.dataset.related.is_some() {
         verification::check_available(release, budget).await
     } else {
         storage::check_available(release_objects(release), budget).await?;
         schema::check_available(&release.dataset, budget).await?;
-        backfill::verify_binding_dependencies(&release.dataset, budget).await
+        backfill::verify_binding_dependencies(&release.dataset, budget, checks).await
     }
 }
 
