@@ -191,8 +191,14 @@ async fn captured_provider_composes_indices_and_keeps_sql_behavior() {
         .await
         .unwrap();
     assert_eq!(result[0].schema().field(0).name(), "renamed");
-    assert_eq!(values(&result, 0), [Some(200), Some(300)]);
-    assert_eq!(values(&result, 1), [None, Some(3)]);
+    // SQL without ORDER BY may return partitions in either order. Preserve
+    // column association while checking the exact values and nulls.
+    let mut rows: Vec<_> = values(&result, 0)
+        .into_iter()
+        .zip(values(&result, 1))
+        .collect();
+    rows.sort_unstable();
+    assert_eq!(rows, [(Some(200), None), (Some(300), Some(3))]);
     let result = context
         .sql("SELECT 9 AS constant FROM retained")
         .await

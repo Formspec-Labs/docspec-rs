@@ -47,13 +47,39 @@ Narrowing discovery remains separate optimization work.
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) caught whole-partition
 window buffering outside DataFusion's memory pool. The comparison now uses
-maintained sorted `ROW_NUMBER` and grouped signed `SUM`/vectorized `MAX`, scanning
-each endpoint once. A narrow input adapter checks actual sorted batch bytes and
+maintained grouped signed `SUM` to cancel exact occurrences first, scanning each
+endpoint once. Occurrence streams need no ranking, sort or window. Value streams
+rank only the remaining members with sorted `ROW_NUMBER`, grouped signed `SUM`
+and vectorized `MAX`. This preserves duplicate counts and selects actual endpoint
+addresses even when signed changes include an intermediate occurrence.
+A narrow input adapter checks actual sorted batch bytes and
 rows before window execution and retains its buffer/bookkeeping allowance. It
 preserves physical ordering and partitioning; it implements no sort, merge or
 window logic. The metadata and window allowances are admission estimates, not a
 whole-process memory guarantee. Native reader page bounds and population-scale
 memory, spill and disk qualification remain open.
+
+The [normalization checks](reviews/comparison-normalization-targeted-3-2026-10-10.log)
+cover endpoint membership, composed signed relations, hot duplicate groups,
+insufficient operator memory and oversized sorted batches. The earlier resource
+failure exhausted the operator pool before reaching the byte guard; only that
+fixture's pool was enlarged to isolate the intended check. Production limits are
+unchanged. The fixture demonstrates composition algebra, not trusted chain
+discovery or an enabled accelerated path.
+Value mode adds an initial aggregate; its cost depends on how many occurrences
+cancel before ranking. High-churn time, memory and spill remain to be measured.
+
+The [independent normalization review](reviews/comparison-normalization-review-2026-10-10.md)
+approves this checkpoint. The [repository gate](reviews/dependency-normalization-full-check-2-2026-10-10.log)
+passes formatting, strict Clippy and every executable test suite. The first gate
+exposed an existing SQL fixture that assumed row order without `ORDER BY`; the
+corrected assertion compares paired rows, preserving nulls and column association.
+The second gate reached documentation tests, where compiled Arrow, DataFusion and
+other dependency files were missing from the build directory. The
+[documentation-only continuation](reviews/dependency-normalization-doc-check-2026-10-10.log)
+rebuilt those artifacts and passed without repeating the executable suites.
+All gate components are covered across these runs. This is not an uninterrupted
+gate pass or a benchmark.
 
 The [focused checks](reviews/change-stream-targeted-6.log) pass independent Rust
 value/address expectations, duplicates/nulls, forward/reverse comparison,
@@ -85,6 +111,16 @@ versioned applied-write certificates and trusted admission, shared R5 accelerate
 discovery, independent optional-history retirement, schema-mapping comparisons,
 portable trust and the remaining R4/R7 scaling cases are unfinished. No full-data
 performance rerun or speedup claim accompanies this increment.
+
+Independent reviews of [trust and composition](reviews/r4-trust-design-2026-10-10.md)
+and [history lifetime](reviews/r4-history-lifetime-design-2026-10-10.md) identify the
+next coherent R4 checkpoint: separate optional applied-change evidence from the
+complete state's required evidence, co-commit qualified local certificates, and
+retire optional history through existing exact retirement rules. Updated states
+must remain readable, admissible as inputs, resumable and fully comparable after
+eligible change-only objects are removed. Required consumer evidence and source
+succession remain protected. Keep full comparison as the public path until this
+lifetime seam passes; adding a descriptor alone does not complete the checkpoint.
 
 ## Native column selection
 
@@ -136,9 +172,8 @@ requested columns into Iceberg before decoding; the
 [reviewed design](reviews/native-column-selection-design-review.md) preserves
 stable field IDs, defaults, output order and occurrence identities.
 
-Further candidates reuse immutable metadata and captured inventories, avoid a
-large-input cardinality scan when the constrained side has unique keys, and use
-maintained Serde serialization for hash-only JSON work. Native row-group layout needs
+Further candidates reuse immutable metadata and captured inventories and avoid a
+large-input cardinality scan when the constrained side has unique keys. Native row-group layout needs
 separate reader-memory qualification. These are researched opportunities, not
 implemented changes or measured speedups. Each has a bounded verification step;
 the audit does not justify additional concurrency, caches or blanket upgrades.
@@ -151,6 +186,17 @@ The [independent review](reviews/hash-reader-review-2026-10-10.md) approves the
 change, and the [repository gate](reviews/hash-reader-check-2026-10-10.log) passes
 formatting, strict Clippy and all-feature tests, including digest/count and I/O
 failure fixtures. No throughput or process-memory improvement is claimed.
+
+Hash-only JSON now streams through Serde directly into BLAKE3's maintained writer.
+The shared helper removes temporary serialized byte vectors from request,
+dependency, phase and owner-protection identities. It preserves exact compact
+bytes, error propagation and existing admission; serialization buffers needed for
+persistence or size checks remain. The [focused checks](reviews/hash-json-targeted-lib-2026-10-10.log)
+compare the previous digest path, frozen typed requests, nested/Unicode inputs
+and partial serialization failures. The [independent review](reviews/hash-json-implementation-review-2026-10-10.md)
+approves the substitution. No throughput or whole-process memory gain is claimed.
+The repository gate and documentation continuation linked above also cover the
+existing lifecycle identity and recovery consumers.
 
 ## Scoped scalar dependency correction
 

@@ -144,3 +144,15 @@ so that log alone is not evidence of correct association. The revised assertion
 tests that association directly. The second repository gate is still running;
 this static note does not claim its result. The reviewer ran no execution and
 changed only this report.
+
+## Root execution addendum, 2026-10-10
+
+The root-owned [second gate](dependency-normalization-full-check-2-2026-10-10.log)
+passed formatting, strict Clippy and every executable suite. Its final Rustdoc
+step failed because compiled dependency files were missing. The
+[documentation-only continuation](dependency-normalization-doc-check-2026-10-10.log)
+rebuilt those artifacts and passed. All gate components are therefore covered
+across these runs; this is not one uninterrupted pass. No production code changed
+after the reviewed normalization and hashing edits. The SQL fixture correction
+compares paired rows without relying on unspecified order. This addendum records
+root execution, not independent reviewer execution or performance measurement.

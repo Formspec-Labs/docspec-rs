@@ -1,0 +1,26 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.70s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test engine::comparison::tests::addressed_differences_cancel_occurrences_before_choosing_value_members ... ok
+test engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel ... FAILED
+test engine::comparison::tests::duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates ... ok
+
+failures:
+
+---- engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel stdout ----
+
+thread 'engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel' (33962958) panicked at src/engine/comparison.rs:846:9:
+assertion `left == right` failed
+  left: "query"
+ right: "oversized_batch"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 188 filtered out; finished in 0.10s
+
+error: test failed, to rerun pass `--lib`

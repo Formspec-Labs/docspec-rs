@@ -1,0 +1,37 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 16.53s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test engine::comparison::tests::addressed_differences_cancel_occurrences_before_choosing_value_members ... ok
+test engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel ... FAILED
+test engine::comparison::tests::duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates ... ok
+
+failures:
+
+---- engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel stdout ----
+
+thread 'engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel' (33999431) panicked at src/engine/comparison.rs:854:9:
+assertion `left == right` failed: Error {
+    code: "query",
+    message: "Resources exhausted: Failed to reserve memory for sort during spill: Resources exhausted: Failed to allocate additional 2.0 MB for GroupedHashAggregateStream[0] (net) with 64.0 B already allocated for this reservation - 2.0 MB remain available for the total pool",
+    source: Some(
+        Shared(
+            ResourcesExhausted(
+                "Failed to reserve memory for sort during spill: Resources exhausted: Failed to allocate additional 2.0 MB for GroupedHashAggregateStream[0] (net) with 64.0 B already allocated for this reservation - 2.0 MB remain available for the total pool",
+            ),
+        ),
+    ),
+    backtrace: <disabled>,
+}
+  left: "query"
+ right: "oversized_batch"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 188 filtered out; finished in 0.20s
+
+error: test failed, to rerun pass `--lib`

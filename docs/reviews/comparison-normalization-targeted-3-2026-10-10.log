@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.06s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test engine::comparison::tests::addressed_differences_cancel_occurrences_before_choosing_value_members ... ok
+test engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel ... ok
+test engine::comparison::tests::duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 188 filtered out; finished in 0.18s
+

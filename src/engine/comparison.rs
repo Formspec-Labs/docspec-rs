@@ -373,9 +373,8 @@ impl Engine {
                 "changed-row streams require identical visible field identities and types",
             ));
         }
-        let identity = identity_columns(&plan);
         let stream: SendableRecordBatchStream = if let Some(relation) = plan.relation.take() {
-            let frame = change_members(relation, identity, plan.fields.len())?;
+            let frame = change_members(relation, plan.fields.len(), plan.descriptor.identity)?;
             let context = Arc::new(frame.task_ctx());
             let physical = window::admit(
                 frame.create_physical_plan().await?,
@@ -440,14 +439,46 @@ impl Engine {
 
 fn change_members(
     relation: DataFrame,
-    mut identity: Vec<Expr>,
     fields: usize,
+    identity: ComparisonIdentity,
 ) -> Result<DataFrame> {
+    let values = (0..fields)
+        .map(|i| col(format!("c{i}")))
+        .collect::<Vec<_>>();
+    let mut occurrences = values.clone();
+    occurrences.extend([col("file"), col("row")]);
+    // Cancel identical occurrences before choosing value representatives. This
+    // removes unchanged endpoint rows and prevents intermediate change-history
+    // addresses from surviving value cancellation. Qualified occurrences are
+    // unique within each endpoint; their remaining signed weights are +/-1.
+    let net = relation
+        .aggregate(occurrences.clone(), vec![sum(col("weight")).alias("net")])?
+        .filter(col("net").not_eq(lit(0_i64)))?;
+    let frame = if identity == ComparisonIdentity::Occurrences {
+        // Exact occurrence differences need only the maintained grouped sum.
+        // Ranking or sorting every occurrence would perform unnecessary work.
+        net
+    } else {
+        occurrences.push(col("net").alias("weight"));
+        value_members(net.select(occurrences)?, values)?
+    };
+    let mut columns = vec![
+        when(col("net").lt(lit(0_i64)), lit("before"))
+            .otherwise(lit("after"))?
+            .alias("side"),
+        col("file"),
+        col("row"),
+    ];
+    columns.extend((0..fields).map(|i| col(format!("c{i}"))));
+    Ok(frame.select(columns)?)
+}
+
+fn value_members(relation: DataFrame, mut values: Vec<Expr>) -> Result<DataFrame> {
     // Rank each side separately so matching ordinals cancel exactly one member.
     // Causal ROW_NUMBER uses DataFusion's bounded, sorted window; an unbounded
     // SUM window would buffer a whole duplicate group outside its memory pool.
     // Sorting and aggregation use the shared pool and maintained spill support.
-    let mut ranked = identity.clone();
+    let mut ranked = values.clone();
     ranked.push(col("weight"));
     let rank = row_number()
         .partition_by(ranked)
@@ -457,29 +488,20 @@ fn change_members(
         ])
         .build()?
         .alias("ordinal");
-    identity.push(col("ordinal"));
-    let frame = relation
-        .window(vec![rank])?
-        .aggregate(
-            identity,
-            vec![
-                sum(col("weight")).alias("net"),
-                max(col("file")).alias("member_file"),
-                max(col("row")).alias("member_row"),
-            ],
-        )?
-        .filter(col("net").not_eq(lit(0_i64)))?;
+    values.push(col("ordinal"));
     // A surviving ordinal has exactly one endpoint member. Vectorized MAX keeps
     // that address; canceled groups never expose a combined representative.
-    let mut columns = vec![
-        when(col("net").lt(lit(0_i64)), lit("before"))
-            .otherwise(lit("after"))?
-            .alias("side"),
-        col("member_file").alias("file"),
-        col("member_row").alias("row"),
-    ];
-    columns.extend((0..fields).map(|i| col(format!("c{i}"))));
-    Ok(frame.select(columns)?)
+    Ok(relation
+        .window(vec![rank])?
+        .aggregate(
+            values,
+            vec![
+                sum(col("weight")).alias("net"),
+                max(col("file")).alias("file"),
+                max(col("row")).alias("row"),
+            ],
+        )?
+        .filter(col("net").not_eq(lit(0_i64)))?)
 }
 
 fn literal_column(name: &str) -> Expr {
@@ -563,6 +585,105 @@ mod tests {
     use datafusion::{datasource::MemTable, physical_plan::displayable};
 
     #[tokio::test]
+    async fn addressed_differences_cancel_occurrences_before_choosing_value_members() {
+        let budget = Budget::new(Limits::default()).unwrap();
+        let frame = |rows: &[(&str, &str, i64)]| {
+            let batch = RecordBatch::try_from_iter(vec![
+                (
+                    "c0",
+                    Arc::new(StringArray::from_iter_values(rows.iter().map(|v| v.0))) as ArrayRef,
+                ),
+                (
+                    "file",
+                    Arc::new(StringArray::from_iter_values(rows.iter().map(|v| v.1))) as ArrayRef,
+                ),
+                (
+                    "row",
+                    Arc::new(Int64Array::from(vec![0; rows.len()])) as ArrayRef,
+                ),
+                (
+                    "weight",
+                    Arc::new(Int64Array::from_iter_values(rows.iter().map(|v| v.2))) as ArrayRef,
+                ),
+            ])
+            .unwrap();
+            budget.context().read_batch(batch).unwrap()
+        };
+        let full = [
+            ("old", "initial", -1),
+            ("new", "z-kept", -1),
+            ("new", "a-final", 1),
+            ("new", "z-kept", 1),
+        ];
+        // Lexically later intermediate addresses would survive raw value ranking
+        // even though they belong to neither endpoint. Cancel their exact births.
+        let chain = [
+            ("old", "initial", -1),
+            ("new", "zz-intermediate", 1),
+            ("new", "zz-intermediate", -1),
+            ("new", "a-final", 1),
+        ];
+        let mut expected = vec![
+            (
+                "before".to_owned(),
+                "initial".to_owned(),
+                0,
+                "old".to_owned(),
+            ),
+            (
+                "after".to_owned(),
+                "a-final".to_owned(),
+                0,
+                "new".to_owned(),
+            ),
+        ];
+        expected.sort();
+        for identity in [ComparisonIdentity::Values, ComparisonIdentity::Occurrences] {
+            for input in [&full[..], &chain[..]] {
+                let frame = change_members(frame(input), 1, identity).unwrap();
+                let context = Arc::new(frame.task_ctx());
+                let plan =
+                    window::admit(frame.create_physical_plan().await.unwrap(), &budget).unwrap();
+                let display = displayable(plan.as_ref()).indent(true).to_string();
+                if identity == ComparisonIdentity::Occurrences {
+                    assert!(display.contains("AggregateExec"));
+                    assert!(!display.contains("WindowAggExec"));
+                    assert!(!display.contains("SortExec:"));
+                    assert!(!display.contains("ComparisonWindowInput:"));
+                }
+                let mut actual = Vec::new();
+                for batch in datafusion::physical_plan::collect(plan, context)
+                    .await
+                    .unwrap()
+                {
+                    let strings = |index| {
+                        batch
+                            .column(index)
+                            .as_any()
+                            .downcast_ref::<StringArray>()
+                            .unwrap()
+                    };
+                    let rows = batch
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap();
+                    for index in 0..batch.num_rows() {
+                        actual.push((
+                            strings(0).value(index).to_owned(),
+                            strings(1).value(index).to_owned(),
+                            rows.value(index),
+                            strings(3).value(index).to_owned(),
+                        ));
+                    }
+                }
+                actual.sort();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates() {
         let root = tempfile::tempdir().unwrap();
         let budget = Budget::in_workspace(
@@ -596,7 +717,14 @@ mod tests {
                         schema.clone(),
                         vec![
                             Arc::new(StringArray::from(vec![value.as_str(); len])),
-                            Arc::new(StringArray::from(vec!["source"; len])),
+                            Arc::new(StringArray::from(vec![
+                                if weight < 0 {
+                                    "before"
+                                } else {
+                                    "after"
+                                };
+                                len
+                            ])),
                             Arc::new(Int64Array::from_iter_values(start..end)),
                             Arc::new(Int64Array::from(vec![weight; len])),
                         ],
@@ -607,7 +735,7 @@ mod tests {
         }
         let input = Arc::new(MemTable::try_new(schema, vec![batches]).unwrap());
         let frame = budget.context().read_table(input.clone()).unwrap();
-        let frame = change_members(frame, vec![col("c0")], 1).unwrap();
+        let frame = change_members(frame, 1, ComparisonIdentity::Values).unwrap();
         let context = frame.task_ctx();
         let physical = window::admit(frame.create_physical_plan().await.unwrap(), &budget).unwrap();
         let display = displayable(physical.as_ref()).indent(true).to_string();
@@ -658,7 +786,7 @@ mod tests {
         )
         .unwrap();
         let frame = constrained.context().read_table(input).unwrap();
-        let error = change_members(frame, vec![col("c0")], 1)
+        let error = change_members(frame, 1, ComparisonIdentity::Values)
             .unwrap()
             .collect()
             .await
@@ -675,7 +803,9 @@ mod tests {
         let budget = Budget::in_workspace(
             Limits {
                 compute_threads: 2,
-                memory_bytes: 64 << 20,
+                // Leave the participating sort/aggregate operators enough pool
+                // space to reach the independently enforced batch-byte limit.
+                memory_bytes: 256 << 20,
                 scratch_bytes: 16 << 20,
                 batch_rows: 32,
                 max_batch_bytes: 64 << 10,
@@ -698,7 +828,11 @@ mod tests {
                     schema.clone(),
                     vec![
                         Arc::new(StringArray::from(vec![value.as_str()])),
-                        Arc::new(StringArray::from(vec!["source"])),
+                        Arc::new(StringArray::from(vec![if weight < 0 {
+                            "before"
+                        } else {
+                            "after"
+                        }])),
                         Arc::new(Int64Array::from(vec![row])),
                         Arc::new(Int64Array::from(vec![weight])),
                     ],
@@ -712,13 +846,14 @@ mod tests {
             .context()
             .read_table(Arc::new(MemTable::try_new(schema, vec![batches]).unwrap()))
             .unwrap();
-        let frame = change_members(frame, vec![col("c0")], 1).unwrap();
+        let frame = change_members(frame, 1, ComparisonIdentity::Values).unwrap();
         let context = Arc::new(frame.task_ctx());
         let plan = window::admit(frame.create_physical_plan().await.unwrap(), &budget).unwrap();
         let error = datafusion::physical_plan::collect(plan, context)
             .await
             .unwrap_err();
-        assert_eq!(Error::from(error).code(), "oversized_batch");
+        let error = Error::from(error);
+        assert_eq!(error.code(), "oversized_batch", "{error:#?}");
         drop(budget.reserve(budget.limits.memory_bytes / 2).unwrap());
     }
 }
