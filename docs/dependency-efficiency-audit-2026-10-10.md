@@ -2,6 +2,14 @@
 
 **Keep the current dependency family. The remaining useful work is to avoid redundant cardinality scans, extend selected-column reading to scalar preparation, and qualify native row-group sizing. Reuse immutable metadata where a repeated open remains.** The [current follow-up](#current-follow-up-2026-10-10) rechecks every direct package, enabled defaults, relevant duplicate dependencies and maintained adapter alternatives. It distinguishes completed improvements from work still in progress; its status and priorities supersede earlier snapshots below. Enabling every optional feature would increase the surface to maintain without establishing a benefit.
 
+The latest [independent completeness review](reviews/package-efficiency-completeness-review-2026-10-10.md)
+confirms every direct Rust and Python package against the unchanged manifests and
+current call sites. It adds one bounded experiment: compare DataFusion's existing
+spill compression with the uncompressed default when a representative query
+actually spills. Both codecs are already enabled. Measure peak scratch, memory,
+time and exact results before changing defaults; this review establishes no new
+speedup or disk-saving result.
+
 The [earlier utilization check](reviews/dependency-utilization-audit-2026-10-10.md)
 rechecks package coverage at `2a5ae51`. It identifies changed-key discovery as a
 remaining caller that can use the existing selected-column reader, and records
@@ -69,14 +77,16 @@ that a crate is compiled or linked for this target.
   [independent review](reviews/compacted-related-review-2026-10-10.md). These are
   implementation evidence, not execution by this audit or a speed measurement.
   Do not duplicate this change from an earlier audit's recommendation.
-- **In progress at this refresh:** [compaction recovery retirement](../src/engine/retention/compaction_recovery.rs)
+- **Implemented at `8566235`:** [compaction recovery retirement](../src/engine/retention/compaction_recovery.rs)
   separates recoverability of an old rewrite from the selected replacement's
-  lifetime. The working [protection helper](../src/engine/compaction.rs#L16) and
+  lifetime. The [protection helper](../src/engine/compaction.rs#L16) and
   [inventory handling](../src/engine/retention/inventory.rs#L1230) preserve the
   replacement and logical metadata without automatically retaining every old
   payload through that selection. Other promises remain independent roots.
-  This addresses retained disk amplification through existing lifecycle rules;
-  this audit establishes neither safe reclamation nor measured disk savings.
+  The [retained repository gate](reviews/compaction-retirement-full-check-2026-10-10.log)
+  includes real obsolete-layout removal fixtures. This addresses retained disk
+  amplification through existing lifecycle rules; the package audit itself
+  establishes neither full-scale reclamation nor measured disk savings.
 
 ### Complete current direct-package matrix
 
