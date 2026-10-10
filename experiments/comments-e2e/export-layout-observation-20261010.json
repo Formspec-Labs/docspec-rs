@@ -1,0 +1,44 @@
+{
+  "scope": "Post-run layout inspection of completed immutable exports; maintained Parquet footer read only, no payload scan.",
+  "exports": {
+    "comments-dockets-export": {
+      "object": {
+        "owner": "comments-dockets",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/b9ff3c50ef6e4063b57b5e5bef5930fc/export.parquet",
+        "digest": "7e82cf2e952d22843272ab6922e279f805e656663f32e2e17596d8d91929b8e5",
+        "bytes": 2470855710
+      },
+      "rows": 10000000,
+      "columns": 32,
+      "row_groups": 10,
+      "serialized_footer_bytes": 30192,
+      "rows_per_group": [
+        577496,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1033896
+      ]
+    },
+    "docket-summary-export": {
+      "object": {
+        "owner": "docket-summary",
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-summary/b39e3acda369432d9cf42b9101713b66/export.parquet",
+        "digest": "860c74851daaf068bacfbf8a3d39e517f95dade1b3c8a6a898c97cbd0e712caa",
+        "bytes": 657089
+      },
+      "rows": 43858,
+      "columns": 7,
+      "row_groups": 1,
+      "serialized_footer_bytes": 2004,
+      "rows_per_group": [
+        43858
+      ]
+    }
+  }
+}

@@ -10,8 +10,9 @@ continuous-ingestion cutover; change-history composition; remaining protection
 lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
 10-million-Comments qualification. Native row statistics now let the full
-Comments-to-Dockets join complete. The next full attempt stopped at flat-export
-footer accounting; the 1,800-second complete-path target remains unqualified.
+Comments-to-Dockets join complete, and larger Parquet groups now let both flat
+exports finish. The next full attempt stopped in the independent exact oracle at
+its 32 GiB scratch limit; the 1,800-second complete-path target remains unqualified.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
@@ -82,9 +83,30 @@ the intended export guard, preserves the selected release and resumes exactly.
 The [complete repository gate](reviews/export-layout-full-check.log) passes.
 The [implementation review](reviews/export-layout-implementation-review.md) approves
 the change, noting that final-pending-group-only refusal lacks an isolated fixture.
-Writer performance qualification remains pending. The [frozen comparison](../experiments/comments-e2e/export-layout-plan.md) retains
+The [frozen comparison](../experiments/comments-e2e/export-layout-plan.md) retains
 the failed baseline and resource limits. A writer memory estimate checked between
-batches is not a whole-process memory bound; the next full run measures that cost.
+batches is not a whole-process memory bound.
+
+The [captured `e40be01` attempt](../experiments/comments-e2e/acceptance-export-layout-20261010.json)
+completed engine processing, evidence, summaries, exports and selection lookups in
+about 135 seconds. The 10-million-row flat export completed in 32.67 seconds, with
+sampled process-tree memory peaking at 2.00 GB. Its [retained layout](../experiments/comments-e2e/export-layout-observation-20261010.json)
+is 10 row groups, a 30,192-byte serialized footer and a 2.47 GB file. Summary export
+also completed. The earlier obsolete-source build was canceled before measurement
+and retained separately; this attempt's captured executable matches the successful
+[corrected build receipt](../experiments/comments-e2e/release-build-export-layout-corrected-20261010.json).
+
+The full attempt failed after 239.29 seconds in DuckDB's independent exact native
+join comparison. DuckDB refused another temporary block at its 32 GiB scratch
+limit. Before that failure, full shaped Comments and nested Dockets/receipt values
+passed; the native join comparison and later checks remain incomplete. Subsequent
+fresh runs did not start. Sampled aggregate memory peaked at 23.38 GB and scratch
+at 32.27 GB (30.05 GiB); sampling missed the higher instantaneous spill usage
+reported by DuckDB. Retained run data is 10.59 GB (3.86× input), with peak additional
+logical disk about 42.86 GB including temporary work. This clears the export
+blocker, not the complete acceptance gate. The next investigation targets a more
+efficient exact oracle over retained completed outputs, preserving all checks and
+resource limits.
 
 ## Receipt changes without value recomputation
 

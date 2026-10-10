@@ -83,3 +83,33 @@ branch was statically traced against maintained finalization.
 
 These are correctness and fixture-layout observations. They do not establish
 full-scale export memory, output size, throughput or performance acceptance.
+
+## Full-run outcome
+
+The first release-build dispatch captured the preceding commit while the commit
+command was still completing. The root detected the source mismatch and canceled
+that build before measurement; its incomplete receipt/log remain retained. The
+corrected build explicitly requires `e40be01`, verifies its source archive and
+records the executable identity captured by the performance harness.
+
+The `e40be01` complete attempt finished engine processing, evidence, summaries,
+both exports and selected-pin lookup in about 135 seconds. The full joined export
+took 32.67 seconds, sampled peak process-tree RSS was 2.00 GB, and its completed
+Parquet has 10 row groups, 30,192 serialized footer bytes and 2.47 GB total size.
+The post-run layout inspection used maintained footer reads, without payload scans.
+The retained observation is `export-layout-observation-20261010.json`.
+
+The full attempt failed at 239.29 seconds: the independent DuckDB exact join
+comparison exhausted its unchanged 32 GiB temporary-space limit. Earlier exact
+shaped-Comment and nested Dockets/receipt checks passed. The failed comparison,
+later checks and remaining repetitions did not pass or run. Sampled peak RSS was
+23.38 GB and scratch 32.27 GB; DuckDB reported higher instantaneous spill use at
+its limit. Retained data is 10.59 GB (3.86× input); peak additional logical disk is
+42.86 GB including temporary work. Raw output, source identities and measurements
+are retained in `acceptance-export-layout-20261010.json` and its referenced run.
+
+**Verdict: bounded improvement; complete acceptance not solved.** The actual
+export completes within unchanged limits. Preserve that implementation and
+investigate the exact independent comparison, reusing completed retained outputs.
+Do not relax equality, omit evidence, raise budgets or relabel this as a passing
+three-run gate.

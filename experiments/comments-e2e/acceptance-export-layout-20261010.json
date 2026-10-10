@@ -1,0 +1,936 @@
+{
+  "format": "docspec-full-acceptance-observation-v1",
+  "artifact_directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824",
+  "build_receipt": "release-build-export-layout-corrected-20261010.json",
+  "source_commit": "e40be018b2a1c12c2e1067ba4fe552de3a6711f6",
+  "captured_binary_matches_build": true,
+  "execution_capture": {
+    "format": "comments-e2e-execution-v1",
+    "complete": true,
+    "started_at": 1791642939.357207,
+    "artifacts": {
+      "runner": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807787,
+          "size": 21309,
+          "mtime_ns": 1791587027905655220,
+          "ctime_ns": 1791587027905655220,
+          "mode": 33188
+        },
+        "bytes": 21309,
+        "sha256": "723dd2fb7b7545ba94d9b5ba8f5b0d5b1681c7cd79ff9fffb0af3fee6d6aaf88",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/run.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132087,
+          "size": 21309,
+          "mtime_ns": 1791642939357299994,
+          "ctime_ns": 1791642939357344411,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "workload": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/workload.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803312,
+          "size": 4864,
+          "mtime_ns": 1791585824108655838,
+          "ctime_ns": 1791585824108655838,
+          "mode": 33188
+        },
+        "bytes": 4864,
+        "sha256": "c44f2fedf9d1990d0d61db3e391aa3c80fc2b6f20282ee5c9aab05ba0f9bd0a3",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/workload.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132088,
+          "size": 4864,
+          "mtime_ns": 1791642939357815121,
+          "ctime_ns": 1791642939357853579,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "integrity": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/integrity.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766879064,
+          "size": 3760,
+          "mtime_ns": 1791586936069824459,
+          "ctime_ns": 1791586936069824459,
+          "mode": 33188
+        },
+        "bytes": 3760,
+        "sha256": "6ebbbc347173d0e70576d01acabb8e3fcd9f974f9ff487b35ff8ab84086a964b",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/integrity.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132089,
+          "size": 3760,
+          "mtime_ns": 1791642939357918954,
+          "ctime_ns": 1791642939357957663,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "comments_input_monitor": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-input/run.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 759489030,
+          "size": 18490,
+          "mtime_ns": 1791585964192078142,
+          "ctime_ns": 1791585964192078142,
+          "mode": 33188
+        },
+        "bytes": 18490,
+        "sha256": "8bb7b248c3ee20df009a844092fbdc2612aa2cb08dc58695fa7b2b318a237cc8",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/comments-input-monitor.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132090,
+          "size": 18490,
+          "mtime_ns": 1791642939358031122,
+          "ctime_ns": 1791642939358069122,
+          "mode": 33060
+        },
+        "source_was_loaded_before_series": true
+      },
+      "binary": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 768131733,
+          "size": 181964104,
+          "mtime_ns": 1791642875711641233,
+          "ctime_ns": 1791642875828699185,
+          "mode": 33261
+        },
+        "bytes": 181964104,
+        "sha256": "3b75f246bc282e60a3fda713b14830f3c16ce9dbe6b5c3afb9ecc621f05a731b",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/docspec",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132091,
+          "size": 181964104,
+          "mtime_ns": 1791642939537669752,
+          "ctime_ns": 1791642939538988673,
+          "mode": 33133
+        }
+      },
+      "oracle": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/oracle.py",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766803313,
+          "size": 20874,
+          "mtime_ns": 1791586698402375624,
+          "ctime_ns": 1791586698402375624,
+          "mode": 33188
+        },
+        "bytes": 20874,
+        "sha256": "aa140f1bbbc31c9e9ef9bf591f6db33e301a0605273dbf153e2867b64b4b4e81",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132092,
+          "size": 20874,
+          "mtime_ns": 1791642939541001680,
+          "ctime_ns": 1791642939541113889,
+          "mode": 33060
+        }
+      },
+      "protocol": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/protocol.md",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 766807788,
+          "size": 13438,
+          "mtime_ns": 1791587027926873302,
+          "ctime_ns": 1791587027926873302,
+          "mode": 33188
+        },
+        "bytes": 13438,
+        "sha256": "a5a0dd9503e325330cf02401ba5a9758e7ae15a6fa372b67f347a69057d22a0c",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/protocol.md",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132093,
+          "size": 13438,
+          "mtime_ns": 1791642939542947312,
+          "ctime_ns": 1791642939543022812,
+          "mode": 33060
+        }
+      },
+      "lock": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/Cargo.lock",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 757661924,
+          "size": 130931,
+          "mtime_ns": 1791484279971238840,
+          "ctime_ns": 1791484279971238840,
+          "mode": 33188
+        },
+        "bytes": 130931,
+        "sha256": "1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/Cargo.lock",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132094,
+          "size": 130931,
+          "mtime_ns": 1791642939543745898,
+          "ctime_ns": 1791642939543882065,
+          "mode": 33060
+        }
+      },
+      "prepared": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/preparation-20261009.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 767014769,
+          "size": 8918,
+          "mtime_ns": 1791587198822526130,
+          "ctime_ns": 1791587198822526130,
+          "mode": 33188
+        },
+        "bytes": 8918,
+        "sha256": "be82b5999be8b1a7514e2059a3c6220e333d8ef5ce702f40ae766d1e27647a6e",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/prepared.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132095,
+          "size": 8918,
+          "mtime_ns": 1791642939544570026,
+          "ctime_ns": 1791642939544620860,
+          "mode": 33060
+        }
+      },
+      "build_receipt": {
+        "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/comments-e2e/release-build-export-layout-corrected-20261010.json",
+        "source_stat": {
+          "dev": 16777233,
+          "ino": 768131734,
+          "size": 14480,
+          "mtime_ns": 1791642875928387618,
+          "ctime_ns": 1791642875928387618,
+          "mode": 33188
+        },
+        "bytes": 14480,
+        "sha256": "443e4e22a2136f0929a7a096f49d61c9293e7cb35f90f7e7f7c8040a43f46a3e",
+        "payload_passes": 1,
+        "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/build-receipt.json",
+        "captured_stat": {
+          "dev": 16777233,
+          "ino": 768132096,
+          "size": 14480,
+          "mtime_ns": 1791642939544908194,
+          "ctime_ns": 1791642939544957278,
+          "mode": 33060
+        }
+      }
+    },
+    "scope": "series-owned read-only files; protection from normal worktree drift",
+    "worktree_diff": {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/worktree.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "finished_at": 1791642939.644091,
+    "elapsed_seconds": 0.2868849169462919
+  },
+  "results": {
+    "mode": "acceptance",
+    "required_fresh_runs": 3,
+    "runs": [
+      {
+        "run": 1,
+        "passed": false,
+        "stages": {
+          "comments-dockets-export-selected": {
+            "sampled_peak_tree_rss_bytes": 31031296,
+            "min_volume_free_bytes": 93175152640,
+            "sampled_peak_workspace_bytes": 10768693237,
+            "sampled_peak_allocated_bytes": 10781831168,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.03070729097817093,
+            "before": {
+              "catalog_and_other": {
+                "files": 495,
+                "bytes": 10768587216,
+                "allocated_bytes": 10781712384
+              },
+              "total": {
+                "files": 495,
+                "bytes": 10768587216,
+                "allocated_bytes": 10781712384
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.019195958971977234,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 500,
+                "bytes": 10768693237,
+                "allocated_bytes": 10781831168
+              },
+              "total": {
+                "files": 500,
+                "bytes": 10768693237,
+                "allocated_bytes": 10781831168
+              }
+            },
+            "volume_free_after_bytes": 93174181888,
+            "time_max_rss_bytes": 31096832
+          },
+          "comments-dockets-export": {
+            "sampled_peak_tree_rss_bytes": 1999798272,
+            "min_volume_free_bytes": 93143756800,
+            "sampled_peak_workspace_bytes": 10766479037,
+            "sampled_peak_allocated_bytes": 10779435008,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.19125491502927616,
+            "before": {
+              "catalog_and_other": {
+                "files": 396,
+                "bytes": 8295388763,
+                "allocated_bytes": 8411373568
+              },
+              "total": {
+                "files": 396,
+                "bytes": 8295388763,
+                "allocated_bytes": 8411373568
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 32.668842957995366,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 422,
+                "bytes": 10766479037,
+                "allocated_bytes": 10779435008
+              },
+              "total": {
+                "files": 422,
+                "bytes": 10766479037,
+                "allocated_bytes": 10779435008
+              }
+            },
+            "volume_free_after_bytes": 93183098880,
+            "time_max_rss_bytes": 1969537024
+          },
+          "comments-dockets-selected": {
+            "sampled_peak_tree_rss_bytes": 31014912,
+            "min_volume_free_bytes": 93177815040,
+            "sampled_peak_workspace_bytes": 10768276287,
+            "sampled_peak_allocated_bytes": 10781376512,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.0301541670341976,
+            "before": {
+              "catalog_and_other": {
+                "files": 479,
+                "bytes": 10768144134,
+                "allocated_bytes": 10781233152
+              },
+              "total": {
+                "files": 479,
+                "bytes": 10768144134,
+                "allocated_bytes": 10781233152
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.02507345797494054,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 484,
+                "bytes": 10768276287,
+                "allocated_bytes": 10781376512
+              },
+              "total": {
+                "files": 484,
+                "bytes": 10768276287,
+                "allocated_bytes": 10781376512
+              }
+            },
+            "volume_free_after_bytes": 93177237504,
+            "time_max_rss_bytes": 31834112
+          },
+          "comments-dockets": {
+            "sampled_peak_tree_rss_bytes": 5019697152,
+            "min_volume_free_bytes": 95492677632,
+            "sampled_peak_workspace_bytes": 8263605127,
+            "sampled_peak_allocated_bytes": 8459153408,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.16833754099207,
+            "before": {
+              "catalog_and_other": {
+                "files": 218,
+                "bytes": 5660666796,
+                "allocated_bytes": 5777915904
+              },
+              "total": {
+                "files": 218,
+                "bytes": 5660666796,
+                "allocated_bytes": 5777915904
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 48.448867208033334,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 313,
+                "bytes": 8263605127,
+                "allocated_bytes": 8459153408
+              },
+              "total": {
+                "files": 313,
+                "bytes": 8263605127,
+                "allocated_bytes": 8459153408
+              }
+            },
+            "volume_free_after_bytes": 95482265600,
+            "time_max_rss_bytes": 4987502592
+          },
+          "comments-selected": {
+            "sampled_peak_tree_rss_bytes": 30916608,
+            "min_volume_free_bytes": 93181464576,
+            "sampled_peak_workspace_bytes": 10767650705,
+            "sampled_peak_allocated_bytes": 10780684288,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.028878332988824695,
+            "before": {
+              "catalog_and_other": {
+                "files": 455,
+                "bytes": 10767544200,
+                "allocated_bytes": 10780569600
+              },
+              "total": {
+                "files": 455,
+                "bytes": 10767544200,
+                "allocated_bytes": 10780569600
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.01905366696882993,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 460,
+                "bytes": 10767650705,
+                "allocated_bytes": 10780684288
+              },
+              "total": {
+                "files": 460,
+                "bytes": 10767650705,
+                "allocated_bytes": 10780684288
+              }
+            },
+            "volume_free_after_bytes": 93180907520,
+            "time_max_rss_bytes": 29868032
+          },
+          "comments": {
+            "sampled_peak_tree_rss_bytes": 3562782720,
+            "min_volume_free_bytes": 98433200128,
+            "sampled_peak_workspace_bytes": 5513561982,
+            "sampled_peak_allocated_bytes": 5630554112,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.03488262399332598,
+            "before": {
+              "catalog_and_other": {
+                "files": 18,
+                "bytes": 182328439,
+                "allocated_bytes": 182374400
+              },
+              "total": {
+                "files": 18,
+                "bytes": 182328439,
+                "allocated_bytes": 182374400
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 31.57009312498849,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 85,
+                "bytes": 5513561982,
+                "allocated_bytes": 5630554112
+              },
+              "total": {
+                "files": 85,
+                "bytes": 5513561982,
+                "allocated_bytes": 5630554112
+              }
+            },
+            "volume_free_after_bytes": 98431037440,
+            "time_max_rss_bytes": 3528048640
+          },
+          "docket-receipts-selected": {
+            "sampled_peak_tree_rss_bytes": 30998528,
+            "min_volume_free_bytes": 93179060224,
+            "sampled_peak_workspace_bytes": 10768045914,
+            "sampled_peak_allocated_bytes": 10781126656,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.029567999998107553,
+            "before": {
+              "catalog_and_other": {
+                "files": 471,
+                "bytes": 10767944073,
+                "allocated_bytes": 10781011968
+              },
+              "total": {
+                "files": 471,
+                "bytes": 10767944073,
+                "allocated_bytes": 10781011968
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.01930937502766028,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 476,
+                "bytes": 10768045914,
+                "allocated_bytes": 10781126656
+              },
+              "total": {
+                "files": 476,
+                "bytes": 10768045914,
+                "allocated_bytes": 10781126656
+              }
+            },
+            "volume_free_after_bytes": 93178531840,
+            "time_max_rss_bytes": 29704192
+          },
+          "docket-receipts": {
+            "sampled_peak_tree_rss_bytes": 38174720,
+            "min_volume_free_bytes": 98414583808,
+            "sampled_peak_workspace_bytes": 5660472022,
+            "sampled_peak_allocated_bytes": 5777661952,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.009914125024806708,
+            "before": {
+              "catalog_and_other": {
+                "files": 142,
+                "bytes": 5544389681,
+                "allocated_bytes": 5661491200
+              },
+              "total": {
+                "files": 142,
+                "bytes": 5544389681,
+                "allocated_bytes": 5661491200
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.8333255830220878,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 192,
+                "bytes": 5660472022,
+                "allocated_bytes": 5777661952
+              },
+              "total": {
+                "files": 192,
+                "bytes": 5660472022,
+                "allocated_bytes": 5777661952
+              }
+            },
+            "volume_free_after_bytes": 98291286016,
+            "time_max_rss_bytes": 334741504
+          },
+          "docket-summary-export-selected": {
+            "sampled_peak_tree_rss_bytes": 31064064,
+            "min_volume_free_bytes": 93173964800,
+            "sampled_peak_workspace_bytes": 10768898668,
+            "sampled_peak_allocated_bytes": 10782056448,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.03079320804681629,
+            "before": {
+              "catalog_and_other": {
+                "files": 503,
+                "bytes": 10768794860,
+                "allocated_bytes": 10781941760
+              },
+              "total": {
+                "files": 503,
+                "bytes": 10768794860,
+                "allocated_bytes": 10781941760
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.018865332996938378,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 508,
+                "bytes": 10768898668,
+                "allocated_bytes": 10782056448
+              },
+              "total": {
+                "files": 508,
+                "bytes": 10768898668,
+                "allocated_bytes": 10782056448
+              }
+            },
+            "volume_free_after_bytes": 93172994048,
+            "time_max_rss_bytes": 30785536
+          },
+          "docket-summary-export": {
+            "sampled_peak_tree_rss_bytes": 30834688,
+            "min_volume_free_bytes": 93182849024,
+            "sampled_peak_workspace_bytes": 10767449194,
+            "sampled_peak_allocated_bytes": 10780467200,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.027059124957304448,
+            "before": {
+              "catalog_and_other": {
+                "files": 426,
+                "bytes": 10766568888,
+                "allocated_bytes": 10779537408
+              },
+              "total": {
+                "files": 426,
+                "bytes": 10766568888,
+                "allocated_bytes": 10779537408
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.21701841696631163,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 452,
+                "bytes": 10767449194,
+                "allocated_bytes": 10780467200
+              },
+              "total": {
+                "files": 452,
+                "bytes": 10767449194,
+                "allocated_bytes": 10780467200
+              }
+            },
+            "volume_free_after_bytes": 93164331008,
+            "time_max_rss_bytes": 66355200
+          },
+          "docket-summary-selected": {
+            "sampled_peak_tree_rss_bytes": 31014912,
+            "min_volume_free_bytes": 93176438784,
+            "sampled_peak_workspace_bytes": 10768486748,
+            "sampled_peak_allocated_bytes": 10781601792,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.030858082987833768,
+            "before": {
+              "catalog_and_other": {
+                "files": 487,
+                "bytes": 10768375620,
+                "allocated_bytes": 10781483008
+              },
+              "total": {
+                "files": 487,
+                "bytes": 10768375620,
+                "allocated_bytes": 10781483008
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.019111917004920542,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 492,
+                "bytes": 10768486748,
+                "allocated_bytes": 10781601792
+              },
+              "total": {
+                "files": 492,
+                "bytes": 10768486748,
+                "allocated_bytes": 10781601792
+              }
+            },
+            "volume_free_after_bytes": 93175418880,
+            "time_max_rss_bytes": 31047680
+          },
+          "docket-summary": {
+            "sampled_peak_tree_rss_bytes": 1060470784,
+            "min_volume_free_bytes": 95453814784,
+            "sampled_peak_workspace_bytes": 8295304303,
+            "sampled_peak_allocated_bytes": 8459497472,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.09084754099603742,
+            "before": {
+              "catalog_and_other": {
+                "files": 317,
+                "bytes": 8263672832,
+                "allocated_bytes": 8459231232
+              },
+              "total": {
+                "files": 317,
+                "bytes": 8263672832,
+                "allocated_bytes": 8459231232
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 19.600337417039555,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 392,
+                "bytes": 8295304303,
+                "allocated_bytes": 8411279360
+              },
+              "total": {
+                "files": 392,
+                "bytes": 8295304303,
+                "allocated_bytes": 8411279360
+              }
+            },
+            "volume_free_after_bytes": 95469096960,
+            "time_max_rss_bytes": 1032847360
+          },
+          "dockets-selected": {
+            "sampled_peak_tree_rss_bytes": 30932992,
+            "min_volume_free_bytes": 93180108800,
+            "sampled_peak_workspace_bytes": 10767846946,
+            "sampled_peak_allocated_bytes": 10780905472,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.029285375028848648,
+            "before": {
+              "catalog_and_other": {
+                "files": 463,
+                "bytes": 10767746774,
+                "allocated_bytes": 10780790784
+              },
+              "total": {
+                "files": 463,
+                "bytes": 10767746774,
+                "allocated_bytes": 10780790784
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.018884167016949505,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 468,
+                "bytes": 10767846946,
+                "allocated_bytes": 10780905472
+              },
+              "total": {
+                "files": 468,
+                "bytes": 10767846946,
+                "allocated_bytes": 10780905472
+              }
+            },
+            "volume_free_after_bytes": 93179920384,
+            "time_max_rss_bytes": 29949952
+          },
+          "dockets": {
+            "sampled_peak_tree_rss_bytes": 38027264,
+            "min_volume_free_bytes": 98430959616,
+            "sampled_peak_workspace_bytes": 5544360299,
+            "sampled_peak_allocated_bytes": 5661450240,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.0063976250239647925,
+            "before": {
+              "catalog_and_other": {
+                "files": 89,
+                "bytes": 5513580403,
+                "allocated_bytes": 5630582784
+              },
+              "total": {
+                "files": 89,
+                "bytes": 5513580403,
+                "allocated_bytes": 5630582784
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.4616847919533029,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 138,
+                "bytes": 5544360299,
+                "allocated_bytes": 5661450240
+              },
+              "total": {
+                "files": 138,
+                "bytes": 5544360299,
+                "allocated_bytes": 5661450240
+              }
+            },
+            "volume_free_after_bytes": 98414690304,
+            "time_max_rss_bytes": 175489024
+          },
+          "oracle": {
+            "sampled_peak_tree_rss_bytes": 23380492288,
+            "min_volume_free_bytes": 50087911424,
+            "sampled_peak_workspace_bytes": 43040295176,
+            "sampled_peak_allocated_bytes": 43171975168,
+            "sampled_peak_scratch_bytes": 32271175008,
+            "inventory_sampling_seconds": 2.085880954924505,
+            "before": {
+              "catalog_and_other": {
+                "files": 511,
+                "bytes": 10769001265,
+                "allocated_bytes": 10782167040
+              },
+              "total": {
+                "files": 511,
+                "bytes": 10769001265,
+                "allocated_bytes": 10782167040
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 104.3360687920358,
+            "exit_code": 1,
+            "after": {
+              "catalog_and_other": {
+                "files": 517,
+                "bytes": 10769124689,
+                "allocated_bytes": 10770124800
+              },
+              "total": {
+                "files": 517,
+                "bytes": 10769124689,
+                "allocated_bytes": 10770124800
+              }
+            },
+            "volume_free_after_bytes": 83985440768,
+            "time_max_rss_bytes": 23567630336
+          },
+          "seal": {
+            "sampled_peak_tree_rss_bytes": 38305792,
+            "min_volume_free_bytes": 98291150848,
+            "sampled_peak_workspace_bytes": 5660617307,
+            "sampled_peak_allocated_bytes": 5777854464,
+            "sampled_peak_scratch_bytes": 0,
+            "inventory_sampling_seconds": 0.013061083038337529,
+            "before": {
+              "catalog_and_other": {
+                "files": 196,
+                "bytes": 5660513351,
+                "allocated_bytes": 5777715200
+              },
+              "total": {
+                "files": 196,
+                "bytes": 5660513351,
+                "allocated_bytes": 5777715200
+              }
+            },
+            "stop_reason": null,
+            "elapsed_seconds": 0.08928637497592717,
+            "exit_code": 0,
+            "after": {
+              "catalog_and_other": {
+                "files": 214,
+                "bytes": 5660617307,
+                "allocated_bytes": 5777854464
+              },
+              "total": {
+                "files": 214,
+                "bytes": 5660617307,
+                "allocated_bytes": 5777854464
+              }
+            },
+            "volume_free_after_bytes": 98290053120,
+            "time_max_rss_bytes": 42532864
+          }
+        },
+        "failure": "RuntimeError('oracle failed: see retained logs and metrics')",
+        "deadline_seconds": 1800,
+        "input_bytes": 2744544515,
+        "elapsed_seconds": 239.29428170900792,
+        "retained_workspace": {
+          "catalog_and_other": {
+            "files": 2,
+            "bytes": 32768,
+            "allocated_bytes": 32768
+          },
+          "total": {
+            "files": 366,
+            "bytes": 10584272987,
+            "allocated_bytes": 10584891392
+          },
+          "admitted_or_prepared_data": {
+            "files": 5,
+            "bytes": 5216057314,
+            "allocated_bytes": 5216071680
+          },
+          "object_metadata": {
+            "files": 33,
+            "bytes": 245407,
+            "allocated_bytes": 311296
+          },
+          "native_data": {
+            "files": 52,
+            "bytes": 5366681955,
+            "allocated_bytes": 5366784000
+          },
+          "lifecycle": {
+            "files": 274,
+            "bytes": 1255543,
+            "allocated_bytes": 1691648
+          }
+        },
+        "retained_run": {
+          "catalog_and_other": {
+            "files": 505,
+            "bytes": 10586909684,
+            "allocated_bytes": 10587881472
+          },
+          "total": {
+            "files": 505,
+            "bytes": 10586909684,
+            "allocated_bytes": 10587881472
+          }
+        },
+        "retained_amplification_vs_inputs": 3.857437773786664,
+        "sampled_peak_tree_rss_bytes": 23380492288,
+        "sampled_peak_workspace_bytes": 43040295176,
+        "sampled_peak_allocated_bytes": 43171975168,
+        "sampled_peak_scratch_bytes": 32271175008,
+        "time_max_rss_bytes": 23567630336,
+        "peak_additional_logical_bytes": 42857967927,
+        "peak_additional_allocated_bytes": 42989608960,
+        "min_volume_free_bytes": 50087911424,
+        "inventory_sampling_seconds": 2.8378799910424277
+      }
+    ],
+    "full_local_performance_acceptance_passed": false,
+    "failure": "RuntimeError('run 1 failed; retained; remaining repetitions not run')",
+    "retained_series": {
+      "catalog_and_other": {
+        "files": 520,
+        "bytes": 10769246777,
+        "allocated_bytes": 10770251776
+      },
+      "total": {
+        "files": 520,
+        "bytes": 10769246777,
+        "allocated_bytes": 10770251776
+      }
+    },
+    "volume_free_after_bytes": 83984789504
+  },
+  "failure_stderr": "{\"check\": \"i_comments admitted byte identity\", \"seconds\": 1.6550390829797834, \"path\": \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/3f64f8b83c1f40d69425cf9bba9ed390/input.parquet\", \"bytes\": 2670490619, \"blake3\": \"bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875\"}\n{\"check\": \"i_dockets admitted byte identity\", \"seconds\": 0.009749374992679805, \"path\": \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/dockets/e46f7ede00e2443a8b8b69550b7ec09b/input.parquet\", \"bytes\": 15480748, \"blake3\": \"774d25ad36af090c40072f2a6a45c924ebc41309ffe4e6738753591c694366aa\"}\n{\"check\": \"i_docket-receipts admitted byte identity\", \"seconds\": 0.03184112499002367, \"path\": \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-receipts/c9e810eb7281462bb0dd36ef399e7685/input.parquet\", \"bytes\": 58573148, \"blake3\": \"7b22adab9da0e993d2d2f831afe10be5a783cb881a796f0b0ca37c675af3d7ed\"}\n{\"check\": \"n_comments native membership/types\", \"seconds\": 0.06513825000729412, \"rows\": 10000000, \"files\": 17}\n{\"check\": \"n_dockets native membership/types\", \"seconds\": 0.00399729103082791, \"rows\": 279719, \"files\": 1}\n{\"check\": \"n_docket-receipts native membership/types\", \"seconds\": 0.007934666995424777, \"rows\": 279720, \"files\": 2}\n{\"check\": \"n_comments-dockets native membership/types\", \"seconds\": 0.0776407920056954, \"rows\": 10000000, \"files\": 24}\n{\"check\": \"n_docket-summary native membership/types\", \"seconds\": 0.0029627920011989772, \"rows\": 43858, \"files\": 1}\n{\"check\": \"all shaped Comment values\", \"seconds\": 43.76467954198597}\n{\"check\": \"dockets complete values including nested evidence\", \"seconds\": 0.06517158303176984}\n{\"check\": \"docket-receipts complete values including nested evidence\", \"seconds\": 0.19207079196348786}\nTraceback (most recent call last):\n  File \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py\", line 359, in <module>\n    main()\n  File \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py\", line 352, in main\n    result = oracle.run_checks()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py\", line 297, in run_checks\n    self.equal(\"expected_join\", \"n_comments-dockets\", TUPLE + JOIN_COLUMNS, \"exact native join\")\n  File \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py\", line 230, in equal\n    exact_equal(self.connection, left, right, names, label)\n  File \"/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/frozen/oracle.py\", line 100, in exact_equal\n    different = connection.execute(\n                ^^^^^^^^^^^^^^^^^^^\n_duckdb.OutOfMemoryException: Out of Memory Error: failed to offload data block of size 96.0 KiB (31.9 GiB/32.0 GiB used).\nThis limit was set by the 'max_temp_directory_size' setting.\nBy default, this setting utilizes the available disk space on the drive where the 'temp_directory' is located.\nYou can adjust this setting, by using (for example) PRAGMA max_temp_directory_size='10GiB'\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads\n",
+  "layout_observation": "export-layout-observation-20261010.json",
+  "scope": "Engine processing/evidence/summary, both immutable exports and selected-pin lookups completed. Independent exact oracle passed shaped Comments and nested Dockets/receipt values, then exhausted its unchanged 32 GiB scratch limit comparing complete native join values. No mismatch was reported before that resource failure. Remaining oracle checks and repetitions did not run; complete performance acceptance remains unqualified."
+}
