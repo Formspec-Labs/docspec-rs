@@ -1,0 +1,329 @@
+{
+  "diagnostic_only": true,
+  "full_acceptance_passed": false,
+  "source_directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/oracle-threads4-20261010T104732",
+  "environment": {
+    "diagnostic_only": true,
+    "baseline": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824",
+    "source_commit": "97d0e75101aa3d2b5c4763f246f82cf6c00639e3",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "python": "3.12.9 (main, Mar 29 2025, 16:43:11) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "libraries": {
+      "duckdb": "1.4.4",
+      "pyarrow": "23.0.0",
+      "pyiceberg": "0.12.0",
+      "psutil": "7.0.0",
+      "blake3": "1.0.11"
+    },
+    "load_average": [
+      4.9619140625,
+      6.42919921875,
+      7.23828125
+    ],
+    "volume_free_bytes": 88612593664,
+    "limits": {
+      "compute_threads": 12,
+      "memory_bytes": 25769803776,
+      "scratch_bytes": 34359738368,
+      "batch_rows": 4096,
+      "max_batch_bytes": 805306368,
+      "max_metadata_bytes": 33554432
+    },
+    "duckdb_memory_bytes": 19327352832,
+    "duckdb_threads": 4,
+    "deadline_seconds": 600,
+    "source_retained": {
+      "catalog_and_other": {
+        "files": 505,
+        "bytes": 10586909684,
+        "allocated_bytes": 10587881472
+      },
+      "total": {
+        "files": 505,
+        "bytes": 10586909684,
+        "allocated_bytes": 10587881472
+      }
+    },
+    "digests": {
+      "monitor.py": "8bb7b248c3ee20df009a844092fbdc2612aa2cb08dc58695fa7b2b318a237cc8",
+      "oracle-original.py": "aa140f1bbbc31c9e9ef9bf591f6db33e301a0605273dbf153e2867b64b4b4e81",
+      "workload.py": "c44f2fedf9d1990d0d61db3e391aa3c80fc2b6f20282ee5c9aab05ba0f9bd0a3",
+      "plan.md": "0c079ee9acb1711fbe4f3724144f791b34ef8225ff7b58c345342c11adccf400",
+      "oracle.py": "5c66920b3bd4c27d116019590462f5930f49cafe47bfab9ff64b5f770968d1c9",
+      "driver.py": "72159ff07128965f1731123ae1ec290008592df48af97effc5ef46d1fba3339d",
+      "integrity.py": "6ebbbc347173d0e70576d01acabb8e3fcd9f974f9ff487b35ff8ab84086a964b"
+    },
+    "source_difference": "Only SET threads=12 changed to SET threads=4 in the captured oracle.",
+    "cache": "Not cleared; retained completed outputs reused; historical baseline, shared workstation.",
+    "background": "No observed Cargo, rustc, pytest or other Comments benchmark before collection; read-only agents and normal desktop/background services may run.",
+    "disk_scope": "Diagnostic files and scratch only; prior immutable output remains in place and is recorded separately. Monitor does not traverse workspace symlink."
+  },
+  "result": {
+    "diagnostic_only": true,
+    "passed": true,
+    "acceptance_passed": false,
+    "oracle": {
+      "exact_readback_passed": true,
+      "comment_rows": 10000000,
+      "matched_rows": 9988138,
+      "unmatched_rows": 11862,
+      "checks": [
+        {
+          "check": "i_comments admitted byte identity",
+          "seconds": 1.3611270830151625,
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/3f64f8b83c1f40d69425cf9bba9ed390/input.parquet",
+          "bytes": 2670490619,
+          "blake3": "bf8027bc72c270b958c1a51e96b1f8d0d950c2a1ea13cd52fdaa9d5d77fae875"
+        },
+        {
+          "check": "i_dockets admitted byte identity",
+          "seconds": 0.008776291972026229,
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/dockets/e46f7ede00e2443a8b8b69550b7ec09b/input.parquet",
+          "bytes": 15480748,
+          "blake3": "774d25ad36af090c40072f2a6a45c924ebc41309ffe4e6738753591c694366aa"
+        },
+        {
+          "check": "i_docket-receipts admitted byte identity",
+          "seconds": 0.029958290979266167,
+          "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-receipts/c9e810eb7281462bb0dd36ef399e7685/input.parquet",
+          "bytes": 58573148,
+          "blake3": "7b22adab9da0e993d2d2f831afe10be5a783cb881a796f0b0ca37c675af3d7ed"
+        },
+        {
+          "check": "n_comments native membership/types",
+          "seconds": 0.06113570899469778,
+          "rows": 10000000,
+          "files": 17
+        },
+        {
+          "check": "n_dockets native membership/types",
+          "seconds": 0.003428374999202788,
+          "rows": 279719,
+          "files": 1
+        },
+        {
+          "check": "n_docket-receipts native membership/types",
+          "seconds": 0.004969875037204474,
+          "rows": 279720,
+          "files": 2
+        },
+        {
+          "check": "n_comments-dockets native membership/types",
+          "seconds": 0.05966958304634318,
+          "rows": 10000000,
+          "files": 24
+        },
+        {
+          "check": "n_docket-summary native membership/types",
+          "seconds": 0.0030073749949224293,
+          "rows": 43858,
+          "files": 1
+        },
+        {
+          "check": "all shaped Comment values",
+          "seconds": 40.93093879200751
+        },
+        {
+          "check": "dockets complete values including nested evidence",
+          "seconds": 0.0885260840295814
+        },
+        {
+          "check": "docket-receipts complete values including nested evidence",
+          "seconds": 0.27233050001086667
+        },
+        {
+          "check": "exact native join",
+          "seconds": 60.26695166697027
+        },
+        {
+          "check": "join_evidence native membership/types",
+          "seconds": 0.020462916989345104,
+          "rows": 10000000,
+          "files": 4
+        },
+        {
+          "check": "complete join contributor membership",
+          "seconds": 2.4919490419561043
+        },
+        {
+          "check": "exact docket summaries",
+          "seconds": 1.5514733329764567
+        },
+        {
+          "check": "summary_evidence native membership/types",
+          "seconds": 0.013758875022176653,
+          "rows": 10000000,
+          "files": 3
+        },
+        {
+          "check": "complete summary contributor membership",
+          "seconds": 0.869841167004779
+        },
+        {
+          "check": "comments-dockets complete flat output",
+          "seconds": 51.9177702080342
+        },
+        {
+          "check": "docket-summary complete flat output",
+          "seconds": 0.011285583022981882
+        }
+      ],
+      "native_tables": {
+        "n_comments": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00000.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00001.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00002.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00003.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00004.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00005.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00006.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00007.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00008.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00009.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00010.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00011.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00012.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00013.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00014.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00015.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments/379a787b081e456eb910498e8fec43ae/data/ccd0749e-dc54-4343-9c80-86a52ba40568-00016.parquet"
+          ],
+          "rows": 10000000,
+          "snapshot": 9047701134691864598,
+          "schema_id": 0
+        },
+        "n_dockets": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/dockets/0218445239ac4132bca0464a25374a65/data/9caf888c-b61d-47f4-9e1d-765160ef6f8a-00000.parquet"
+          ],
+          "rows": 279719,
+          "snapshot": 180374303191768393,
+          "schema_id": 0
+        },
+        "n_docket-receipts": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-receipts/e23699d06e7c41dd8261a2b3084412ad/data/f8066fcf-504f-44f3-bb77-d24cfe956bdc-00000.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-receipts/e23699d06e7c41dd8261a2b3084412ad/data/f8066fcf-504f-44f3-bb77-d24cfe956bdc-00001.parquet"
+          ],
+          "rows": 279720,
+          "snapshot": 7147343523976721839,
+          "schema_id": 0
+        },
+        "n_comments-dockets": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00000.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00001.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00002.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00003.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00004.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00005.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00006.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00007.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00008.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00009.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00010.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00011.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00012.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00013.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00014.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00015.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00016.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00017.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00018.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00019.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00020.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00021.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00022.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/21084d13dc604356aedfa00b7fb0f9cf/data/8eccbe29-e01a-4a42-b3de-0d489a4a84dd-00023.parquet"
+          ],
+          "rows": 10000000,
+          "snapshot": 6521504851554749287,
+          "schema_id": 0
+        },
+        "n_docket-summary": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-summary/f5997e7a319f4ab7a66013165723b441/data/f32ad040-6eea-4907-a60c-8f2065904633-00000.parquet"
+          ],
+          "rows": 43858,
+          "snapshot": 1493286364361649799,
+          "schema_id": 0
+        },
+        "join_evidence": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/62a3b49946d441c99381f2ef01e08b39/data/c6d1d5bc-dfab-47fa-a738-190903100f22-00000.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/62a3b49946d441c99381f2ef01e08b39/data/c6d1d5bc-dfab-47fa-a738-190903100f22-00001.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/62a3b49946d441c99381f2ef01e08b39/data/c6d1d5bc-dfab-47fa-a738-190903100f22-00002.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/comments-dockets/62a3b49946d441c99381f2ef01e08b39/data/c6d1d5bc-dfab-47fa-a738-190903100f22-00003.parquet"
+          ],
+          "rows": 10000000,
+          "snapshot": 2424859083583800893,
+          "schema_id": 0
+        },
+        "summary_evidence": {
+          "files": [
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-summary/8551c2d4a5a24717bccb7189de13bc82/data/9e068e93-5e89-4445-8919-8c06f30c53d5-00000.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-summary/8551c2d4a5a24717bccb7189de13bc82/data/9e068e93-5e89-4445-8919-8c06f30c53d5-00001.parquet",
+            "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-e2e-export-layout-20261010/20261010T103539-acceptance-13ca1824/run-01/workspace/objects/docket-summary/8551c2d4a5a24717bccb7189de13bc82/data/9e068e93-5e89-4445-8919-8c06f30c53d5-00002.parquet"
+          ],
+          "rows": 10000000,
+          "snapshot": 8570633462161674574,
+          "schema_id": 0
+        }
+      },
+      "evidence_scope": "whole-input Comments provenance; native nested docket receipts bound by generation; exact join and summary contributor relations; no per-docket receipt decoding or unavailable source-body claim"
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 23345152000,
+      "min_volume_free_bytes": 55584534528,
+      "sampled_peak_workspace_bytes": 32682207090,
+      "sampled_peak_allocated_bytes": 32780840960,
+      "sampled_peak_scratch_bytes": 32681856400,
+      "inventory_sampling_seconds": 1.3098000438185409,
+      "before": {
+        "catalog_and_other": {
+          "files": 27,
+          "bytes": 331569,
+          "allocated_bytes": 393216
+        },
+        "total": {
+          "files": 27,
+          "bytes": 331569,
+          "allocated_bytes": 393216
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 164.19146266701864,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 33,
+          "bytes": 382741,
+          "allocated_bytes": 454656
+        },
+        "total": {
+          "files": 33,
+          "bytes": 382741,
+          "allocated_bytes": 454656
+        }
+      },
+      "volume_free_after_bytes": 88360591360,
+      "time_max_rss_bytes": 23433527296
+    },
+    "retained_diagnostic": {
+      "catalog_and_other": {
+        "files": 35,
+        "bytes": 387701,
+        "allocated_bytes": 462848
+      },
+      "total": {
+        "files": 35,
+        "bytes": 387701,
+        "allocated_bytes": 462848
+      }
+    }
+  },
+  "retained_engine_scratch_files": 0,
+  "retained_engine_scratch_bytes": 0,
+  "interpretation": "All exact oracle checks passed on retained pins at four active threads; catalog selection remains historical full-run evidence. No fresh-run or isolated-speedup claim."
+}

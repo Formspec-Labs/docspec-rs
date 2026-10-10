@@ -228,7 +228,7 @@ def environment(capture, args):
         "background_load_note": args.background_load_note,
         "background_processes": subprocess.check_output(
             ["ps", "-axo", "pid,ppid,pcpu,rss,comm"], text=True),
-        "limits": LIMITS, "oracle_memory_bytes": 18 << 30,
+        "limits": LIMITS, "oracle_memory_bytes": 18 << 30, "oracle_threads": 4,
         "retained_bytes_per_run_allowance": args.retained_bytes_per_run,
         "retained_allowance_is_estimate": True,
         "sampling": {"rss_free_seconds": 1, "disk_seconds": 5,

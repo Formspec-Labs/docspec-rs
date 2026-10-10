@@ -116,7 +116,7 @@ class Oracle:
         scratch = run / "oracle-scratch"
         scratch.mkdir(exist_ok=False)
         self.connection.execute("SET memory_limit='18GiB'")
-        self.connection.execute("SET threads=12")
+        self.connection.execute("SET threads=4")
         self.connection.execute("SET max_temp_directory_size='32GiB'")
         self.connection.execute("SET preserve_insertion_order=false")
         self.connection.execute(f"SET temp_directory={literal(scratch)}")

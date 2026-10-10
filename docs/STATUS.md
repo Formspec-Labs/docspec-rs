@@ -11,8 +11,10 @@ lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and complete Q1–Q8 and
 10-million-Comments qualification. Native row statistics now let the full
 Comments-to-Dockets join complete, and larger Parquet groups now let both flat
-exports finish. The next full attempt stopped in the independent exact oracle at
-its 32 GiB scratch limit; the 1,800-second complete-path target remains unqualified.
+exports finish. The full attempt stopped at the independent oracle’s 32 GiB
+scratch limit; a four-thread diagnostic now completes every exact check on those
+retained outputs. Three fresh full runs and the 1,800-second complete-path target
+remain unqualified.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
@@ -107,6 +109,17 @@ logical disk about 42.86 GB including temporary work. This clears the export
 blocker, not the complete acceptance gate. The next investigation targets a more
 efficient exact oracle over retained completed outputs, preserving all checks and
 resource limits.
+
+That [retained-output diagnostic](../experiments/comments-e2e/oracle-threads4-20261010.json)
+passed every exact check in 164.19 seconds with only DuckDB threads reduced from
+12 to 4. Sampled aggregate RSS was 21.74 GiB and scratch 30.44 GiB, within unchanged
+limits. It verified all joined values, contributor relations, summaries and both
+flat outputs, including 9,988,138 matched and 11,862 unmatched Comments. Adopt the
+smaller active oracle count; retain 12 engine threads. The [independent review](reviews/oracle-efficiency-design-review.md)
+finds no correctness blocker. No new comparison algorithm is needed. This is a
+complete oracle result over retained pins; catalog selection remains historical
+evidence, and renewed fresh-run acceptance is pending. The [synthetic harness](reviews/oracle-threads4-check-20261010.log)
+and [complete repository gate](reviews/oracle-threads4-full-check-20261010.log) pass.
 
 ## Receipt changes without value recomputation
 

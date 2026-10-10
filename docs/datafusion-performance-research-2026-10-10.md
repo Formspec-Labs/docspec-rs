@@ -162,5 +162,24 @@ plus a required DataFusion correctness guard now complete the previously failing
 join; the next full attempt reached a flat-export footer-accounting refusal.
 That observation promoted row-group layout ahead of further scan work. The
 [frozen layout comparison](../experiments/comments-e2e/export-layout-plan.md)
-keeps the same reader, workload and resource limits. No complete-path performance
-acceptance follows from the research or the partial improvement.
+keeps the same reader, workload and resource limits. The implemented flat writer
+now finishes the 10-million-row export in 32.67 seconds, with 10 row groups and
+a 30,192-byte footer. Processing, evidence, summaries and both exports finished
+in about 135 seconds on the shared workstation. These are retained observations,
+not an isolated speedup comparison.
+
+The next failure moved to the independent exact checker: DuckDB exhausted its
+32 GiB spill allowance while grouping complete joined values. The full attempt
+still failed. [DuckDB/Arrow follow-up research](reviews/oracle-efficiency-research.md)
+prioritizes fewer active threads, then exact dictionary encoding of repeated
+contributor paths if needed. Both use maintained engine behavior; neither changes
+the required equality checks. The [frozen diagnostic](../experiments/comments-e2e/oracle-efficiency-plan.md)
+reuses completed artifacts instead of repeating the engine. Native projection
+and cardinality scan elimination remain candidates, not implemented improvements.
+No complete-path performance acceptance follows from these partial results.
+
+The complete retained-output oracle subsequently passed at four threads in
+164.19 seconds, with sampled RSS 21.74 GiB and scratch 30.44 GiB. Keep that smallest
+setting change and defer dictionary/keyed alternatives. Exact checks are intact;
+this does not qualify fresh-run performance. See the
+[diagnostic receipt](../experiments/comments-e2e/oracle-threads4-20261010.json).

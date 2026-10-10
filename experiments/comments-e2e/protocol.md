@@ -205,3 +205,20 @@ python experiments/comments-e2e/run.py run \
 Use `--mode pilot` only for one identical full-workload diagnostic. It cannot pass
 acceptance. `test_workload.py` contains synthetic harness checks; those do not
 qualify the corpus or establish resource/performance results.
+
+## Oracle thread correction before renewed collection
+
+The first full `e40be01` attempt completed engine work and exports but failed
+independent equality at DuckDB's 32 GiB spill cap. A separately frozen diagnostic
+reran the complete oracle over those retained outputs, changing only active
+DuckDB threads from 12 to **4**. All exact checks completed in 164.19 seconds,
+with sampled RSS 21.74 GiB and scratch 30.44 GiB. See
+[the diagnostic and limits](oracle-efficiency-plan.md) and
+[its retained receipt](oracle-threads4-20261010.json).
+
+Renewed collection uses **12 engine compute threads and 4 oracle threads**.
+The 12-thread ceiling, 18 GiB DuckDB memory, 24 GiB aggregate RSS, 32 GiB combined
+scratch, full values/evidence checks, 1,800-second deadline and three fresh runs
+remain unchanged. Record the active oracle setting explicitly. The old failed
+record remains failed; the retained-output diagnostic does not supply any fresh
+acceptance run. No dictionary or keyed-comparison algorithm is introduced.

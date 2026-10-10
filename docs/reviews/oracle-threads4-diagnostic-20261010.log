@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/tmp/docspec-oracle-threads-diagnostic.py", line 52, in <module>
+    'digests': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in frozen.iterdir()},
+                                       ^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.pyenv/versions/3.12.9/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.pyenv/versions/3.12.9/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IsADirectoryError: [Errno 21] Is a directory: '/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/oracle-threads4-20261010T104717/frozen/__pycache__'

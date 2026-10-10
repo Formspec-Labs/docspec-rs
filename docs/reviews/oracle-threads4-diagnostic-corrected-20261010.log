@@ -1,0 +1,8 @@
+/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/oracle-threads4-20261010T104732
+{"stage": "oracle", "seconds": 30.49829491705168, "tree_rss_bytes": 17995497472, "volume_free_bytes": 69657595904}
+{"stage": "oracle", "seconds": 60.977304917003494, "tree_rss_bytes": 22653255680, "volume_free_bytes": 70305185792}
+{"stage": "oracle", "seconds": 91.47374725004192, "tree_rss_bytes": 21005516800, "volume_free_bytes": 57733095424}
+{"stage": "oracle", "seconds": 121.96468933403958, "tree_rss_bytes": 21855748096, "volume_free_bytes": 77854314496}
+{"stage": "oracle", "seconds": 152.53173370903824, "tree_rss_bytes": 21751136256, "volume_free_bytes": 64219627520}
+{"arm": "oracle", "sampled_peak_tree_rss_bytes": 23345152000, "min_volume_free_bytes": 55584534528, "sampled_peak_workspace_bytes": 32682207090, "sampled_peak_allocated_bytes": 32780840960, "sampled_peak_scratch_bytes": 32681856400, "inventory_sampling_seconds": 1.3098000438185409, "before": {"catalog_and_other": {"files": 27, "bytes": 331569, "allocated_bytes": 393216}, "total": {"files": 27, "bytes": 331569, "allocated_bytes": 393216}}, "stop_reason": null, "elapsed_seconds": 164.19146266701864, "exit_code": 0, "after": {"catalog_and_other": {"files": 33, "bytes": 382741, "allocated_bytes": 454656}, "total": {"files": 33, "bytes": 382741, "allocated_bytes": 454656}}, "volume_free_after_bytes": 88360591360, "time_max_rss_bytes": 23433527296}
+{"diagnostic": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/oracle-threads4-20261010T104732", "passed": true, "failure": null}
