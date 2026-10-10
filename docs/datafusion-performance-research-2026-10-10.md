@@ -153,3 +153,14 @@ Supporting independent research: [join diagnosis](reviews/comments-join-memory-d
 [reader/writer investigation](reviews/native-reader-efficiency-research.md).
 This research used official documentation, tagged source and retained evidence;
 it did not rerun the corpus, change Rust code or claim a new performance result.
+
+## Implementation follow-up
+
+The initial research above is retained as written. Subsequent qualification is
+tracked in [STATUS](STATUS.md#native-query-planning). Native physical statistics
+plus a required DataFusion correctness guard now complete the previously failing
+join; the next full attempt reached a flat-export footer-accounting refusal.
+That observation promoted row-group layout ahead of further scan work. The
+[frozen layout comparison](../experiments/comments-e2e/export-layout-plan.md)
+keeps the same reader, workload and resource limits. No complete-path performance
+acceptance follows from the research or the partial improvement.

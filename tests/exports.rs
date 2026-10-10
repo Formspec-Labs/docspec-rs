@@ -389,7 +389,7 @@ async fn primitive_exports_preserve_types_values_nulls_and_authorized_column_ord
 }
 
 #[tokio::test]
-async fn flat_export_footer_limit_preserves_prior_selection_and_can_resume() {
+async fn small_read_batches_export_exact_data_with_bounded_footer() {
     let root = tempfile::tempdir().unwrap();
     let rows = (0..256_i64)
         .map(|value| {
@@ -426,12 +426,93 @@ async fn flat_export_footer_limit_preserves_prior_selection_and_can_resume() {
     let first = engine.export(&request(&release, "first")).await.unwrap();
     drop(engine);
 
-    // Many tiny output row groups stress footer growth without a large payload.
-    // The source was created with larger groups and retains its exact identity.
+    // One-row reader batches must share output groups instead of growing the footer.
+    // The source retains its exact identity under the smaller read allowance.
     let engine = Engine::open(
         root.path().join("workspace"),
         Limits {
             batch_rows: 1,
+            max_metadata_bytes: 256 << 10,
+            ..limits()
+        },
+    )
+    .await
+    .unwrap();
+    let mut spec = request(&release, "bounded-footer");
+    spec.expected = Some(first.id.clone());
+    let pin = engine.export(&spec).await.unwrap();
+    let footer =
+        ParquetRecordBatchReaderBuilder::try_new(File::open(&pin.object.path).unwrap()).unwrap();
+    assert_eq!(footer.metadata().num_row_groups(), 1);
+    assert_eq!(
+        footer.metadata().file_metadata().num_rows(),
+        rows.len() as i64
+    );
+    assert_eq!(engine.export(&spec).await.unwrap(), pin);
+    let mut expected = rows
+        .into_iter()
+        .map(|(id, text, _)| (id, text))
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(independent_rows(&pin), expected);
+    assert_eq!(
+        engine
+            .latest_export(&spec.dataset, &spec.channel)
+            .await
+            .unwrap(),
+        pin
+    );
+}
+
+#[tokio::test]
+async fn memory_driven_footer_limit_preserves_prior_selection_and_can_resume() {
+    let root = tempfile::tempdir().unwrap();
+    // Distinct eight-KiB strings fill the writer estimate even with dictionary encoding.
+    // The fixture stays modest while producing enough memory-driven groups to refuse.
+    let text = "abcdefgh".repeat(1024);
+    let rows = (0..1024_i64)
+        .map(|value| {
+            (
+                Some(value),
+                Some(format!("{value}:{text}")),
+                "private-canary".into(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let source = write_input(&root.path().join("footer-input.parquet"), &rows, false);
+    let engine = Engine::open(
+        root.path().join("workspace"),
+        Limits {
+            // Initial input slices may retain the complete eight-MiB Arrow buffers.
+            // Small source groups also keep later one-row reads below 32 KiB.
+            batch_rows: 1,
+            max_batch_bytes: 16 << 20,
+            ..limits()
+        },
+    )
+    .await
+    .unwrap();
+    let release = engine
+        .run(&RunSpec {
+            dataset: id("footer"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+    let first = engine.export(&request(&release, "first")).await.unwrap();
+    drop(engine);
+
+    let engine = Engine::open(
+        root.path().join("workspace"),
+        Limits {
+            batch_rows: 1,
+            max_batch_bytes: 32 << 10,
             max_metadata_bytes: 256 << 10,
             ..limits()
         },

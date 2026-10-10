@@ -427,14 +427,12 @@ impl Engine {
         let path = directory.join("export.parquet");
         let initial_path = path.clone();
         let output_schema = schema.clone();
-        let rows_per_group = budget.limits.batch_rows;
         let mut writer = budget
             .blocking(move || {
                 let _memory = memory;
                 std::fs::create_dir_all(&directory)?;
                 let output = HashingFile::create(&initial_path)?;
                 let properties = WriterProperties::builder()
-                    .set_max_row_group_row_count(Some(rows_per_group))
                     .set_compression(Compression::ZSTD(ZstdLevel::default()))
                     .set_statistics_enabled(EnabledStatistics::None)
                     .set_offset_index_disabled(true)
@@ -476,7 +474,11 @@ impl Engine {
                             ));
                         }
                         writer.0.write(&batch)?;
-                        writer.0.flush()?;
+                        // Reader batch size does not determine physical row groups.
+                        // Flush when estimated writer memory reaches the batch allowance.
+                        if writer.0.memory_size() >= limits.max_batch_bytes {
+                            writer.0.flush()?;
+                        }
                         if writer
                             .0
                             .flushed_row_groups()
@@ -486,7 +488,7 @@ impl Engine {
                         {
                             return Err(Error::refusal(
                                 "metadata_capacity",
-                                "flat export footer exceeds the declared metadata allowance",
+                                "estimated flat export footer exceeds the declared metadata allowance",
                             ));
                         }
                         Ok(writer)
@@ -501,9 +503,22 @@ impl Engine {
             ));
         }
         let owner = spec.dataset.clone();
+        let max_metadata_bytes = budget.limits.max_metadata_bytes;
         let object = budget
             .blocking(move || {
                 let (mut output, _memory) = writer;
+                // Finish flushes the pending group and consumes the accumulated records.
+                // Admit its footer before that boundary, including the final partial group.
+                let groups = output
+                    .flushed_row_groups()
+                    .len()
+                    .saturating_add(usize::from(output.in_progress_rows() != 0));
+                if groups.saturating_mul(footer_group_bytes) > max_metadata_bytes {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "estimated flat export footer exceeds the declared metadata allowance",
+                    ));
+                }
                 output.finish()?;
                 output.inner().finish(&owner, &path)
             })

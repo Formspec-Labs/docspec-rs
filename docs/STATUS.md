@@ -64,6 +64,28 @@ The original hash-build failure is cleared for these inputs, while complete-path
 acceptance remains unqualified. The next investigation targets output row-group
 layout under the unchanged memory and metadata allowances.
 
+## Flat-export row-group layout
+
+The export writer now separates reader batches from Parquet row groups. It keeps
+ArrowWriter's maintained row cap and flushes when estimated writer memory reaches
+the existing batch allowance. The writer reservation, conservative accumulated
+footer check and independent serialized-footer check remain unchanged. The final
+pending group is charged before `finish`, which consumes the writer's completed
+group metadata. No new tuning option or writer implementation is added.
+
+The [design review](reviews/export-layout-design-review.md) ties the earlier
+refusal to a deterministic group-count estimate. The small-batch fixture now
+exports exact values in one group. The first [focused run](reviews/export-layout-focused-check.log)
+also found an input-buffer allowance problem in the new refusal fixture; its
+corrected [refusal/retry check](reviews/export-layout-refusal-check.log) reaches
+the intended export guard, preserves the selected release and resumes exactly.
+The [complete repository gate](reviews/export-layout-full-check.log) passes.
+The [implementation review](reviews/export-layout-implementation-review.md) approves
+the change, noting that final-pending-group-only refusal lacks an isolated fixture.
+Writer performance qualification remains pending. The [frozen comparison](../experiments/comments-e2e/export-layout-plan.md) retains
+the failed baseline and resource limits. A writer memory estimate checked between
+batches is not a whole-process memory bound; the next full run measures that cost.
+
 ## Receipt changes without value recomputation
 
 The [receipt interface](evidence-updates.md) replaces complete receipt groups for
