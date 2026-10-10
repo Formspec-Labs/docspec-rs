@@ -5,6 +5,8 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[cfg(test)]
+mod inventory_tests;
+#[cfg(test)]
 mod plan_probe;
 
 pub(super) const TUPLE: [&str; 4] = [
@@ -507,19 +509,45 @@ async fn join_frame(
     budget: &Budget,
     enforce_cardinality: bool,
 ) -> Result<DataFrame> {
+    register_join_inputs(context, spec, releases, budget, enforce_cardinality).await?;
+    join_plan(context, spec, enforce_cardinality).await
+}
+
+async fn register_join_inputs(
+    context: &SessionContext,
+    spec: &JoinTransform,
+    releases: &BTreeMap<Id, &ReleasePin>,
+    budget: &Budget,
+    enforce_cardinality: bool,
+) -> Result<()> {
+    // Cardinality probes and the main join replay these same immutable inputs.
+    // One-shot joins keep their existing lazy inventory loading.
+    let repeated = enforce_cardinality && spec.join.cardinality != JoinCardinality::ManyToMany;
+    let mut captured: Option<(&VersionRef, Arc<storage::OccurrenceScan>)> = None;
     for (alias, version) in [("join_left", &spec.left), ("join_right", &spec.right)] {
         let release = releases.get(&version.dataset).ok_or_else(invalid)?;
         if release.version_ref() != *version {
             return Err(invalid());
         }
         let pin = release.dataset.groups.get("source").ok_or_else(invalid)?;
-        let native = storage::open_pin(pin).await?;
-        context.register_table(
-            alias,
-            crate::query::occurrences(native, budget.clone(), Some(pin.rows))?,
-        )?;
+        let provider = if repeated {
+            let scan = match &captured {
+                Some((previous, scan)) if *previous == version => scan.clone(),
+                _ => {
+                    let native = storage::open_pin(pin).await?;
+                    Arc::new(storage::OccurrenceScan::open(&native, budget).await?)
+                }
+            };
+            let provider = crate::query::files(scan.clone(), None, budget.clone())?;
+            captured = Some((version, scan));
+            provider
+        } else {
+            let native = storage::open_pin(pin).await?;
+            crate::query::occurrences(native, budget.clone(), Some(pin.rows))?
+        };
+        context.register_table(alias, provider)?;
     }
-    join_plan(context, spec, enforce_cardinality).await
+    Ok(())
 }
 
 pub(super) async fn join_registered(

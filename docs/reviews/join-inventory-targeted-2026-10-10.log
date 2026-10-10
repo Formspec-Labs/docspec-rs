@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.29s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 2 tests
+test engine::refresh::inventory_tests::one_shot_join_inputs_keep_inventory_lazy ... ok
+test engine::refresh::inventory_tests::cardinality_and_main_join_replay_without_manifest_and_share_self_join_admission ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 208 filtered out; finished in 0.65s
+

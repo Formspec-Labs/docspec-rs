@@ -357,6 +357,28 @@ and maintained sequential stream composition as adopted. The ranked metadata,
 join-scan and native-layout opportunities remain; no additional package, optional
 feature or infrastructure is justified by this source review.
 
+Constrained full joins now capture each input's native file inventory once and
+reuse the existing selected-column provider across cardinality probes and the
+main join. Exact self-joins share that capture between aliases. Joins without
+cardinality probes retain lazy inventory loading; ordinary readers and sequential
+history providers are unchanged. This adds no cross-request cache or invalidation
+mechanism. The [focused checks](reviews/join-inventory-targeted-2026-10-10.log)
+replay the probes and join after removing a fixture manifest list, verify exact
+values including null keys, and check sharing and final-owner admission release.
+The [independent implementation review](reviews/join-inventory-reuse-review-2026-10-10.md)
+approves preserved interpretation and ownership, with the capacity tradeoff below.
+The [repository gate](reviews/join-inventory-full-check-2026-10-10.log) passes
+formatting, strict Clippy and all registered executable and documentation suites.
+The retained Comments physical-plan probe remains explicitly ignored; no full-data
+performance run accompanies this change.
+
+Captured metadata stays admitted through its last provider or execution owner.
+Full-schema file tasks are retained before selected payload reads, so very wide,
+many-file inputs can reach the capture limit earlier than a projected lazy scan.
+The change removes repeated inventory discovery; it does not eliminate repeated
+payload scans or establish elapsed-time, process-memory or disk savings. Native
+row statistics and early field selection still use the existing provider.
+
 The remaining pure hash-only request fingerprint and physical-schema identity
 sites now use the same streamed JSON digest helper, preserving their normalized
 values and exact compact bytes. Original-table construction shares the admitted
@@ -883,6 +905,16 @@ change does not establish a measured speedup.
 The [complete repository gate](reviews/compacted-updates-check.log) passes for
 this isolated increment, including existing schema, backfill, refresh, retention
 and restore behavior.
+
+The next local maintenance delivery extends that same admitted physical-source
+capture to incremental join and summary outputs. Processing must retain unaffected
+compacted files and resume its original capture after a later compaction; logical
+change endpoints remain canonical. This is still unimplemented. Reuse the existing
+`update_source` dependency and protection path, with independent value/contributor,
+physical-sharing, no-op and interrupted-resume checks. Obsolete compaction recovery
+retirement follows separately: current active representation records also protect
+their predecessor, so adding retirement key names alone cannot reclaim those bytes.
+Continuous-ingestion backfill and bounded cutover remain required R3 work.
 
 The expanded writer exposed a default-stack regression in incremental summaries.
 The [backtrace](reviews/native-writer-stack-backtrace.log) and
