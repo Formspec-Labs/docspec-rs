@@ -297,6 +297,11 @@ impl OccurrenceScan {
         self.tasks.contains_key(path)
     }
 
+    /// Looks up the row count without walking other files.
+    pub fn file_rows(&self, path: &str) -> Option<u64> {
+        self.tasks.get(path).map(|(_, file)| file.record_count())
+    }
+
     pub fn files(&self) -> impl Iterator<Item = &DataFile> {
         self.tasks.values().map(|(_, file)| file)
     }

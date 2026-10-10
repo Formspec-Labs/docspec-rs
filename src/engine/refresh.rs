@@ -4,6 +4,9 @@ use super::write::{Prepared, identifier as quote};
 use super::*;
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+mod plan_probe;
+
 pub(super) const TUPLE: [&str; 4] = [
     "__docspec_left_file",
     "__docspec_left_row",
@@ -165,12 +168,13 @@ impl Engine {
                 let context = self.context();
                 match &spec.transform {
                     RefreshTransform::Join(_) => {
+                        let pin = processing.table.as_ref().ok_or_else(invalid)?;
                         context.register_table(
                             "matches",
                             crate::query::table(
-                                storage::open_pin(processing.table.as_ref().ok_or_else(invalid)?)
-                                    .await?,
+                                storage::open_pin(pin).await?,
                                 self.inner.lifecycle.budget.clone(),
+                                Some(pin.rows),
                             )?,
                         )?;
                     }
@@ -508,9 +512,12 @@ async fn join_frame(
         if release.version_ref() != *version {
             return Err(invalid());
         }
-        let native =
-            storage::open_pin(release.dataset.groups.get("source").ok_or_else(invalid)?).await?;
-        context.register_table(alias, crate::query::occurrences(native, budget.clone())?)?;
+        let pin = release.dataset.groups.get("source").ok_or_else(invalid)?;
+        let native = storage::open_pin(pin).await?;
+        context.register_table(
+            alias,
+            crate::query::occurrences(native, budget.clone(), Some(pin.rows))?,
+        )?;
     }
     join_plan(context, spec, enforce_cardinality).await
 }
@@ -527,6 +534,23 @@ async fn join_plan(
     spec: &JoinTransform,
     enforce_cardinality: bool,
 ) -> Result<DataFrame> {
+    let (probes, main) = join_queries(context, spec, enforce_cardinality).await?;
+    for (_, sql) in probes {
+        if has_rows(context, &sql).await? {
+            return Err(Error::refusal(
+                "join_cardinality",
+                "matching source keys exceed the declared cardinality",
+            ));
+        }
+    }
+    Ok(context.sql(&main).await?)
+}
+
+async fn join_queries(
+    context: &SessionContext,
+    spec: &JoinTransform,
+    enforce_cardinality: bool,
+) -> Result<(Vec<(JoinSide, String)>, String)> {
     let schemas = [
         context
             .table("join_left")
@@ -617,6 +641,7 @@ async fn join_plan(
     };
     // A semi join preserves each candidate partner once, so malformed declared
     // cardinality refuses before a duplicate-key Cartesian result is written.
+    let mut probes = Vec::new();
     for side in if !enforce_cardinality {
         vec![]
     } else {
@@ -644,27 +669,21 @@ async fn join_plan(
                     .collect::<Vec<_>>(),
             ),
         };
-        if has_rows(
-            context,
-            &format!(
+        probes.push((
+            side,
+            format!(
                 "SELECT 1 FROM {from} ON {predicate} GROUP BY {} HAVING COUNT(*) > 1 LIMIT 1",
                 keys.join(", ")
             ),
-        )
-        .await?
-        {
-            return Err(Error::refusal(
-                "join_cardinality",
-                "matching source keys exceed the declared cardinality",
-            ));
-        }
+        ));
     }
-    Ok(context
-        .sql(&format!(
+    Ok((
+        probes,
+        format!(
             "SELECT {} FROM join_left l {kind} JOIN join_right r ON {predicate}",
             columns.join(", ")
-        ))
-        .await?)
+        ),
+    ))
 }
 
 pub(super) async fn verify_related(
@@ -719,7 +738,10 @@ pub(super) async fn verify_related_with_inputs(
         ));
     }
     context.register_table("expected", expected.into_view())?;
-    context.register_table("actual", crate::query::table(native, budget.clone())?)?;
+    context.register_table(
+        "actual",
+        crate::query::table(native, budget.clone(), Some(source.rows))?,
+    )?;
     let columns = context
         .table("expected")
         .await?
@@ -754,7 +776,10 @@ pub(super) async fn verify_related_with_inputs(
     if !checks.deep() {
         return Ok(());
     }
-    context.register_table("evidence", crate::query::table(evidence, budget.clone())?)?;
+    context.register_table(
+        "evidence",
+        crate::query::table(evidence, budget.clone(), Some(related.evidence.rows))?,
+    )?;
     equal_multisets(&context, "expected_evidence", "evidence", &evidence_columns).await?;
     let RefreshTransform::Join(join) = &related.request.transform else {
         return Ok(());

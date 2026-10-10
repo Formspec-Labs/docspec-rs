@@ -76,7 +76,11 @@ pub(super) async fn register_input(
     check_row_count(source.rows)?;
     context.register_table(
         "aggregate_input",
-        crate::query::occurrences(storage::open_pin(source).await?, budget.clone())?,
+        crate::query::occurrences(
+            storage::open_pin(source).await?,
+            budget.clone(),
+            Some(source.rows),
+        )?,
     )?;
     qualify(context, &spec.grouping, "aggregate_input").await
 }
@@ -215,7 +219,10 @@ impl Engine {
                     .sum::<u64>(),
             )
         };
-        context.register_table("affected", crate::query::table(native, budget.clone())?)?;
+        context.register_table(
+            "affected",
+            crate::query::table(native, budget.clone(), Some(affected.rows))?,
+        )?;
         let key_names = keys(&aggregate.grouping);
         let selected = key_names
             .iter()

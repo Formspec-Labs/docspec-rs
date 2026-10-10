@@ -171,12 +171,16 @@ impl Engine {
                 .sum::<u64>();
             context.register_table(
                 format!("keys_{index}"),
-                crate::query::table(native, budget.clone())?,
+                crate::query::table(native, budget.clone(), Some(pin.rows))?,
             )?;
             for (prefix, pin) in [("old", old), ("new", new)] {
                 context.register_table(
                     format!("{prefix}_{index}"),
-                    crate::query::occurrences(storage::open_pin(pin).await?, budget.clone())?,
+                    crate::query::occurrences(
+                        storage::open_pin(pin).await?,
+                        budget.clone(),
+                        Some(pin.rows),
+                    )?,
                 )?;
             }
         }
@@ -193,7 +197,11 @@ impl Engine {
         discovery.bytes_written += keys.metrics.bytes_written;
         context.register_table(
             "affected",
-            crate::query::table(storage::open_pin(&keys.table).await?, budget.clone())?,
+            crate::query::table(
+                storage::open_pin(&keys.table).await?,
+                budget.clone(),
+                Some(keys.table.rows),
+            )?,
         )?;
         // Null-safe membership also includes unmatched partial-null groups under
         // ordinary SQL equality. The actual join keeps its declared null policy.
@@ -220,9 +228,14 @@ impl Engine {
                 context.register_table(format!("{prefix}_scope_{side}"), frame.into_view())?;
             }
         }
+        let before_source = source(base)?;
         context.register_table(
             "before",
-            crate::query::table(storage::open_pin(source(base)?).await?, budget.clone())?,
+            crate::query::table(
+                storage::open_pin(before_source).await?,
+                budget.clone(),
+                Some(before_source.rows),
+            )?,
         )?;
         let mut joins = Vec::new();
         for side in 0..2 {
@@ -477,6 +490,7 @@ impl Engine {
                 crate::query::table(
                     storage::open_pin(pin).await?,
                     self.inner.lifecycle.budget.clone(),
+                    Some(pin.rows),
                 )?,
             )?;
         }

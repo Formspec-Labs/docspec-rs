@@ -580,9 +580,12 @@ pub(super) async fn verify_group_data(
     let context = budget.context();
     context.register_table(
         "source",
-        crate::query::occurrences(source_native, budget.clone())?,
+        crate::query::occurrences(source_native, budget.clone(), Some(source.rows))?,
     )?;
-    context.register_table("actual", crate::query::table(group_native, budget.clone())?)?;
+    context.register_table(
+        "actual",
+        crate::query::table(group_native, budget.clone(), Some(group.rows))?,
+    )?;
     let mut columns = vec![col(storage::OCCURRENCE_FILE), col(storage::OCCURRENCE_ROW)];
     columns.extend(
         expressions

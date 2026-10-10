@@ -273,7 +273,7 @@ async fn native_current_schema_projection_reorders_equal_types_by_id() {
     context
         .register_table(
             "evolved",
-            crate::query::table(evolved.clone(), budget.clone()).unwrap(),
+            crate::query::table(evolved.clone(), budget.clone(), None).unwrap(),
         )
         .unwrap();
     let query = context

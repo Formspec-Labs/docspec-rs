@@ -168,9 +168,9 @@ pub(super) async fn verify_native_changes(
         context.register_table(
             format!("raw_{name}"),
             if located {
-                crate::query::occurrences(native, budget.clone())?
+                crate::query::occurrences(native, budget.clone(), Some(pin.rows))?
             } else {
-                crate::query::table(native, budget.clone())?
+                crate::query::table(native, budget.clone(), Some(pin.rows))?
             },
         )?;
         context.register_table(

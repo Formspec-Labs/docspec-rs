@@ -16,6 +16,39 @@ unqualified.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Native query planning
+
+Native scans now expose the selected pin's row count through maintained
+`DataSourceExec` planning. Captured-file queries use their existing file index;
+no payload scan is added to obtain statistics. Decoded byte sizes remain unknown,
+and the existing native reader retains schema, occurrence and admission rules.
+Column pushdown and cardinality-query changes remain separate work.
+
+The [baseline plan](reviews/native-join-plan-baseline.log) builds the main join
+from Comments; the [corrected plan](reviews/native-join-plan-corrected.log)
+builds it from Dockets. The cardinality probe builds Dockets in both. These early
+captures did not verify the enclosing manifest identity. The [final capture](reviews/native-join-plan-verified.log)
+reuses production manifest admission and confirms Dockets as the build side with
+279,719 retained rows, probing 10 million Comments. Physical plans establish
+optimizer choice, not successful execution or lower memory use.
+
+The [design review](reviews/native-statistics-design-review.md) identified an
+upstream filter/offset/count defect. The [initial runtime check](reviews/native-statistics-initial-check.log)
+reproduced zero where four rows should remain. The shared session now omits only
+`aggregate_statistics`, preserving maintained join selection. This sacrifices
+metadata-only aggregate shortcuts in affected sessions to preserve results.
+There is no compatible published 53.x fix or narrower general-purpose setting
+identified by the official-source follow-up. The native and flat-Parquet
+regressions cover this path.
+
+The [repository gate](reviews/native-statistics-full-check.log) passed before the
+final review corrections. Those corrections replace a repeated file-inventory
+walk with a map lookup and bind diagnostic manifests through the production
+reader. Post-correction [strict lint](reviews/native-statistics-review-fixes-check.log),
+[library checks](reviews/native-statistics-review-fixes-tests.log), and verified
+plan capture pass. The [implementation review](reviews/native-scan-implementation-review.md)
+approves the final static change. Full Comments performance remains unqualified.
+
 ## Receipt changes without value recomputation
 
 The [receipt interface](evidence-updates.md) replaces complete receipt groups for
@@ -93,9 +126,9 @@ independent reconstruction did not complete. Raw logs and workspaces remain
 retained; the resource limits and acceptance criteria are unchanged.
 
 The [documentation research](datafusion-performance-research-2026-10-10.md)
-identifies native column projection and physical-plan statistics as the first
-adapter improvements to qualify. These are source-supported opportunities,
-not a measured correction or a passing acceptance result.
+prioritizes physical-plan statistics, native column projection, avoidable
+cardinality scans and output row-group layout. Statistics are now integrated as
+described above; the remaining opportunities and full-path benefit are unqualified.
 
 ## Local Dagster scheduling
 

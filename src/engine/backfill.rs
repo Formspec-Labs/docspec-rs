@@ -197,12 +197,18 @@ async fn combined_dataset(
         })
         .map(|field| format!("s.{}", quote(&field.name)))
         .collect::<Vec<_>>();
-    context.register_table("source", crate::query::occurrences(source, budget.clone())?)?;
+    context.register_table(
+        "source",
+        crate::query::occurrences(source, budget.clone(), Some(dataset.groups["source"].rows))?,
+    )?;
     let mut from = "source s".to_owned();
     for (index, (name, binding)) in dataset.computed.iter().enumerate() {
         let alias = format!("g{index}");
         let native = storage::open_pin(&dataset.groups[name]).await?;
-        context.register_table(&alias, crate::query::table(native, budget.clone())?)?;
+        context.register_table(
+            &alias,
+            crate::query::table(native, budget.clone(), Some(dataset.groups[name].rows))?,
+        )?;
         from.push_str(&format!(
             " INNER JOIN {alias} ON s.{} = {alias}.{} AND s.{} = {alias}.{}",
             quote(storage::OCCURRENCE_FILE),

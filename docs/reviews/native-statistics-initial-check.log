@@ -1,0 +1,29 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 14.72s
+     Running unittests src/lib.rs (target/debug/deps/docspec-d9039bc58e38c22e)
+
+running 6 tests
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::tests::native_statistics_preserve_filtered_offset_counts ... FAILED
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+test query::tests::native_statistics_choose_the_smaller_build_in_both_directions ... ok
+
+failures:
+
+---- query::tests::native_statistics_preserve_filtered_offset_counts stdout ----
+
+thread 'query::tests::native_statistics_preserve_filtered_offset_counts' (29083890) panicked at src/query.rs:576:13:
+assertion `left == right` failed: source row hint: Some(7)
+  left: 0
+ right: 4
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    query::tests::native_statistics_preserve_filtered_offset_counts
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 105 filtered out; finished in 1.53s
+
+error: test failed, to rerun pass `--lib`

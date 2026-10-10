@@ -3,9 +3,11 @@
 use crate::{Error, Result};
 use datafusion::{
     execution::{
+        SessionStateBuilder,
         memory_pool::FairSpillPool,
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
+    physical_optimizer::optimizer::PhysicalOptimizer,
     prelude::{SessionConfig, SessionContext},
 };
 use fs2::FileExt;
@@ -96,18 +98,32 @@ impl Budget {
     }
 
     pub(crate) fn context(&self) -> SessionContext {
-        SessionContext::new_with_config_rt(
-            SessionConfig::new()
-                .with_batch_size(self.limits.batch_rows)
-                .with_target_partitions(self.limits.compute_threads)
-                // DataFusion 53.1's dynamic join bounds use ordinary comparisons
-                // even for null-safe joins, dropping matching partial-null keys.
-                // Keep other pruning enabled; qualify an upstream fix before reuse.
-                .set_bool(
-                    "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
-                    false,
-                ),
-            self.runtime.clone(),
+        // DataFusion 53.1 can promote a filtered row estimate through OFFSET to
+        // exact zero, then fold COUNT to an incorrect constant. Retain join cost
+        // planning, but disable that aggregate rewrite until the upstream path
+        // passes native_statistics_preserve_filtered_offset_counts unguarded.
+        let rules = PhysicalOptimizer::new()
+            .rules
+            .into_iter()
+            .filter(|rule| rule.name() != "aggregate_statistics")
+            .collect();
+        let config = SessionConfig::new()
+            .with_batch_size(self.limits.batch_rows)
+            .with_target_partitions(self.limits.compute_threads)
+            // DataFusion 53.1's dynamic join bounds use ordinary comparisons
+            // even for null-safe joins, dropping matching partial-null keys.
+            // Keep other pruning enabled; qualify an upstream fix before reuse.
+            .set_bool(
+                "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
+                false,
+            );
+        SessionContext::new_with_state(
+            SessionStateBuilder::new()
+                .with_config(config)
+                .with_runtime_env(self.runtime.clone())
+                .with_default_features()
+                .with_physical_optimizer_rules(rules)
+                .build(),
         )
     }
 

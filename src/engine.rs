@@ -573,6 +573,8 @@ impl Engine {
         })?;
         resolve_release(before, &self.inner.lifecycle.budget).await?;
         resolve_release(after, &self.inner.lifecycle.budget).await?;
+        let first_rows = first.rows;
+        let second_rows = second.rows;
         let first = storage::open_pin(first).await?;
         let second = storage::open_pin(second).await?;
         storage::identity::has_origins(first.metadata().current_schema())?;
@@ -600,10 +602,13 @@ impl Engine {
             return Ok(comparison);
         }
         let context = self.context();
-        for (name, table) in [("before", first), ("after", second)] {
+        for (name, table, rows) in [
+            ("before", first, first_rows),
+            ("after", second, second_rows),
+        ] {
             context.register_table(
                 name,
-                crate::query::table(table, self.inner.lifecycle.budget.clone())?,
+                crate::query::table(table, self.inner.lifecycle.budget.clone(), Some(rows))?,
             )?;
         }
         let visible = first_schema

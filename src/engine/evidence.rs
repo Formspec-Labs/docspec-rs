@@ -264,6 +264,7 @@ impl Engine {
                 crate::query::occurrences(
                     storage::open_pin(&pin).await?,
                     engine.inner.lifecycle.budget.clone(),
+                    Some(pin.rows),
                 )?,
             )?;
             Ok(context.table("source").await?.execute_stream().await?)
@@ -428,7 +429,11 @@ impl Engine {
                     let native = storage::open_pin(&previous.table).await?;
                     context.register_table(
                         "receipts",
-                        crate::query::table(native.clone(), self.inner.lifecycle.budget.clone())?,
+                        crate::query::table(
+                            native.clone(),
+                            self.inner.lifecycle.budget.clone(),
+                            Some(previous.table.rows),
+                        )?,
                     )?;
                     let replacement = context.table("receipts").await?.limit(0, Some(0))?;
                     let scope = if let Some(changes) = &processing.changes {
@@ -437,6 +442,7 @@ impl Engine {
                             crate::query::occurrences(
                                 storage::open_pin(&changes.removed).await?,
                                 self.inner.lifecycle.budget.clone(),
+                                Some(changes.removed.rows),
                             )?,
                         )?;
                         context
@@ -675,7 +681,10 @@ pub(super) fn verify_result<'a>(
         }
         if checks.deep() {
             let context = budget.context();
-            context.register_table("receipts", crate::query::table(native, budget.clone())?)?;
+            context.register_table(
+                "receipts",
+                crate::query::table(native, budget.clone(), Some(evidence.table.rows))?,
+            )?;
             check_associations(
                 context
                     .table("receipts")
@@ -710,7 +719,11 @@ async fn verify_inheritance(
     for (name, pin) in [("previous", &previous.table), ("current", &current.table)] {
         context.register_table(
             name,
-            crate::query::table(storage::open_pin(pin).await?, budget.clone())?,
+            crate::query::table(
+                storage::open_pin(pin).await?,
+                budget.clone(),
+                Some(pin.rows),
+            )?,
         )?;
     }
     let (expected, _memory) = associate(
