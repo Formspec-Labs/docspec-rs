@@ -132,6 +132,35 @@ fn batch(table: &Table, rows: &[Row]) -> RecordBatch {
     .unwrap()
 }
 
+async fn selected_defaults(table: &Table, budget: &Budget, expected: &[Row]) {
+    let mut observed = Vec::new();
+    let mut stream = storage::read_projected_batches(table, budget, Some(&[1, 2, 1]))
+        .await
+        .unwrap()
+        .boxed();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        assert_eq!(batch.column(0), batch.column(2));
+        let values = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let supplied = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        observed.extend(values.iter().zip(supplied.values().iter()));
+    }
+    observed.sort();
+    let mut expected = expected
+        .iter()
+        .map(|row| (row.1, row.2))
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(observed, expected);
+}
+
 #[tokio::test]
 async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen() {
     let (root, catalog, original, _) = fixture().await;
@@ -188,6 +217,7 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
         .await
         .unwrap();
     assert_eq!(rows(&batches), expected);
+    selected_defaults(&defaulted, &budget, &expected).await;
     let old_expected = expected.clone();
 
     // A future admission normalizer must materialize write-default=9 for omission;
@@ -211,6 +241,7 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
     expected.extend(supplied);
     expected.sort();
     assert_eq!(rows(&native_batches(&appended).await), expected);
+    selected_defaults(&appended, &budget, &expected).await;
     let appended_expected = expected.clone();
     assert!(
         appended
@@ -291,6 +322,7 @@ async fn native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reop
     assert_eq!(reopened.metadata().format_version(), FormatVersion::V3);
     assert_eq!(reopened.metadata().last_column_id(), 9);
     assert_eq!(rows(&native_batches(&reopened).await), expected);
+    selected_defaults(&reopened, &budget, &expected).await;
     assert_eq!(rows(&native_batches(&defaulted).await), old_expected);
     assert_eq!(rows(&native_batches(&appended).await), appended_expected);
     for (path, digest) in originals {

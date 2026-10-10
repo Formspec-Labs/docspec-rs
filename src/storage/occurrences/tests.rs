@@ -337,4 +337,6 @@ async fn reserved_names_and_unqualified_schema_changes_refuse() {
 }
 
 mod defaults;
+mod nested_selection;
 mod schema;
+mod selection;

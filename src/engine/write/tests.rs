@@ -543,12 +543,14 @@ async fn value_only_key_probes_skip_wide_fields_and_keep_reader_admission() {
     let mut full = scan.read_file(&path, &small).unwrap().boxed();
     assert_eq!(full.try_next().await.unwrap_err().code(), "oversized_batch");
     drop(full);
-    // One captured inventory remains admitted; reserve everything except one reader.
+    // Leave one reader and a KiB for its small selection/schema mappings.
+    // A second reader cannot reserve its batch buffers under this ceiling.
     let spare = small
         .reserve(
             small.limits.memory_bytes / 2
                 - small.limits.max_metadata_bytes * 2
-                - small.limits.max_batch_bytes * 2,
+                - small.limits.max_batch_bytes * 2
+                - 1024,
         )
         .unwrap();
     let mut first = scan

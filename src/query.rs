@@ -8,18 +8,16 @@ use datafusion::{
     datasource::source::{DataSource, DataSourceExec},
     execution::TaskContext,
     logical_expr::{Expr, TableType},
-    physical_expr::{
-        EquivalenceProperties, Partitioning, expressions::Column, projection::ProjectionExprs,
-    },
+    physical_expr::{EquivalenceProperties, Partitioning, projection::ProjectionExprs},
     physical_plan::{
         DisplayFormatType, ExecutionPlan, SendableRecordBatchStream, coop::make_cooperative,
-        limit::GlobalLimitExec, projection::ProjectionExec, stream::RecordBatchStreamAdapter,
-        streaming::PartitionStream,
+        limit::GlobalLimitExec, stream::RecordBatchStreamAdapter, streaming::PartitionStream,
     },
 };
 use futures::{StreamExt, TryStreamExt};
 use iceberg::table::Table;
 use std::{any::Any, fmt, sync::Arc};
+use tokio::sync::OwnedSemaphorePermit;
 
 /// Uses the same reader admission and native field interpretation as independent reads.
 /// Supply rows only from the same selected pin; unpinned schema candidates use None.
@@ -53,10 +51,12 @@ fn provider(
         )?)
     };
     let partition = NativePartition {
-        source: NativeSource::Table {
+        source: Arc::new(NativeSource::Table {
             table: native,
             located,
-        },
+            projection: None,
+            _projection_memory: None,
+        }),
         schema: schema.clone(),
         budget,
         rows: rows.and_then(|rows| usize::try_from(rows).ok()),
@@ -98,6 +98,19 @@ fn projected_files(
             rows.checked_add(usize::try_from(file.record_count()).ok()?)
         }),
     };
+    let projection_memory = columns
+        .map(|columns| {
+            storage::reserve_projection(
+                &budget,
+                scan.schema(),
+                columns.len(),
+                columns
+                    .len()
+                    .saturating_mul(size_of::<usize>())
+                    .saturating_add(size_of::<Vec<usize>>()),
+            )
+        })
+        .transpose()?;
     let projection = columns
         .map(|columns| {
             columns
@@ -111,11 +124,12 @@ fn projected_files(
         None => scan.schema().clone(),
     };
     let partition = NativePartition {
-        source: NativeSource::File {
+        source: Arc::new(NativeSource::File {
             scan,
             path,
             projection,
-        },
+            _projection_memory: projection_memory,
+        }),
         schema: schema.clone(),
         budget,
         rows,
@@ -147,23 +161,13 @@ impl TableProvider for NativeTable {
         _filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        // Filters remain unsupported here, so DataFusion applies residual filters
-        // before any query limit. Reuse maintained projection and limit operators.
-        let mut plan: Arc<dyn ExecutionPlan> = Arc::new(DataSourceExec::new(self.0.clone()));
-        if let Some(indices) = projection {
-            let projected = self.0.schema.project(indices)?;
-            let columns = indices
-                .iter()
-                .zip(projected.fields())
-                .map(|(index, field)| {
-                    (
-                        Arc::new(Column::new(field.name(), *index))
-                            as Arc<dyn datafusion::physical_expr::PhysicalExpr>,
-                        field.name().clone(),
-                    )
-                });
-            plan = Arc::new(ProjectionExec::try_new(columns, plan)?);
-        }
+        // DataFusion applies residual filters before query limits. Compose its
+        // provider-relative indices before the native reader opens payloads.
+        let partition = match projection {
+            Some(indices) => Arc::new(self.0.project(indices).map_err(external)?),
+            None => self.0.clone(),
+        };
+        let mut plan: Arc<dyn ExecutionPlan> = Arc::new(DataSourceExec::new(partition));
         if limit.is_some() {
             plan = Arc::new(GlobalLimitExec::new(plan, 0, limit));
         }
@@ -171,26 +175,76 @@ impl TableProvider for NativeTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum NativeSource {
     Table {
         table: Table,
         located: bool,
+        projection: Option<Vec<usize>>,
+        _projection_memory: Option<OwnedSemaphorePermit>,
     },
     File {
         scan: Arc<storage::OccurrenceScan>,
         path: Option<String>,
         projection: Option<Vec<usize>>,
+        _projection_memory: Option<OwnedSemaphorePermit>,
     },
 }
 
 #[derive(Debug)]
 struct NativePartition {
-    source: NativeSource,
+    source: Arc<NativeSource>,
     schema: SchemaRef,
     budget: Budget,
     /// A count from the selected pin or captured files, never a payload estimate.
     rows: Option<usize>,
+}
+
+impl NativePartition {
+    fn project(&self, indices: &[usize]) -> Result<Self> {
+        let memory = storage::reserve_projection(
+            &self.budget,
+            &self.schema,
+            indices.len(),
+            indices
+                .len()
+                .saturating_mul(size_of::<usize>())
+                .saturating_add(size_of::<Vec<usize>>()),
+        )?;
+        // Arrow validates every provider-relative index before composition.
+        let schema = Arc::new(self.schema.project(indices)?);
+        let existing = match self.source.as_ref() {
+            NativeSource::Table { projection, .. } | NativeSource::File { projection, .. } => {
+                projection.as_deref()
+            }
+        };
+        let projection = Some(
+            indices
+                .iter()
+                .map(|index| existing.map_or(*index, |existing| existing[*index]))
+                .collect(),
+        );
+        let source = match self.source.as_ref() {
+            NativeSource::Table { table, located, .. } => NativeSource::Table {
+                table: table.clone(),
+                located: *located,
+                projection,
+                _projection_memory: Some(memory),
+            },
+            NativeSource::File { scan, path, .. } => NativeSource::File {
+                scan: scan.clone(),
+                path: path.clone(),
+                projection,
+                _projection_memory: Some(memory),
+            },
+        };
+        Ok(Self {
+            source: Arc::new(source),
+            schema,
+            budget: self.budget.clone(),
+            rows: self.rows,
+        })
+    }
 }
 
 impl DataSource for NativePartition {
@@ -264,26 +318,33 @@ impl PartitionStream for NativePartition {
         let source = self.source.clone();
         let budget = self.budget.clone();
         let prepare = async move {
-            let stream = match source {
+            let stream = match source.as_ref() {
                 NativeSource::Table {
                     table,
                     located: true,
-                } => storage::read_occurrences(&table, &budget).await?.boxed(),
+                    projection,
+                    ..
+                } => storage::read_projected_occurrences(table, &budget, projection.as_deref())
+                    .await?
+                    .boxed(),
                 NativeSource::Table {
                     table,
                     located: false,
-                } => storage::read_batches(&table, &budget).await?.boxed(),
+                    projection,
+                    ..
+                } => storage::read_projected_batches(table, &budget, projection.as_deref())
+                    .await?
+                    .boxed(),
                 NativeSource::File {
                     scan,
                     path: Some(path),
                     projection,
+                    ..
                 } => scan
-                    .read_projected_file(&path, &budget, projection.as_deref())?
+                    .read_projected_file(path, &budget, projection.as_deref())?
                     .boxed(),
                 NativeSource::File {
-                    scan,
-                    path: None,
-                    projection,
+                    scan, path: None, ..
                 } => {
                     let bytes = scan.files().fold(0usize, |bytes, file| {
                         bytes
@@ -303,16 +364,31 @@ impl PartitionStream for NativePartition {
                         .collect::<Vec<_>>();
                     // The next reader opens only after the preceding stream reaches
                     // EOF and releases its buffers. Keep path admission until drop.
+                    let source = source.clone();
                     futures::stream::iter(paths)
                         .map(move |path| {
                             let _memory = &memory;
+                            let NativeSource::File {
+                                scan, projection, ..
+                            } = source.as_ref()
+                            else {
+                                unreachable!("captured file source remains unchanged");
+                            };
                             scan.read_projected_file(&path, &budget, projection.as_deref())
                         })
                         .try_flatten()
                         .boxed()
                 }
             };
-            Ok::<_, crate::Error>(stream)
+            // Keep the mapping and its reservation alive until EOF or drop.
+            Ok::<_, crate::Error>(
+                stream
+                    .map(move |batch| {
+                        let _source = &source;
+                        batch
+                    })
+                    .boxed(),
+            )
         };
         let prepare = async move {
             prepare
@@ -430,6 +506,16 @@ mod tests {
         .unwrap()
     }
 
+    fn query_budget() -> Budget {
+        // Query plans retain column mappings alongside native batch reservations.
+        // Keep the same process ceiling and leave room by reducing the batch cap.
+        Budget::new(Limits {
+            max_batch_bytes: 32 << 10,
+            ..reader_budget().limits
+        })
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows() {
         let (_root, _engine, _spec, native) = fixture().await;
@@ -438,10 +524,12 @@ mod tests {
             iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema()).unwrap(),
         );
         let partition = NativePartition {
-            source: NativeSource::Table {
+            source: Arc::new(NativeSource::Table {
                 table: native,
                 located: false,
-            },
+                projection: None,
+                _projection_memory: None,
+            }),
             schema,
             budget: budget.clone(),
             rows: Some(7),
@@ -477,7 +565,7 @@ mod tests {
         let (_root, engine, mut spec, native) = fixture().await;
         let context = SessionContext::new();
         context
-            .register_table("retained", table(native, reader_budget(), Some(7)).unwrap())
+            .register_table("retained", table(native, query_budget(), Some(7)).unwrap())
             .unwrap();
         spec.operation = Id::new("empty").unwrap();
         spec.sql = "SELECT * FROM input WHERE id < 0".into();
@@ -489,7 +577,7 @@ mod tests {
                     storage::open_pin(&empty.dataset.groups["source"])
                         .await
                         .unwrap(),
-                    reader_budget(),
+                    query_budget(),
                     Some(0),
                 )
                 .unwrap(),
@@ -560,7 +648,7 @@ mod tests {
     async fn native_statistics_preserve_filtered_offset_counts() {
         let (_root, _engine, spec, native) = fixture().await;
         for rows in [None, Some(7)] {
-            let budget = reader_budget();
+            let budget = query_budget();
             let context = budget.context();
             context
                 .register_table("retained", table(native.clone(), budget, rows).unwrap())
@@ -578,7 +666,7 @@ mod tests {
         }
         // The session guard also covers the maintained flat-Parquet provider,
         // whose own exact input counts can become filter estimates downstream.
-        let context = reader_budget().context();
+        let context = query_budget().context();
         context
             .register_parquet(
                 "retained",
@@ -620,16 +708,16 @@ mod tests {
         spec.sql = "SELECT * FROM input WHERE id < 2".into();
         let small = engine.run(&spec).await.unwrap().dataset.groups["source"].clone();
         assert_eq!(small.rows, 2);
-        let context = reader_budget().context();
+        let context = query_budget().context();
         context
-            .register_table("large", table(large, reader_budget(), Some(7)).unwrap())
+            .register_table("large", table(large, query_budget(), Some(7)).unwrap())
             .unwrap();
         context
             .register_table(
                 "small",
                 table(
                     storage::open_pin(&small).await.unwrap(),
-                    reader_budget(),
+                    query_budget(),
                     Some(small.rows),
                 )
                 .unwrap(),
@@ -674,3 +762,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod selection_tests;

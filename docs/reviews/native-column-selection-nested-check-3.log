@@ -1,0 +1,22 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.86s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+test storage::occurrences::tests::nested_selection::selected_nested_roots_preserve_children_repeats_and_occurrence_rows ... FAILED
+
+failures:
+
+---- storage::occurrences::tests::nested_selection::selected_nested_roots_preserve_children_repeats_and_occurrence_rows stdout ----
+
+thread 'storage::occurrences::tests::nested_selection::selected_nested_roots_preserve_children_repeats_and_occurrence_rows' (32260627) panicked at src/storage/occurrences/tests/nested_selection.rs:142:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "unsupported_schema_evolution", message: "native read interpretation for type, requiredness, nested moves or default changes is unqualified", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    storage::occurrences::tests::nested_selection::selected_nested_roots_preserve_children_repeats_and_occurrence_rows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 180 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--lib`

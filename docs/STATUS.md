@@ -19,11 +19,52 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Native column selection
+
+SQL column selection now reaches the maintained Iceberg reader before value
+decoding. The adapter composes SQL indices through captured-file selections,
+selects each required native field once, and returns the requested order and
+repeated columns through shared Arrow arrays. Occurrence reads retain complete
+file traversal and original row positions, include paired stored origins when
+needed, and avoid constructing unrequested locator arrays.
+
+The shared selection code preserves stable field IDs, defaults, the transient
+native file-column workaround and stream-owned admission. Selection maps and
+projected schemas share one allocation estimate. Independent review found the
+initial query estimate omitted schema handles and copied metadata; the correction
+admits those before allocation and retains the permit with the source.
+
+The [focused checks](reviews/native-column-selection-targeted-2.log) pass direct
+and composed selections, repeated and empty outputs, origin fallback/refusal,
+capacity lifetime and SQL reads with a damaged unselected page. Selected reads
+over evolved schemas and native defaults also pass in the library suite. The
+[nested-root check](reviews/native-column-selection-nested-check-4.log) preserves
+sparse parent/child IDs, nulls, metadata and occurrence rows for a Struct root.
+Its earlier attempts retain fixture setup failures; production schema guards
+remain unchanged. The
+[implementation review](reviews/native-column-selection-implementation-review.md)
+approves the semantic checkpoint and records its coverage limits.
+
+The [second repository gate](reviews/native-column-selection-full-check-2.log)
+exposed a normal-stack overflow during incremental join planning. The
+[declared probe and debugger trace](reviews/native-column-selection-stack-probe.md)
+led to boxing the maintained native planning future at one shared boundary. The
+[unchanged failing case](reviews/native-column-selection-stack-boxed.log) now
+passes. The [final repository gate](reviews/native-column-selection-full-check-3.log)
+passes formatting, strict Clippy and all-feature tests with that correction;
+no stack or resource limit was raised.
+
+This establishes column skipping in the fixtures. Requested-scan-byte counters
+and the bounded timing comparison remain pending; there is no throughput or
+whole-process memory improvement claim. Empty or entirely absent physical-field
+selections can still trigger the pinned reader's full-column fallback. Reader
+concurrency, row-group layout and the known selected-page memory limit are unchanged.
+
 ## Dependency efficiency audit
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) covers direct Rust
 and Python dependencies, enabled Rust features and material transitive APIs.
-It supports keeping the current stack. The next reader improvement is to pass
+It supports keeping the current stack. The reader change above implements passing
 requested columns into Iceberg before decoding; the
 [reviewed design](reviews/native-column-selection-design-review.md) preserves
 stable field IDs, defaults, output order and occurrence identities.

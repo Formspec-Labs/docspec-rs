@@ -89,11 +89,19 @@ pub(super) async fn plan_files(table: &Table) -> Result<FileScanTaskStream> {
     // including when all requested fields are absent and it reads all columns.
     // This column is transient; it is removed before application processing.
     fields.push(RESERVED_FIELD_ID_FILE);
-    Ok(table
-        .scan()
-        .with_concurrency_limit(1)
-        .build()?
-        .plan_files()
+    plan_selected_files(table, fields).await
+}
+
+/// Plans already-qualified current-schema field IDs, including the transient file field.
+pub(super) async fn plan_selected_files(
+    table: &Table,
+    fields: Vec<i32>,
+) -> Result<FileScanTaskStream> {
+    let schema = table.metadata().current_schema().clone();
+    let scan = table.scan().with_concurrency_limit(1).build()?;
+    // Keep the native planner's large future out of enclosing lifecycle futures.
+    // These also call the SQL planner, which needs the normal thread stack.
+    Ok(Box::pin(scan.plan_files())
         .await?
         .map_ok(move |mut task| {
             task.schema = schema.clone();

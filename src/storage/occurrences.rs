@@ -2,7 +2,7 @@
 
 use crate::{Error, Result, budget::Budget};
 use arrow::{
-    array::{Int64Array, StringArray},
+    array::{ArrayRef, Int64Array, StringArray},
     datatypes::{DataType, Field, Schema, SchemaRef},
     record_batch::RecordBatch,
 };
@@ -59,7 +59,16 @@ pub async fn read_occurrences(
     table: &Table,
     budget: &Budget,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    let state = Occurrences::open(table, budget).await?;
+    read_projected_occurrences(table, budget, None).await
+}
+
+pub(crate) async fn read_projected_occurrences(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    let inventory = super::snapshot_files(table, budget).await?;
+    let state = Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
     Ok(futures::stream::try_unfold(state, |mut state| async move {
         Ok(state.next().await?.map(|batch| (batch, state)))
     }))
@@ -78,6 +87,8 @@ struct Occurrences {
     expected: BTreeMap<String, DataFile>,
     current: Option<FileRows>,
     schema: SchemaRef,
+    native_schema: iceberg::spec::SchemaRef,
+    selection: Option<super::selection::Selection>,
     located: bool,
     limit: usize,
     _batches: OwnedSemaphorePermit,
@@ -96,12 +107,35 @@ impl Occurrences {
         inventory: super::SnapshotFiles,
         located: bool,
     ) -> Result<Self> {
+        Self::capture_projected(table, budget, inventory, located, None).await
+    }
+
+    async fn capture_projected(
+        table: &Table,
+        budget: &Budget,
+        inventory: super::SnapshotFiles,
+        located: bool,
+        projection: Option<&[usize]>,
+    ) -> Result<Self> {
         super::defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
         let schema = if located {
             occurrence_schema(table)?
         } else {
             super::schema::read_schema(table)?
         };
+        let native_schema = table.metadata().current_schema().clone();
+        let selection = projection
+            .map(|indices| {
+                super::selection::Selection::new(
+                    &native_schema,
+                    &schema,
+                    indices,
+                    located,
+                    true,
+                    budget,
+                )
+            })
+            .transpose()?;
         let batches = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
         // Retain the existing inventory reservation while its live descriptors are used.
         let expected = inventory
@@ -109,7 +143,12 @@ impl Occurrences {
             .into_iter()
             .map(|file| (file.file_path().to_owned(), file))
             .collect();
-        let tasks = super::schema::plan_files(table).await?;
+        let tasks = match &selection {
+            Some(selection) => {
+                super::schema::plan_selected_files(table, selection.fields.clone()).await?
+            }
+            None => super::schema::plan_files(table).await?,
+        };
         let reader = table
             .reader_builder()
             .with_data_file_concurrency_limit(1)
@@ -123,6 +162,8 @@ impl Occurrences {
             expected,
             current: None,
             schema,
+            native_schema,
+            selection,
             located,
             limit: budget.limits.max_batch_bytes,
             _batches: batches,
@@ -147,7 +188,9 @@ impl Occurrences {
                                 "decoded rows exceed the captured native count",
                             )
                         })?;
-                    let batch = if self.located {
+                    let batch = if let Some(selection) = &self.selection {
+                        selection.apply(batch, Some((&file.path, file.next, end)), self.limit)?
+                    } else if self.located {
                         append_locations(
                             batch,
                             &file.path,
@@ -210,6 +253,7 @@ pub(crate) struct OccurrenceScan {
     tasks: BTreeMap<String, (FileScanTask, DataFile)>,
     reader: ArrowReader,
     schema: SchemaRef,
+    native_schema: iceberg::spec::SchemaRef,
     located: bool,
     _metadata: Arc<OwnedSemaphorePermit>,
 }
@@ -288,6 +332,7 @@ impl OccurrenceScan {
             tasks,
             reader: state.reader,
             schema: state.schema,
+            native_schema: state.native_schema,
             located: state.located,
             _metadata: state._metadata,
         })
@@ -323,41 +368,28 @@ impl OccurrenceScan {
         let (task, file) = self.tasks.get(path).ok_or_else(|| {
             Error::refusal("occurrence_tasks", "file is outside the captured source")
         })?;
+        let selection = projection
+            .map(|indices| {
+                super::selection::Selection::new(
+                    &self.native_schema,
+                    &self.schema,
+                    indices,
+                    self.located,
+                    true,
+                    budget,
+                )
+            })
+            .transpose()?;
         let mut task = task.clone();
-        let schema = if let Some(indices) = projection {
-            if self.located {
-                return Err(Error::refusal(
-                    "invalid_projection",
-                    "value projection cannot change occurrence columns",
-                ));
-            }
-            let schema = Arc::new(self.schema.project(indices)?);
-            task.project_field_ids = indices
-                .iter()
-                .map(|index| {
-                    task.schema
-                        .as_struct()
-                        .fields()
-                        .get(*index)
-                        .map(|field| field.id)
-                        .ok_or_else(|| {
-                            Error::refusal(
-                                "invalid_projection",
-                                "field is outside the captured schema",
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            task.project_field_ids
-                .push(iceberg::metadata_columns::RESERVED_FIELD_ID_FILE);
-            schema
-        } else {
-            self.schema.clone()
-        };
+        if let Some(selection) = &selection {
+            task.project_field_ids = selection.fields.clone();
+        }
         let state = Occurrences {
             tasks: futures::stream::iter([Ok(task)]).boxed(),
             reader: self.reader.clone(),
-            schema,
+            schema: self.schema.clone(),
+            native_schema: self.native_schema.clone(),
+            selection,
             located: self.located,
             expected: BTreeMap::from([(path.to_owned(), file.clone())]),
             current: None,
@@ -397,38 +429,60 @@ fn append_locations(
     schema: &SchemaRef,
     limit: usize,
 ) -> Result<RecordBatch> {
-    let native_schema = batch.schema();
-    if let (Ok(file), Ok(row)) = (
-        native_schema.index_of(super::identity::ORIGIN_FILE),
-        native_schema.index_of(super::identity::ORIGIN_ROW),
-    ) {
-        let mut columns = batch.columns().to_vec();
-        columns.push(batch.column(file).clone());
-        columns.push(batch.column(row).clone());
-        return Ok(RecordBatch::try_new(schema.clone(), columns)?);
-    }
-    // Bound path replication and position buffers before allocating them. The
-    // final Arrow memory check also accounts for buffer padding and array structs.
-    let added = path
-        .len()
-        .saturating_add(size_of::<i64>() + size_of::<i32>())
-        .saturating_mul(batch.num_rows())
-        .saturating_add(size_of::<i32>());
-    if batch.get_array_memory_size().saturating_add(added) > limit {
-        return Err(oversized());
-    }
+    let (file, row) = location_columns(&batch, path, start, end, true, true, limit)?;
     let mut columns = batch.columns().to_vec();
-    columns.push(Arc::new(StringArray::from_iter_values(
-        std::iter::repeat_n(path, batch.num_rows()),
-    )));
-    columns.push(Arc::new(Int64Array::from_iter_values(
-        start as i64..end as i64,
-    )));
+    columns.push(file.expect("requested file column"));
+    columns.push(row.expect("requested row column"));
     let result = RecordBatch::try_new(schema.clone(), columns)?;
     if result.get_array_memory_size() > limit {
         return Err(oversized());
     }
     Ok(result)
+}
+
+pub(super) fn location_columns(
+    batch: &RecordBatch,
+    path: &str,
+    start: u64,
+    end: u64,
+    want_file: bool,
+    want_row: bool,
+    limit: usize,
+) -> Result<(Option<ArrayRef>, Option<ArrayRef>)> {
+    let native_schema = batch.schema();
+    if let (Ok(file), Ok(row)) = (
+        native_schema.index_of(super::identity::ORIGIN_FILE),
+        native_schema.index_of(super::identity::ORIGIN_ROW),
+    ) {
+        return Ok((
+            want_file.then(|| batch.column(file).clone()),
+            want_row.then(|| batch.column(row).clone()),
+        ));
+    }
+    // Bound path replication and position buffers before allocating them. The
+    // final Arrow memory check also accounts for buffer padding and array structs.
+    let file_bytes = if want_file {
+        path.len().saturating_add(size_of::<i32>())
+    } else {
+        0
+    };
+    let row_bytes = if want_row { size_of::<i64>() } else { 0 };
+    let added = file_bytes
+        .saturating_add(row_bytes)
+        .saturating_mul(batch.num_rows())
+        .saturating_add(if want_file { size_of::<i32>() } else { 0 });
+    if batch.get_array_memory_size().saturating_add(added) > limit {
+        return Err(oversized());
+    }
+    let file = want_file.then(|| {
+        Arc::new(StringArray::from_iter_values(std::iter::repeat_n(
+            path,
+            batch.num_rows(),
+        ))) as ArrayRef
+    });
+    let row = want_row
+        .then(|| Arc::new(Int64Array::from_iter_values(start as i64..end as i64)) as ArrayRef);
+    Ok((file, row))
 }
 
 fn oversized() -> Error {

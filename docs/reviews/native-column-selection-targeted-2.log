@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.95s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 10 tests
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test engine::retention::recovery::tests::otherwise_consistent_selection_cannot_complete_a_different_request ... ok
+test query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices ... ok
+test query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior ... ok
+test query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics ... ok
+test query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation ... ok
+test storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns ... ok
+test storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation ... ok
+test query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream ... ok
+test storage::occurrences::tests::selection::sql_native_and_captured_reads_skip_a_damaged_unselected_page ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 170 filtered out; finished in 1.86s
+

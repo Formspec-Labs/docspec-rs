@@ -6,11 +6,13 @@ mod inspection;
 mod occurrences;
 pub(crate) mod removal;
 mod schema;
+mod selection;
+pub(crate) use selection::reserve_projection;
 mod tables;
 pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};
-pub(crate) use occurrences::OccurrenceScan;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
+pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
 pub(crate) use tables::{bounded_json, fresh_metadata, register_candidate, replacement_metadata};
 
 use crate::{
@@ -87,10 +89,33 @@ pub async fn read_batches(
     table: &Table,
     budget: &Budget,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    read_projected_batches(table, budget, None).await
+}
+
+pub(crate) async fn read_projected_batches(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
     let limit = budget.limits.max_batch_bytes;
-    let tasks = schema::plan_files(table).await?;
+    let selection = projection
+        .map(|indices| {
+            selection::Selection::new(
+                table.metadata().current_schema(),
+                &schema::read_schema(table)?,
+                indices,
+                false,
+                false,
+                budget,
+            )
+        })
+        .transpose()?;
+    let tasks = match &selection {
+        Some(selection) => schema::plan_selected_files(table, selection.fields.clone()).await?,
+        None => schema::plan_files(table).await?,
+    };
     let stream = table
         .reader_builder()
         .with_data_file_concurrency_limit(1)
@@ -99,13 +124,17 @@ pub async fn read_batches(
         .read(tasks)?
         .stream();
     Ok(futures::stream::try_unfold(
-        (stream, reservation),
-        move |(mut stream, reservation)| async move {
+        (stream, reservation, selection),
+        move |(mut stream, reservation, selection)| async move {
             let Some(batch) = stream.try_next().await? else {
                 return Ok(None);
             };
             let batch = schema::strip_file_column(batch, limit)?;
-            Ok(Some((batch, (stream, reservation))))
+            let batch = match &selection {
+                Some(selection) => selection.apply(batch, None, limit)?,
+                None => batch,
+            };
+            Ok(Some((batch, (stream, reservation, selection))))
         },
     ))
 }

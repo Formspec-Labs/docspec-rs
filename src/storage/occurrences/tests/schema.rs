@@ -4,13 +4,32 @@ use super::*;
 use iceberg::spec::{NestedField, PrimitiveType, Type};
 
 async fn current_schema_batches(table: &Table, budget: &Budget) -> Vec<RecordBatch> {
-    storage::read_batches(table, budget)
+    let full: Vec<RecordBatch> = storage::read_batches(table, budget)
         .await
         .unwrap()
         .boxed()
         .try_collect()
         .await
-        .unwrap()
+        .unwrap();
+    let width = table.metadata().current_schema().as_struct().fields().len();
+    let mut projections = vec![vec![], (0..width).rev().chain(0..width.min(1)).collect()];
+    projections.extend((0..width).map(|index| vec![index]));
+    for indices in projections {
+        let selected = storage::read_projected_batches(table, budget, Some(&indices))
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        // Existing assertions independently check the full values. Differential
+        // reads also exercise sparse IDs, defaults and user _file.
+        let expected = full
+            .iter()
+            .map(|batch| batch.project(&indices).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(selected, expected, "native columns {indices:?}");
+    }
+    full
 }
 
 #[tokio::test]

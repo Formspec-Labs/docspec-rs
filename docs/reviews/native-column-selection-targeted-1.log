@@ -1,0 +1,74 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.03s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 10 tests
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices ... FAILED
+test engine::retention::recovery::tests::otherwise_consistent_selection_cannot_complete_a_different_request ... ok
+test query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior ... FAILED
+test query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics ... FAILED
+test query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation ... FAILED
+test query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream ... FAILED
+test storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns ... FAILED
+test storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation ... FAILED
+test storage::occurrences::tests::selection::sql_native_and_captured_reads_skip_a_damaged_unselected_page ... ok
+
+failures:
+
+---- query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices stdout ----
+DOCSPEC_TEST_WORK admission
+
+thread 'query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices' (31952131) panicked at src/query/selection_tests.rs:64:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "disk_capacity", message: "input, output and declared scratch do not fit available disk", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior stdout ----
+DOCSPEC_TEST_WORK admission
+
+thread 'query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior' (31952145) panicked at src/query/selection_tests.rs:64:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "disk_capacity", message: "input, output and declared scratch do not fit available disk", source: None, backtrace: <disabled> }
+
+---- query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics stdout ----
+DOCSPEC_TEST_WORK admission
+
+thread 'query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics' (31952148) panicked at src/query/selection_tests.rs:64:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "disk_capacity", message: "input, output and declared scratch do not fit available disk", source: None, backtrace: <disabled> }
+
+---- query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation stdout ----
+DOCSPEC_TEST_WORK admission
+
+thread 'query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation' (31952151) panicked at src/query/selection_tests.rs:64:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "disk_capacity", message: "input, output and declared scratch do not fit available disk", source: None, backtrace: <disabled> }
+
+---- query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream stdout ----
+DOCSPEC_TEST_WORK admission
+
+thread 'query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream' (31952152) panicked at src/query/selection_tests.rs:64:43:
+called `Result::unwrap()` on an `Err` value: Error { code: "disk_capacity", message: "input, output and declared scratch do not fit available disk", source: None, backtrace: <disabled> }
+
+---- storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns stdout ----
+
+thread 'storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns' (31952161) panicked at src/storage/occurrences/tests/selection.rs:89:10:
+called `Result::unwrap()` on an `Err` value: Context("Not enough memory to continue external sort. Consider increasing the memory limit config: 'datafusion.runtime.memory_limit', or decreasing the config: 'datafusion.execution.sort_spill_reservation_bytes'.", ResourcesExhausted("Failed to allocate additional 10.0 MB for ExternalSorterMerge[2] with 0.0 B already allocated for this reservation - 2.1 MB remain available for the total pool"))
+
+---- storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation stdout ----
+
+thread 'storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation' (31952162) panicked at src/storage/occurrences/tests/selection.rs:248:13:
+assertion `left == right` failed
+  left: [Some("birth-file"), Some("docspec:0798d032-0aed-4c97-940b-6a93d71d6370")]
+ right: [Some("birth-file"), Some("/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIsY5Om/origins/data/ff1e79ca-b1fd-4d4b-8e2a-22601a4efc2c-00000.parquet")]
+
+
+failures:
+    query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices
+    query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior
+    query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics
+    query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation
+    query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream
+    storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns
+    storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation
+
+test result: FAILED. 3 passed; 7 failed; 0 ignored; 0 measured; 170 filtered out; finished in 0.74s
+
+error: test failed, to rerun pass `--lib`
