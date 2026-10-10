@@ -32,7 +32,7 @@ pub(in crate::engine) fn qualification_key(proof: &DependencyQualification) -> R
     validate_qualification(proof)?;
     Ok(format!(
         "dependency-qualification/{}",
-        blake3::hash(&serde_json::to_vec(proof)?).to_hex()
+        storage::json_digest(proof)?.to_hex()
     ))
 }
 

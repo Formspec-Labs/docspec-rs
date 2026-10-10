@@ -1130,10 +1130,9 @@ pub(super) async fn inherited_inputs(
 }
 
 fn file_key(source: &ObjectRef, expressions: &Expressions, eligibility: u64) -> Result<String> {
-    let bytes = serde_json::to_vec(&(source, &expressions.dependencies))?;
     Ok(format!(
         "phase/backfill/{eligibility}/{}",
-        blake3::hash(&bytes).to_hex()
+        storage::json_digest(&(source, &expressions.dependencies))?.to_hex()
     ))
 }
 

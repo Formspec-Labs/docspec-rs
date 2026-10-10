@@ -137,14 +137,9 @@ impl Expressions {
             .values()
             .map(|id| field_interpretation(native_source, *id, observes_metadata))
             .collect::<Result<Vec<_>>>()?;
-        let dependencies = blake3::hash(&serde_json::to_vec(&(
-            PROCESSOR,
-            spec,
-            &input_fields,
-            dependencies,
-        ))?)
-        .to_hex()
-        .to_string();
+        let dependencies = storage::json_digest(&(PROCESSOR, spec, &input_fields, dependencies))?
+            .to_hex()
+            .to_string();
         let inferred = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
             &arrow::datatypes::Schema::new(fields),
         )?;

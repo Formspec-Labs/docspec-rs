@@ -423,8 +423,8 @@ pub(super) fn phase_key(
     phase: &str,
     base_manifest: Option<&ObjectRef>,
 ) -> Result<String> {
-    let material = if spec.mode == RefreshMode::Incremental {
-        serde_json::to_vec(&(
+    let digest = if spec.mode == RefreshMode::Incremental {
+        storage::json_digest(&(
             PROCESSOR,
             spec.mode,
             base_manifest.ok_or_else(invalid)?,
@@ -432,13 +432,13 @@ pub(super) fn phase_key(
             &spec.definition,
         ))?
     } else if phase == "admission" {
-        serde_json::to_vec(&(PROCESSOR, spec.inputs()))?
+        storage::json_digest(&(PROCESSOR, spec.inputs()))?
     } else {
-        serde_json::to_vec(&(PROCESSOR, &spec.transform, &spec.definition))?
+        storage::json_digest(&(PROCESSOR, &spec.transform, &spec.definition))?
     };
     Ok(format!(
         "phase/refresh/{}/{eligibility}/{phase}",
-        blake3::hash(&material).to_hex()
+        digest.to_hex()
     ))
 }
 

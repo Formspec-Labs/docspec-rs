@@ -191,9 +191,7 @@ pub(super) fn unavailable_key(path: &str) -> String {
 }
 
 fn value_digest(value: &impl Serialize) -> Result<String> {
-    Ok(blake3::hash(&serde_json::to_vec(value)?)
-        .to_hex()
-        .to_string())
+    Ok(storage::json_digest(value)?.to_hex().to_string())
 }
 
 pub(super) fn protection_key(grant: &OwnerProtection) -> Result<String> {

@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.02s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 3 tests
+test storage::tests::json_digest_preserves_serialization_errors ... ok
+test storage::tests::json_digest_preserves_typed_request_serialization ... ok
+test storage::tests::json_digest_preserves_nested_maps_unicode_and_unsized_values ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 187 filtered out; finished in 0.00s
+

@@ -139,9 +139,7 @@ impl Engine {
     }
 
     async fn export_admitted(&self, spec: &ExportSpec, stop: Option<&str>) -> Result<ExportPin> {
-        let digest = blake3::hash(&serde_json::to_vec(spec)?)
-            .to_hex()
-            .to_string();
+        let digest = storage::json_digest(spec)?.to_hex().to_string();
         let operation = self.admit_export(spec, &digest).await?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
@@ -575,7 +573,7 @@ fn check_operation(operation: &ExportOperation, spec: &ExportSpec, digest: &str)
 
 pub(super) fn validate_operation_record(operation: &ExportOperation) -> Result<()> {
     validate_request(&operation.request)?;
-    let digest = blake3::hash(&serde_json::to_vec(&operation.request)?)
+    let digest = storage::json_digest(&operation.request)?
         .to_hex()
         .to_string();
     check_operation(operation, &operation.request, &digest)

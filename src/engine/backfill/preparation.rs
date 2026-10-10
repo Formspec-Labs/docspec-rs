@@ -86,12 +86,12 @@ impl Engine {
             definition,
             input_fields,
         )?);
-        let digest = blake3::hash(&serde_json::to_vec(&(
+        let digest = storage::json_digest(&(
             PROCESSOR,
             source.logical_metadata(),
             definition,
             &expressions.input_fields,
-        ))?)
+        ))?
         .to_hex()
         .to_string();
         let prepared_key = format!("backfill-prepared/{}/{digest}", operation.eligibility);

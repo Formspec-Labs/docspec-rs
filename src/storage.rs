@@ -49,6 +49,18 @@ use std::{
     sync::Arc,
 };
 
+/// Hashes the exact compact JSON serialization without retaining its bytes.
+///
+/// # Errors
+/// Returns the same serialization errors as `serde_json::to_vec`.
+pub(crate) fn json_digest<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> serde_json::Result<blake3::Hash> {
+    let mut hasher = blake3::Hasher::new();
+    serde_json::to_writer(&mut hasher, value)?;
+    Ok(hasher.finalize())
+}
+
 /// Creates the maintained embedded catalog; application rows remain in Iceberg.
 ///
 /// # Errors
@@ -727,6 +739,101 @@ mod tests {
         array::Int64Array,
         datatypes::{DataType, Field, Schema},
     };
+
+    fn assert_json_digest<T: serde::Serialize + ?Sized>(value: &T) {
+        let bytes = serde_json::to_vec(value).unwrap();
+        assert_eq!(json_digest(value).unwrap(), blake3::hash(&bytes));
+    }
+
+    #[test]
+    fn json_digest_preserves_typed_request_serialization() {
+        use crate::{export::ExportSpec, model::GroupDefinition};
+
+        // Freeze compact struct ordering as well as compare the previous digest path.
+        let definition_json = r#"{"group":"classification","definition":"révision-東京","fields":[{"id":10,"name":"label\nquoted\"","expression":"coalesce(text, '🦀')"}]}"#;
+        let definition: GroupDefinition = serde_json::from_str(definition_json).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&definition).unwrap(),
+            definition_json.as_bytes()
+        );
+        assert_json_digest(&definition);
+        let processor = "docspec.scalar-backfill.v2";
+        assert_json_digest(&(processor, &definition));
+        let bindings = BTreeMap::from([("text", 2), ("language", 3)]);
+        assert_json_digest(&(
+            processor,
+            &definition,
+            bindings,
+            vec![serde_json::json!({"name": "évidence", "nested": [null, true, 3]})],
+        ));
+
+        let export_json = r#"{"dataset":"comments","operation":"export-1","source":{"dataset":"comments","version":"v1","manifest":{"owner":"comments","path":"/retained/東京/manifest.json","digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bytes":123}},"channel":"download","expected":null,"policy":{"group":"source","rows":"all","columns":["id","résumé"]}}"#;
+        let request: ExportSpec = serde_json::from_str(export_json).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&request).unwrap(),
+            export_json.as_bytes()
+        );
+        assert_json_digest(&request);
+        assert_json_digest(&(&request.source.manifest, "dependency-digest"));
+    }
+
+    #[test]
+    fn json_digest_preserves_nested_maps_unicode_and_unsized_values() {
+        let nested = BTreeMap::from([
+            (
+                "z-last",
+                serde_json::json!({"array": [null, true, -42, 1.25]}),
+            ),
+            (
+                "a-first",
+                serde_json::json!({"text": "é東京🦀\n\t\"\\", "empty": {}}),
+            ),
+        ]);
+        assert_json_digest(&nested);
+        assert_json_digest(&serde_json::Value::Null);
+        assert_json_digest(&[] as &[u64]);
+        assert_json_digest(&[0, 1, u64::MAX] as &[u64]);
+        assert_json_digest("é東京🦀\n\t\"\\");
+        // Cross BLAKE3 chunk boundaries without depending on serializer write sizes.
+        assert_json_digest(&"é東京🦀".repeat(1024));
+    }
+
+    #[test]
+    fn json_digest_preserves_serialization_errors() {
+        struct FailAfterField;
+
+        impl serde::Serialize for FailAfterField {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                use serde::ser::SerializeStruct;
+                let mut fields = serializer.serialize_struct("FailAfterField", 2)?;
+                fields.serialize_field("first", "already serialized")?;
+                Err(serde::ser::Error::custom("injected serialization failure"))
+            }
+        }
+
+        fn compare_errors(value: &impl serde::Serialize) {
+            let buffered = serde_json::to_vec(value).unwrap_err();
+            let streamed = json_digest(value).unwrap_err();
+            assert_eq!(streamed.classify(), buffered.classify());
+            assert_eq!(streamed.line(), buffered.line());
+            assert_eq!(streamed.column(), buffered.column());
+            assert_eq!(streamed.to_string(), buffered.to_string());
+            let buffered = Error::from(buffered);
+            let streamed = Error::from(streamed);
+            assert_eq!(streamed.code(), buffered.code());
+            assert_eq!(streamed.code(), "invalid_json");
+            assert_eq!(
+                std::error::Error::source(&streamed).unwrap().to_string(),
+                std::error::Error::source(&buffered).unwrap().to_string()
+            );
+        }
+
+        compare_errors(&FailAfterField);
+        compare_errors(&BTreeMap::from([((1, 2), "invalid JSON map key")]));
+    }
 
     #[test]
     fn digest_matches_complete_bytes_for_empty_and_multi_buffer_files() {

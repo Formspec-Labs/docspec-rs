@@ -19,10 +19,9 @@ pub(in crate::engine) struct Requirements {
 
 /// Addresses requirements independently of source definitions, epochs and adoption IDs.
 pub(in crate::engine) fn scope_key(definition: &GroupDefinition) -> Result<String> {
-    let bytes = serde_json::to_vec(&(backfill::PROCESSOR, definition))?;
     Ok(format!(
         "correction-requirements/{}",
-        blake3::hash(&bytes).to_hex()
+        storage::json_digest(&(backfill::PROCESSOR, definition))?.to_hex()
     ))
 }
 
