@@ -1,7 +1,8 @@
 # DataFusion and Arrow efficiency decisions
 
-Research date: 2026-10-10. Implementation baseline: `ce3ad6b`; the lockfile
-resolves DataFusion 53.1.0, Arrow/Parquet 58.4.0 and Iceberg 0.10.1.
+Research date: 2026-10-10. Initial implementation baseline: `ce3ad6b`;
+follow-up inspected `9c818a0` and the current reader/writer source. The lockfile
+resolves DataFusion 53.1.0, Arrow/Parquet 58.4.0, Iceberg 0.10.1 and Tokio 1.53.2.
 
 **The documented changes now pass the full local performance gate:** native
 planning statistics, larger flat-export row groups and four oracle threads
@@ -10,8 +11,148 @@ exact independent readback. See [the current result](STATUS.md#full-local-perfor
 Keep maintained execution, decoding and writing. The remaining reader opportunity
 is to push column selection down so narrow queries avoid decoding unused values.
 
-The initial diagnosis and priorities below are retained as research history.
-The implementation follow-up records what was subsequently changed and measured.
+## Current decisions and next work
+
+**Keep the current engine family. Connect its existing optimizations to our native
+reader, then reduce repeated work and output overhead.** Official documentation
+and independent source investigations support these changes; they do not provide
+a measured speedup for DocSpec. This follow-up ran no new performance experiment
+and read no corpus payloads.
+
+The [accepted measurements](../experiments/comments-e2e/acceptance-oracle-threads4-20261010.json)
+separate the costs. Engine command stages total 127.42–129.75 seconds; the exact
+independent checker takes 180.92–261.26 seconds, or 58–67% of complete elapsed time.
+The checker is qualification work. Keep ordinary creation and readback checks
+bounded, retain their results, and reserve complete reconstruction for acceptance
+or a specific investigation, as [AGENTS](../AGENTS.md) already requires.
+
+| Order | Concrete change | User value | Acceptance evidence |
+| --- | --- | --- | --- |
+| First | Push SQL column selection through `NativeTable::scan` into Iceberg field-ID selection. Extend the existing captured-file reader to support requested occurrence columns. | Key-only joins, summaries and reads stop decoding unrelated long text and nested values. Rows may still be scanned; bytes decoded per row should fall. | Same values, defaults, types and physical identities; an instrumented narrow read proves unused value columns are not decoded. Include empty/default-only projections and reordered fields. |
+| Next | Share one captured file-task inventory for the same immutable selection within an operation. | Repeated queries avoid repeated metadata traversal as retained history grows. Reuse the existing bounded `Arc<OccurrenceScan>`; keep values streamed. | Count inventory/planning work and actual metadata requests as history grows; confirm exact selection, admission and reader lifetime. |
+| Next | Check constrained-side duplicate keys before consulting the other side of a join. Reuse the existing matched-key check when duplicates exist. | A unique Dockets key set can establish many-to-one cardinality without a second scan of all Comments. The main join still reads its required inputs. | Compare matched/unmatched duplicates, composite and null-safe keys; measure both unique and duplicate-present inputs. The latter may pay an extra small-side grouping pass. |
+| Next | Separate native Parquet row-group limits from execution batch rows. Keep Iceberg's maintained rolling writer. | Reduce footer work and potentially compressed output size without enlarging processing batches. | Compare write plus subsequent read time, writer/process memory, serialized metadata, peak disk and retained bytes under the same limits. |
+| As needed | Make CLI runtime configuration follow the selected resource profile; keep blocking work bounded. | Avoid misleading thread settings and preserve responsiveness under simultaneous operations. | Verify actual worker settings, cancellation/permit lifetime and mixed-operation memory. Do not describe partition count as a process-wide thread cap. |
+| When measured | Reuse immutable metadata and enable safe selective pruning through the adapter that actually reads the files. | Reduce repeated footer/range requests for small or remote reads. | Prove cache hits/request reduction, byte bounds, exact snapshot/schema interpretation and unchanged occurrence identities. |
+
+### Column selection is the smallest useful reader change
+
+`NativeTable::scan` currently puts `ProjectionExec` above a full-width native
+scan, and `try_swapping_with_projection` declines integration. Iceberg already
+accepts selected field IDs. DataFusion's maintained data-source interfaces supply
+the planner integration; the work belongs in our thin adapter. See
+[query.rs](../src/query.rs) and the [official pruning explanation](https://datafusion.apache.org/blog/2025/03/20/parquet-pruning/).
+
+This needs more than forwarding an index vector. Our current
+`OccurrenceScan::read_projected_file` rejects projection for located reads.
+Extend it to decode requested value fields plus any stored origin fields needed
+to produce requested occurrence IDs. Keep the selected schema, transient native
+file-column workaround and missing-field defaults. For files whose row identities
+come from physical offsets, assign positions over the complete unfiltered stream
+before applying any row filter. Output projection can then discard internal
+columns. See [occurrences.rs](../src/storage/occurrences.rs).
+
+Table-backed occurrence reads currently rebuild an inventory through
+`snapshot_files`, which visits snapshots retained in the selected metadata file.
+The join's cardinality probe and main query execute separately. Share captured
+tasks for the same selection within that operation instead of repeating this
+history traversal. Keep the complete retention inventory at the lifecycle
+boundaries that require it. Iceberg already caches some table metadata, so fewer
+planning passes do not automatically imply the same reduction in storage reads.
+[Local inventory](../src/storage.rs), [join execution](../src/engine/refresh.rs),
+[pinned Iceberg scan context](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/scan/context.rs).
+
+Also qualify zero-column and defaults-only reads: the pinned Iceberg projection
+builder can fall back to all columns when no selected physical field exists.
+An empty logical projection therefore does not establish cheap `COUNT(*)`.
+Keep the existing aggregate-statistics correctness guard until a maintained fix
+passes the regression. Predicate pruning is a separate step: missing physical
+columns can be treated as null before initial defaults are reconstructed, so a
+residual filter cannot recover rows already discarded. See the pinned
+[projection](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/projection.rs),
+[predicate handling](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/predicate_visitor.rs)
+and [reader pipeline](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/reader/pipeline.rs).
+
+### Finish the native writer improvement without inventing a writer
+
+The flat export already lets ArrowWriter combine small batches and flushes on
+estimated writer memory. The native writer still sets its row-group row limit to
+`batch_rows`, normally 4,096. These are different paths; the export result does
+not establish an improved native layout. See [storage.rs](../src/storage.rs) and
+[export.rs](../src/engine/export.rs).
+
+Parquet 58.4 supports separate row and encoded-byte group thresholds, which can
+pass through Iceberg's existing `ParquetWriterBuilder`. Estimated encoded
+row-group size and estimated writer memory remain different measures. Preserve
+or replace the current conservative admission and footer accounting with equally
+effective bounds before raising group limits. Group size, rolling file size and
+execution batch size serve different purposes. Changing only the row cap would still leave native metadata
+accounting charging groups per input batch and closing writers early. Account for
+the new layout too. Larger files can also increase bytes rewritten for a small
+update, so include a fixed-size update in the comparison.
+[Writer properties](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/file/properties.rs),
+[ArrowWriter memory behavior](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/arrow/arrow_writer/mod.rs),
+[Iceberg writer](https://github.com/apache/iceberg-rust/blob/04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9/crates/iceberg/src/writer/file_writer/parquet_writer.rs).
+
+### Keep the efficient paths already present
+
+The engine already streams batches, shares a `RuntimeEnv` across query contexts,
+uses a shared operator-memory pool and scratch manager, admits native readers and
+writers, compresses output with Zstandard, reuses completed phases and exposes
+native row statistics for join planning. Preserve those paths. Arrow array-handle
+clones are not payload copies; view arrays can share long strings but can also
+keep large backing buffers alive. Copy only where measured lifetime memory
+justifies it. [Pinned Arrow view implementation](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/arrow-array/src/array/byte_view_array.rs).
+
+`Limits.compute_threads` sets DataFusion partitions and blocking-job admission;
+the CLI independently starts 12 Tokio worker threads. Tokio's blocking pool is
+separate, and running blocking jobs are not canceled by dropping their caller.
+The current worker-owned permits are therefore useful. Align configuration before
+adding concurrency, without building another scheduler. [Budget](../src/budget.rs),
+[CLI](../src/main.rs), [Tokio blocking-task guidance](https://docs.rs/tokio/1.53.2/tokio/task/fn.spawn_blocking.html).
+
+DataFusion's `FairSpillPool` can refuse memory growth earlier, prompting operators
+that support spilling to spill. It is not an allocator-level RSS limit. Keep
+observed process measurements.
+DataFusion also supports spill compression, but it would affect DataFusion
+scratch, not the separate DuckDB checker responsible for the observed large spill.
+Change it only for a measured DataFusion spill workload.
+[Pinned memory pools](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/execution/src/memory_pool/pool.rs),
+[pinned spill settings](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/common/src/config.rs).
+
+### Storage and upgrade decisions
+
+The qualified flow retains about 10.6 GB from 2.74 GB of inputs: 3.86×, including
+admitted originals, native results, evidence and flat releases. Sampled peak
+additional logical space reaches 42.93 GB with scratch; sampling makes this a
+lower bound. These are different retained products, not proof that a single
+output inflated by that factor. Attribute improvements to
+their actual copy or phase. Sharing unchanged files and avoiding redundant
+materializations should precede another cache or codec. Keep required original
+bytes, releases and recovery evidence; measure coexistence during updates and
+compaction as well as final size.
+
+DataFusion's metadata cache belongs to its own reader paths; configuring it does
+not automatically cache the Iceberg decoder hidden behind our custom source.
+Establish which maintained reader owns a repeated request before introducing any
+cache. [Pinned runtime/cache interface](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/execution/src/runtime_env.rs).
+
+Newer upstream releases offer useful scan improvements, but a version upgrade
+must move the compatible dependency family together. The inspected DataFusion
+55.2 tag uses Arrow/Parquet 59.2; our Iceberg integration uses 58. It is not a
+one-line upgrade. Keep the regression guards for filtered counts and null-safe
+dynamic joins until the replacement passes them. Custom joins, blanket indexes,
+another SQL backend and distributed scheduling have no measured justification
+for this workload. [DataFusion 55 improvements](https://datafusion.apache.org/blog/2026/08/25/datafusion-55.0.0/),
+[55.2 dependency manifest](https://raw.githubusercontent.com/apache/datafusion/55.2.0/Cargo.toml).
+
+Qualify one change at a time against retained inputs. First establish exact
+behavior and eliminated work with bounded fixtures and physical plans; then use
+the existing frozen performance workflow when a timing or storage claim needs
+measurement. Preserve the accepted workload and resource ceilings.
+
+The initial diagnosis and priorities below remain research history. The
+implementation follow-up records what was subsequently changed and measured.
 
 ## What the failed run establishes
 
