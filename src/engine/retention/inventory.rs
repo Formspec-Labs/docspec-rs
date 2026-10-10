@@ -1224,7 +1224,12 @@ impl Inventory {
             {
                 return Err(invalid_inventory("compaction completion identity differs"));
             }
-            self.table(&result.source, origin)?;
+            // Selection promises an equivalent current layout, not recovery of
+            // the rewrite that produced it. Recovery records root both sides.
+            // The replacement retains logical metadata without its old payload.
+            if !key.starts_with("representation/") {
+                self.table(&result.source, origin)?;
+            }
             self.table(&result.replacement, origin)?;
         } else if let Some(id) = key.strip_prefix("export-operation/") {
             let operation: crate::engine::export::ExportOperation = decode(json)?;

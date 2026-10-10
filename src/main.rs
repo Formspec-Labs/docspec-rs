@@ -157,6 +157,15 @@ enum Command {
     },
     /// End terminal operation recovery; preserve completed phases and available results.
     RetireOperation { plan: PathBuf },
+    /// Capture a compaction's recovery records, including interrupted work.
+    PlanCompactionRetirement {
+        dataset: String,
+        retirement: String,
+        operation: String,
+        reason: String,
+    },
+    /// End compaction recovery; preserve selected representations and physical files.
+    RetireCompaction { plan: PathBuf },
     /// Stop an unfinished operation; preserve its completed phases and retained files.
     Abandon {
         dataset: String,
@@ -592,6 +601,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetireOperation { plan } => print_json(
                     &engine
                         .retire_operation(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanCompactionRetirement {
+                    dataset,
+                    retirement,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_compaction_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &Id::new(operation)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireCompaction { plan } => print_json(
+                    &engine
+                        .retire_compaction(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::Abandon {

@@ -9,6 +9,7 @@ use crate::catalog::View;
 use std::collections::BTreeSet;
 
 mod availability;
+pub(super) mod compaction_recovery;
 mod grants;
 mod inventory;
 pub(super) mod owners;

@@ -88,6 +88,11 @@ pub fn router(engine: Engine) -> Router {
             post(plan_operation_retirement),
         )
         .route("/retention/operations/retire", post(retire_operation))
+        .route(
+            "/retention/compactions/plan",
+            post(plan_compaction_retirement),
+        )
+        .route("/retention/compactions/retire", post(retire_compaction))
         .route("/datasets/{dataset}", get(inspect))
         .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
@@ -422,6 +427,29 @@ async fn retire_operation(
     Ok(Json(engine.retire_operation(&plan).await?))
 }
 
+async fn plan_compaction_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<OperationRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_compaction_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.operation,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_compaction(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_compaction(&plan).await?))
+}
+
 impl From<Error> for HttpError {
     fn from(error: Error) -> Self {
         Self(error)
@@ -431,8 +459,10 @@ impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
             "availability_retired" => StatusCode::GONE,
-            "no_release" | "no_export" | "no_operation" | "no_phase" | "no_removal"
-            | "no_changes" | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
+            "no_release" | "no_export" | "no_operation" | "no_compaction" | "no_phase"
+            | "no_removal" | "no_changes" | "missing_group" | "missing_evidence" => {
+                StatusCode::NOT_FOUND
+            }
             "operation_conflict"
             | "correction_conflict"
             | "correction_required"
@@ -450,6 +480,7 @@ impl IntoResponse for HttpError {
             | "grant_in_use"
             | "grant_retired"
             | "recovery_retired"
+            | "compaction_retired"
             | "retirement_conflict"
             | "removal_conflict"
             | "stale_removal"

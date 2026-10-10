@@ -12,7 +12,7 @@ use docspec::{
 use futures::{StreamExt, TryStreamExt};
 use scalar::{fixture, id, limits};
 
-fn request(release: &ReleasePin, operation: &str) -> CompactionSpec {
+pub(super) fn request(release: &ReleasePin, operation: &str) -> CompactionSpec {
     CompactionSpec {
         dataset: release.dataset.dataset.clone(),
         operation: id(operation),
@@ -23,7 +23,7 @@ fn request(release: &ReleasePin, operation: &str) -> CompactionSpec {
     }
 }
 
-fn update_request(
+pub(super) fn update_request(
     root: &std::path::Path,
     release: &ReleasePin,
     operation: &str,
@@ -40,7 +40,7 @@ fn update_request(
     }
 }
 
-async fn occurrences(pin: &TablePin) -> Vec<(String, i64, Option<i64>, Option<String>)> {
+pub(super) async fn occurrences(pin: &TablePin) -> Vec<(String, i64, Option<i64>, Option<String>)> {
     let native = storage::open_pin(pin).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
     let mut stream = storage::read_occurrences(&native, &budget)

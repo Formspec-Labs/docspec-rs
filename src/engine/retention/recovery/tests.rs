@@ -24,7 +24,7 @@ fn limits() -> Limits {
     }
 }
 
-async fn fixture(root: &Path) -> (Engine, RunSpec, ReleasePin) {
+pub(in crate::engine::retention) async fn fixture(root: &Path) -> (Engine, RunSpec, ReleasePin) {
     let input = root.join("input.parquet");
     let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
     let batch =

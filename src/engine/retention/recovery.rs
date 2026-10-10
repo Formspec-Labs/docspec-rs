@@ -6,7 +6,7 @@ use super::*;
 use crate::{budget::Budget, catalog::SnapshotRows};
 
 #[cfg(all(test, feature = "test-util"))]
-mod tests;
+pub(super) mod tests;
 
 fn keys(operation: &Id) -> [String; 4] {
     ["operation", "request", "request-dependencies", "backfill"]
@@ -178,6 +178,7 @@ fn check_attempt(
         || generation.revision <= operation_revision
         || generation.revision > boundary
         || operation != request.operation().as_str()
+        || purpose == "compaction"
         || Id::new(purpose).is_err()
         || attempt.consumer != *request.dataset()
         || attempt.paths != [format!("{}/", directory.display())]
@@ -217,7 +218,9 @@ pub(super) fn collect(
     for (key, revision, json) in rows.prefix("protection/") {
         let _memory = rows.reserve_decoded(budget, &[key])?;
         let attempt: Protection = serde_json::from_str(json)?;
-        if !attempt.purpose.starts_with(&prefix) {
+        if !attempt.purpose.starts_with(&prefix)
+            || attempt.purpose == format!("{operation}/compaction")
+        {
             continue;
         }
         let generation = RetainedGeneration {

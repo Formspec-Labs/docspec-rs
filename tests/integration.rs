@@ -16,6 +16,8 @@ mod backfill_dependencies;
 mod change_origins;
 mod change_transport;
 mod compaction;
+mod compaction_retirement;
+mod compaction_retirement_transport;
 mod comparison;
 mod completed_backfill_plan;
 mod defaults;

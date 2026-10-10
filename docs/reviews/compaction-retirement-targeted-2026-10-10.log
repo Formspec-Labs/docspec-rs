@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.17s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 6 tests
+test compaction_retirement::concurrent_identical_compactions_leave_one_exact_retirable_recovery_bundle ... ok
+test compaction_retirement::retired_chain_reclaims_intermediate_data_and_metadata_without_changing_selected_layout ... ok
+test compaction_retirement::identical_operation_ids_keep_normal_and_compaction_attempt_retirement_separate ... ok
+test compaction_retirement::captured_update_keeps_intermediate_layout_until_both_operation_and_phase_recovery_end ... ok
+test compaction_retirement::interrupted_bundles_retire_exactly_after_reopen_and_later_completion_invalidates_preview ... ok
+test compaction_retirement_transport::cli_http_compaction_retirement_preserves_reads_and_reconciles_exact_retry ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 255 filtered out; finished in 6.61s
+

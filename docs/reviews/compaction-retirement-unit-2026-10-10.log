@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.85s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 2 tests
+test engine::retention::compaction_recovery::tests::lost_retirement_reply_and_concurrent_retry_keep_one_decision_and_current_layout ... ok
+test engine::retention::compaction_recovery::tests::forged_compaction_receipt_cannot_end_another_attempt_or_omit_completed_work ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 211 filtered out; finished in 1.46s
+

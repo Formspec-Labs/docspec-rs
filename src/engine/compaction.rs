@@ -13,6 +13,26 @@ pub(super) struct Capture {
 }
 
 impl Engine {
+    pub(super) async fn protect_compaction_table(
+        &self,
+        dataset: &Id,
+        table: &TablePin,
+        manifest: Option<&ObjectRef>,
+    ) -> Result<retention::owners::ReferenceProtections> {
+        let budget = &self.inner.lifecycle.budget;
+        let bytes = inputs::metadata_size(
+            &(&table.objects, table.logical_metadata(), manifest),
+            budget.limits.max_metadata_bytes,
+        )?;
+        let _objects_memory = budget.reserve(bytes.saturating_mul(4).saturating_add(4096))?;
+        let mut objects = table.objects.clone();
+        // Logical metadata can belong to another owner after a full rewrite.
+        // It remains required even when none of that owner's data files survive.
+        objects.push(table.logical_metadata().clone());
+        objects.extend(manifest.cloned());
+        self.protect_objects(dataset, &objects).await
+    }
+
     /// Compacts exact live files without changing the logical dataset version.
     ///
     /// Rewrites and verifies under ordinary work admission. Old pins and completed
@@ -106,6 +126,21 @@ impl Engine {
         let captured = {
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
+            let rows = lifecycle.rows(&view).await?;
+            if let Some(revision) = rows.revision(&request_key)
+                && retention::retirement::record_retired(
+                    &rows,
+                    &view,
+                    &request_key,
+                    revision,
+                    &lifecycle.budget,
+                )?
+            {
+                return Err(Error::refusal(
+                    "compaction_retired",
+                    "compaction recovery was explicitly retired; use a new operation identity",
+                ));
+            }
             if let Some(done) = lifecycle
                 .get::<CompactionResult>(&view, &result_key)
                 .await?
@@ -159,9 +194,9 @@ impl Engine {
                 }
             };
             // Owner grants are acquired outside consumer locking, before admission.
-            let mut objects = capture.source.objects.clone();
-            objects.push(capture.manifest.clone());
-            let protections = self.protect_objects(&spec.dataset, &objects).await?;
+            let protections = self
+                .protect_compaction_table(&spec.dataset, &capture.source, Some(&capture.manifest))
+                .await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
             if let Some(existing) = lifecycle.get::<Capture>(&view, &request_key).await? {
@@ -310,6 +345,11 @@ impl Engine {
                 .await?;
         }
         stop_after(stop, "verification")?;
+        // Selection only needs the replacement, shared files and logical schema.
+        // Keep broader predecessor grants on recovery records, not this authority.
+        let selected_protections = self
+            .protect_compaction_table(&spec.dataset, &prepared.replacement, None)
+            .await?;
         {
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
@@ -352,7 +392,7 @@ impl Engine {
                 &view,
                 &representation_key,
                 &prepared,
-                Some(&protections),
+                Some(&selected_protections),
             )?;
             records.extend(completion_records(
                 &spec.dataset,

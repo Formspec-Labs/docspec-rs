@@ -31,7 +31,9 @@ survive rewrites so retained computed groups remain readable. Target file size
 is a preference; metadata limits may close a file sooner. Old exact pins remain
 retained. Source updates and incremental joins/summaries capture and reuse eligible
 compacted output files, including on resume; later compaction cannot change an
-admitted write. Compaction does not reclaim old storage.
+admitted write. Compaction itself keeps old storage. Explicit recovery retirement
+below can make obsolete intermediate files eligible for the existing removal
+service while preserving selected layouts and independently retained pins.
 
 Create a local restore point before maintenance, then restore it only after
 closing the engine and all reader streams:
@@ -218,6 +220,30 @@ reopening the workspace. Fresh operation-retirement planning returns
 `recovery_retired` (HTTP 409). Available completed results still support lookup
 and run/plan retries. Abandoned operations still refuse with `operation_abandoned`;
 retirement ends their recovery protections without changing their terminal state.
+
+To end retry/recovery for a compaction, including an interrupted rewrite, capture
+and apply its exact recovery plan:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-compaction-retirement comments retired-layout-recovery old-compaction "rewrite recovery no longer needed" > compaction-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-compaction compaction-retirement.json
+```
+
+HTTP uses `POST /retention/compactions/plan` with `dataset`, `retirement`,
+`operation` and `reason`, then `POST /retention/compactions/retire` with the
+returned plan. These call `Engine::plan_compaction_retirement` and
+`Engine::retire_compaction`. Execution checks the exact request, completed
+rewrite/verification/result records and owned compaction attempts. New work since
+preview requires a fresh plan. Identical execution retries return the same
+decision; reusing the compaction ID returns `compaction_retired` (HTTP 409).
+
+The selected equivalent layout remains readable. For successive rewrites A then
+B, A's exclusive files can become removable after both recovery promises end:
+B's recovery still needs A until then. Retained phases, readers, original pins,
+shared files and owner grants remain independent protections. Retirement keeps
+metadata and bytes; use the existing removal preview and execution for eligible
+objects, and explicit owner-grant retirement where needed. It does not retire
+the selected `representation/` authority or automatically expire history.
 
 Catalog work keeps running after a caller disconnects or drops its future. The
 owned task retains workspace ownership, shared maintenance admission and its

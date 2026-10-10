@@ -50,6 +50,9 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
         }
+        RetirementScope::CompactionRecovery { operation } => {
+            super::compaction_recovery::scope_key(operation, key)
+        }
         RetirementScope::ResultAvailability { operation } => {
             key == format!("result/{operation}")
                 || key == format!("readback/{operation}")
@@ -70,6 +73,7 @@ pub(super) fn retained_key(key: &str) -> bool {
         || key.starts_with("readback/")
         || key.starts_with("backfill-readback/")
         || super::grants::grant_key(key)
+        || super::compaction_recovery::recovery_key(key)
         || [
             "operation/",
             "request/",
@@ -172,6 +176,7 @@ pub(super) fn validate_markers(
     }
     super::availability::validate_pointer(rows, view, receipt, revision)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
+    super::compaction_recovery::validate_saved(rows, view, receipt, engine)?;
     super::grants::validate_saved(rows, view, receipt, engine)?;
     if receipt.plan.scope == RetirementScope::OptionalChanges {
         for generation in &receipt.plan.records {
@@ -574,6 +579,21 @@ impl Engine {
         }
         if plan.scope == RetirementScope::OwnerGrants {
             super::grants::check_eligible(self, &view, &rows, &plan.records).await?;
+        }
+        if let RetirementScope::CompactionRecovery { operation } = &plan.scope {
+            let current = super::compaction_recovery::collect(
+                &rows,
+                &view,
+                operation,
+                &self.inner.root,
+                &lifecycle.budget,
+            )?;
+            if current != plan.records {
+                return Err(Error::refusal(
+                    "stale_retirement",
+                    "compaction recovery records changed; capture a fresh plan",
+                ));
+            }
         }
         let mut records = Vec::with_capacity(plan.records.len() + 1);
         for phase in &plan.records {

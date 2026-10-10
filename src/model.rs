@@ -550,6 +550,7 @@ pub enum RetirementScope {
     OptionalChanges,
     ResultAvailability { operation: OperationId },
     OperationRecovery { operation: OperationId },
+    CompactionRecovery { operation: OperationId },
     OwnerGrants,
     RestorePoints,
 }
