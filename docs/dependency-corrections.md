@@ -62,13 +62,14 @@ requirement state and checker. An explanation can retrieve the scoped decisions
 on demand. The cumulative field set itself remains bounded by the accepted
 declaration size and metadata budget; its retained versions still consume space.
 
-Bundle acknowledgment must return the canonical retained completion and its
-actual native generation. Assemble from those returned completions after the
-bundle commits. If another worker already retained a winner, use that winner's
-outputs and protection. The current code can keep this attempt's output files
-after acknowledgment skips a concurrent winner; looking up the material key
-later would falsely label those files with the winner's generation. Keep bundled
-acknowledgment and bounded descriptor buffering, avoiding a transaction per file.
+Bundle acknowledgment now returns the canonical retained completion and its
+actual native generation. Assembly uses those returned completions after the
+bundle commits. If another worker already retained a winner, it uses that
+winner's outputs and protection. This prerequisite fixes the earlier mismatch
+between an attempt's physical outputs and the retained winner's generation.
+Bundled acknowledgment and bounded descriptor buffering remain; see the
+[implementation checkpoint](STATUS.md#canonical-scalar-file-completions).
+Persisting those original generations in shared descriptors remains future work.
 
 The current requirement key is derived from the exact deficient processor and
 group definition, independently of source writer definitions or adoption IDs.

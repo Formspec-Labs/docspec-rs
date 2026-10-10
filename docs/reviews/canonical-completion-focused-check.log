@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 16.30s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 2 tests
+test engine::backfill::preparation::tests::concurrent_acknowledgments_assemble_one_winner_with_its_own_scope ... ok
+test engine::backfill::preparation::tests::retired_completion_gets_a_new_generation_and_retry_keeps_that_winner ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 0.36s
+

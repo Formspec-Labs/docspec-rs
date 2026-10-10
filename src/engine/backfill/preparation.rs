@@ -2,6 +2,50 @@
 
 use super::*;
 
+#[cfg(all(test, feature = "test-util"))]
+#[path = "file_completion_tests.rs"]
+mod tests;
+
+/// A canonical file completion and the exact retained generation that won.
+pub(in crate::engine) struct AcknowledgedFile {
+    pub(in crate::engine) completion: FileCompletion,
+    pub(in crate::engine) generation: RetainedGeneration,
+    pub(in crate::engine) protections: Option<Arc<ReferenceProtections>>,
+}
+
+struct FileAssembly {
+    files: Vec<DataFile>,
+    inherited: Vec<ObjectRef>,
+    protections: Option<ReferenceProtections>,
+    bytes: usize,
+}
+
+impl FileAssembly {
+    async fn append(
+        &mut self,
+        acknowledged: Vec<AcknowledgedFile>,
+        expressions: &Expressions,
+        eligibility: u64,
+        budget: &Budget,
+    ) -> Result<()> {
+        for file in acknowledged {
+            if file.generation.key != file_key(&file.completion.source, expressions, eligibility)? {
+                return Err(invalid_group());
+            }
+            self.bytes = charge_assembly(
+                self.bytes,
+                &file.completion,
+                budget.limits.max_metadata_bytes,
+            )?;
+            self.files
+                .extend(read_completion(&file.completion, &expressions.native, budget).await?);
+            self.inherited.extend(file.completion.outputs);
+            ReferenceProtections::inherit(&mut self.protections, file.protections.as_deref())?;
+        }
+        Ok(())
+    }
+}
+
 impl Engine {
     #[expect(
         clippy::too_many_arguments,
@@ -62,77 +106,48 @@ impl Engine {
             let scan = storage::OccurrenceScan::open(&native, &lifecycle.budget).await?;
             let objects = source_objects(source);
             let mut completions = BTreeMap::new();
-            let mut files = Vec::new();
-            let mut inherited = Vec::new();
-            let mut protections = source_protections
-                .map(ReferenceProtections::duplicate)
-                .transpose()?;
+            let mut assembly = FileAssembly {
+                files: Vec::new(),
+                inherited: Vec::new(),
+                protections: source_protections
+                    .map(ReferenceProtections::duplicate)
+                    .transpose()?,
+                bytes: 0,
+            };
             let _assembly = lifecycle
                 .budget
                 .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
-            let mut assembly_bytes = 0usize;
             let mut completion_view = lifecycle.open(request.dataset()).await?;
             for file in scan.files() {
                 let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
                 let key = file_key(object, &expressions, operation.eligibility)?;
                 let existing: Option<FileCompletion> =
                     self.active_completion(&completion_view, &key).await?;
-                let completion = if let Some(existing) = existing {
-                    let retained = self.retained_protections(&completion_view, &key).await?;
-                    ReferenceProtections::inherit(&mut protections, retained.as_ref())?;
-                    existing
-                } else {
-                    let result = self
-                        .compute_file(
-                            request.dataset(),
-                            &scan,
-                            object,
-                            file.record_count(),
-                            &output,
-                            expressions.clone(),
-                        )
-                        .await;
-                    let completion = match result {
-                        Ok(mut completion) => {
-                            completion.source_metadata = Some(source.metadata.clone());
-                            completion
-                        }
-                        Err(error) => {
-                            self.acknowledge_files(
-                                request,
-                                operation,
-                                &mut completions,
-                                source_protections,
-                            )
-                            .await?;
-                            let _guard = lock.lock().await;
-                            let view = lifecycle.open(request.dataset()).await?;
-                            self.check_not_abandoned(&view, request.operation()).await?;
-                            lifecycle
-                                .commit(
-                                    &view,
-                                    vec![record(
-                                        format!("failure/{}/{key}", request.operation()),
-                                        error.to_string(),
-                                    )?],
-                                )
-                                .await?;
-                            return Err(error);
-                        }
+                if let Some(existing) = existing {
+                    if existing.source != **object || existing.rows != file.record_count() {
+                        return Err(invalid_group());
+                    }
+                    let rows = lifecycle.rows(&completion_view).await?;
+                    let retained = AcknowledgedFile {
+                        completion: existing,
+                        generation: RetainedGeneration {
+                            key: key.clone(),
+                            revision: rows.revision(&key).ok_or_else(invalid_group)?,
+                        },
+                        protections: self
+                            .retained_protections(&completion_view, &key)
+                            .await?
+                            .map(Arc::new),
                     };
-                    completions.insert(key, completion.clone());
-                    completion
-                };
-                if completion.source != **object || completion.rows != file.record_count() {
-                    return Err(invalid_group());
-                }
-                match charge_assembly(
-                    assembly_bytes,
-                    &completion,
-                    lifecycle.budget.limits.max_metadata_bytes,
-                ) {
-                    Ok(bytes) => assembly_bytes = bytes,
-                    Err(error) => {
+                    if let Err(error) = assembly
+                        .append(
+                            vec![retained],
+                            &expressions,
+                            operation.eligibility,
+                            &lifecycle.budget,
+                        )
+                        .await
+                    {
                         self.acknowledge_files(
                             request,
                             operation,
@@ -142,36 +157,89 @@ impl Engine {
                         .await?;
                         return Err(error);
                     }
+                    continue;
                 }
-                files.extend(
-                    read_completion(&completion, &expressions.native, &lifecycle.budget).await?,
-                );
-                inherited.extend(completion.outputs.clone());
+                let result = self
+                    .compute_file(
+                        request.dataset(),
+                        &scan,
+                        object,
+                        file.record_count(),
+                        &output,
+                        expressions.clone(),
+                    )
+                    .await;
+                let completion = match result {
+                    Ok(mut completion) => {
+                        completion.source_metadata = Some(source.metadata.clone());
+                        completion
+                    }
+                    Err(error) => {
+                        self.acknowledge_files(
+                            request,
+                            operation,
+                            &mut completions,
+                            source_protections,
+                        )
+                        .await?;
+                        let _guard = lock.lock().await;
+                        let view = lifecycle.open(request.dataset()).await?;
+                        self.check_not_abandoned(&view, request.operation()).await?;
+                        lifecycle
+                            .commit(
+                                &view,
+                                vec![record(
+                                    format!("failure/{}/{key}", request.operation()),
+                                    error.to_string(),
+                                )?],
+                            )
+                            .await?;
+                        return Err(error);
+                    }
+                };
+                if completion.source != **object || completion.rows != file.record_count() {
+                    return Err(invalid_group());
+                }
+                completions.insert(key, completion);
                 let bytes = serde_json::to_vec(&completions)?.len();
                 if completions.len() >= COMPLETION_BUNDLE
                     || bytes >= lifecycle.budget.limits.max_metadata_bytes / 8
                 {
-                    self.acknowledge_files(
-                        request,
-                        operation,
-                        &mut completions,
-                        source_protections,
-                    )
-                    .await?;
+                    let acknowledged = self
+                        .acknowledge_files(request, operation, &mut completions, source_protections)
+                        .await?;
                     stop_after(stop, "files")?;
+                    assembly
+                        .append(
+                            acknowledged,
+                            &expressions,
+                            operation.eligibility,
+                            &lifecycle.budget,
+                        )
+                        .await?;
                     completion_view = lifecycle.open(request.dataset()).await?;
                 }
             }
-            self.acknowledge_files(request, operation, &mut completions, source_protections)
+            let acknowledged = self
+                .acknowledge_files(request, operation, &mut completions, source_protections)
                 .await?;
             stop_after(stop, "files")?;
-            let output = storage::append(&output, lifecycle.catalog.as_ref(), files).await?;
+            assembly
+                .append(
+                    acknowledged,
+                    &expressions,
+                    operation.eligibility,
+                    &lifecycle.budget,
+                )
+                .await?;
+            let output =
+                storage::append(&output, lifecycle.catalog.as_ref(), assembly.files).await?;
             let prepared = storage::pin(
                 request.dataset(),
                 &output,
                 source.rows,
                 &lifecycle.budget,
-                &inherited,
+                &assembly.inherited,
             )
             .await?;
             let _guard = lock.lock().await;
@@ -206,10 +274,10 @@ impl Engine {
                     &view,
                     &prepared_key,
                     &completed,
-                    protections.as_ref(),
+                    assembly.protections.as_ref(),
                 )?;
                 lifecycle.commit(&view, records).await?;
-                (completed.table, protections)
+                (completed.table, assembly.protections)
             }
         };
         stop_after(stop, "processing")?;
@@ -321,9 +389,9 @@ impl Engine {
         operation: &Operation,
         pending: &mut BTreeMap<String, FileCompletion>,
         source_protections: Option<&ReferenceProtections>,
-    ) -> Result<()> {
+    ) -> Result<Vec<AcknowledgedFile>> {
         if pending.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let lock = self.lock(request.dataset()).await;
         let _guard = lock.lock().await;
@@ -331,27 +399,41 @@ impl Engine {
         let view = lifecycle.open(request.dataset()).await?;
         self.check_completion(&view, operation, request.operation())
             .await?;
+        let rows = lifecycle.rows(&view).await?;
         let mut changes = Vec::new();
-        let mut bindings = Vec::new();
+        let mut acknowledged = Vec::new();
+        let mut new_keys = BTreeSet::new();
+        let mut new_protections = None;
         let mut bytes = 0usize;
-        for (key, completion) in pending.iter() {
-            if self
-                .active_completion::<FileCompletion>(&view, key)
-                .await?
-                .is_none()
+        let mut completion_bytes = 0usize;
+        for (key, candidate) in pending.iter() {
+            let (completion, revision, protections) = if let Some(existing) =
+                self.active_completion::<FileCompletion>(&view, key).await?
             {
-                // Each serialized binding is a separate copy until commit.
-                // Keep its admitted scope alive and cap the combined bundle,
-                // including bindings, before accumulating another record.
-                let binding = source_protections
-                    .map(ReferenceProtections::duplicate)
-                    .transpose()?;
+                if existing.source != candidate.source || existing.rows != candidate.rows {
+                    return Err(invalid_group());
+                }
+                (
+                    existing,
+                    rows.revision(key).ok_or_else(invalid_group)?,
+                    self.retained_protections(&view, key).await?.map(Arc::new),
+                )
+            } else {
+                // New files share one acquired scope; serialized bindings remain
+                // separate copies and count against the combined commit bound.
+                if new_keys.is_empty() {
+                    new_protections = source_protections
+                        .map(ReferenceProtections::duplicate)
+                        .transpose()?
+                        .map(Arc::new);
+                }
+                let protections = new_protections.clone();
                 let records = completion_records(
                     request.dataset(),
                     &view,
                     key,
-                    completion,
-                    binding.as_ref(),
+                    candidate,
+                    protections.as_deref(),
                 )?;
                 bytes = bytes.saturating_add(inputs::metadata_size(
                     &records,
@@ -361,18 +443,37 @@ impl Engine {
                         .max_metadata_bytes
                         .saturating_sub(bytes),
                 )?);
-                bindings.extend(binding);
                 changes.extend(records);
-            }
-            // A concurrent winner keeps its own value and binding. Assembly has
-            // already consumed this candidate's outputs under source_protections;
-            // it must not replace that scope with the unconsumed winner's scope.
+                new_keys.insert(key.clone());
+                (candidate.clone(), view.revision, protections)
+            };
+            completion_bytes = completion_bytes.saturating_add(inputs::metadata_size(
+                &(key, &completion),
+                lifecycle
+                    .budget
+                    .limits
+                    .max_metadata_bytes
+                    .saturating_sub(completion_bytes),
+            )?);
+            acknowledged.push(AcknowledgedFile {
+                completion,
+                generation: RetainedGeneration {
+                    key: key.clone(),
+                    revision,
+                },
+                protections,
+            });
         }
         if !changes.is_empty() {
-            lifecycle.commit(&view, changes).await?;
+            let committed = lifecycle.commit(&view, changes).await?;
+            for file in &mut acknowledged {
+                if new_keys.contains(&file.generation.key) {
+                    file.generation.revision = committed.revision;
+                }
+            }
         }
         pending.clear();
-        Ok(())
+        Ok(acknowledged)
     }
 
     async fn compute_file(

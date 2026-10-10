@@ -19,6 +19,31 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Canonical scalar file completions
+
+Scalar preparation now assembles the file completion that actually won its
+guarded acknowledgment, together with that record's native revision and retained
+protection. Concurrent workers therefore consume the same retained files and
+scope. Cached completions keep their original generation; retirement followed by
+recomputation creates a new generation. Bundled acknowledgment and metadata
+bounds remain, and assembly shares protection allocations and moves output
+references without adding a payload scan.
+
+The [focused checks](reviews/canonical-completion-focused-check.log) cover
+concurrent winners and retirement/reopen/retry. The
+[complete repository gate](reviews/canonical-completion-full-check.log) passes
+with two compiler jobs and two test threads. Independent
+[consistency](reviews/canonical-completion-consistency-review.md) and
+[efficiency](reviews/canonical-completion-efficiency-review.md) reviews approve
+this increment. They record nonblocking gaps for a mixed existing/new bundle and
+distinct nonempty protection scopes; no performance improvement was measured.
+
+This is a prerequisite for [scoped dependency correction](dependency-corrections.md).
+Original execution descriptors, their retention integration, the correction
+service and Q4 qualification remain unfinished. The
+[retention seam review](reviews/scalar-origins-retention-seams.md) maps the next
+changes onto the existing protection inventory.
+
 ## Native query planning
 
 Native scans now expose the selected pin's row count through maintained
