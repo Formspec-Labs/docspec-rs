@@ -557,7 +557,6 @@ pub(super) async fn verify_transition(
         || after.definition != spec.next_definition
         || before.related.is_some()
         || after.related.is_some()
-        || after.changes.is_some()
         || before.inputs != after.inputs
         || before.relationship != after.relationship
         || before.eligibility != after.eligibility

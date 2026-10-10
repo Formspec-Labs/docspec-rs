@@ -158,7 +158,6 @@ pub struct DatasetPin {
     pub request: OperationRequest,
     /// Exact selected combination replaced or extended, including concurrent sibling groups.
     pub parent_manifest: Option<ObjectRef>,
-    pub changes: Option<ChangePin>,
     pub processor: String,
     /// Validation scope completed before selection. Older releases meet at least routine scope.
     #[serde(default)]
@@ -182,7 +181,7 @@ pub enum VerificationLevel {
     /// Check references, schemas, sizes, footer counts and a bounded row sample.
     #[default]
     Routine,
-    /// Also hash payloads and reconstruct complete values, changes and evidence.
+    /// Also hash payloads and reconstruct complete derived values and evidence.
     Deep,
 }
 
@@ -548,6 +547,7 @@ pub struct RetainedGeneration {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RetirementScope {
     PhaseRecovery,
+    OptionalChanges,
     ResultAvailability { operation: OperationId },
     OperationRecovery { operation: OperationId },
     OwnerGrants,
@@ -1076,9 +1076,12 @@ impl OperationRequest {
     }
 }
 
-/// Typed before/after rows from applied writes, selected with their exact result.
+/// Typed applied rows retained by a recovery phase or optional change descriptor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangePin {
+    /// Qualified local production semantics; absent older claims are not certified.
+    #[serde(default)]
+    pub rules: String,
     pub base_version: Id,
     pub base_manifest: ObjectRef,
     pub before_metadata: ObjectRef,
@@ -1086,6 +1089,41 @@ pub struct ChangePin {
     pub key_field_ids: Vec<i32>,
     pub removed: TablePin,
     pub added: TablePin,
+}
+
+/// Applied changes stored independently of the complete result's required evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppliedChangeSet {
+    pub format: u32,
+    pub rules: String,
+    pub operation: OperationId,
+    pub before: VersionRef,
+    pub source: Option<ChangePin>,
+    pub receipts: Option<ChangePin>,
+}
+
+/// Local change qualification selected atomically with its exact result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeCertificate {
+    pub format: u32,
+    pub rules: String,
+    pub before: VersionRef,
+    pub after: VersionRef,
+    pub descriptor: ObjectRef,
+}
+
+/// A captured optional certificate and its bounded typed description.
+///
+/// This metadata identifies retained evidence but creates no lasting protection.
+/// Readers and consumers must acquire their own admission or retention promise.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CertifiedChanges {
+    pub revision: i64,
+    pub certificate: ChangeCertificate,
+    pub changes: AppliedChangeSet,
 }
 
 /// Counts observed while discovering and writing a candidate; no reporting scan.

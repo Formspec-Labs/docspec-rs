@@ -139,7 +139,14 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
         .await
         .unwrap();
     assert_eq!(&noop.dataset.groups["source"], source);
-    let changes = noop.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&noop.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     assert_eq!((changes.removed.rows, changes.added.rows), (0, 0));
     let empty = storage::open_pin(&changes.removed).await.unwrap();
     assert_eq!(
@@ -166,7 +173,14 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
     // Discovery conservatively recomputes all keys from rewritten producer
     // files, including equal-valued contributor groups. Those applied groups
     // receive new births; rows kept outside that scope retain their identities.
-    let changes = changed.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&changed.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     let removed = occurrences(&changes.removed).await;
     assert!(!removed.is_empty());
     assert!(removed.iter().all(|row| original.contains(row)));
@@ -297,7 +311,14 @@ async fn receipt_free_updates_preserve_original_addresses_and_new_births() {
         .await
         .unwrap();
     assert_eq!(&noop.dataset.groups["source"], source);
-    let changes = noop.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&noop.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     assert_eq!((changes.removed.rows, changes.added.rows), (0, 0));
     assert_eq!(changes.before_metadata, source.metadata);
     assert_eq!(changes.after_metadata, source.metadata);
@@ -314,7 +335,14 @@ async fn receipt_free_updates_preserve_original_addresses_and_new_births() {
     let mutation = update(root.path(), &noop, "replace", &replacements);
     let changed = engine.update(&mutation).await.unwrap();
     assert!(changed.dataset.evidence.is_none());
-    let changes = changed.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&changed.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     let removed: Vec<_> = original
         .iter()
         .filter(|row| row.2 == Some(1) || row.2.is_none())
@@ -379,8 +407,16 @@ async fn receipt_free_updates_preserve_original_addresses_and_new_births() {
         ))
         .await
         .unwrap();
+    let changes = engine
+        .change_certificate(&second.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     assert_eq!(
-        occurrences(&second.dataset.changes.as_ref().unwrap().removed).await,
+        occurrences(&changes.removed).await,
         current
             .iter()
             .filter(|row| row.2 == Some(1))

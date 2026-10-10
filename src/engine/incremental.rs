@@ -89,6 +89,7 @@ impl Engine {
             return Ok(write::Prepared {
                 table: before.clone(),
                 changes: Some(ChangePin {
+                    rules: super::changes::WRITE_RULES.into(),
                     base_version: base.id.clone(),
                     base_manifest: base.manifest.clone(),
                     before_metadata: before.metadata.clone(),
@@ -295,6 +296,7 @@ impl Engine {
         applied.metrics.data_files_written += discovery.data_files_written;
         applied.metrics.bytes_written += discovery.bytes_written;
         let changes = ChangePin {
+            rules: super::changes::WRITE_RULES.into(),
             base_version: base.id.clone(),
             base_manifest: base.manifest.clone(),
             before_metadata: before.metadata.clone(),

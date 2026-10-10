@@ -36,6 +36,8 @@ mod export;
 pub use evidence::read_receipts;
 mod history;
 mod restore;
+#[doc(inline)]
+pub use changes::verify_applied_changes;
 use changes::verify_changes;
 mod inputs;
 #[doc(inline)]
@@ -1246,9 +1248,11 @@ impl Engine {
             };
             let receipts = if evidence_only {
                 Some(Retained {
-                    value: crate::evidence::EvidenceResult {
-                        source: (&table).into(),
-                        table: processed,
+                    value: evidence::PreparedReceipts {
+                        result: crate::evidence::EvidenceResult {
+                            source: (&table).into(),
+                            table: processed,
+                        },
                         changes: processing.changes.clone(),
                     },
                     protections: processing
@@ -1273,7 +1277,7 @@ impl Engine {
                         dependencies.tables.push((&related.evidence).into());
                     }
                     if let Some(receipts) = &receipts {
-                        dependencies.tables.push((&receipts.table).into());
+                        dependencies.tables.push((&receipts.result.table).into());
                     }
                     dependencies
                 });
@@ -1307,7 +1311,7 @@ impl Engine {
                 )
                 .await?;
                 if let Some(receipts) = &receipts {
-                    evidence::verify_result(
+                    evidence::verify_prepared(
                         spec,
                         &table,
                         base.as_ref().ok_or_else(|| {
@@ -1347,6 +1351,20 @@ impl Engine {
                 self.complete(spec, &operation, phase, protections).await?
             };
             stop_after(stop, "validation")?;
+            self.prepare_changes(
+                spec,
+                &operation,
+                base.as_ref(),
+                if evidence_only {
+                    None
+                } else {
+                    processing.changes.as_ref()
+                },
+                receipts
+                    .as_ref()
+                    .and_then(|receipts| receipts.changes.as_ref()),
+            )
+            .await?;
             let protection_view = lifecycle.open(spec.dataset()).await?;
             let mut readback_protections = self
                 .request_protections(&protection_view, spec.operation())
@@ -1516,12 +1534,7 @@ impl Engine {
                 inputs,
                 relationship: inputs::relationship(spec, base.as_ref().map(|base| &base.dataset)),
                 related: related.map(|related| Box::new(related.value)),
-                evidence: receipts.map(|receipts| Box::new(receipts.value)),
-                changes: if evidence_only {
-                    None
-                } else {
-                    processing.changes.clone()
-                },
+                evidence: receipts.map(|receipts| Box::new(receipts.value.result)),
                 definition: captured_request.result_definition().to_owned(),
                 eligibility: operation.eligibility,
                 boundary: operation.boundary,
@@ -2328,25 +2341,9 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
             .values()
             .filter_map(|group| group.origins.clone()),
     );
-    if let Some(changes) = &dataset.changes {
-        objects.extend([
-            changes.base_manifest.clone(),
-            changes.before_metadata.clone(),
-        ]);
-        objects.extend(changes.added.objects.iter().cloned());
-        objects.extend(changes.removed.objects.iter().cloned());
-    }
     if let Some(evidence) = &dataset.evidence {
         objects.push(evidence.source.metadata.clone());
         objects.extend(evidence.table.objects.iter().cloned());
-        if let Some(changes) = &evidence.changes {
-            objects.extend([
-                changes.base_manifest.clone(),
-                changes.before_metadata.clone(),
-            ]);
-            objects.extend(changes.added.objects.iter().cloned());
-            objects.extend(changes.removed.objects.iter().cloned());
-        }
     }
     objects.sort_by(|left, right| left.path.cmp(&right.path));
     objects.dedup();
@@ -2420,14 +2417,6 @@ async fn verify_local_release(
         .get("source")
         .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
     checks.table(source, budget).await?;
-    verify_changes(
-        &decoded.request,
-        source,
-        decoded.changes.as_ref(),
-        budget,
-        checks,
-    )
-    .await?;
     backfill::verify_groups(decoded, budget, checks).await?;
     evidence::verify(decoded, budget, checks).await?;
     Ok(())

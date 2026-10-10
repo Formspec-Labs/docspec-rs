@@ -746,10 +746,6 @@ impl Engine {
             dataset.parent_manifest = Some(current.manifest.clone());
             dataset.version = spec.operation.clone();
             dataset.request = request.clone();
-            dataset.changes = None;
-            if let Some(evidence) = &mut dataset.evidence {
-                evidence.changes = None;
-            }
             dataset.processor = PROCESSOR.into();
             dataset
                 .groups
@@ -962,7 +958,6 @@ impl Engine {
                 || dataset.groups.get("source") != Some(source)
                 || dataset.related != capture.related
                 || dataset.relationship != base.dataset.relationship
-                || dataset.changes.is_some()
                 || dataset.parent_manifest.is_none()
                 || binding.definition != definition
                 || binding.request != request
@@ -1337,7 +1332,6 @@ mod tests {
                     boundary: 0,
                     request,
                     parent_manifest: None,
-                    changes: None,
                     processor: PROCESSOR.into(),
                     validation: VerificationLevel::Routine,
                 },

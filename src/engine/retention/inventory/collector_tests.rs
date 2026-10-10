@@ -72,7 +72,6 @@ fn release(root: &Path, owner: &str, version: &str) -> ReleasePin {
                 definition: "v1".into(),
             }),
             parent_manifest: None,
-            changes: None,
             processor: "fixture".into(),
             validation: VerificationLevel::Routine,
         },
@@ -266,7 +265,7 @@ async fn empty_authority_has_no_selected_result_or_protection_claim() {
 }
 
 #[tokio::test]
-async fn closure_collects_history_computation_coverage_seals_and_changes_without_payload_reads() {
+async fn closure_collects_history_computation_coverage_and_seals_without_payload_reads() {
     let root = tempfile::tempdir().unwrap();
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
@@ -335,24 +334,11 @@ async fn closure_collects_history_computation_coverage_seals_and_changes_without
         },
         evidence: evidence.clone(),
     }));
-    let removed = table(root.path(), "consumer", "removed");
-    let added = table(root.path(), "consumer", "added");
-    selected.dataset.changes = Some(ChangePin {
-        base_version: base.id.clone(),
-        base_manifest: base.manifest.clone(),
-        before_metadata: base.dataset.groups["source"].metadata.clone(),
-        after_metadata: selected.dataset.groups["source"].metadata.clone(),
-        key_field_ids: vec![1],
-        removed: removed.clone(),
-        added: added.clone(),
-    });
     let expected = [&base, &producer, &sibling, &selected]
         .into_iter()
         .flat_map(direct_objects)
         .chain([schema_only])
         .chain(evidence.objects)
-        .chain(removed.objects)
-        .chain(added.objects)
         .map(|object| (object.path.clone(), object))
         .collect::<BTreeMap<_, _>>();
     // Only release manifests exist. The supplied root and every native/payload

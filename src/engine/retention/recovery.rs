@@ -15,9 +15,31 @@ fn keys(operation: &Id) -> [String; 4] {
 
 pub(super) fn scope_key(operation: &Id, key: &str) -> bool {
     keys(operation).iter().any(|candidate| candidate == key)
+        || key == format!("prepared-changes/{operation}")
         || key
             .strip_prefix("protection/")
             .is_some_and(|id| Id::new(id).is_ok())
+}
+
+fn prepared_generation(
+    rows: &SnapshotRows,
+    request: &OperationRequest,
+    operation_revision: i64,
+    boundary: i64,
+    budget: &Budget,
+) -> Result<Option<RetainedGeneration>> {
+    let key = format!("prepared-changes/{}", request.operation());
+    let _memory = rows.reserve_decoded(budget, &[&key])?;
+    let Some((revision, _, prepared)) =
+        rows.get_record::<crate::engine::changes::PreparedChanges>(&key)?
+    else {
+        return Ok(None);
+    };
+    if revision <= operation_revision || revision > boundary {
+        return Err(invalid_retirement());
+    }
+    crate::engine::changes::check_prepared(&prepared, &key, request.dataset())?;
+    Ok(Some(RetainedGeneration { key, revision }))
 }
 
 // Admission identity stays readable after its recovery contribution ends.
@@ -180,6 +202,12 @@ pub(super) fn collect(
     let (operation_revision, request, admitted) = admission(rows, view, operation)?;
     terminal(rows, operation_revision, &request, &admitted, view.revision)?;
     let mut records = check_fixed(rows, &request, operation_revision)?;
+    if let Some(prepared) =
+        prepared_generation(rows, &request, operation_revision, view.revision, budget)?
+        && !record_retired(rows, view, &prepared.key, prepared.revision, budget)?
+    {
+        records.push(prepared);
+    }
     // Charge spare vector capacity and per-entry allocation overhead as well as keys.
     let mut bytes = records
         .iter()
@@ -233,6 +261,19 @@ pub(super) fn validate_saved(
     terminal(rows, revision, &request, &admitted, receipt.plan.revision)?;
     for fixed in check_fixed(rows, &request, revision)? {
         if receipt.plan.records.binary_search(&fixed).is_err() {
+            return Err(invalid_retirement());
+        }
+    }
+    if let Some(prepared) =
+        prepared_generation(rows, &request, revision, receipt.plan.revision, budget)?
+        && receipt.plan.records.binary_search(&prepared).is_err()
+    {
+        // A completed preparation can end independently through PhaseRecovery.
+        // Its earlier retirement must already precede this captured decision.
+        if !record_retired(rows, view, &prepared.key, prepared.revision, budget)?
+            || super::retirement::retirement_marker(rows, view, &prepared.key, prepared.revision)?
+                .is_none_or(|(retired, _)| retired > receipt.plan.revision)
+        {
             return Err(invalid_retirement());
         }
     }

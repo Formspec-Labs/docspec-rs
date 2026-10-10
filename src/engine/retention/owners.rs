@@ -967,7 +967,24 @@ async fn visit_creation(
         if revision <= 0 || revision > view.revision {
             return Err(invalid());
         }
-        if key.starts_with("restore-materialized/") {
+        if key.starts_with("prepared-changes/") {
+            let prepared: crate::engine::changes::PreparedChanges = serde_json::from_str(json)?;
+            crate::engine::changes::check_prepared(&prepared, key, &prepared.before.dataset)?;
+            if crate::catalog::lifecycle_ident(&prepared.before.dataset) != *view.table.identifier()
+            {
+                return Err(invalid());
+            }
+            observe(&prepared.descriptor)?;
+        } else if key.starts_with("change-certificate/") {
+            let certificate: ChangeCertificate = serde_json::from_str(json)?;
+            crate::engine::changes::check_certificate(rows, revision, key, &certificate)?;
+            if crate::catalog::lifecycle_ident(&certificate.after.dataset)
+                != *view.table.identifier()
+            {
+                return Err(invalid());
+            }
+            observe(&certificate.descriptor)?;
+        } else if key.starts_with("restore-materialized/") {
             let created: crate::restore::RestoreMaterialized = serde_json::from_str(json)?;
             observe(&created.reference.manifest)?;
             observe(&created.catalog)?;

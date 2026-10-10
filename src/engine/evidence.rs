@@ -6,6 +6,11 @@ use arrow::datatypes::{DataType, Schema as ArrowSchema};
 use datafusion::{logical_expr::JoinType, physical_plan::SendableRecordBatchStream};
 use write::{Applied, Prepared, Replacement, any_rows, identifier as quote, same_fields};
 
+pub(super) struct PreparedReceipts {
+    pub result: EvidenceResult,
+    pub changes: Option<ChangePin>,
+}
+
 fn keys() -> Vec<String> {
     vec![SOURCE_FILE.into(), SOURCE_ROW.into()]
 }
@@ -51,6 +56,32 @@ fn check_schema(schema: &ArrowSchema, payload: bool) -> Result<()> {
 
 fn key_columns() -> Vec<datafusion::logical_expr::Expr> {
     vec![col(SOURCE_FILE), col(SOURCE_ROW)]
+}
+
+async fn receipt_inputs(
+    context: &SessionContext,
+    has_deletions: bool,
+) -> Result<(DataFrame, DataFrame)> {
+    let replacement = context.table("replacements").await?;
+    check_schema(replacement.schema().as_arrow(), true)?;
+    let mut scope = replacement.clone().select(key_columns())?.distinct()?;
+    if has_deletions {
+        let deletions = context.table("deletions").await?;
+        check_schema(deletions.schema().as_arrow(), false)?;
+        if any_rows(scope.clone().join(
+            deletions.clone(),
+            JoinType::Inner,
+            &[SOURCE_FILE, SOURCE_ROW],
+            &[SOURCE_FILE, SOURCE_ROW],
+            None,
+        )?)
+        .await?
+        {
+            return Err(invalid("receipt replacement and deletion keys overlap"));
+        }
+        scope = scope.union(deletions)?.distinct()?;
+    }
+    Ok((replacement, scope))
 }
 
 /// Enforce association while processing new receipt keys, not on ordinary reads.
@@ -286,25 +317,7 @@ impl Engine {
                     .register_parquet(name, &object.path, ParquetReadOptions::default())
                     .await?;
             }
-            let replacement = context.table("replacements").await?;
-            check_schema(replacement.schema().as_arrow(), true)?;
-            let mut scope = replacement.clone().select(key_columns())?.distinct()?;
-            if spec.deletions.is_some() {
-                let deletions = context.table("deletions").await?;
-                check_schema(deletions.schema().as_arrow(), false)?;
-                if any_rows(scope.clone().join(
-                    deletions.clone(),
-                    JoinType::Inner,
-                    &[SOURCE_FILE, SOURCE_ROW],
-                    &[SOURCE_FILE, SOURCE_ROW],
-                    None,
-                )?)
-                .await?
-                {
-                    return Err(invalid("receipt replacement and deletion keys overlap"));
-                }
-                scope = scope.union(deletions)?.distinct()?;
-            }
+            let (replacement, scope) = receipt_inputs(&context, spec.deletions.is_some()).await?;
             check_associations(scope.clone(), source, &self.inner.lifecycle.budget).await?;
             let before = if let Some(previous) = &base.dataset.evidence {
                 previous.table.clone()
@@ -355,6 +368,7 @@ impl Engine {
                 |previous| previous.table.metadata.clone(),
             );
             let changes = ChangePin {
+                rules: changes::WRITE_RULES.into(),
                 base_version: base.id,
                 base_manifest: base.manifest,
                 before_metadata,
@@ -380,7 +394,7 @@ impl Engine {
         processing: &'a Retained<PhaseResult>,
         base: &'a ReleasePin,
         stop: Option<&'a str>,
-    ) -> futures::future::BoxFuture<'a, Result<Option<Retained<EvidenceResult>>>> {
+    ) -> futures::future::BoxFuture<'a, Result<Option<Retained<PreparedReceipts>>>> {
         Box::pin(async move {
             let Some(previous) = &base.dataset.evidence else {
                 return Ok(None);
@@ -391,9 +405,11 @@ impl Engine {
                 .ok_or_else(|| invalid("processing lacks source"))?;
             if adopts_receipts(request, processing, &base.dataset)? {
                 return Ok(Some(Retained {
-                    value: EvidenceResult {
-                        source: source.into(),
-                        table: previous.table.clone(),
+                    value: PreparedReceipts {
+                        result: EvidenceResult {
+                            source: source.into(),
+                            table: previous.table.clone(),
+                        },
                         changes: None,
                     },
                     protections: processing
@@ -472,6 +488,7 @@ impl Engine {
                         })
                         .await?;
                     let changes = ChangePin {
+                        rules: changes::WRITE_RULES.into(),
                         base_version: base.id.clone(),
                         base_manifest: base.manifest.clone(),
                         before_metadata: previous.table.metadata.clone(),
@@ -505,12 +522,14 @@ impl Engine {
                 };
             stop_after(stop, "receipts")?;
             Ok(Some(Retained {
-                value: EvidenceResult {
-                    source: source.into(),
-                    table: retained
-                        .table
-                        .clone()
-                        .ok_or_else(|| invalid("receipt completion lacks table"))?,
+                value: PreparedReceipts {
+                    result: EvidenceResult {
+                        source: source.into(),
+                        table: retained
+                            .table
+                            .clone()
+                            .ok_or_else(|| invalid("receipt completion lacks table"))?,
+                    },
                     changes: retained.changes.clone(),
                 },
                 protections: retained.protections,
@@ -590,49 +609,58 @@ pub(super) fn verify<'a>(
             .groups
             .get("source")
             .ok_or_else(|| invalid("result has no source"))?;
-        let base_release = ReleasePin {
-            id: base.version.clone(),
-            dataset: base,
-            manifest: parent.clone(),
-            verified: true,
-        };
-        verify_result(
-            &dataset.request,
-            source,
-            &base_release,
-            evidence,
-            budget,
-            checks,
-        )
-        .await?;
-        if checks.deep() && !matches!(dataset.request, OperationRequest::Evidence(_)) {
-            verify_inheritance(dataset, &base_release.dataset, budget).await?;
+        if !matches!(dataset.request, OperationRequest::Evidence(_)) && base.evidence.is_none() {
+            return Err(invalid("inherited receipt result has no prior table"));
+        }
+        if matches!(dataset.request, OperationRequest::Evidence(_))
+            && base.groups.get("source") != Some(source)
+        {
+            return Err(invalid("receipt update changed its captured source"));
+        }
+        verify_result(source, evidence, budget, checks).await?;
+        if let Some(previous) = &base.evidence
+            && previous.table != evidence.table
+        {
+            let before = storage::open_pin(&previous.table).await?;
+            let after = storage::open_pin(&evidence.table).await?;
+            if !storage::identity::preserves_schema(
+                before.metadata().current_schema(),
+                after.metadata().current_schema(),
+            )? {
+                return Err(invalid(
+                    "receipt schema differs from its retained predecessor",
+                ));
+            }
+        }
+        if checks.deep() {
+            if let Some(previous) = &base.evidence
+                && previous.table != evidence.table
+            {
+                checks.table(&previous.table, budget).await?;
+            }
+            if let OperationRequest::Evidence(spec) = &dataset.request {
+                verify_replacement(dataset, &base, spec, budget).await?;
+            } else {
+                verify_inheritance(dataset, &base, budget).await?;
+            }
         }
         Ok(())
     })
 }
 
-pub(super) fn verify_result<'a>(
+/// Checks applied receipts once while their recovery phase owns the change rows.
+pub(super) fn verify_prepared<'a>(
     request: &'a OperationRequest,
     source: &'a TablePin,
     base: &'a ReleasePin,
-    evidence: &'a EvidenceResult,
+    prepared: &'a PreparedReceipts,
     budget: &'a Budget,
     checks: &'a mut verification::Checks,
 ) -> futures::future::BoxFuture<'a, Result<()>> {
     Box::pin(async move {
-        if evidence.source != NativeSnapshotRef::from(source) {
-            return Err(invalid(
-                "receipt association uses another source interpretation",
-            ));
-        }
-        checks.table(&evidence.table, budget).await?;
-        let native = storage::open_pin(&evidence.table).await?;
-        check_schema(
-            &iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?,
-            true,
-        )?;
-        if let Some(changes) = &evidence.changes {
+        let evidence = &prepared.result;
+        verify_result(source, evidence, budget, checks).await?;
+        if let Some(changes) = &prepared.changes {
             let before = base
                 .dataset
                 .evidence
@@ -669,9 +697,32 @@ pub(super) fn verify_result<'a>(
                 "unchanged receipts do not preserve their original table",
             ));
         }
-        if matches!(request, OperationRequest::Evidence(_)) && evidence.changes.is_none() {
+        if matches!(request, OperationRequest::Evidence(_)) && prepared.changes.is_none() {
             return Err(invalid("receipt update lacks applied change evidence"));
         }
+        Ok(())
+    })
+}
+
+/// Checks complete receipt state without requiring optional transition history.
+pub(super) fn verify_result<'a>(
+    source: &'a TablePin,
+    evidence: &'a EvidenceResult,
+    budget: &'a Budget,
+    checks: &'a mut verification::Checks,
+) -> futures::future::BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        if evidence.source != NativeSnapshotRef::from(source) {
+            return Err(invalid(
+                "receipt association uses another source interpretation",
+            ));
+        }
+        checks.table(&evidence.table, budget).await?;
+        let native = storage::open_pin(&evidence.table).await?;
+        check_schema(
+            &iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?,
+            true,
+        )?;
         if checks.deep() {
             let context = budget.context();
             context.register_table(
@@ -693,6 +744,70 @@ pub(super) fn verify_result<'a>(
     })
 }
 
+// Reconstruct receipt replacement from retained original inputs, not optional deltas.
+async fn verify_replacement(
+    dataset: &DatasetPin,
+    base: &DatasetPin,
+    spec: &EvidenceSpec,
+    budget: &Budget,
+) -> Result<()> {
+    let current = dataset
+        .evidence
+        .as_ref()
+        .ok_or_else(|| invalid("missing receipts"))?;
+    let source = dataset
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid("missing source"))?;
+    let context = budget.context();
+    for (name, input) in dataset.request.inputs() {
+        let object = dataset
+            .inputs
+            .get(&dataset.request.input_key(&name))
+            .filter(|object| object.digest == input.digest)
+            .ok_or_else(|| invalid("receipt input differs from its captured request"))?;
+        context
+            .register_parquet(&name, &object.path, ParquetReadOptions::default())
+            .await?;
+    }
+    let (replacement, scope) = receipt_inputs(&context, spec.deletions.is_some()).await?;
+    check_associations(scope.clone(), source, budget).await?;
+    let expected = if let Some(previous) = &base.evidence {
+        let native = storage::open_pin(&previous.table).await?;
+        let expected = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+        if !same_fields(&expected, replacement.schema().as_arrow())? {
+            return Err(invalid(
+                "receipt replacements must preserve the complete native schema",
+            ));
+        }
+        context.register_table(
+            "previous",
+            crate::query::table(native, budget.clone(), Some(previous.table.rows))?,
+        )?;
+        context
+            .table("previous")
+            .await?
+            .join(
+                scope,
+                JoinType::LeftAnti,
+                &[SOURCE_FILE, SOURCE_ROW],
+                &[SOURCE_FILE, SOURCE_ROW],
+                None,
+            )?
+            .union(replacement)?
+    } else {
+        replacement
+    };
+    verify_receipt_values(
+        &context,
+        expected,
+        &current.table,
+        budget,
+        "receipt values differ from the retained replacement and deletion inputs",
+    )
+    .await
+}
+
 // Verify complete inheritance, including duplicate/null/nested receipt values.
 // The difference is grouped once, so each relation is consumed once.
 async fn verify_inheritance(
@@ -709,16 +824,14 @@ async fn verify_inheritance(
         .as_ref()
         .ok_or_else(|| invalid("missing receipts"))?;
     let context = budget.context();
-    for (name, pin) in [("previous", &previous.table), ("current", &current.table)] {
-        context.register_table(
-            name,
-            crate::query::table(
-                storage::open_pin(pin).await?,
-                budget.clone(),
-                Some(pin.rows),
-            )?,
-        )?;
-    }
+    context.register_table(
+        "previous",
+        crate::query::table(
+            storage::open_pin(&previous.table).await?,
+            budget.clone(),
+            Some(previous.table.rows),
+        )?,
+    )?;
     let (expected, _memory) = associate(
         context.table("previous").await?,
         dataset
@@ -729,6 +842,36 @@ async fn verify_inheritance(
         JoinType::LeftSemi,
     )
     .await?;
+    verify_receipt_values(
+        &context,
+        expected,
+        &current.table,
+        budget,
+        "inherited receipts differ from the surviving source occurrences",
+    )
+    .await
+}
+
+async fn verify_receipt_values(
+    context: &SessionContext,
+    expected: DataFrame,
+    current: &TablePin,
+    budget: &Budget,
+    reason: &str,
+) -> Result<()> {
+    let native = storage::open_pin(current).await?;
+    if !same_fields(
+        expected.schema().as_arrow(),
+        &iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?,
+    )? {
+        return Err(invalid(
+            "receipt values changed their complete field types or nullability",
+        ));
+    }
+    context.register_table(
+        "current",
+        crate::query::table(native, budget.clone(), Some(current.rows))?,
+    )?;
     context.register_table("expected", expected.into_view())?;
     let columns = [SOURCE_FILE, SOURCE_ROW, EVIDENCE]
         .iter()
@@ -739,9 +882,7 @@ async fn verify_inheritance(
         "SELECT 1 FROM (SELECT {columns}, CAST(1 AS BIGINT) AS delta FROM expected UNION ALL SELECT {columns}, CAST(-1 AS BIGINT) AS delta FROM current) GROUP BY {columns} HAVING SUM(delta) <> 0 LIMIT 1"
     );
     if any_rows(context.sql(&mismatch).await?).await? {
-        return Err(invalid(
-            "inherited receipts differ from the surviving source occurrences",
-        ));
+        return Err(invalid(reason));
     }
     Ok(())
 }

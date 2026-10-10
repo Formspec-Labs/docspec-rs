@@ -3,6 +3,85 @@
 use super::write::identifier as quote;
 use super::*;
 
+mod certificates;
+mod retirement;
+pub(super) use certificates::{
+    PreparedChanges, WRITE_RULES, check_applied, check_certificate, check_prepared,
+};
+
+/// Independently reconstructs an optional applied transition from exact endpoints.
+///
+/// This explicit audit scans the applied rows and endpoint values. It does not
+/// grant local certificate authority or extend any objects' retention lifetime.
+/// The caller keeps the referenced objects available throughout the check.
+///
+/// # Errors
+/// Refuses incorrect bindings, changed objects, invalid schemas or applied values,
+/// and exhausted execution capacity.
+pub async fn verify_applied_changes(
+    before: &ReleasePin,
+    after: &ReleasePin,
+    changes: &AppliedChangeSet,
+    limits: Limits,
+) -> Result<()> {
+    certificates::check_bindings(changes)?;
+    let invalid = || {
+        Error::refusal(
+            "invalid_changes",
+            "applied transition differs from its exact endpoints",
+        )
+    };
+    if changes.before != before.version_ref()
+        || changes.operation != after.id
+        || changes.before.dataset != after.dataset.dataset
+        || after.dataset.parent_manifest.as_ref() != Some(&before.manifest)
+        || after.dataset.request.base() != Some(&before.id)
+        || changes.format != 1
+        || changes.rules != WRITE_RULES
+        || (changes.source.is_none() && changes.receipts.is_none())
+    {
+        return Err(invalid());
+    }
+    let budget = Budget::new(limits)?;
+    resolve_release(before, &budget).await?;
+    resolve_release(after, &budget).await?;
+    if let OperationRequest::Refresh(spec) = &after.dataset.request
+        && spec.mode == RefreshMode::Incremental
+    {
+        incremental::qualify(spec, &before.dataset, after.dataset.eligibility, &budget).await?;
+    }
+    let mut checks = verification::Checks::new(VerificationLevel::Deep);
+    let source = after.dataset.groups.get("source").ok_or_else(invalid)?;
+    checks.table(source, &budget).await?;
+    verify_changes(
+        &after.dataset.request,
+        source,
+        changes.source.as_ref(),
+        &budget,
+        &mut checks,
+    )
+    .await?;
+    match (&after.dataset.evidence, &changes.receipts) {
+        (Some(result), receipt_changes) => {
+            evidence::verify_prepared(
+                &after.dataset.request,
+                source,
+                before,
+                &evidence::PreparedReceipts {
+                    result: (**result).clone(),
+                    changes: receipt_changes.clone(),
+                },
+                &budget,
+                &mut checks,
+            )
+            .await?;
+        }
+        (None, Some(_)) => return Err(invalid()),
+        (None, None) => {}
+    }
+    Ok(())
+}
+
 pub(super) async fn verify_changes(
     request: &OperationRequest,
     source: &TablePin,

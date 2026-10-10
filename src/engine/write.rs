@@ -8,6 +8,9 @@ use arrow::{
 };
 use iceberg::{spec::Schema, table::Table};
 
+mod verification;
+pub(super) use verification::verify_update;
+
 pub(super) struct Prepared {
     pub table: TablePin,
     pub changes: Option<ChangePin>,
@@ -366,6 +369,7 @@ impl Engine {
             .finish_source_replacement(&spec.dataset, directory, captured_before, applied)
             .await?;
         let changes = ChangePin {
+            rules: super::changes::WRITE_RULES.into(),
             base_version: spec.base.clone(),
             base_manifest: base.manifest,
             before_metadata: canonical_before.metadata.clone(),

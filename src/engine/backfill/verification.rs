@@ -77,15 +77,19 @@ pub(crate) async fn verify_groups(
                 return Err(inputs::invalid_relationship());
             }
         }
-        OperationRequest::Update(_) => {
+        OperationRequest::Update(spec) => {
             if dataset.related.is_some() {
                 return Err(invalid_group());
             }
-            let changes = dataset.changes.as_ref().ok_or_else(invalid_group)?;
-            if dataset.parent_manifest.as_ref() != Some(&changes.base_manifest) {
+            let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
+            let base = history.read(parent).await?;
+            if base.dataset != spec.dataset
+                || base.dataset != dataset.dataset
+                || base.version != spec.base
+                || base.version == dataset.version
+            {
                 return Err(invalid_group());
             }
-            let base = history.read(&changes.base_manifest).await?;
             let mut inherited_inputs = dataset.inputs.clone();
             for name in dataset.request.inputs().keys() {
                 let key = dataset.request.input_key(name);
@@ -102,7 +106,8 @@ pub(crate) async fn verify_groups(
             {
                 return Err(invalid_group());
             }
-            check_refreshed_groups(dataset, &base, &changes.base_manifest)?;
+            super::super::write::verify_update(dataset, &base, spec, budget, checks).await?;
+            check_refreshed_groups(dataset, &base, parent)?;
         }
         OperationRequest::Backfill(spec) => {
             let selected = dataset
@@ -176,14 +181,6 @@ pub(crate) async fn verify_groups(
                     return Err(invalid_group());
                 }
                 if spec.mode == RefreshMode::Incremental {
-                    if dataset
-                        .changes
-                        .as_ref()
-                        .map(|changes| &changes.base_manifest)
-                        != Some(parent)
-                    {
-                        return Err(invalid_group());
-                    }
                     super::super::incremental::qualify(spec, &base, dataset.eligibility, budget)
                         .await?;
                 }
@@ -219,7 +216,6 @@ pub(crate) async fn verify_groups(
                 || !super::super::corrections::inherits_groups(&dataset.computed, &base.computed)
                 || dataset.related != base.related
                 || dataset.relationship != base.relationship
-                || dataset.changes.is_some()
                 || dataset.boundary != base.boundary
                 || dataset.eligibility != base.eligibility
                 || dataset.definition != base.definition
@@ -764,7 +760,6 @@ mod tests {
                 boundary: 0,
                 request: OperationRequest::Build(request),
                 parent_manifest: None,
-                changes: None,
                 processor: "test".into(),
                 validation: VerificationLevel::Routine,
             };

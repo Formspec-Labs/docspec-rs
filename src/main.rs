@@ -64,6 +64,8 @@ enum Command {
     Resume { spec: PathBuf },
     /// Inspect current retained phase and authority records.
     Inspect { dataset: String },
+    /// Inspect optional change evidence for an exact version reference.
+    InspectChanges { version: PathBuf },
     /// Explain protection for exact objects; this does not authorize removal.
     InspectRetention { objects: PathBuf },
     /// Preview exact owned file removal and its retained protection blockers.
@@ -107,6 +109,16 @@ enum Command {
     },
     /// Retire the phase generations in a saved plan; preserve files and releases.
     RetirePhases { plan: PathBuf },
+    /// Capture optional change evidence for independent logical retirement.
+    PlanChangeRetirement {
+        dataset: String,
+        retirement: String,
+        /// JSON array of exact version identifiers.
+        versions: PathBuf,
+        reason: String,
+    },
+    /// Retire optional change evidence from a saved plan; preserve complete results.
+    RetireChanges { plan: PathBuf },
     /// Capture exact restore points whose recovery promises should end.
     PlanRestorePointRetirement {
         dataset: String,
@@ -422,6 +434,11 @@ async fn main() -> anyhow::Result<()> {
                 Command::Inspect { dataset } => {
                     print_json(&engine.inspect(&Id::new(dataset)?).await?)?
                 }
+                Command::InspectChanges { version } => print_json(
+                    &engine
+                        .change_certificate(&read_json::<VersionRef>(version)?)
+                        .await?,
+                )?,
                 Command::InspectRetention { objects } => print_json(
                     &engine
                         .inspect_retention(&read_json::<Vec<ObjectRef>>(objects)?)
@@ -475,6 +492,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetirePhases { plan } => print_json(
                     &engine
                         .retire_phases(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanChangeRetirement {
+                    dataset,
+                    retirement,
+                    versions,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_change_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &read_json::<Vec<Id>>(versions)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireChanges { plan } => print_json(
+                    &engine
+                        .retire_changes(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::PlanRestorePointRetirement {

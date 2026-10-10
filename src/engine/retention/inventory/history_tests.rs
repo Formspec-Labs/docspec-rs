@@ -75,7 +75,6 @@ fn release(root: &Path, owner: &str, version: &str) -> ReleasePin {
                 definition: "v1".into(),
             }),
             parent_manifest: None,
-            changes: None,
             processor: "fixture".into(),
             validation: VerificationLevel::Routine,
         },

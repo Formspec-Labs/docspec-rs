@@ -228,6 +228,16 @@ impl Engine {
         // Ordering and observed lag retain inline evidence, not another promise
         // to keep every endpoint's payload. Actual results carry that protection.
         records.push(record(&key, &link)?);
+        if let Some(certificate) = self
+            .changes_for_selection(view, &rows, &release.value)
+            .await?
+        {
+            let key = format!("change-certificate/{}", release.id);
+            if rows.revision(&key).is_some() {
+                return Err(invalid("a selected change certificate cannot be replaced"));
+            }
+            records.push(record(key, certificate)?);
+        }
         if let Some(progress) = progress {
             records.push(record(format!("input-progress/{}", release.id), progress)?);
         }

@@ -363,8 +363,14 @@ async fn incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop
         noop.dataset.related.as_ref().unwrap().evidence,
         joined.dataset.related.as_ref().unwrap().evidence
     );
-    assert_eq!(noop.dataset.changes.as_ref().unwrap().removed.rows, 0);
-    assert_eq!(noop.dataset.changes.as_ref().unwrap().added.rows, 0);
+    let certified = engine
+        .change_certificate(&noop.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let changes = certified.changes.source.as_ref().unwrap();
+    assert_eq!(changes.removed.rows, 0);
+    assert_eq!(changes.added.rows, 0);
     assert_eq!(
         noop.dataset.related.as_ref().unwrap().coverage.inputs[&left.dataset.dataset],
         left.version_ref()
@@ -587,12 +593,17 @@ async fn incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_
     );
     // Balanced foreign removals/additions cancel algebraically but were never in
     // the base. Membership, not just count or the reconstruction equation, must refuse.
-    let mut bad = noop.clone();
-    let changes = bad.dataset.changes.as_mut().unwrap();
+    let certified = engine
+        .change_certificate(&noop.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut bad = certified.changes.clone();
+    let changes = bad.source.as_mut().unwrap();
     changes.removed = other.dataset.groups["source"].clone();
     changes.added = other.dataset.groups["source"].clone();
     assert_eq!(
-        verify_release(&forged(root.path(), "foreign-removals", bad), limits())
+        docspec::engine::verify_applied_changes(&first, &noop, &bad, limits())
             .await
             .unwrap_err()
             .code(),
@@ -605,34 +616,37 @@ async fn incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_
     join_mut(&mut full).join.nulls = NullMatching::Never;
     let changed = engine.refresh(&full).await.unwrap();
     let mut bad = changed.clone();
-    let mut changes = noop.dataset.changes.clone().unwrap();
+    let mut applied = certified.changes.clone();
+    applied.before = noop.version_ref();
+    applied.operation = changed.id.clone();
+    let changes = applied.source.as_mut().unwrap();
     changes.base_version = noop.id.clone();
     changes.base_manifest = noop.manifest.clone();
     changes.before_metadata = noop.dataset.groups["source"].metadata.clone();
     changes.after_metadata = bad.dataset.groups["source"].metadata.clone();
     changes.removed = noop.dataset.groups["source"].clone();
     changes.added = changed.dataset.groups["source"].clone();
-    bad.dataset.changes = Some(changes);
     bad.dataset.related.as_mut().unwrap().request.mode = RefreshMode::Incremental;
     bad.dataset.request = docspec::model::OperationRequest::Refresh(Box::new(
         bad.dataset.related.as_ref().unwrap().request.clone(),
     ));
+    let bad = forged(root.path(), "unsupported-mode", bad);
     assert_eq!(
-        verify_release(&forged(root.path(), "unsupported-mode", bad), limits())
+        docspec::engine::verify_applied_changes(&noop, &bad, &applied, limits())
             .await
             .unwrap_err()
             .code(),
         "full_refresh_required"
     );
-    let mut bad = noop;
-    bad.dataset.changes.as_mut().unwrap().base_manifest =
-        forged(root.path(), "base-alias", first).manifest;
+    let mut bad = certified.changes;
+    bad.source.as_mut().unwrap().base_manifest =
+        forged(root.path(), "base-alias", first.clone()).manifest;
     assert_eq!(
-        verify_release(&forged(root.path(), "different-parent", bad), limits())
+        docspec::engine::verify_applied_changes(&first, &noop, &bad, limits())
             .await
             .unwrap_err()
             .code(),
-        "invalid_group"
+        "invalid_changes"
     );
 }
 

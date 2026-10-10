@@ -267,7 +267,14 @@ async fn repeated_compaction_noop_updates_reuse_groups_first_computed_on_a_repre
         expected_occurrences
     );
     assert_eq!(combined(&engine, &selected).await, expected_values);
-    let changes = selected.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&selected.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     assert_eq!(changes.before_metadata, first.replacement.metadata);
     assert_eq!(changes.after_metadata, second.replacement.metadata);
     assert_eq!(changes.removed.rows, 0);
@@ -337,7 +344,14 @@ async fn updates_share_partial_compaction_and_preserve_surviving_occurrences() {
             .iter()
             .any(|object| &object.path == path)
     }));
-    let changes = first.dataset.changes.as_ref().unwrap();
+    let changes = engine
+        .change_certificate(&first.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
     assert_eq!(changes.base_manifest, base.manifest);
     assert_eq!(
         changes.before_metadata,

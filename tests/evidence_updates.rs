@@ -251,19 +251,15 @@ async fn receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins
     assert_eq!(attached.dataset.related, base.dataset.related);
     expected.sort();
     assert_eq!(receipts(&engine, &attached).await, expected);
-    assert_eq!(
-        attached
-            .dataset
-            .evidence
-            .as_ref()
-            .unwrap()
-            .changes
-            .as_ref()
-            .unwrap()
-            .removed
-            .rows,
-        0
-    );
+    let changes = engine
+        .change_certificate(&attached.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .receipts
+        .unwrap();
+    assert_eq!(changes.removed.rows, 0);
     verify_release(&attached, limits()).await.unwrap();
     let replace = vec![(positions[0].1.clone(), Some("corrected".into()))];
     let deleted = vec![(positions[1].1.clone(), None)];
@@ -278,13 +274,13 @@ async fn receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins
         .await
         .unwrap();
     assert_eq!(changed.dataset.groups, base.dataset.groups);
-    let delta = changed
-        .dataset
-        .evidence
-        .as_ref()
+    let delta = engine
+        .change_certificate(&changed.version_ref())
+        .await
+        .unwrap()
         .unwrap()
         .changes
-        .as_ref()
+        .receipts
         .unwrap();
     assert_eq!((delta.removed.rows, delta.added.rows), (5, 1));
     let mut remaining = vec![
@@ -351,13 +347,13 @@ async fn first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_fi
         .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(receipts(&engine, &changed).await, expected);
-    let receipt_changes = changed
-        .dataset
-        .evidence
-        .as_ref()
+    let receipt_changes = engine
+        .change_certificate(&changed.version_ref())
+        .await
+        .unwrap()
         .unwrap()
         .changes
-        .as_ref()
+        .receipts
         .unwrap();
     assert_eq!(
         (receipt_changes.removed.rows, receipt_changes.added.rows),
@@ -967,14 +963,17 @@ async fn inherited_receipt_deletions_survive_process_loss_without_repeating_work
         release.dataset.evidence.as_ref().unwrap().table,
         retained.table.unwrap()
     );
-    let delta = release
-        .dataset
-        .evidence
-        .as_ref()
+    let delta = engine
+        .change_certificate(&release.version_ref())
+        .await
+        .unwrap()
         .unwrap()
         .changes
-        .as_ref()
+        .receipts
         .unwrap();
     assert_eq!((delta.removed.rows, delta.added.rows), (1, 0));
     verify_release(&release, limits()).await.unwrap();
 }
+#[cfg(all(feature = "test-util", unix))]
+#[path = "evidence_updates/optional_history.rs"]
+mod optional_history;

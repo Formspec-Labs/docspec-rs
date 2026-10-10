@@ -21,6 +21,43 @@ fn limits() -> Limits {
     }
 }
 
+#[test]
+fn change_history_and_recovery_have_distinct_exact_retirement_scopes() {
+    let operation = id("update");
+    for key in ["change-certificate/update", "change-certificate/Update_2"] {
+        assert!(scope_key(&RetirementScope::OptionalChanges, key));
+        assert!(retained_key(key));
+        assert!(!completion_key(key));
+        assert!(!scope_key(
+            &RetirementScope::OperationRecovery {
+                operation: operation.clone(),
+            },
+            key,
+        ));
+    }
+    for key in [
+        "change-certificate/",
+        "change-certificate/update/extra",
+        "change-certificate/../update",
+        "prepared-changes/update",
+        "result/update",
+    ] {
+        assert!(!scope_key(&RetirementScope::OptionalChanges, key));
+    }
+    assert!(completion_key("prepared-changes/update"));
+    assert!(scope_key(
+        &RetirementScope::OperationRecovery { operation },
+        "prepared-changes/update",
+    ));
+    assert!(!completion_key("prepared-changes/update/extra"));
+    assert!(!scope_key(
+        &RetirementScope::OperationRecovery {
+            operation: id("other"),
+        },
+        "prepared-changes/update",
+    ));
+}
+
 #[tokio::test]
 async fn lost_native_reply_and_concurrent_retry_record_one_retirement() {
     let root = tempfile::tempdir().unwrap();

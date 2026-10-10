@@ -5,6 +5,7 @@ use crate::engine::backfill::{
     Capture, FileCompletion, GroupDependencies, PreparedCompletion, ValidationCompletion,
     origins::{OriginalDeclaration, ScalarOrigins},
 };
+use crate::engine::changes::PreparedChanges;
 use iceberg::{NamespaceIdent, TableIdent, spec::TableMetadata, table::Table};
 use serde::de::DeserializeOwned;
 
@@ -455,6 +456,7 @@ enum Expansion {
     Origins,
     Declaration,
     Release,
+    Changes(PreparedChanges),
     Restore(crate::restore::RestorePointRef),
     Native(Option<(Option<i64>, i32)>),
 }
@@ -470,6 +472,7 @@ enum MetadataKind {
     Origins,
     Declaration,
     Release,
+    Changes,
     Restore,
     Native,
 }
@@ -478,6 +481,7 @@ struct VisitedMetadata {
     object: ObjectRef,
     kind: MetadataKind,
     binding: Option<(Option<i64>, i32)>,
+    change_binding: Option<blake3::Hash>,
     complete: bool,
 }
 
@@ -798,16 +802,22 @@ impl Inventory {
         origin: &RetentionBlocker,
     ) -> Result<()> {
         self.object(object, origin)?;
-        let (tag, binding) = match kind {
+        let (tag, binding) = match &kind {
             Expansion::Origins => (MetadataKind::Origins, None),
             Expansion::Declaration => (MetadataKind::Declaration, None),
             Expansion::Release => (MetadataKind::Release, None),
+            Expansion::Changes(_) => (MetadataKind::Changes, None),
             Expansion::Restore(_) => (MetadataKind::Restore, None),
-            Expansion::Native(binding) => (MetadataKind::Native, binding),
+            Expansion::Native(binding) => (MetadataKind::Native, *binding),
+        };
+        let change_binding = match &kind {
+            Expansion::Changes(prepared) => Some(storage::json_digest(prepared)?),
+            _ => None,
         };
         if let Some(old) = self.visited.get_mut(&object.path) {
             if old.object != *object
                 || old.kind != tag
+                || old.change_binding != change_binding
                 || (binding.is_some() && old.binding.is_some() && old.binding != binding)
             {
                 return Err(invalid_inventory(
@@ -826,12 +836,18 @@ impl Inventory {
                 .saturating_mul(2)
                 .saturating_add(origin.table.len() + origin.key.len() + 256),
         )?;
+        if let Expansion::Changes(prepared) = &kind {
+            // The queued descriptor binding is bounded metadata, independent
+            // of the change tables' potentially large file inventories.
+            self.charge(inputs::metadata_size(prepared, self.limit)?.saturating_mul(2))?;
+        }
         self.visited.insert(
             object.path.clone(),
             VisitedMetadata {
                 object: object.clone(),
                 kind: tag,
                 binding,
+                change_binding,
                 complete: false,
             },
         );
@@ -974,6 +990,24 @@ impl Inventory {
         self.table(&changes.added, origin)
     }
 
+    fn optional_changes(&mut self, changes: &ChangePin, origin: &RetentionBlocker) -> Result<()> {
+        // These metadata objects interpret the applied rows. The whole endpoint
+        // snapshots and result manifests have independent availability promises.
+        self.object(&changes.before_metadata, origin)?;
+        self.object(&changes.after_metadata, origin)?;
+        self.table(&changes.removed, origin)?;
+        self.table(&changes.added, origin)
+    }
+
+    fn prepared_changes(
+        &mut self,
+        prepared: PreparedChanges,
+        origin: &RetentionBlocker,
+    ) -> Result<()> {
+        let descriptor = prepared.descriptor.clone();
+        self.enqueue(&descriptor, Expansion::Changes(prepared), origin)
+    }
+
     fn dataset(&mut self, dataset: &DatasetPin, origin: &RetentionBlocker) -> Result<()> {
         if !supported_format(dataset.format) {
             return Err(invalid_inventory("unsupported release format"));
@@ -993,15 +1027,9 @@ impl Inventory {
         if let Some(evidence) = &dataset.evidence {
             self.snapshot(&evidence.source, origin)?;
             self.table(&evidence.table, origin)?;
-            if let Some(changes) = &evidence.changes {
-                self.changes(changes, origin)?;
-            }
         }
         if let Some(parent) = &dataset.parent_manifest {
             self.release(parent, origin)?;
-        }
-        if let Some(changes) = &dataset.changes {
-            self.changes(changes, origin)?;
         }
         Ok(())
     }
@@ -1031,7 +1059,24 @@ impl Inventory {
         origin: &RetentionBlocker,
     ) -> Result<()> {
         // Most-specific families precede their common prefix.
-        if let Some(id) = key.strip_prefix("dependency-correction/") {
+        if key.starts_with("prepared-changes/") {
+            let prepared: PreparedChanges = decode(json)?;
+            crate::engine::changes::check_prepared(&prepared, key, &prepared.before.dataset)?;
+            if crate::catalog::lifecycle_ident(&prepared.before.dataset).to_string() != origin.table
+            {
+                return Err(invalid_inventory("prepared change dataset differs"));
+            }
+            self.prepared_changes(prepared, origin)?;
+        } else if key.starts_with("change-certificate/") {
+            let certificate: ChangeCertificate = decode(json)?;
+            crate::engine::changes::check_certificate(rows, origin.revision, key, &certificate)?;
+            if crate::catalog::lifecycle_ident(&certificate.after.dataset).to_string()
+                != origin.table
+            {
+                return Err(invalid_inventory("change certificate dataset differs"));
+            }
+            self.prepared_changes(PreparedChanges::from(&certificate), origin)?;
+        } else if let Some(id) = key.strip_prefix("dependency-correction/") {
             let decision: CorrectionDecision = decode(json)?;
             crate::engine::corrections::records::validate(&decision.request)?;
             if decision.request.id.as_str() != id
@@ -1527,6 +1572,15 @@ impl Inventory {
                     }
                     self.dataset(&dataset, &origin)?;
                 }
+                Expansion::Changes(prepared) => {
+                    let Strict(applied): Strict<AppliedChangeSet> =
+                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
+                            .await?;
+                    crate::engine::changes::check_applied(&applied, &prepared)?;
+                    for changes in applied.source.iter().chain(applied.receipts.iter()) {
+                        self.optional_changes(changes, &origin)?;
+                    }
+                }
                 Expansion::Restore(reference) => {
                     let point: crate::restore::RestorePoint =
                         inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
@@ -1585,14 +1639,15 @@ struct Runtime {
 }
 
 struct Strict<T>(T);
-impl<'de, T: DeserializeOwned + Serialize> Deserialize<'de> for Strict<T> {
+impl<'de, T: DeserializeOwned + Serialize + 'static> Deserialize<'de> for Strict<T> {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
-        let original = serde_json::Value::deserialize(deserializer)?;
+        let mut original = serde_json::Value::deserialize(deserializer)?;
         let value: T =
             serde_json::from_value(original.clone()).map_err(serde::de::Error::custom)?;
         let known = serde_json::to_value(&value).map_err(serde::de::Error::custom)?;
+        normalize_legacy_state_fields::<T>(&mut original).map_err(serde::de::Error::custom)?;
         if !known_fields(&original, &known) {
             return Err(serde::de::Error::custom(
                 "unsupported retention metadata fields",
@@ -1602,8 +1657,70 @@ impl<'de, T: DeserializeOwned + Serialize> Deserialize<'de> for Strict<T> {
     }
 }
 
-fn decode<T: DeserializeOwned + Serialize>(json: &str) -> Result<T> {
+fn decode<T: DeserializeOwned + Serialize + 'static>(json: &str) -> Result<T> {
     Ok(serde_json::from_str::<Strict<T>>(json)?.0)
+}
+
+fn normalize_legacy_state_fields<T: 'static>(
+    original: &mut serde_json::Value,
+) -> serde_json::Result<()> {
+    use std::any::TypeId;
+
+    // Only complete states dropped these two optional members. Typed root
+    // selection and exact paths prevent similarly named recovery dependencies
+    // or arbitrary nested objects from inheriting this compatibility exception.
+    if TypeId::of::<T>() == TypeId::of::<DatasetPin>() {
+        normalize_legacy_dataset(original)?;
+    } else if TypeId::of::<T>() == TypeId::of::<ReleasePin>() {
+        if let Some(dataset) = original.get_mut("dataset") {
+            normalize_legacy_dataset(dataset)?;
+        }
+    } else if TypeId::of::<T>() == TypeId::of::<Authority>() {
+        if let Some(dataset) = original.get_mut("selected") {
+            normalize_legacy_dataset(dataset)?;
+        }
+        if let Some(dataset) = original
+            .get_mut("release")
+            .and_then(|release| release.get_mut("dataset"))
+        {
+            normalize_legacy_dataset(dataset)?;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_legacy_dataset(dataset: &mut serde_json::Value) -> serde_json::Result<()> {
+    if !dataset
+        .get("format")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|format| u32::try_from(format).ok())
+        .is_some_and(supported_format)
+    {
+        return Ok(());
+    }
+    let Some(fields) = dataset.as_object_mut() else {
+        return Ok(());
+    };
+    if let Some(changes) = fields.remove("changes") {
+        check_legacy_changes(changes)?;
+    }
+    if let Some(changes) = fields
+        .get_mut("evidence")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|evidence| evidence.remove("changes"))
+    {
+        check_legacy_changes(changes)?;
+    }
+    Ok(())
+}
+
+fn check_legacy_changes(changes: serde_json::Value) -> serde_json::Result<()> {
+    if !changes.is_null() {
+        // Check the former typed shape, including unrecognized dependency fields.
+        // These records gain neither retention roots nor certificate trust.
+        let _: Strict<ChangePin> = serde_json::from_value(changes)?;
+    }
+    Ok(())
 }
 
 // Serde's flatten and untagged enums buffer unknown fields, bypassing ordinary
@@ -1901,6 +2018,10 @@ mod scalar_origins_tests {
 mod collector_tests;
 #[cfg(test)]
 mod history_tests;
+#[cfg(test)]
+mod legacy_fields_tests;
+#[cfg(test)]
+mod optional_changes_tests;
 
 #[cfg(test)]
 mod correction_tests {

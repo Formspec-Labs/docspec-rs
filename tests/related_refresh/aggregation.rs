@@ -196,7 +196,15 @@ async fn incremental_groups_move_delete_and_replace_equal_values_with_new_contri
         result.dataset.related.as_ref().unwrap().evidence,
         old_evidence
     );
-    assert!(result.dataset.changes.as_ref().unwrap().removed.rows > 0);
+    let changes = engine
+        .change_certificate(&result.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
+    assert!(changes.removed.rows > 0);
     check_summary(&engine, &result, &input, false).await;
     // Move the null group to a new docket, then delete the last member of another group.
     for (operation, replacements, deletions) in [
@@ -278,8 +286,16 @@ async fn grouped_and_global_empty_transitions_and_noop_pins_remain_exact() {
                     next.dataset.related.as_ref().unwrap().evidence,
                     result.dataset.related.as_ref().unwrap().evidence
                 );
-                assert_eq!(next.dataset.changes.as_ref().unwrap().removed.rows, 0);
-                assert_eq!(next.dataset.changes.as_ref().unwrap().added.rows, 0);
+                let changes = engine
+                    .change_certificate(&next.version_ref())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .changes
+                    .source
+                    .unwrap();
+                assert_eq!(changes.removed.rows, 0);
+                assert_eq!(changes.added.rows, 0);
             }
             result = next;
         }

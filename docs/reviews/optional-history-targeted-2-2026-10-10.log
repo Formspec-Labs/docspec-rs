@@ -1,0 +1,85 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.66s
+     Running tests/evidence_updates.rs (target/debug/deps/evidence_updates-c58213d616c21a27)
+
+running 11 tests
+test nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test optional_history::terminal_recovery_retirement_releases_receipt_history_without_losing_receipts ... ok
+test receipt_processing_survives_process_loss_without_original_input ... ok
+test adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test inherited_receipt_deletions_survive_process_loss_without_repeating_work ... ok
+test receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+test evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+test first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... ok
+test active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.05s
+
+     Running tests/http_optional_changes.rs (target/debug/deps/http_optional_changes-50091a662d099a44)
+
+running 1 test
+test saved_http_plan_retires_optional_changes_and_reconciles_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.35s
+
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact has been running for over 60 seconds
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 127.84s
+
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 16 tests
+test affected_base_with_changed_file_size_refuses_before_rewrite ... ok
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test routine_verification_inspects_required_state_files_once ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test update_creation_inspects_only_new_files_without_duplicate_change_checks ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test optional_history::local_certificates_require_the_exact_result_revision_and_well_formed_endpoints ... ok
+test optional_history::removed_optional_deltas_preserve_complete_state_and_independent_consumers ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.18s
+

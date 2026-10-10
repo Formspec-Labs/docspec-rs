@@ -286,6 +286,7 @@ impl Engine {
         Ok(write::Prepared {
             schema_input: None,
             changes: Some(ChangePin {
+                rules: super::changes::WRITE_RULES.into(),
                 base_version: base.id.clone(),
                 base_manifest: base.manifest.clone(),
                 before_metadata: before.metadata.clone(),

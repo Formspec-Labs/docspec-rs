@@ -1,0 +1,400 @@
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'phase_dependencies']
+FREE_BEFORE 5748453376
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_dependencies-7f3cdff2d099c532 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 7.14s
+     Running tests/phase_dependencies.rs (target/debug/deps/phase_dependencies-7f3cdff2d099c532)
+
+running 2 tests
+test processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test evolved_build_keeps_exact_consumed_schema_metadata ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.43s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_dependencies-7f3cdff2d099c532 logical_bytes=244996144
+FREE_AFTER 5727768576
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'phase_retirement']
+FREE_BEFORE 5727768576
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_retirement-ba03eff11568c106 fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.30s
+     Running tests/phase_retirement.rs (target/debug/deps/phase_retirement-ba03eff11568c106)
+
+running 7 tests
+test retained_readback_selects_after_upstream_retirement_without_source ... ok
+test processing_recovers_after_admission_retirement_and_restart ... ok
+test exact_generation_retries_do_not_retire_recomputed_work ... ok
+test validation_requires_explicit_retirement_after_processing_replacement ... ok
+test scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test evidence_requires_explicit_retirement_after_source_replacement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.82s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_retirement-ba03eff11568c106 logical_bytes=246336816
+FREE_AFTER 5970931712
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'phase_retirement_transport']
+FREE_BEFORE 5970931712
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_retirement_transport-d54b0438f0857867 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 6.33s
+     Running tests/phase_retirement_transport.rs (target/debug/deps/phase_retirement_transport-d54b0438f0857867)
+
+running 2 tests
+test availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.30s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/phase_retirement_transport-d54b0438f0857867 logical_bytes=259723088
+FREE_AFTER 5973303296
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'physical_removal_process']
+FREE_BEFORE 5973303296
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/physical_removal_process-55c64a133547db59 fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.24s
+     Running tests/physical_removal_process.rs (target/debug/deps/physical_removal_process-55c64a133547db59)
+
+running 1 test
+test sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.73s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/physical_removal_process-55c64a133547db59 logical_bytes=245795472
+FREE_AFTER 6206967808
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'physical_removal_transport']
+FREE_BEFORE 6206967808
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/physical_removal_transport-8a4777cd7d7c3f52 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 5.54s
+     Running tests/physical_removal_transport.rs (target/debug/deps/physical_removal_transport-8a4777cd7d7c3f52)
+
+running 1 test
+test cli_http_preview_agrees_and_keeps_protected_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.94s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/physical_removal_transport-8a4777cd7d7c3f52 logical_bytes=259782112
+FREE_AFTER 6209691648
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'qualification_roots']
+FREE_BEFORE 6209691648
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/qualification_roots-b20d1f291f2bc053 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 4.85s
+     Running tests/qualification_roots.rs (target/debug/deps/qualification_roots-b20d1f291f2bc053)
+
+running 2 tests
+test sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+test qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.33s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/qualification_roots-b20d1f291f2bc053 logical_bytes=245233232
+FREE_AFTER 6208425984
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'rebuild']
+FREE_BEFORE 6208425984
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/rebuild-71cd6360fd02d8fc fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.21s
+     Running tests/rebuild.rs (target/debug/deps/rebuild-71cd6360fd02d8fc)
+
+running 7 tests
+test rebuild_retry_identity_includes_base_and_self_base_refuses_before_admission ... ok
+test reordered_full_rebuild_rebinds_computed_inputs_by_prior_current_names ... ok
+test independent_rebuild_verifier_rejects_false_composition_and_input_claims ... ok
+test failed_or_invalidated_rebuild_keeps_previous_complete_selection ... ok
+test later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work ... ok
+test full_rebuild_requalifies_source_and_every_group_without_changing_history ... ok
+test rebuild_resumes_source_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.21s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/rebuild-71cd6360fd02d8fc logical_bytes=245816400
+FREE_AFTER 6451073024
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'rebuild_completion']
+FREE_BEFORE 6451073024
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/rebuild_completion-e2c166ebcfc744bd fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.73s
+     Running tests/rebuild_completion.rs (target/debug/deps/rebuild_completion-e2c166ebcfc744bd)
+
+running 5 tests
+test lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.26s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/rebuild_completion-e2c166ebcfc744bd logical_bytes=245469840
+FREE_AFTER 6655225856
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'refresh']
+FREE_BEFORE 6655225856
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/refresh-fd6c71288816c9ab fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 5.77s
+     Running tests/refresh.rs (target/debug/deps/refresh-fd6c71288816c9ab)
+
+running 9 tests
+test invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test relocated_retry_preserves_original_request_and_readback ... ok
+test independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.72s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/refresh-fd6c71288816c9ab logical_bytes=245747408
+FREE_AFTER 6180839424
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'related_refresh']
+FREE_BEFORE 6180839424
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6 fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.25s
+     Running tests/related_refresh.rs (target/debug/deps/related_refresh-36f3e2d2ba35a1a6)
+
+running 29 tests
+test aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact has been running for over 60 seconds
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill has been running for over 60 seconds
+test aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 132.36s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/related_refresh-36f3e2d2ba35a1a6 logical_bytes=261183856
+FREE_AFTER 7154339840
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'restore']
+FREE_BEFORE 7154339840
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/restore-3a394b6257246dbd fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 5.53s
+     Running tests/restore.rs (target/debug/deps/restore-3a394b6257246dbd)
+
+running 13 tests
+test delayed_writer_child ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test explicit_retirement_ends_restore_admission_and_preserves_creation_evidence ... ok
+test corruption_and_foreign_workspace_refuse_before_catalog_selection ... ok
+test live_engine_and_held_stream_keep_the_storage_fence ... ok
+test catalog_loss_requires_explicit_artifact_import ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp85mc2m/workspace/objects/comments/97863efc96d8484fafa8a059b78d65a4/data/1648d24b-accf-423c-b3ef-b669b1a9c8b5-00000.parquet
+DOCSPEC_TEST_WORK readback
+test explicitly_retired_shared_preparation_refuses_same_point_retry ... ok
+test interrupted_shared_capture_protects_reuse_after_older_point_retires ... ok
+test independent_delayed_writer_must_finish_before_restore_can_select ... ok
+test restores_exact_catalog_and_missing_originals_from_retained_copies ... ok
+test scalar_origins_restore_after_file_prepared_and_validation_retirement ... ok
+test completed_capture_reconciles_manifest_and_commit_response_without_recopying ... ok
+test repeated_points_reuse_source_backups_and_do_not_clone_backup_trees ... ok
+test failed_capture_retries_reuse_one_reservation_and_bounded_partial_files ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.03s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/restore-3a394b6257246dbd logical_bytes=248372704
+FREE_AFTER 7142227968
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'restore_catalog']
+FREE_BEFORE 7142227968
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/restore_catalog-930613c850bc237e fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+     Running tests/restore_catalog.rs (target/debug/deps/restore_catalog-930613c850bc237e)
+
+running 1 test
+test restore_reconstructs_an_unpromised_native_registration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.60s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/restore_catalog-930613c850bc237e logical_bytes=245273504
+FREE_AFTER 7329030144
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'retention_inspection']
+FREE_BEFORE 7329026048
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/retention_inspection-a93ba5b57e41f0bf fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+     Running tests/retention_inspection.rs (target/debug/deps/retention_inspection-a93ba5b57e41f0bf)
+
+running 8 tests
+test family_only_namespace_retains_external_release_dependencies_once ... ok
+test admitted_refresh_request_protects_inputs_before_any_phase_completes ... ok
+test selected_and_prepared_roots_retain_original_executions_without_old_phases ... ok
+test unknown_and_legacy_roots_refuse_instead_of_reporting_unprotected ... ok
+test completed_and_interrupted_roots_protect_without_opening_payloads ... ok
+test schema_admission_and_evolved_group_metadata_preserve_native_interpretation ... ok
+test each_backfill_completion_independently_protects_its_consumed_source ... ok
+test candidate_identity_capacity_and_transport_boundaries_are_explicit ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.58s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/retention_inspection-a93ba5b57e41f0bf logical_bytes=259958656
+FREE_AFTER 7592394752
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'scalar_bindings']
+FREE_BEFORE 7592394752
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/scalar_bindings-54c1e5341b6b343e fresh=True
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 0.18s
+     Running tests/scalar_bindings.rs (target/debug/deps/scalar_bindings-54c1e5341b6b343e)
+
+running 3 tests
+test opposite_boolean_outputs_cannot_hide_each_other_in_value_comparison ... ok
+test cached_readback_requires_older_binding_manifests_and_origin_schemas ... ok
+test redirected_rehashed_ancestor_does_not_change_an_authored_expression ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.46s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/scalar_bindings-54c1e5341b6b343e logical_bytes=244154144
+FREE_AFTER 7841472512
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'schema']
+FREE_BEFORE 7841464320
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/schema-8c6a4c5f9c33822e fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 6.46s
+     Running tests/schema.rs (target/debug/deps/schema-8c6a4c5f9c33822e)
+
+running 9 tests
+test rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test cached_related_result_checks_schema_input_history ... ok
+test invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... ok
+test schema_cutover_fences_old_workers_and_later_admissions ... ok
+test http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+test killed_schema_workers_resume_only_missing_phases ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.98s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/schema-8c6a4c5f9c33822e logical_bytes=260345504
+FREE_AFTER 7842992128
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'succession']
+FREE_BEFORE 7842992128
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/succession-beeee1111db26b76 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 4.01s
+     Running tests/succession.rs (target/debug/deps/succession-beeee1111db26b76)
+
+running 6 tests
+test identity_mismatch_and_orphan_branches_cannot_establish_coverage ... ok
+test admission_and_prepared_releases_do_not_create_accepted_history ... ok
+test selected_head_cannot_predeclare_a_future_commit_or_disagree_with_its_release ... ok
+test every_selection_records_actual_predecessor_in_the_same_native_commit ... ok
+test missing_malformed_rebound_and_cyclic_history_refuses_without_payload_reads ... ok
+test small_history_budget_refuses_and_transports_share_the_proof_service ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.45s
+
+EXIT_CODE 0
+REMOVED_SUCCESSFUL_TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/succession-beeee1111db26b76 logical_bytes=260008192
+FREE_AFTER 7851462656
+COMMAND ['cargo', 'test', '--locked', '--all-features', '-j', '1', '--message-format=json', '--test', 'updates']
+FREE_BEFORE 7851462656
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+TEST_EXECUTABLE /Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/updates-8e9eebe06733cc56 fresh=False
+{"reason":"build-finished","success":true}
+    Finished `test` profile [unoptimized] target(s) in 3.09s
+     Running tests/updates.rs (target/debug/deps/updates-8e9eebe06733cc56)
+
+running 17 tests
+test affected_base_with_changed_file_size_refuses_before_rewrite ... ok
+test legacy_changes::recovered_processing_without_production_marker_does_not_mint_a_certificate ... FAILED
+test composite_nullable_quoted_keys_match_as_tuples ... ok
+test http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test routine_verification_inspects_required_state_files_once ... ok
+test paired_writer_refusal_retains_admission_and_can_resume ... ok
+test nested_replacements_preserve_values_and_native_field_ids ... ok
+test independent_verifier_requires_changes_and_exact_endpoints ... ok
+test applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test stale_updates_cannot_overwrite_a_selected_result ... ok
+test update_creation_inspects_only_new_files_without_duplicate_change_checks ... ok
+test optional_history::local_certificates_require_the_exact_result_revision_and_well_formed_endpoints ... ok
+test optional_history::removed_optional_deltas_preserve_complete_state_and_independent_consumers ... ok
+test update_handoffs_reuse_completed_work_after_input_loss ... ok
+test killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+
+failures:
+
+---- legacy_changes::recovered_processing_without_production_marker_does_not_mint_a_certificate stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmproHc88/workspace/objects/comments/0163c841a34d4d2db3e03caa1e9e533b/data/ff812261-bf67-488d-a2d4-7751f5fd4b42-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmproHc88/workspace/objects/comments/0163c841a34d4d2db3e03caa1e9e533b/data/ff812261-bf67-488d-a2d4-7751f5fd4b42-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmproHc88/workspace/objects/comments/0163c841a34d4d2db3e03caa1e9e533b/data/ff812261-bf67-488d-a2d4-7751f5fd4b42-00002.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmproHc88/workspace/objects/comments/0163c841a34d4d2db3e03caa1e9e533b/data/ff812261-bf67-488d-a2d4-7751f5fd4b42-00003.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'legacy_changes::recovered_processing_without_production_marker_does_not_mint_a_certificate' (35390242) panicked at tests/updates/legacy_changes.rs:84:46:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_owner_protection", message: "owner, immutable object identity or committed protection differs", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    legacy_changes::recovered_processing_without_production_marker_does_not_mint_a_certificate
+
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.09s
+
+error: test failed, to rerun pass `--test updates`
+EXIT_CODE 101

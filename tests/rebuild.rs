@@ -154,7 +154,13 @@ async fn full_rebuild_requalifies_source_and_every_group_without_changing_histor
     assert_eq!(result.dataset.parent_manifest, Some(base.manifest.clone()));
     assert!(result.dataset.eligibility > base.dataset.eligibility);
     assert!(result.dataset.boundary > base.dataset.boundary);
-    assert!(result.dataset.changes.is_none());
+    assert!(
+        engine
+            .change_certificate(&result.version_ref())
+            .await
+            .unwrap()
+            .is_none()
+    );
     for (name, binding) in &result.dataset.computed {
         assert_eq!(binding.definition, base.dataset.computed[name].definition);
         assert_eq!(binding.request, OperationRequest::Build(request.clone()));

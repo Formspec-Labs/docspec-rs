@@ -8,7 +8,7 @@ use crate::{
     evidence::EvidenceSpec,
     export::{ExportPin, ExportSpec},
     model::{
-        Abandonment, BackfillSpec, CompactionResult, CompactionSpec, Comparison,
+        Abandonment, BackfillSpec, CertifiedChanges, CompactionResult, CompactionSpec, Comparison,
         ComparisonIdentity, ComparisonOptions, CorrectionDecision, DependencyCorrection,
         GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan,
         RemovalStatus, RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec,
@@ -35,6 +35,7 @@ pub fn router(engine: Engine) -> Router {
         .route("/run", post(run))
         .route("/compare", post(compare))
         .route("/changes", post(changes))
+        .route("/changes/inspect", post(inspect_changes))
         .route("/updates/plan", post(plan_update))
         .route("/updates/run", post(update))
         .route("/receipts/plan", post(plan_evidence))
@@ -65,6 +66,8 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/retention/phases/plan", post(plan_phase_retirement))
         .route("/retention/phases/retire", post(retire_phases))
+        .route("/retention/changes/plan", post(plan_change_retirement))
+        .route("/retention/changes/retire", post(retire_changes))
         .route(
             "/retention/restore-points/plan",
             post(plan_restore_point_retirement),
@@ -177,6 +180,13 @@ async fn changes(
         .into_response())
 }
 
+async fn inspect_changes(
+    State(engine): State<Engine>,
+    Json(version): Json<VersionRef>,
+) -> Result<Json<Option<CertifiedChanges>>, HttpError> {
+    Ok(Json(engine.change_certificate(&version).await?))
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RemovalRequest {
@@ -268,6 +278,38 @@ async fn retire_phases(
     Json(plan): Json<RetentionPlan>,
 ) -> Result<Json<Retirement>, HttpError> {
     Ok(Json(engine.retire_phases(&plan).await?))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangeRetirementRequest {
+    dataset: Id,
+    retirement: Id,
+    versions: Vec<Id>,
+    reason: String,
+}
+
+async fn plan_change_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<ChangeRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_change_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.versions,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_changes(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_changes(&plan).await?))
 }
 
 #[derive(serde::Deserialize)]
@@ -390,7 +432,7 @@ impl IntoResponse for HttpError {
         let status = match self.0.code() {
             "availability_retired" => StatusCode::GONE,
             "no_release" | "no_export" | "no_operation" | "no_phase" | "no_removal"
-            | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
+            | "no_changes" | "missing_group" | "missing_evidence" => StatusCode::NOT_FOUND,
             "operation_conflict"
             | "correction_conflict"
             | "correction_required"
@@ -404,6 +446,7 @@ impl IntoResponse for HttpError {
             | "generation_conflict"
             | "phase_generation_conflict"
             | "phase_retired"
+            | "changes_retired"
             | "grant_in_use"
             | "grant_retired"
             | "recovery_retired"

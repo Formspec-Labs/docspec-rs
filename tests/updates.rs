@@ -3,6 +3,14 @@
 #[cfg(feature = "test-util")]
 mod support;
 
+#[cfg(feature = "test-util")]
+#[path = "updates/legacy_changes.rs"]
+mod legacy_changes;
+
+#[cfg(all(feature = "test-util", unix))]
+#[path = "updates/optional_history.rs"]
+mod optional_history;
+
 use arrow::{
     array::{Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},
@@ -197,7 +205,12 @@ async fn applied_updates_preserve_duplicates_null_keys_history_and_unchanged_fil
         read(&release.dataset.groups["source"]).await,
         reconstruction(&rows, &replacements, &deletions)
     );
-    let changes = release.dataset.changes.as_ref().unwrap();
+    let certified = engine
+        .change_certificate(&release.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let changes = certified.changes.source.as_ref().unwrap();
     assert_eq!(
         changes.before_metadata,
         before.dataset.groups["source"].metadata
@@ -362,7 +375,16 @@ async fn overlap_refuses_and_empty_replacement_can_delete_every_row() {
     assert_eq!(empty.dataset.groups["source"].rows, 0);
     assert!(read(&empty.dataset.groups["source"]).await.is_empty());
     assert_eq!(
-        empty.dataset.changes.as_ref().unwrap().removed.rows,
+        engine
+            .change_certificate(&empty.version_ref())
+            .await
+            .unwrap()
+            .unwrap()
+            .changes
+            .source
+            .unwrap()
+            .removed
+            .rows,
         rows.len() as u64
     );
     verify_release(&empty, limits()).await.unwrap();
@@ -392,7 +414,12 @@ async fn identical_competing_updates_reconcile_and_noop_preserves_files() {
         read(&result.dataset.groups["source"]).await,
         reconstruction(&rows, &[], &[])
     );
-    let changes = result.dataset.changes.as_ref().unwrap();
+    let certified = engine
+        .change_certificate(&result.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let changes = certified.changes.source.as_ref().unwrap();
     assert_eq!((changes.removed.rows, changes.added.rows), (0, 0));
     let parquet = |pin: &TablePin| {
         pin.objects
@@ -434,7 +461,7 @@ async fn affected_base_with_changed_file_size_refuses_before_rewrite() {
 }
 
 #[tokio::test]
-async fn routine_verification_inspects_shared_change_files_once() {
+async fn routine_verification_inspects_required_state_files_once() {
     use docspec::{engine::verify_release_at, model::VerificationLevel};
     let root = TempDir::new().unwrap();
     let (engine, _, _, _) = fixture(root.path()).await;
@@ -446,17 +473,12 @@ async fn routine_verification_inspects_shared_change_files_once() {
         &[],
     );
     let release = engine.update(&mutation).await.unwrap();
-    let changes = release.dataset.changes.as_ref().unwrap();
-    let paths: std::collections::BTreeSet<_> = [
-        &release.dataset.groups["source"],
-        &changes.added,
-        &changes.removed,
-    ]
-    .into_iter()
-    .flat_map(|pin| &pin.objects)
-    .filter(|object| object.path.ends_with(".parquet"))
-    .map(|object| object.path.as_str())
-    .collect();
+    let paths: std::collections::BTreeSet<_> = release.dataset.groups["source"]
+        .objects
+        .iter()
+        .filter(|object| object.path.ends_with(".parquet"))
+        .map(|object| object.path.as_str())
+        .collect();
     let report = verify_release_at(&release, limits(), VerificationLevel::Routine)
         .await
         .unwrap();
@@ -651,7 +673,18 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
         .collect();
     removed.sort();
     assert_eq!(
-        read(&result.dataset.changes.as_ref().unwrap().removed).await,
+        read(
+            &engine
+                .change_certificate(&result.version_ref())
+                .await
+                .unwrap()
+                .unwrap()
+                .changes
+                .source
+                .unwrap()
+                .removed
+        )
+        .await,
         removed
     );
 }
@@ -659,28 +692,42 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
 #[tokio::test]
 async fn independent_verifier_requires_changes_and_exact_endpoints() {
     let root = TempDir::new().unwrap();
-    let (engine, _, _, _) = fixture(root.path()).await;
+    let (engine, _, before, _) = fixture(root.path()).await;
     let spec = update(root.path(), "initial", "changed", &[(Some(1), None)], &[]);
     let result = engine.update(&spec).await.unwrap();
+    let certified = engine
+        .change_certificate(&result.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    docspec::engine::verify_applied_changes(&before, &result, &certified.changes, limits())
+        .await
+        .unwrap();
+    let mut rebound = result.clone();
+    rebound
+        .dataset
+        .groups
+        .insert("source".into(), before.dataset.groups["source"].clone());
+    assert_eq!(
+        docspec::engine::verify_applied_changes(&before, &rebound, &certified.changes, limits())
+            .await
+            .unwrap_err()
+            .code(),
+        "release_mismatch"
+    );
     for change in 0..4 {
-        let mut bad = result.clone();
+        let mut bad = certified.changes.clone();
         match change {
-            0 => bad.dataset.changes = None,
-            1 => bad.dataset.changes.as_mut().unwrap().key_field_ids = vec![999],
-            2 => bad.dataset.changes.as_mut().unwrap().base_manifest = result.manifest.clone(),
-            _ => bad.dataset.changes.as_mut().unwrap().removed.rows += 1,
+            0 => bad.source = None,
+            1 => bad.source.as_mut().unwrap().key_field_ids = vec![999],
+            2 => bad.source.as_mut().unwrap().base_manifest = result.manifest.clone(),
+            _ => bad.source.as_mut().unwrap().removed.rows += 1,
         }
-        let path = root.path().join(format!("bad-{change}.json"));
-        std::fs::write(&path, serde_json::to_vec(&bad.dataset).unwrap()).unwrap();
-        let (digest, bytes) = storage::digest(&path).unwrap();
-        bad.manifest = docspec::model::ObjectRef {
-            owner: spec.dataset.clone(),
-            path: path.to_string_lossy().into_owned(),
-            digest,
-            bytes,
-        };
         assert_eq!(
-            verify_release(&bad, limits()).await.unwrap_err().code(),
+            docspec::engine::verify_applied_changes(&before, &result, &bad, limits())
+                .await
+                .unwrap_err()
+                .code(),
             "invalid_changes"
         );
     }
@@ -932,7 +979,12 @@ async fn killed_update_workers_resume_retained_handoffs_and_exact_changes() {
             read(&release.dataset.groups["source"]).await,
             reconstruction(&rows, &replacements, &deletions)
         );
-        let changes = release.dataset.changes.as_ref().unwrap();
+        let certified = engine
+            .change_certificate(&release.version_ref())
+            .await
+            .unwrap()
+            .unwrap();
+        let changes = certified.changes.source.as_ref().unwrap();
         let mut removed: Vec<_> = rows
             .iter()
             .filter(|row| {

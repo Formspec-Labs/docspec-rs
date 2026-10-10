@@ -161,10 +161,15 @@ async fn every_selection_records_actual_predecessor_in_the_same_native_commit() 
     );
     // Succession survives unavailable optional accelerators and input payloads.
     std::fs::remove_file(&first.dataset.inputs["input"].path).unwrap();
-    for table in [
-        &updated.dataset.changes.as_ref().unwrap().added,
-        &updated.dataset.changes.as_ref().unwrap().removed,
-    ] {
+    let changes = engine
+        .change_certificate(&updated.version_ref())
+        .await
+        .unwrap()
+        .unwrap()
+        .changes
+        .source
+        .unwrap();
+    for table in [&changes.added, &changes.removed] {
         for object in &table.objects {
             if object.path.ends_with(".parquet") && Path::new(&object.path).exists() {
                 std::fs::remove_file(&object.path).unwrap();

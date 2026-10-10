@@ -17,7 +17,8 @@ pub(super) struct RetiredRecord {
 }
 
 pub(in crate::engine) fn completion_key(key: &str) -> bool {
-    key.starts_with("restore-reuse/")
+    named_key(key, "prepared-changes/")
+        || key.starts_with("restore-reuse/")
         || key.starts_with("phase/backfill/")
         || (key.starts_with("phase/")
             && [
@@ -35,9 +36,15 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
         || key.starts_with("groups/")
 }
 
+fn named_key(key: &str, prefix: &str) -> bool {
+    key.strip_prefix(prefix)
+        .is_some_and(|id| Id::new(id).is_ok())
+}
+
 pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
     match scope {
         RetirementScope::PhaseRecovery => completion_key(key),
+        RetirementScope::OptionalChanges => named_key(key, "change-certificate/"),
         RetirementScope::RestorePoints => key.starts_with("restore-point/"),
         RetirementScope::OwnerGrants => super::grants::grant_key(key),
         RetirementScope::OperationRecovery { operation } => {
@@ -57,6 +64,7 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
 
 pub(super) fn retained_key(key: &str) -> bool {
     completion_key(key)
+        || named_key(key, "change-certificate/")
         || key.starts_with("restore-point/")
         || key.starts_with("result/")
         || key.starts_with("readback/")
@@ -165,7 +173,30 @@ pub(super) fn validate_markers(
     super::availability::validate_pointer(rows, view, receipt, revision)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
     super::grants::validate_saved(rows, view, receipt, engine)?;
+    if receipt.plan.scope == RetirementScope::OptionalChanges {
+        for generation in &receipt.plan.records {
+            validate_optional(rows, view, generation, &engine.inner.lifecycle.budget)?;
+        }
+    }
     Ok(())
+}
+
+fn validate_optional(
+    rows: &SnapshotRows,
+    view: &View,
+    generation: &RetainedGeneration,
+    budget: &crate::budget::Budget,
+) -> Result<()> {
+    let _memory = rows.reserve_decoded(budget, &[&generation.key])?;
+    let (revision, _, certificate): (_, _, ChangeCertificate) = rows
+        .get_record(&generation.key)?
+        .ok_or_else(invalid_retirement)?;
+    if revision != generation.revision
+        || &crate::catalog::lifecycle_ident(&certificate.after.dataset) != view.table.identifier()
+    {
+        return Err(invalid_retirement());
+    }
+    super::super::changes::check_certificate(rows, revision, &generation.key, &certificate)
 }
 
 /// Validated retirement membership shared by inventory and grant eligibility.
@@ -259,7 +290,7 @@ pub(super) fn invalid_retirement() -> Error {
     )
 }
 
-pub(super) fn plan(
+pub(in crate::engine) fn plan(
     view: &View,
     dataset: Id,
     retirement: Id,
@@ -467,7 +498,10 @@ impl Engine {
         self.retire_retained(plan).await
     }
 
-    pub(super) async fn retire_retained(&self, plan: &RetentionPlan) -> Result<Retirement> {
+    pub(in crate::engine) async fn retire_retained(
+        &self,
+        plan: &RetentionPlan,
+    ) -> Result<Retirement> {
         let memory = self.request_memory(plan)?;
         let plan = plan.clone();
         self.maintain_work(memory, move |engine| async move {
@@ -557,6 +591,9 @@ impl Engine {
                     "completion generation changed or was already retired; capture a fresh plan",
                 ));
             }
+            if plan.scope == RetirementScope::OptionalChanges {
+                validate_optional(&rows, &view, phase, &lifecycle.budget)?;
+            }
             records.push(record(
                 marker_key(phase),
                 RetiredRecord {
@@ -596,7 +633,7 @@ impl Engine {
         Ok(result)
     }
 
-    pub(super) fn retirement_catalog(&self) -> Result<()> {
+    pub(in crate::engine) fn retirement_catalog(&self) -> Result<()> {
         if !self.inner.owned_catalog {
             return Err(Error::refusal(
                 "retention_catalog_unqualified",
