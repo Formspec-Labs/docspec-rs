@@ -1,0 +1,40 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.37s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 5 tests
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... FAILED
+test continuous_backfill::parent_identity_conflicts_and_public_child_entry_points_refuse ... ok
+test continuous_backfill::parent_abandonment_survives_reopen_and_keeps_completed_files ... ok
+test continuous_backfill::selected_parent_retries_exact_child_after_successor_and_honors_availability ... ok
+test continuous_backfill::cold_retry_recovers_every_durable_handoff_with_exact_parent_result ... ok
+
+failures:
+
+---- continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZLiBV8/workspace/objects/comments/243e999189c64faca5e449f67096e86c/data/e16891e1-e23b-43eb-ba5a-909e7718cfb5-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZLiBV8/workspace/objects/comments/243e999189c64faca5e449f67096e86c/data/e16891e1-e23b-43eb-ba5a-909e7718cfb5-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZLiBV8/workspace/objects/comments/243e999189c64faca5e449f67096e86c/data/e16891e1-e23b-43eb-ba5a-909e7718cfb5-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+
+thread 'continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions' (38230029) panicked at tests/continuous_backfill.rs:208:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "schema_mismatch", message: "deletion rows must contain exactly the typed key fields", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 265 filtered out; finished in 6.75s
+
+error: test failed, to rerun pass `--test integration`

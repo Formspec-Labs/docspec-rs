@@ -173,6 +173,12 @@ impl Engine {
             ));
         }
         let view = lifecycle.open(dataset).await?;
+        if let Some(abandoned) = self
+            .abandon_continuous_in(&view, dataset, operation, reason)
+            .await?
+        {
+            return Ok(abandoned);
+        }
         let rows = lifecycle.rows(&view).await?;
         let (revision, _, admitted) = rows
             .get_record::<Operation>(&format!("operation/{operation}"))?
@@ -207,6 +213,7 @@ impl Engine {
     }
 
     pub(super) async fn check_not_abandoned(&self, view: &View, operation: &Id) -> Result<()> {
+        self.check_continuous_capability(view, operation).await?;
         if self
             .inner
             .lifecycle

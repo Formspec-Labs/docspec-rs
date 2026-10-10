@@ -5,6 +5,7 @@ use super::*;
 use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
+pub(in crate::engine) mod continuous;
 #[cfg(all(test, feature = "test-util"))]
 mod correction_tests;
 pub(in crate::engine) mod expressions;
@@ -279,6 +280,7 @@ impl Engine {
         {
             return Err(conflicting_operation());
         }
+        self.check_continuous_child(&view, spec, None).await?;
         if let Some(result) = lifecycle
             .get::<ReleasePin>(&view, &format!("result/{}", spec.operation))
             .await?
@@ -479,7 +481,7 @@ impl Engine {
         let digest = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         // Native preparation has a large async state. Keep it on the heap rather
         // than nesting another copy in the reconciliation future's stack frame.
-        let result = Box::pin(self.prepare_backfill(spec, stop)).await;
+        let result = Box::pin(self.prepare_backfill(spec, stop, None)).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -491,6 +493,7 @@ impl Engine {
             let operation: Option<Operation> = lifecycle
                 .get(&view, &format!("operation/{}", spec.operation))
                 .await?;
+            self.check_continuous_child(&view, spec, None).await?;
             if operation.is_some_and(|operation| operation.request_digest == digest)
                 && let Some(completed) = lifecycle
                     .get(&view, &format!("result/{}", spec.operation))
@@ -506,6 +509,7 @@ impl Engine {
         &self,
         spec: &BackfillSpec,
         stop: Option<&str>,
+        continuous: Option<&continuous::Attempt>,
     ) -> Result<ReleasePin> {
         validate(spec)?;
         let request = OperationRequest::Backfill(spec.clone());
@@ -522,6 +526,7 @@ impl Engine {
             if old.as_ref().is_some_and(|old| old.request_digest != digest) {
                 return Err(conflicting_operation());
             }
+            self.check_continuous_child(&view, spec, continuous).await?;
             if let Some(result) = lifecycle
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
@@ -616,12 +621,17 @@ impl Engine {
                         serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}),
                     )?,
                 ];
+                self.continuous_admission_records(&view, spec, continuous, &mut records)
+                    .await?;
                 protected.records(&view, &request, &mut records)?;
                 lifecycle.commit(&view, records).await?;
                 break (operation, capture, base);
             }
         };
         drop(admission);
+        if continuous.is_some() {
+            stop_after(stop, "continuous-admission")?;
+        }
         let source = base
             .dataset
             .groups
@@ -681,7 +691,7 @@ impl Engine {
                 source,
                 source_protections.as_ref(),
                 &definition,
-                None,
+                continuous.map(|attempt| &attempt.intent.input_fields),
                 stop,
                 &mut checks,
             ))
@@ -705,6 +715,7 @@ impl Engine {
             let (current, current_protections) = {
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
+                self.check_continuous_child(&view, spec, continuous).await?;
                 if let Some(completed) = lifecycle
                     .get(&view, &format!("result/{}", spec.operation))
                     .await?
@@ -871,6 +882,7 @@ impl Engine {
             );
             let _guards = self.lock_inputs(datasets).await;
             let view = lifecycle.open(&spec.dataset).await?;
+            self.check_continuous_child(&view, spec, continuous).await?;
             if let Some(completed) = lifecycle
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
@@ -887,7 +899,12 @@ impl Engine {
             if let Some(dependencies) = &dependencies {
                 Box::pin(self.guard_ancestors(dependencies, &release)).await?;
             }
-            Box::pin(self.select(&view, authority, &release)).await?;
+            if let Some(attempt) = continuous {
+                Box::pin(self.select_continuous_backfill(&view, authority, &release, attempt))
+                    .await?;
+            } else {
+                Box::pin(self.select(&view, authority, &release)).await?;
+            }
             stop_after(stop, "selection")?;
             return Ok(release.value);
         }

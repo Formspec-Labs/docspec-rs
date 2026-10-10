@@ -4,6 +4,7 @@ use super::*;
 use crate::catalog::{SnapshotRows, View};
 
 mod admissions;
+mod target;
 
 impl Engine {
     /// Proves forward coverage using one captured accepted-history snapshot.
@@ -162,9 +163,22 @@ impl Engine {
     pub(super) async fn select_with_progress(
         &self,
         view: &View,
+        authority: Authority,
+        release: &Retained<ReleasePin>,
+        progress: Option<&BTreeMap<Id, SuccessionProof>>,
+    ) -> Result<()> {
+        self.select_with_records(view, authority, release, progress, Vec::new(), None)
+            .await
+    }
+
+    pub(super) async fn select_with_records(
+        &self,
+        view: &View,
         mut authority: Authority,
         release: &Retained<ReleasePin>,
         progress: Option<&BTreeMap<Id, SuccessionProof>>,
+        extra_records: Vec<(String, serde_json::Value)>,
+        fence: Option<&super::intake::SourceFence>,
     ) -> Result<()> {
         let lifecycle = &self.inner.lifecycle;
         self.check_not_abandoned(view, &release.id).await?;
@@ -242,6 +256,10 @@ impl Engine {
         }
         if let Some(progress) = progress {
             records.push(record(format!("input-progress/{}", release.id), progress)?);
+        }
+        records.extend(extra_records);
+        if let Some(fence) = fence {
+            records.push(self.closed_source_fence_record(view, fence).await?);
         }
         lifecycle.commit(view, records).await?;
         Ok(())

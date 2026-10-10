@@ -1,0 +1,81 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.65s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 8 tests
+test continuous_backfill::parent_identity_conflicts_and_public_child_entry_points_refuse ... ok
+test continuous_backfill::parent_abandonment_survives_reopen_and_keeps_completed_files ... ok
+test continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source ... FAILED
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... FAILED
+test continuous_backfill::expired_drain_returns_pending_ids_reopens_intake_and_preserves_work ... ok
+test continuous_backfill::restore_point_recovers_unfinished_parent_and_protects_active_and_selected_outputs ... ok
+test continuous_backfill::selected_parent_retries_exact_child_after_successor_and_honors_availability ... ok
+test continuous_backfill::cold_retry_recovers_every_durable_handoff_with_exact_parent_result ... ok
+
+failures:
+
+---- continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/ca3b3f1ee6de44f9800b5d66048537f0/data/75f4848f-1c9a-4fae-a94f-48ccc9a08705-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/ca3b3f1ee6de44f9800b5d66048537f0/data/75f4848f-1c9a-4fae-a94f-48ccc9a08705-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/ca3b3f1ee6de44f9800b5d66048537f0/data/75f4848f-1c9a-4fae-a94f-48ccc9a08705-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/84641897760c44a2af15183d19c1443f/data/10751446-bc4d-431b-80f1-cd7e843643b3-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/84641897760c44a2af15183d19c1443f/data/dfbc967e-d140-4f45-af77-a034565d3141-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/84641897760c44a2af15183d19c1443f/data/ea626241-51b0-4a68-a889-7172ed3d2523-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUiJAQr/workspace/objects/comments/eca9734c9a06404097e4b0a5a312ebee/data/78137a2d-37a2-4e8c-b9b1-5d1f4f570fa6-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source' (38301448) panicked at tests/continuous_backfill.rs:609:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_succession", message: "target result differs from its admitted request", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/3d42413ace3d492689b54cf9ada0f1c8/data/00acd31a-c56a-49e4-8935-a27f0d2f7b4c-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/3d42413ace3d492689b54cf9ada0f1c8/data/00acd31a-c56a-49e4-8935-a27f0d2f7b4c-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/3d42413ace3d492689b54cf9ada0f1c8/data/00acd31a-c56a-49e4-8935-a27f0d2f7b4c-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/f7d8e77a29234bcaa7bbd74d9e6f0b49/data/data/13679564-b0f3-46b0-94fc-c6c38841c0bc-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/f7d8e77a29234bcaa7bbd74d9e6f0b49/data/data/d9d430f6-ff8e-41c7-b323-adf23f7d7086-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpK3eSUM/workspace/objects/comments/f7d8e77a29234bcaa7bbd74d9e6f0b49/removed/data/b13486c1-d93b-4362-b934-03c6d74ecad6-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions' (38301451) panicked at tests/continuous_backfill.rs:229:66:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_succession", message: "target result differs from its admitted request", source: None, backtrace: <disabled> }
+
+
+failures:
+    continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source
+    continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions
+
+test result: FAILED. 6 passed; 2 failed; 0 ignored; 0 measured; 265 filtered out; finished in 8.04s
+
+error: test failed, to rerun pass `--test integration`

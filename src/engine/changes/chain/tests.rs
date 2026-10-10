@@ -39,6 +39,7 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
             compute_threads: 2,
             batch_rows: 16,
             max_batch_bytes: 4 << 20,
+            scratch_bytes: 16 << 20,
             ..Limits::default()
         },
     )

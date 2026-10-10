@@ -900,6 +900,28 @@ pub struct BackfillSpec {
     pub fields: Vec<ComputedField>,
 }
 
+/// One recoverable scalar-field change while source versions continue advancing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContinuousBackfillSpec {
+    /// The operation identifies the parent intent; its base fixes original meaning.
+    pub backfill: BackfillSpec,
+    /// Attempts before temporarily fencing new source admissions, from 1 through 16.
+    pub optimistic_rounds: u32,
+    /// Maximum local fence lifetime, from 1 through 300000 milliseconds.
+    pub fence_millis: u64,
+}
+
+/// Bounded control progress; child phases retain the actual processing evidence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContinuousBackfillPlan {
+    pub completed: Option<ReleasePin>,
+    pub child: Option<Id>,
+    pub round: u32,
+    pub pending_source: Vec<Id>,
+    pub fenced: bool,
+}
+
 /// Material scalar computation, independent of its adoption operation and captured source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupDefinition {

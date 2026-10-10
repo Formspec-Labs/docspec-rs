@@ -9,10 +9,10 @@ use crate::{
     export::{ExportPin, ExportSpec},
     model::{
         Abandonment, BackfillSpec, CertifiedChanges, CompactionResult, CompactionSpec, Comparison,
-        ComparisonIdentity, ComparisonOptions, CorrectionDecision, DependencyCorrection,
-        GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan,
-        RemovalStatus, RetentionInspection, RetentionPlan, Retirement, RunSpec, SchemaSpec,
-        SuccessionProof, UpdateSpec, VersionRef,
+        ComparisonIdentity, ComparisonOptions, ContinuousBackfillPlan, ContinuousBackfillSpec,
+        CorrectionDecision, DependencyCorrection, GenerationSeal, Id, InputCoverage, ObjectRef,
+        RefreshSpec, ReleasePin, RemovalPlan, RemovalStatus, RetentionInspection, RetentionPlan,
+        Retirement, RunSpec, SchemaSpec, SuccessionProof, UpdateSpec, VersionRef,
     },
     restore::RestorePointRef,
 };
@@ -44,6 +44,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/schemas/run", post(evolve_schema))
         .route("/backfills/plan", post(plan_backfill))
         .route("/backfills/run", post(backfill))
+        .route("/continuous-backfill", post(continuous_backfill))
+        .route("/plan-continuous-backfill", post(plan_continuous_backfill))
         .route("/refreshes/plan", post(plan_refresh))
         .route("/refreshes/run", post(refresh))
         .route("/exports/run", post(export))
@@ -464,6 +466,13 @@ impl IntoResponse for HttpError {
                 StatusCode::NOT_FOUND
             }
             "operation_conflict"
+            | "source_fenced"
+            | "source_fence_lost"
+            | "continuous_changed"
+            | "continuous_child_owned"
+            | "backfill_target_conflict"
+            | "backfill_source_identity_changed"
+            | "stale_continuous_definition"
             | "correction_conflict"
             | "correction_required"
             | "correction_mismatch"
@@ -682,6 +691,20 @@ async fn backfill(
     Json(spec): Json<BackfillSpec>,
 ) -> Result<Json<ReleasePin>, HttpError> {
     Ok(Json(engine.backfill(&spec).await?))
+}
+
+async fn plan_continuous_backfill(
+    State(engine): State<Engine>,
+    Json(spec): Json<ContinuousBackfillSpec>,
+) -> Result<Json<ContinuousBackfillPlan>, HttpError> {
+    Ok(Json(engine.plan_continuous_backfill(&spec).await?))
+}
+
+async fn continuous_backfill(
+    State(engine): State<Engine>,
+    Json(spec): Json<ContinuousBackfillSpec>,
+) -> Result<Json<ReleasePin>, HttpError> {
+    Ok(Json(engine.continuous_backfill(&spec).await?))
 }
 
 async fn plan_refresh(

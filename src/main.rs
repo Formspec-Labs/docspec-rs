@@ -8,9 +8,10 @@ use docspec::{
     evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
-        BackfillSpec, CompactionSpec, ComparisonIdentity, ComparisonOptions, DependencyCorrection,
-        GenerationSeal, Id, InputCoverage, ObjectRef, RefreshSpec, ReleasePin, RemovalPlan,
-        RetentionPlan, RunSpec, SchemaSpec, UpdateSpec, VerificationLevel, VersionRef,
+        BackfillSpec, CompactionSpec, ComparisonIdentity, ComparisonOptions,
+        ContinuousBackfillSpec, DependencyCorrection, GenerationSeal, Id, InputCoverage, ObjectRef,
+        RefreshSpec, ReleasePin, RemovalPlan, RetentionPlan, RunSpec, SchemaSpec, UpdateSpec,
+        VerificationLevel, VersionRef,
     },
     restore::RestorePointRef,
     storage,
@@ -223,6 +224,10 @@ enum Command {
     PlanBackfill { spec: PathBuf },
     /// Compute or resume an independent scalar field group.
     Backfill { spec: PathBuf },
+    /// Explain bounded catch-up and cutover work for a continuous field group.
+    PlanContinuousBackfill { spec: PathBuf },
+    /// Compute or resume a field group while source admissions advance.
+    ContinuousBackfill { spec: PathBuf },
     /// Stream a pinned combined view as Arrow IPC.
     ReadCombined { release: PathBuf, output: PathBuf },
     /// Stream exact contributor pairs as Arrow IPC without the producer catalog.
@@ -672,6 +677,16 @@ async fn main() -> anyhow::Result<()> {
                 Command::Backfill { spec } => {
                     print_json(&engine.backfill(&read_json::<BackfillSpec>(spec)?).await?)?
                 }
+                Command::PlanContinuousBackfill { spec } => print_json(
+                    &engine
+                        .plan_continuous_backfill(&read_json::<ContinuousBackfillSpec>(spec)?)
+                        .await?,
+                )?,
+                Command::ContinuousBackfill { spec } => print_json(
+                    &engine
+                        .continuous_backfill(&read_json::<ContinuousBackfillSpec>(spec)?)
+                        .await?,
+                )?,
                 command @ (Command::ReadCombined { .. } | Command::ReadOccurrences { .. }) => {
                     let (release, output, occurrences) = match command {
                         Command::ReadCombined { release, output } => (release, output, false),

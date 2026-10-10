@@ -6,8 +6,8 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes broader dependency correction beyond
-the local scalar case and continuous-ingestion cutover; remaining protection
-lifetimes, maintenance integration and broader failure qualification; remote
+the local scalar case and broader continuous-backfill qualification; remaining
+protection lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and the remaining
 Q1–Q8 and update/backfill/recovery performance qualification. The defined full
 local 10-million-Comments performance gate now **passes**: three fresh workspaces
@@ -18,6 +18,79 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+
+## One recoverable scalar backfill across advancing source versions
+
+The local engine now implements `continuous_backfill` and
+`plan_continuous_backfill`, with thin CLI and HTTP entry points. One immutable
+`ContinuousBackfillSpec` retains the user's original target and authored input
+field IDs. Exact child requests capture successive selected sources. They use the
+existing scalar processing, file completions, validation, readback and owner
+protections; an unchanged file does not need another computation. An intermediate
+child cannot select through the ordinary public backfill API.
+
+Selection checks the original target through accepted history, including
+same-definition competing replacements and changes that later revert. Compatible
+source updates and sibling groups can compose. A full rebuild that renumbers an
+authored field refuses; this does not implement global source-field identity
+across arbitrary rebuilds. Schema changes still fence the existing writer
+definition, and nested/global computations remain outside this scalar path.
+
+After a finite number of optimistic attempts, a host-bound monotonic fence stops
+new source admissions for the requested bounded interval. Previously admitted
+requests can finish. Unresolved requests remain retained and visible; the
+controller never abandons them to force convergence. The drain checks pending
+admissions only when the lifecycle revision changes. Expiry releases admission
+policy and leaves expensive completed work resumable. The deadline does not bound
+a stalled native commit while a dataset lock is held; that delay needs measurement.
+These lease semantics qualify only the exclusively owned local catalog.
+
+The shared selection commit records the winning child, parent completion and any
+active parent-owned fence closure together. An optimistic concurrent retry also
+consumes an active fence owned by the same parent. Fence acquisition checks the
+parent under the same lock as registration, so an abandoned or completed parent
+cannot install another fence. Completed retries resolve their original child
+before current-head or lease checks; completed planning avoids later history work.
+
+Control records contain metadata references, without duplicating the payload
+protection graph. Each child uses existing protected admission. Superseded
+children receive exact abandonment decisions and can use ordinary recovery
+retirement; shared phase and result lifetimes remain independent. Parent
+abandonment stops child completion/selection and closes its fence without deleting
+work. Parent completion follows the winning child's availability retirement.
+Typed inventory handling includes these records in retention and restore.
+
+Independent [consistency](reviews/continuous-controller-consistency-review-2026-10-10.md)
+and [resource](reviews/continuous-controller-resources-review-2026-10-10.md)
+reviews cover the implementation. The resource review prompted metadata admission
+before full result decoding and removal of an unnecessary authority copy. No
+new scheduler, SQL database, cache or data-processing engine was introduced.
+History proofs remain bounded metadata work at mutable admission/selection
+boundaries; no whole-process memory or full-scale backfill performance claim is made.
+
+The [repository gate](reviews/continuous-controller-full-check-2026-10-10.log)
+passed strict lint and the new unit cases, then stopped in an older history
+fixture whose default 32 GiB scratch reservation exceeded available disk during
+the run. That tiny fixture now requests 16 MiB; production limits are unchanged.
+The [continuation](reviews/continuous-controller-gate-continuation-2026-10-10.log)
+passes that corrected case, the complete integration target, isolated restore and
+worker tests, and documentation checks. The
+[final focused run](reviews/continuous-controller-final-check-2026-10-10.log)
+passes formatting, strict lint and the controller unit/integration suites after
+the last review correction. Every gate component is covered across these runs;
+this is not an uninterrupted gate pass. The external Comments physical-plan probe
+remains explicitly ignored, and no full-data performance workload was rerun.
+
+Earlier targeted attempts retain a corrected deletion-fixture schema and two
+integration findings in the new lineage proof: admitted source paths may move
+into retained storage, and only some request types populate the optional
+`Operation::base_manifest`. The proof now uses material request identity and the
+exact accepted base receipt. Passing fixtures cover native recovery, source edits,
+target conflicts, intake/drain/expiry, same-parent fence adoption, malformed
+pending and completed control records, retired result availability and
+fresh-catalog restore at the original workspace. They do not complete R3:
+broader dependency/evolution semantics, related-input races, process-death windows,
+retirement/removal races and population/history/resource scaling remain open.
 
 ## Complete source-admission accounting before cutover
 
@@ -46,10 +119,9 @@ reads or every source update.
 This is the admission prerequisite identified by the independent
 [consistency design](reviews/continuous-backfill-design-consistency-2026-10-10.md)
 and [resource design](reviews/continuous-backfill-design-resources-2026-10-10.md).
-Continuous-ingestion R3 remains unfinished: it still needs durable transition and
-child identities, target-lineage checks, bounded intake fencing, catch-up, atomic
-parent completion and fence closure, and successful concurrent-ingestion/recovery
-qualification. The current fixed-capture service is not that complete workflow.
+The [continuous scalar controller](#one-recoverable-scalar-backfill-across-advancing-source-versions)
+now implements those coordination mechanisms. This older prerequisite checkpoint
+does not by itself qualify that workflow or complete the broader R3 requirement.
 
 The [metadata checks](reviews/cutover-admissions-unit-2-2026-10-10.log),
 [real operation checks](reviews/cutover-admissions-integration-2026-10-10.log)
@@ -365,7 +437,14 @@ concurrency, row-group layout and the known selected-page memory limit are uncha
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) covers direct Rust
 and Python dependencies, enabled Rust features and material transitive APIs.
-It supports keeping the current stack. The reader change above implements passing
+The latest [feature-utilization coverage](reviews/dependency-feature-utilization-audit-2026-10-10.md)
+reconfirms the remaining priorities without identifying another replacement:
+scalar dependency selection, duplicate-first cardinality proof, and controlled
+native row-group/spill-compression experiments. It distinguishes delivered changes
+from unmeasured opportunities and covers the direct Rust/Python declarations plus
+material transitive integration families.
+
+The audit supports keeping the current stack. The reader change above implements passing
 requested columns into Iceberg before decoding; the
 [reviewed design](reviews/native-column-selection-design-review.md) preserves
 stable field IDs, defaults, output order and occurrence identities.
@@ -1992,7 +2071,7 @@ or compatibility layer for legacy DocSpec.
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
-| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; continuous-ingestion catch-up and cutover |
+| R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption; one retained local continuous scalar intent with exact source captures and bounded intake fencing | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; broader continuous-cutover process/race/resource qualification |
 | R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers; shared qualified history discovery for local R5 consumers under existing maintenance and processing protection | Schema-mapping comparison, portable trust and remaining scaling/failure qualification |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation and compaction recovery, and unused owner-grant retirement; actual obsolete intermediate-layout reclamation through native registration detachment and exact removal; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads, source updates and incremental join/summary outputs with exact captured-layout recovery; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compacted related-input selection, contributor table compaction and selected representation-authority retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |

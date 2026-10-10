@@ -1059,7 +1059,13 @@ impl Inventory {
         origin: &RetentionBlocker,
     ) -> Result<()> {
         // Most-specific families precede their common prefix.
-        if key.starts_with("prepared-changes/") {
+        if key == "source-fence" {
+            let fence: crate::engine::intake::SourceFence = decode(json)?;
+            crate::engine::intake::validate_record(&fence)?;
+            if crate::catalog::lifecycle_ident(&fence.dataset).to_string() != origin.table {
+                return Err(invalid_inventory("source fence dataset differs"));
+            }
+        } else if key.starts_with("prepared-changes/") {
             let prepared: PreparedChanges = decode(json)?;
             crate::engine::changes::check_prepared(&prepared, key, &prepared.before.dataset)?;
             if crate::catalog::lifecycle_ident(&prepared.before.dataset).to_string() != origin.table
@@ -1515,6 +1521,14 @@ impl Inventory {
                     }
                 }
             }
+        } else if crate::engine::backfill::continuous::validate_control_record(
+            key,
+            json,
+            rows,
+            &origin.table,
+            origin.revision,
+        )? {
+            // Parent/control pointers do not add a second payload lifetime.
         } else if key.starts_with("abandoned/") {
             let _: Abandonment = decode(json)?;
         } else if key.starts_with("runtime/") {

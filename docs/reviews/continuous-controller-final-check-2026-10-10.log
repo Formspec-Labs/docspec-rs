@@ -1,0 +1,31 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 12.85s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 15.54s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 4 tests
+test engine::backfill::continuous::tests::parent_abandoned_after_intent_capture_cannot_acquire_a_fence ... ok
+test engine::backfill::continuous::tests::completed_parent_cannot_reacquire_a_fence_from_its_captured_intent ... ok
+test engine::backfill::continuous::tests::optimistic_same_parent_worker_adopts_live_fence_and_closes_it_with_selection ... ok
+test engine::backfill::continuous::tests::corrupted_child_request_association_refuses_before_and_after_selection ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 2.38s
+
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 7.41s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 9 tests
+test continuous_backfill::parent_identity_conflicts_and_public_child_entry_points_refuse ... ok
+test continuous_backfill::parent_abandonment_survives_reopen_and_keeps_completed_files ... ok
+test continuous_backfill::expired_drain_returns_pending_ids_reopens_intake_and_preserves_work ... ok
+test continuous_backfill::restore_point_recovers_unfinished_parent_and_protects_active_and_selected_outputs ... ok
+test continuous_backfill::selected_parent_retries_exact_child_after_successor_and_honors_availability ... ok
+test continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source ... ok
+test continuous_backfill::absent_target_refuses_same_type_source_field_id_remapping ... ok
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... ok
+test continuous_backfill::cold_retry_recovers_every_durable_handoff_with_exact_parent_result ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 265 filtered out; finished in 10.04s
+

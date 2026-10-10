@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.83s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 8 tests
+test engine::history::target::tests::absent_target_cannot_appear_and_disappear_in_intervening_history ... ok
+test engine::history::target::tests::absent_target_and_equal_endpoints_remain_valid ... ok
+test engine::history::target::tests::rejects_forged_endpoints_and_unrelated_or_backward_history ... ok
+test engine::history::target::tests::competing_same_definition_and_aba_replacements_conflict ... ok
+test engine::history::target::tests::allows_coordinated_updates_siblings_schema_and_evidence_after_retirement ... ok
+test engine::history::target::tests::refuses_remapped_authored_ids_and_uncoordinated_binding_changes ... ok
+test engine::history::target::tests::rejects_request_receipt_and_chain_inconsistency ... ok
+test engine::history::target::tests::refuses_bounded_metadata_traversal_before_history_grows_unbounded ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 226 filtered out; finished in 5.87s
+

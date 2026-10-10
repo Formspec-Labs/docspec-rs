@@ -80,6 +80,12 @@ impl Engine {
         let view = lifecycle.open(request.dataset()).await?;
         self.check_not_abandoned(&view, request.operation()).await?;
         let native = storage::open_pin(source).await?;
+        self.check_continuous_source_schema(
+            &view,
+            request.operation(),
+            native.metadata().current_schema(),
+        )
+        .await?;
         let expressions = Arc::new(Expressions::compile(
             &self.context(),
             native.metadata().current_schema(),

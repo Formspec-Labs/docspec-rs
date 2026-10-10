@@ -13,6 +13,8 @@ use tokio::{runtime::Handle, sync::OwnedSemaphorePermit};
 pub(super) struct Host {
     _workspace: WorkspaceLock,
     uncertain: AtomicBool,
+    pub(super) instance: String,
+    clock_origin: std::time::Instant,
 }
 
 impl Host {
@@ -20,7 +22,14 @@ impl Host {
         Ok(Arc::new(Self {
             _workspace: WorkspaceLock::acquire(root)?,
             uncertain: AtomicBool::new(false),
+            instance: uuid::Uuid::new_v4().to_string(),
+            clock_origin: std::time::Instant::now(),
         }))
+    }
+
+    pub(super) fn monotonic_millis(&self) -> Result<u64> {
+        u64::try_from(self.clock_origin.elapsed().as_millis())
+            .map_err(|_| Error::refusal("source_fence_clock", "host monotonic clock overflow"))
     }
 
     fn check(&self) -> Result<()> {

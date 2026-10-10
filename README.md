@@ -485,6 +485,48 @@ new source can reuse unchanged file computations. Independent groups merge into
 the latest selection; competing replacements of one group reject a stale target.
 Combined reads join group values to exact source-file row positions.
 
+For a single resumable request while source intake continues, wrap that request
+in `continuous-backfill.json`:
+
+```json
+{
+  "backfill": {
+    "dataset": "comments", "operation": "text-stats-continuous-001",
+    "base": "update-001", "definition": "comments-v1",
+    "group": "text_stats", "group_definition": "text-stats-v1",
+    "fields": [{"id": 10, "name": "character_count", "expression": "CAST(length(comment) AS BIGINT)"}]
+  },
+  "optimistic_rounds": 2,
+  "fence_millis": 30000
+}
+```
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-continuous-backfill continuous-backfill.json
+target/debug/docspec --workspace workspaces/comments continuous-backfill continuous-backfill.json > enriched-release.json
+```
+
+Repeat the same parent request to resume. Each captured source has an exact child
+operation; completed file work is shared across captures. The returned release
+identifies the selected child, and parent retries return that same release after
+later selections. Competing changes to the target group refuse. Authored source
+field IDs must retain their meaning; a rebuild that renumbers them requires a new
+intent against the new schema.
+
+After the configured optimistic attempts, the engine briefly refuses new source
+admissions with `source_fenced` while already accepted requests finish. An
+unresolved accepted request remains visible in the plan. Expiry returns
+`source_fence_lost`, allows intake again and retains completed work for retry.
+`optimistic_rounds` accepts 1–16 and `fence_millis` accepts 1–300000. These are local
+host limits; a stalled native commit can hold its dataset lock beyond the lease.
+Use the existing `abandon` operation with the parent ID to stop an unfinished
+intent. This does not delete completed work.
+
+HTTP exposes `POST /continuous-backfill` and `POST /plan-continuous-backfill`
+with the same JSON. Ordinary backfill entry points refuse owned child IDs;
+operate through the parent. See [current qualification](docs/STATUS.md#one-recoverable-scalar-backfill-across-advancing-source-versions)
+for the supported local behavior and remaining lifecycle work.
+
 Before schema or backfill selection, every accepted source request must have
 entered the selected history or been explicitly abandoned. A later full build
 does not resolve an earlier unfinished request. Such a request produces

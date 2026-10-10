@@ -40,6 +40,7 @@ mod restore;
 pub use changes::verify_applied_changes;
 use changes::verify_changes;
 mod inputs;
+mod intake;
 #[doc(inline)]
 pub use inputs::verify_input_coverage;
 mod read;
@@ -994,6 +995,8 @@ impl Engine {
                 );
                 let guards = self.lock_inputs(datasets).await;
                 let view = lifecycle.open(spec.dataset()).await?;
+                self.check_continuous_operation_id(&view, spec.operation())
+                    .await?;
                 let old: Option<Operation> = lifecycle
                     .get(&view, &format!("operation/{}", spec.operation()))
                     .await?;
@@ -1007,6 +1010,16 @@ impl Engine {
                     return Ok(result);
                 }
                 self.check_not_abandoned(&view, spec.operation()).await?;
+                if old.is_none()
+                    && matches!(
+                        spec,
+                        OperationRequest::Build(_)
+                            | OperationRequest::Update(_)
+                            | OperationRequest::Refresh(_)
+                    )
+                {
+                    self.check_source_intake(&view).await?;
+                }
                 let decoding = if old.is_none() {
                     Some(
                         lifecycle

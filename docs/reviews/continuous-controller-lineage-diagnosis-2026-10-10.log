@@ -1,0 +1,44 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.87s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 1 test
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... FAILED
+
+failures:
+
+---- continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/8a684139938246b8b3b56221b5743f52/data/68e2ab17-4b94-406f-92da-15ccdec92045-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/8a684139938246b8b3b56221b5743f52/data/68e2ab17-4b94-406f-92da-15ccdec92045-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/8a684139938246b8b3b56221b5743f52/data/68e2ab17-4b94-406f-92da-15ccdec92045-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/763d1dc76c2a4388a2bef1c03fec359e/data/data/30421fa9-b21e-450d-bdaf-7b339262ffc7-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/763d1dc76c2a4388a2bef1c03fec359e/data/data/b1aa3280-7494-4b3f-8175-2eca81dc477a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHBVtwx/workspace/objects/comments/763d1dc76c2a4388a2bef1c03fec359e/removed/data/8f80754d-156f-4df7-a8ae-f987222fb240-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+
+thread 'continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions' (38325407) panicked at tests/continuous_backfill.rs:229:66:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_succession", message: "target composition parent differs from its admitted capture", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 273 filtered out; finished in 1.50s
+
+error: test failed, to rerun pass `--test integration`
