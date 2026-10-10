@@ -2,6 +2,13 @@
 
 **Keep the current dependency family. Native column selection, maintained BLAKE3 reading and streamed hash-only JSON are implemented. Occurrence comparisons now avoid sorting; value comparisons retain maintained bounded ranking and sorted-batch admission. Prioritize captured metadata reuse and avoidable scans next.** Enabling every optional feature would increase the surface to maintain without establishing a benefit.
 
+The [latest utilization check](reviews/dependency-utilization-audit-2026-10-10.md)
+rechecks package coverage at `2a5ae51`. It identifies changed-key discovery as a
+remaining caller that can use the existing selected-column reader, and records
+the reader-concurrency constraint for composing change history. Its ranked
+actions supersede the ordering below; the detailed upstream analysis remains
+useful. Cargo target grouping changes build organization, not dependency features.
+
 This is a static audit dated 2026-10-10, refreshed against base `0011f7588ab58171c0f3d71e829b4902215ab70b` and the hash-only JSON/comparison-normalization changes. The original audit at `5508a1144d872e4f72ed636eab02dc0eedc0146c` supplied the package research; subsequent refreshes reuse it and check coverage and changed call sites. The comparison findings distinguish the initially inspected implementation, the maintained replacement, and its scoped root-owned qualification. The audit subagent changed only this document and ran no builds, tests, formatting, benchmarks, downloads of data, or corpus-payload reads. Completed checks are attributed to retained root-task receipts. Performance statements distinguish structural effects from timing hypotheses.
 
 The root's [current qualification record](STATUS.md#exact-streamed-endpoint-comparison) includes formatting, strict Clippy and all executable suites in the [latest gate](reviews/dependency-normalization-full-check-2-2026-10-10.log), plus the passing [documentation continuation](reviews/dependency-normalization-doc-check-2026-10-10.log) after missing compiled dependencies were rebuilt. The [normalization review](reviews/comparison-normalization-review-2026-10-10.md) and [hash-only JSON review](reviews/hash-json-implementation-review-2026-10-10.md) approve the scoped changes. Earlier foundation evidence remains retained. These checks establish tested behavior, not a throughput improvement or complete lifecycle qualification.

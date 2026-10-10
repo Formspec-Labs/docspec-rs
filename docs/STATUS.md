@@ -168,6 +168,15 @@ accelerated chain admission/composition, portable trust and population-scale
 resource qualification remain open. Ordinary public comparison still uses the
 unchanged/full paths. No new throughput or disk-reduction measurement is claimed.
 
+The independent [admission review](reviews/chain-admission-architecture-2026-10-10.md)
+and [resource review](reviews/chain-resource-architecture-2026-10-10.md) constrain
+the next implementation: share one captured certificate resolver, retain existing
+maintenance custody, and activate a bounded number of native delta readers.
+Reuse the current occurrence-first comparison operators. Refresh must derive
+old/new affected keys before discarding changed values; key-only value cancellation
+can hide a real same-key update. These are reviewed implementation decisions,
+not enabled acceleration or runtime qualification.
+
 ## Native column selection
 
 SQL column selection now reaches the maintained Iceberg reader before value
@@ -226,6 +235,16 @@ the audit does not justify additional concurrency, caches or blanket upgrades.
 The [independent follow-up](reviews/dependency-audit-followup-2026-10-10.md)
 confirmed coverage against the same manifest identities and found two remaining
 hash-only JSON buffers that can use the existing streaming digest helper.
+
+The [utilization audit](reviews/dependency-utilization-audit-2026-10-10.md)
+rechecks every direct Rust and Python package and the material transitive APIs.
+Its additional finding is that join/summary changed-key discovery still reads
+whole changed files before selecting keys. The existing selected-column reader
+can remove unrelated decoding without another index or execution layer. Address
+that bounded adoption before broader captured-metadata reuse and join-scan work.
+Scalar preparation has a similar opportunity but also needs expression indices
+rebound to the selected schema. Package features and versions remain unchanged;
+these findings establish no measured speedup.
 
 The hash-only file reader now uses BLAKE3's `update_reader` and `count`, removing
 the custom read/count loop and its one-MiB heap buffer. The pinned reader uses a
