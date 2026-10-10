@@ -2058,7 +2058,7 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"evidence": {"base": spec.base, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
         }
     };
-    Ok(blake3::hash(&serde_json::to_vec(&(PROCESSOR, material))?)
+    Ok(storage::json_digest(&(PROCESSOR, material))?
         .to_hex()
         .to_string())
 }

@@ -246,7 +246,7 @@ impl Checks {
         }
         Ok(Table::builder()
             .identifier(iceberg::TableIdent::from_strs(["scalar", "originals"])?)
-            .metadata((*metadata).clone())
+            .metadata(metadata)
             .metadata_location(&reference.metadata.path)
             .file_io(iceberg::io::FileIO::new_with_fs())
             .runtime(iceberg::Runtime::try_current()?)
@@ -684,6 +684,10 @@ mod tests {
         let cached_inventory = checks.source_files[&source.metadata.path].clone();
         let admitted = checks.bytes;
         let source_table = checks.table(&source_reference, budget).await.unwrap();
+        assert!(Arc::ptr_eq(
+            &checks.schemas[&source.metadata.path],
+            &source_table.metadata_ref()
+        ));
         let reused_inventory = checks.source_files(&source_table, budget).await.unwrap();
         assert!(Arc::ptr_eq(&cached_inventory, &reused_inventory));
         assert_eq!(

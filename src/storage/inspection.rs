@@ -47,9 +47,7 @@ pub(crate) fn schema_identity(schema: &iceberg::spec::StructType) -> Result<Stri
     }
     let mut schema = serde_json::to_value(schema)?;
     physical(&mut schema);
-    Ok(blake3::hash(&serde_json::to_vec(&schema)?)
-        .to_hex()
-        .to_string())
+    Ok(json_digest(&schema)?.to_hex().to_string())
 }
 
 #[derive(Default)]
