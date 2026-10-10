@@ -1,12 +1,12 @@
 # Package efficiency audit
 
-**Keep the current dependency family. Native column selection, maintained BLAKE3 reading and streamed hash-only JSON are implemented. Occurrence comparisons now avoid sorting; value comparisons retain maintained bounded ranking and sorted-batch admission. Prioritize captured metadata reuse and avoidable scans next.** Enabling every optional feature would increase the surface to maintain without establishing a benefit.
+**Keep the current dependency family. The remaining useful work is to avoid redundant cardinality scans, extend selected-column reading to scalar preparation, and qualify native row-group sizing. Reuse immutable metadata where a repeated open remains.** The [current follow-up](#current-follow-up-2026-10-10) rechecks every direct package, enabled defaults, relevant duplicate dependencies and maintained adapter alternatives. It distinguishes completed improvements from work still in progress; its status and priorities supersede earlier snapshots below. Enabling every optional feature would increase the surface to maintain without establishing a benefit.
 
-The [latest utilization check](reviews/dependency-utilization-audit-2026-10-10.md)
+The [earlier utilization check](reviews/dependency-utilization-audit-2026-10-10.md)
 rechecks package coverage at `2a5ae51`. It identifies changed-key discovery as a
 remaining caller that can use the existing selected-column reader, and records
 the reader-concurrency constraint for composing change history. Its ranked
-actions supersede the ordering below; the detailed upstream analysis remains
+actions are retained as research history; the detailed upstream analysis remains
 useful. Cargo target grouping changes build organization, not dependency features.
 
 The [independent coverage addendum](reviews/package-coverage-check-2026-10-10.md)
@@ -14,6 +14,210 @@ checks the current manifests/imports and the maintained streaming-table boundary
 It finds no omitted direct package or new reason for feature expansion. Follow
 [current status](STATUS.md#dependency-efficiency-audit) for selected-key adoption
 and its qualification; earlier audit snapshots describe the code when inspected.
+
+## Current follow-up: 2026-10-10
+
+This follow-up inspected `bd6eadecb9ac052fcd2b6090075501b0e2e08290` and the
+identified working changes in source update/incremental refresh. It parsed all
+direct Rust declarations, Cargo.lock, the Dagster manifest and Python imports;
+rechecked active call sites and relevant installed upstream source; browsed
+official pinned Rust source and current package documentation; and ran only
+offline, locked Cargo metadata/tree inspection. It ran no builds, tests,
+benchmarks, corpus reads or asset downloads and changed only this report.
+Coverage means every **direct** production/development/build package and the
+material transitive facilities listed here. It does not mean every transitive
+implementation was reviewed. Prior exact-version package research and the
+feature appendix remain applicable; no feature set changed.
+
+Fresh SHA-256 identities are `f3a0798a2ae7163a57521be70cfed0fe6cab47dea7bff744369e86affd1e02a2`
+for Cargo.toml, `1a42088d740c961f0e4261c46bf60e2efebaa5cda5d61caecd8c5de2a5cc906f`
+for Cargo.lock and `45bdcdb17448c397e0309847814702aa3d9ca035c0b4eb1bb1c4d8ee2138c478`
+for the Dagster manifest. The original manifest identity farther below predates
+Cargo target grouping. `cargo metadata --offline --locked --all-features --format-version 1`
+confirms the direct resolved-feature appendix. Host production reachability was
+checked separately with `cargo tree --offline --locked --target aarch64-apple-darwin --edges normal,build`;
+lockfile presence alone does not establish
+that a crate is compiled or linked for this target.
+
+### Completed integration and active work
+
+- **Implemented:** early native column selection and selected-key discovery,
+  BLAKE3's reader, streamed JSON fingerprints, shared original-table metadata,
+  and constrained full-join inventory capture. In particular,
+  [register_join_inputs](../src/engine/refresh.rs#L524) captures each input once
+  for the cardinality probes and main query, sharing exact self-join inputs.
+  [Original-table construction](../src/engine/backfill/origins/checks.rs#L241)
+  now passes the admitted metadata `Arc` directly. These are no longer pending
+  recommendations. [STATUS](STATUS.md#dependency-efficiency-audit) names their
+  retained author checks; this audit did not rerun them or measure their speed.
+- **Implemented:** [sequence](../src/query/sequence.rs#L27) uses DataFusion's
+  finite `StreamingTable` and Futures `then`/`try_flatten`. The pinned flatten
+  implementation drops the completed child before opening the next one. Keep
+  selected-column providers underneath this already-shaped stream composition;
+  no custom scheduler, concatenation engine or fan-out queue is needed.
+- **In progress at inspection:** the root-owned
+  [open_captured_source](../src/engine/write.rs#L43) helper is shared by source
+  replacement and [incremental discovery](../src/engine/incremental.rs#L64).
+  It checks logical identity, row count and public schema before reading an
+  admitted compacted representation. This consolidates interpretation checks;
+  it is not a general metadata cache or elimination of every metadata open.
+  Its executing owner controls qualification and commits. Do not duplicate this
+  change from an earlier audit's recommendation.
+
+### Complete current direct-package matrix
+
+Every Rust entry below was matched to Cargo.lock and current callers. The
+[detailed package matrix](#every-direct-rust-dependency) retains pinned official
+API links and feature rationale; the current disposition here supersedes its
+older call-site status.
+
+| Direct package / resolved version | Current maintained use and disposition |
+| --- | --- |
+| `anyhow` 1.0.104 | [CLI result boundary](../src/main.rs#L295), `bail!` and `ensure!`. Keep stable library refusal codes; no additional error framework or feature is justified. |
+| `arrow` 58.4.0 | [Selected arrays](../src/storage/selection.rs), shared batch columns, compute and [IPC](../src/http/ipc.rs). Keep zero-copy handles; scalar input selection remains below. Array-handle cloning is not a payload copy, while slices can retain their backing allocation. |
+| `async-trait` 0.1.92 | [Native catalog](../src/catalog.rs#L567) and [TableProvider](../src/query.rs#L147) implement upstream dynamic async interfaces. Keep the required adapter; a local syntax replacement cannot change those interfaces. |
+| `axum` 0.8.9 | [Router](../src/http.rs#L32), bounded JSON extraction and streamed Arrow bodies. Keep native framing/backpressure. Unused direct defaults are identified below; no new transport is needed. |
+| `blake3` 1.8.7 | [Reader](../src/storage.rs#L424), [Serde writer](../src/storage.rs#L56), admission copy/hash and [export sink](../src/engine/export.rs#L806). Maintained replacements are adopted. Keep required write-and-hash boundaries; defer Rayon/mmap without evidence. |
+| `clap` 4.6.7 | [Derived CLI](../src/main.rs#L29). Native parsing/help already replace custom parsing. No pipeline efficiency change is justified. |
+| `datafusion` 53.1.0 | [Shared runtime](../src/budget.rs#L85), [physical statistics](../src/query.rs#L284), relational execution and [stream composition](../src/query/sequence.rs#L27). Keep optimizer correctness guards and admitted comparison ranking. Duplicate-first cardinality proof is the remaining relational opportunity. |
+| `fs2` 0.4.3 | [OS-held lock](../src/budget.rs#L191) and [free-space check](../src/engine/export.rs#L476). Standard-library locking alone would not remove the free-space dependency; no replacement is justified. |
+| `futures` 0.3.34 | [Demand-driven streams](../src/storage.rs#L138) and [sequential flattening](../src/query/sequence.rs#L77). Keep bounded activation; upstream consumers still enable default executor utilities. |
+| `iceberg` 0.10.1 | [Selected native scans](../src/storage/schema.rs#L96), snapshots/manifests, [native writers](../src/storage.rs#L273), transactions and references. Keep the decoder/writer; use its metrics and shared metadata rather than another cache or decoder. |
+| `iceberg-catalog-sql` 0.10.1 | [SqlCatalogBuilder](../src/storage.rs#L75), native pool and conditional catalog commits. Keep; no measured contention calls for another catalog or tuning the pool. |
+| `mimalloc` 0.1.52 | [CLI global allocator](../src/main.rs#L26). Keep existing allocator; library consumers choose their allocator. No new flags or upgrade justified by this audit. |
+| `parquet` 58.4.0 | [Native properties](../src/storage.rs#L264), maintained encoders/footers, [flat writer](../src/engine/export.rs#L447) and memory-based flush. Native row-group sizing remains below; no blanket codec/index change. |
+| `serde` 1.0.229 | [Typed durable/public data](../src/model.rs#L8) and [lifecycle records](../src/catalog.rs#L547). Derives provide maintained serialization. Keep exact types and ordering; no new serialization format. |
+| `serde_json` 1.0.151 | [Direct hash serialization](../src/storage.rs#L60), bounded metadata parsing/persistence and CLI/HTTP JSON. Pure hash buffers are removed; buffers used for persistence or admission still serve a purpose. |
+| `sqlx` 0.8.6 | [Native SQLite restore copy](../src/engine/restore.rs#L807) uses `VACUUM INTO`, then integrity checks; SQL catalog uses its `Any` driver. Keep native backup/database facilities. MySQL/Postgres are not active host production dependencies. |
+| `tokio` 1.53.2 | [Owned semaphore/blocking admission](../src/budget.rs#L131), [worker lifetime](../src/engine/worker.rs), network and cooperative yields. Keep permits inside work that survives caller cancellation. CLI workers, DataFusion partitions and native file/range concurrency are distinct controls. |
+| `tracing` 0.1.44 | [Structured capacity/lock diagnostics](../src/budget.rs#L206) and lifecycle events. Keep bounded fields and phase-level diagnostics; no per-row logging or replacement backend. |
+| `tracing-subscriber` 0.3.23 | [Environment-filtered stderr setup](../src/main.rs#L296). Keep maintained filtering; no measured need to narrow its behavior or enable another output format. |
+| `uuid` 1.27.0 | [Native file IDs](../src/storage.rs#L281), operation/object names and parsing. Keep random immutable naming; v7 is not a demonstrated storage optimization here. |
+| `tempfile` 3.27.0 — dev | [Isolated test workspace](../tests/worker_initialization.rs#L4), maintained cleanup. Keep; durable completed phases must retain their different lifetime. |
+| `tower` 0.5.3 — dev direct | [HTTP ServiceExt/oneshot tests](../tests/http_read.rs#L18). Keep maintained service harness. Runtime transitive retry/timeout features do not mean DocSpec installs mutation-retry middleware. |
+
+The Python import check parsed adapter, script and experiment files without
+executing modules. It found the same external packages below; local helpers and
+the standard library add no third-party package requirement. Qualification
+versions are retained receipt observations, not a newly verified installation.
+
+| Python package / declaration or retained version | Current maintained use and disposition |
+| --- | --- |
+| `dagster ==1.13.16` | [Resource/op/job and explicit retries](../adapters/dagster/src/docspec_dagster/definitions.py#L9). Keep the thin scheduler and unchanged native request on uncertain outcomes. [Native operation APIs](https://dagster.io/docs/api/dagster/ops) already supply the scheduling primitive. |
+| `pydantic >=2,<3` | [Field bounds](../adapters/dagster/src/docspec_dagster/definitions.py#L13). Keep native validation; the standalone HTTP client still needs exact-byte/protocol checks. [Field documentation](https://pydantic.dev/docs/validation/latest/concepts/fields/). |
+| `setuptools >=68` — build | [Manifest](../adapters/dagster/pyproject.toml#L1) uses standard discovery/build backend. Keep; no runtime bulk-data work. [Build configuration](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html). |
+| `duckdb` 1.4.4 — qualification | [Oracle controls](../experiments/comments-e2e/oracle.py#L118), direct Parquet views and exact duplicate-aware equality. Keep accepted four-thread settings and spill bounds. Later/current documentation does not qualify different settings in this pinned environment. |
+| `pyarrow` 23.0.0 — qualification | [Batch preparation](../experiments/comments-input/prepare.py#L59), footer/schema inspection and typed expectations. Keep maintained batching; the [23.x batch-reader API](https://arrow.apache.org/docs/23.0/python/generated/pyarrow.parquet.ParquetFile.html) supports projection, but full source preservation requires all selected source fields. |
+| `pyiceberg` 0.12.0 — qualification | [Static snapshot/file planning](../experiments/comments-e2e/oracle.py#L161). Keep independent membership/schema interpretation and explicit unsupported-delete refusals. [Native API](https://py.iceberg.apache.org/api/) is guidance, not Rust/Python feature parity. |
+| `psutil` 7.0.0 — qualification | [Process-tree sampling](../experiments/comments-input/run.py#L83). Keep measurement separate from allocator/engine allowances; sampled peaks are lower bounds. [Native sampling APIs](https://psutil.readthedocs.io/stable/) avoid another monitor. |
+| Python `blake3` 1.0.11 — qualification | [Integrity pass](../experiments/comments-e2e/integrity.py#L70) combines digests and before/after identity checks. Keep one read; separate convenience whole-file calls would repeat it. |
+| `numpy` — preparation, version not retained | [Batch row mask](../experiments/comments-input/prepare.py#L60) uses vectorized integer operations. Keep; no Python row loop to replace. Record its actual environment if preparation is rerun. |
+
+No additional direct build package or project `build.rs` was found. Python
+qualification still lacks a complete reproducible installation lock; freeze the
+actual environment before the next controlled run instead of assuming an old
+executable path reconstructs it.
+
+### Remaining work, ranked by concrete work avoided
+
+| Priority | Current evidence and maintained option | Smallest validation before acceptance |
+| --- | --- | --- |
+| **First: skip the common redundant cardinality scan.** | [join_queries](../src/engine/refresh.rs#L679) still semi-joins constrained-side keys against the other input before grouping duplicates. Prove constrained-side uniqueness with maintained DataFusion grouping first; no duplicates means the large-side proof scan is unnecessary. Keep the matched-key proof when duplicates exist. This removes an O(N) probe scan in the unique branch; the duplicate branch adds constrained-side work. Inventory capture already removes repeated metadata discovery, not these payload scans. | Exact results/refusals for unmatched and matched duplicates, composite keys, both null modes and both constrained sides; inspect actual scan execution counts for unique and duplicate branches. Measure both branches before claiming a speedup. |
+| **Next: select scalar input dependencies.** | [File preparation](../src/engine/backfill/preparation.rs#L609) still reads the complete file before [evaluating expressions](../src/engine/backfill/expressions.rs#L128). Reuse `read_projected_file` for required value/origin columns and rebind DataFusion physical expressions to that selected schema. Work can scale with selected width instead of full row width; rows still need evaluation. | Cover renamed/reordered fields, defaults, nulls, constant-only expressions, metadata-sensitive functions and stored origins. A damaged-unused-column fixture plus native requested-byte counters can establish excluded decoding without a full benchmark. |
+| **Then: qualify native row-group sizing.** | [Native writer](../src/storage.rs#L268) still sets row-group rows equal to processing batch rows. [Parquet's pinned properties](https://raw.githubusercontent.com/apache/arrow-rs/58.4.0/parquet/src/file/properties.rs) support separate row/encoded-byte bounds. Larger groups can reduce footer overhead and retained bytes, but increase writer and selected-page reader memory. | First test large row groups with small returned batches under admission. Then compare write/read costs, footer/output bytes, RSS, scratch, peak additional disk and retained bytes. Include old/new coexistence and failed attempts; the flat-export result is not native-writer proof. |
+| **Bounded follow-up: reuse remaining repeated metadata opens.** | [open_pin](../src/storage.rs#L714) still hashes metadata, then `StaticTable` rereads it. Prefer an already admitted immutable table/capture at repeated call sites. For a later single-read implementation, use the native [table metadata setter](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/table.rs) with exact identity and selected schema/snapshot checks; preserve compressed-metadata decoding. Do not redo the completed join capture or metadata-Arc fix. | Count opens/planning requests as history/file count grows; verify corruption, gzip metadata, exact pin binding, final-owner permit release and failures. Keep independent verification boundaries. A process-wide cache is not needed. |
+| **Measurement support for these changes:** preserve the reader's existing metrics. | [Ordinary reads](../src/storage.rs#L131) and [occurrence reads](../src/storage/occurrences.rs#L232) consume `.stream()` and lose access to [Iceberg ScanMetrics](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/arrow/scan_metrics.rs). Clone its handle before consuming the stream in qualification/requested diagnostics. | Label it requested data/delete-file range bytes, including attempted reads; it excludes manifest planning and is not physical disk I/O. Reuse existing inventories for retained disk; do not rescan payloads merely to report savings. |
+
+The [shared FairSpillPool](../src/budget.rs#L88) only bounds participating
+operators. The pinned [hash join](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/physical-plan/src/joins/hash_join/exec.rs)
+has no spill cure for an oversized build. Keep accurate native statistics and
+the existing [comparison admission](../src/engine/comparison.rs); no new custom
+join/window engine is justified. [Tokio's blocking documentation](https://docs.rs/tokio/1.53.2/tokio/task/fn.spawn_blocking.html)
+confirms why worker-owned permits must survive caller cancellation. Increasing
+`target_partitions` does not split the single native source partition at
+[query.rs:276](../src/query.rs#L276); increasing file/range concurrency needs a
+measured bottleneck and concurrent-buffer accounting first.
+
+### Maintained alternatives and the precise adapter gaps
+
+`iceberg-datafusion` **0.10.1 is version-compatible**: its published manifest
+accepts DataFusion 53.1, Iceberg 0.10 and Parquet 58. The inspected package's
+`.cargo_vcs_info.json` identifies upstream commit
+`04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9`.
+The [official dependency family](https://raw.githubusercontent.com/apache/iceberg-rust/04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9/Cargo.toml)
+and [static provider](https://raw.githubusercontent.com/apache/iceberg-rust/04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9/crates/integrations/datafusion/src/table/mod.rs)
+support explicit snapshot reads. Snapshot pinning is **not** the reason to reject
+that integration. The catalog-backed variant intentionally reloads current heads;
+that variant would not preserve selected immutable inputs.
+
+The actual gaps in its [scan implementation](https://raw.githubusercontent.com/apache/iceberg-rust/04ae06bdb15a6fd7c7927d29d4e0f6a33de0f1f9/crates/integrations/datafusion/src/physical_plan/scan.rs)
+are no injection point for our admitted captured reader, no physical row-count
+statistics override, no stored-origin/physical-position output, and one source
+partition. It calls native `to_arrow` internally. Our selected-schema `_file`
+workaround, complete-file checks and admission lifetimes would still need an
+adapter. Its internal limit filters later batches rather than terminating that
+stream; an outer limit can stop consumption, so this is a caution about that
+primitive, not proof every limited SQL query scans everything. Keep the current
+native provider until an alternative qualifies these exact behaviors with less
+code. Upstream append/commit integration also does not replace DocSpec's
+multi-table guarded selection and recoverable phase ownership.
+
+The [maintained StreamingTable](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/catalog/src/streaming.rs)
+is already used where appropriate. Its [execution](https://raw.githubusercontent.com/apache/datafusion/53.1.0/datafusion/physical-plan/src/streaming.rs)
+projects emitted batches, so it cannot alone replace early native column
+selection. Likewise, DataFusion's Parquet/object-store cache does not govern the
+Iceberg decoder. Explicit manifest inventory loads at
+[snapshot_files](../src/storage.rs#L519) bypass Iceberg's cache; its
+[native Moka weigher](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/io/object_cache.rs)
+does not include complete heap-owned entries. Enlarging cache weight is not a
+memory-bound proof or a replacement for admitted request-local reuse.
+
+The native [Parquet writer](https://raw.githubusercontent.com/apache/iceberg-rust/v0.10.1/crates/iceberg/src/writer/file_writer/parquet_writer.rs)
+already owns schema conversion, encoding, compression, statistics and rolling
+files. Its completed `DataFileBuilder` does not return a BLAKE3 content digest;
+`current_written_size` reports written/encoded buffering, not total writer memory.
+Our native-output digest pass therefore remains a documented exception until its
+cost justifies a storage-writer interception. The flat writer's small
+[HashingFile](../src/engine/export.rs#L836) instead hashes bytes actually accepted
+by the file and syncs completion: a plain BLAKE3 reader would require another pass.
+The [HTTP IPC adapter](../src/http/ipc.rs#L73) uses maintained Arrow StreamWriter,
+Axum bodies and `Bytes::from_owner`; its custom piece retains the permit with the
+chunk and bounds serialization. Neither a producer queue nor another stream
+format removes that ownership requirement.
+
+### Enabled defaults, duplicate packages and build footprint
+
+The host production graph confirms these are dependency decisions, not unused
+runtime algorithms to replace:
+
+| Candidate | Verified graph evidence and decision |
+| --- | --- |
+| Arrow CSV/JSON and Futures executor defaults | DataFusion declares Arrow with defaults plus prettyprint/time-zone support and Futures with defaults; Iceberg also enables Futures defaults. Disabling only DocSpec's direct defaults does not remove those packages/features. Keep current declarations unless a compatible upstream graph reduction is demonstrated. |
+| Parquet codec/encryption defaults | DataFusion enables Parquet defaults plus async/object-store; Iceberg enables defaults plus encryption. Preserve input codec compatibility and the current selected Zstandard output. Root-default trimming does not remove upstream requirements. |
+| Axum `form`, `query`, `matched-path`, `original-uri` | Current router imports none of those extractors. These are a plausible narrowly scoped build cleanup because DocSpec is the sole Axum parent. However, `serde_urlencoded` remains required by Reqwest and SQLx SQLite, while JSON retains `serde_path_to_error`. Feature-code reduction is possible; package-count or binary-size savings are unmeasured. Lowest priority: resolve the actual changed graph and run transport checks before accepting a narrower declaration. |
+| SQLx optional database backends | MySQL/Postgres appear in lock/metadata resolution, but the host normal/build tree has no path to them. Current direct features are already `default-features=false`, Tokio, SQLite and Any; the maintained SQL catalog needs Any. Do not claim unused database binaries or remove required native catalog features. |
+| `zstd` 0.13.3 and 0.14.0; `zstd-safe` 7.3.0 and 8.0.0 | Avro/Arrow/DataFusion/Iceberg/Parquet use 0.13; async compression's `compression-codecs` uses 0.14. Both resolve the same `zstd-sys` 2.1.0+zstd.1.5.7. Duplicate Rust wrappers do not establish duplicated native compression or duplicate data work. Defer coordinated upgrades to measured build pressure. |
+| Other host duplicate families | `base64`, `darling`, `darling_core`, `darling_macro`, `foldhash`, `getrandom`, `hashbrown`, `itertools`, `miniz_oxide`, `ordered-float`, `rand_core` and `syn` have different upstream consumers/requirements. Host/build contexts also show `memchr` twice at the same version. Do not force incompatible overrides or count each tree entry as a separate release-binary payload. Exact feature/target build cost needs a build measurement. |
+
+The remaining material transitives are accounted for in the earlier matrix:
+Arrow/DataFusion component crates own buffers, kernels and plans; Futures/Tokio
+utilities own stream/runtime glue; Bytes/HTTP/Hyper own framing; `object_store`
+and native Iceberg storage own I/O; Moka owns native caching; SQLx/SQLite own
+catalog transactions/backup; codec, allocator, parser and proc-macro/build crates
+remain maintained upstream facilities. This refresh found no alternate
+project-owned implementation of those facilities to replace.
+
+[Cargo's additive feature rules](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification)
+explain why manifest simplification alone need not reduce compiled work. Keep
+the existing test-target grouping, development debug/incremental settings and
+limited release debug symbols. Any future build claim must measure clean build
+time, peak additional target storage and retained artifacts separately from data,
+scratch and lifecycle history. Current DataFusion/Arrow upgrade candidates remain
+the compatibility work described in the [version research](datafusion-performance-research-2026-10-10.md),
+not pinned capabilities or permission for a default flip. No upgrade, allocator
+change, custom scheduler, cache, catalog, decoder or join engine is recommended.
+
+## Earlier audit and qualification snapshots
 
 This is a static audit dated 2026-10-10, refreshed against base `0011f7588ab58171c0f3d71e829b4902215ab70b` and the hash-only JSON/comparison-normalization changes. The original audit at `5508a1144d872e4f72ed636eab02dc0eedc0146c` supplied the package research; subsequent refreshes reuse it and check coverage and changed call sites. The comparison findings distinguish the initially inspected implementation, the maintained replacement, and its scoped root-owned qualification. The audit subagent changed only this document and ran no builds, tests, formatting, benchmarks, downloads of data, or corpus-payload reads. Completed checks are attributed to retained root-task receipts. Performance statements distinguish structural effects from timing hypotheses.
 
