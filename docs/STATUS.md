@@ -71,10 +71,19 @@ stable field IDs, defaults, output order and occurrence identities.
 
 Further candidates reuse immutable metadata and captured inventories, avoid a
 large-input cardinality scan when the constrained side has unique keys, and use
-maintained BLAKE3/Serde APIs for hash-only work. Native row-group layout needs
+maintained Serde serialization for hash-only JSON work. Native row-group layout needs
 separate reader-memory qualification. These are researched opportunities, not
 implemented changes or measured speedups. Each has a bounded verification step;
 the audit does not justify additional concurrency, caches or blanket upgrades.
+
+The hash-only file reader now uses BLAKE3's `update_reader` and `count`, removing
+the custom read/count loop and its one-MiB heap buffer. The pinned reader uses a
+64-KiB stack buffer and retries interrupted reads; other failures still return
+errors without a partial identity. Admission copy/hash remains a single pass.
+The [independent review](reviews/hash-reader-review-2026-10-10.md) approves the
+change, and the [repository gate](reviews/hash-reader-check-2026-10-10.log) passes
+formatting, strict Clippy and all-feature tests, including digest/count and I/O
+failure fixtures. No throughput or process-memory improvement is claimed.
 
 ## Scoped scalar dependency correction
 

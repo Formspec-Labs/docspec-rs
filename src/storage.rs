@@ -399,22 +399,18 @@ pub(crate) async fn append(
 
 /// Hashes immutable bytes using bounded reads.
 ///
+/// Retries interrupted reads through the maintained BLAKE3 reader.
+///
 /// # Errors
 /// Returns filesystem failures without interpreting partial files as complete.
 pub fn digest(path: &Path) -> Result<(String, u64)> {
-    let mut input = File::open(path)?;
+    digest_reader(File::open(path)?)
+}
+
+fn digest_reader(input: impl Read) -> Result<(String, u64)> {
     let mut hasher = blake3::Hasher::new();
-    let mut buf = vec![0; 1024 * 1024];
-    let mut bytes = 0;
-    loop {
-        let n = input.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        bytes += n as u64;
-    }
-    Ok((hasher.finalize().to_hex().to_string(), bytes))
+    hasher.update_reader(input)?;
+    Ok((hasher.finalize().to_hex().to_string(), hasher.count()))
 }
 
 pub(crate) fn object(owner: &Id, path: &Path) -> Result<ObjectRef> {
@@ -731,6 +727,87 @@ mod tests {
         array::Int64Array,
         datatypes::{DataType, Field, Schema},
     };
+
+    #[test]
+    fn digest_matches_complete_bytes_for_empty_and_multi_buffer_files() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("bytes");
+        // Cross both the maintained reader's buffer and the previous loop's buffer.
+        for size in [0, 1, 65_535, 65_536, 65_537, 2 * 1024 * 1024 + 17] {
+            let bytes: Vec<u8> = (0..size).map(|index| (index % 251) as u8).collect();
+            std::fs::write(&path, &bytes).unwrap();
+            assert_eq!(
+                digest(&path).unwrap(),
+                (blake3::hash(&bytes).to_hex().to_string(), size as u64)
+            );
+        }
+    }
+
+    #[test]
+    fn digest_reader_retries_interruptions_and_accepts_short_reads() {
+        struct InterruptedReader<'a> {
+            remaining: &'a [u8],
+            interrupt: bool,
+        }
+
+        impl Read for InterruptedReader<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.interrupt {
+                    self.interrupt = false;
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                self.interrupt = true;
+                let limit = buffer.len().min(7);
+                self.remaining.read(&mut buffer[..limit])
+            }
+        }
+
+        let bytes = b"short reads and repeated interruptions preserve every byte";
+        let reader = InterruptedReader {
+            remaining: bytes,
+            interrupt: true,
+        };
+        assert_eq!(
+            digest_reader(reader).unwrap(),
+            (blake3::hash(bytes).to_hex().to_string(), bytes.len() as u64)
+        );
+    }
+
+    #[test]
+    fn digest_reader_preserves_io_failure_after_partial_input() {
+        struct FailedReader;
+
+        impl Read for FailedReader {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected read failure",
+                ))
+            }
+        }
+
+        let reader = std::io::Cursor::new(b"partial bytes").chain(FailedReader);
+        let error = digest_reader(reader).unwrap_err();
+        assert_eq!(error.code(), "io");
+        let cause = std::error::Error::source(&error)
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap();
+        assert_eq!(cause.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(cause.to_string(), "injected read failure");
+    }
+
+    #[test]
+    fn digest_preserves_file_open_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let error = digest(&root.path().join("missing")).unwrap_err();
+        assert_eq!(error.code(), "io");
+        let cause = std::error::Error::source(&error)
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap();
+        assert_eq!(cause.kind(), std::io::ErrorKind::NotFound);
+    }
 
     #[test]
     fn canceled_inventory_checks_keep_worker_owned_metadata_admission() {
