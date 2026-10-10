@@ -33,6 +33,76 @@ fn source_schema() -> Schema {
         .unwrap()
 }
 
+#[tokio::test]
+async fn captured_source_requires_logical_identity_count_and_public_schema() {
+    let root = TempDir::new().unwrap();
+    let engine = Engine::open(
+        root.path().join("workspace"),
+        Limits {
+            compute_threads: 2,
+            memory_bytes: 64 << 20,
+            scratch_bytes: 0,
+            max_metadata_bytes: 1 << 20,
+            max_batch_bytes: 64 << 10,
+            ..Limits::default()
+        },
+    )
+    .await
+    .unwrap();
+    let owner = Id::new("capture").unwrap();
+    let native = engine
+        .create_output(&owner, &root.path().join("canonical"), source_schema())
+        .await
+        .unwrap();
+    let canonical = storage::pin(&owner, &native, 0, &engine.inner.lifecycle.budget, &[])
+        .await
+        .unwrap();
+    let with_origins = engine
+        .source_with_origins(&owner, &canonical, &root.path().join("origins"))
+        .await
+        .unwrap();
+    let accepted = open_captured_source(&canonical, &with_origins)
+        .await
+        .unwrap();
+    assert!(storage::identity::has_origins(accepted.metadata().current_schema()).unwrap());
+
+    for change_count in [false, true] {
+        let mut invalid = with_origins.clone();
+        if change_count {
+            invalid.rows += 1;
+        } else {
+            invalid.logical_metadata.as_mut().unwrap().digest = "different-logical-source".into();
+        }
+        assert_eq!(
+            open_captured_source(&canonical, &invalid)
+                .await
+                .unwrap_err()
+                .code(),
+            "invalid_admission_dependencies"
+        );
+    }
+    // Matching logical metadata alone cannot bless another schema as equivalent.
+    let foreign_schema = Schema::builder()
+        .with_fields([field(10, "old key", PrimitiveType::Int)])
+        .build()
+        .unwrap();
+    let foreign = engine
+        .create_output(&owner, &root.path().join("foreign"), foreign_schema)
+        .await
+        .unwrap();
+    let mut foreign = storage::pin(&owner, &foreign, 0, &engine.inner.lifecycle.budget, &[])
+        .await
+        .unwrap();
+    foreign.logical_metadata = Some(canonical.logical_metadata().clone());
+    assert_eq!(
+        open_captured_source(&canonical, &foreign)
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_admission_dependencies"
+    );
+}
+
 fn batch(schema: &Schema, rows: &[Row], evolved: bool) -> RecordBatch {
     let arrow = Arc::new(iceberg::arrow::schema_to_arrow_schema(schema).unwrap());
     let keys = Arc::new(Int64Array::from(

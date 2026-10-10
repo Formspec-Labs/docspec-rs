@@ -43,6 +43,7 @@ impl Engine {
         directory: &Path,
         admission: &PhaseResult,
         operation: &Operation,
+        captured_source: Option<&TablePin>,
     ) -> Result<write::Prepared> {
         let coverage = admission.coverage.as_ref().ok_or_else(full_refresh)?;
         if coverage.inputs != spec.inputs() {
@@ -56,6 +57,11 @@ impl Engine {
         let budget = &self.inner.lifecycle.budget;
         // A base is read as an immutable result, never inferred from table heads.
         resolve_release(&base, budget).await?;
+        let canonical = source(&base)?;
+        // Resume keeps its admitted layout; older admissions use the canonical
+        // source instead of resolving a newly selected representation.
+        let captured = captured_source.unwrap_or(canonical);
+        let native = write::open_captured_source(canonical, captured).await?;
         let previous = refresh::load_inputs(&related.coverage, budget).await?;
         let current = refresh::load_inputs(coverage, budget).await?;
         if previous.releases.iter().all(|(dataset, old)| {
@@ -69,8 +75,6 @@ impl Engine {
         }) {
             // Receipt-only input succession advances exact coverage while the
             // complete value result and contributor occurrences remain unchanged.
-            let before = source(&base)?;
-            let native = storage::open_pin(before).await?;
             // Preserve the current native schema ID as well as its fields;
             // fresh creation can renumber an evolved source's schema.
             let empty = self
@@ -89,13 +93,13 @@ impl Engine {
                 })
                 .collect::<Result<Vec<_>>>()?;
             return Ok(write::Prepared {
-                table: before.clone(),
+                table: captured.clone(),
                 changes: Some(ChangePin {
                     rules: super::changes::WRITE_RULES.into(),
                     base_version: base.id.clone(),
                     base_manifest: base.manifest.clone(),
-                    before_metadata: before.metadata.clone(),
-                    after_metadata: before.metadata.clone(),
+                    before_metadata: canonical.metadata.clone(),
+                    after_metadata: captured.metadata.clone(),
                     key_field_ids,
                     removed: empty.clone(),
                     added: empty,
@@ -106,12 +110,26 @@ impl Engine {
         }
         match &spec.transform {
             RefreshTransform::Join(_) => {
-                Box::pin(self.process_incremental_join(spec, directory, &base, &previous, &current))
-                    .await
+                Box::pin(self.process_incremental_join(
+                    spec,
+                    directory,
+                    &base,
+                    &previous,
+                    &current,
+                    (captured, &native),
+                ))
+                .await
             }
             RefreshTransform::Aggregate(_) => {
-                Box::pin(self.process_aggregation(spec, directory, &base, &previous, &current))
-                    .await
+                Box::pin(self.process_aggregation(
+                    spec,
+                    directory,
+                    &base,
+                    &previous,
+                    &current,
+                    (captured, &native),
+                ))
+                .await
             }
         }
     }
@@ -123,7 +141,9 @@ impl Engine {
         base: &ReleasePin,
         previous: &refresh::LoadedInputs,
         current: &refresh::LoadedInputs,
+        captured: (&TablePin, &iceberg::table::Table),
     ) -> Result<write::Prepared> {
+        let (captured_source, native) = captured;
         let budget = &self.inner.lifecycle.budget;
         let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
         let RefreshTransform::Join(join) = &spec.transform else {
@@ -231,14 +251,9 @@ impl Engine {
                 context.register_table(format!("{prefix}_scope_{side}"), frame.into_view())?;
             }
         }
-        let before_source = source(base)?;
         context.register_table(
             "before",
-            crate::query::table(
-                storage::open_pin(before_source).await?,
-                budget.clone(),
-                Some(before_source.rows),
-            )?,
+            crate::query::table(native.clone(), budget.clone(), Some(captured_source.rows))?,
         )?;
         let mut joins = Vec::new();
         for side in 0..2 {
@@ -266,7 +281,6 @@ impl Engine {
         )?;
         let replacement = refresh::join_registered(&context, join).await?;
         let before = source(base)?;
-        let native = storage::open_pin(before).await?;
         let key_field_ids = TUPLE
             .iter()
             .map(|key| {
@@ -280,7 +294,7 @@ impl Engine {
             .collect::<Result<Vec<_>>>()?;
         let keys = TUPLE.map(str::to_owned);
         let (write_before, replacement) = self
-            .source_replacement(base, directory, replacement, &keys)
+            .source_replacement(&spec.dataset, captured, directory, replacement, &keys)
             .await?;
         let applied = self
             .replace_keys(Replacement {
@@ -294,7 +308,7 @@ impl Engine {
             })
             .await?;
         let mut applied = self
-            .finish_source_replacement(&spec.dataset, directory, before, applied)
+            .finish_source_replacement(&spec.dataset, directory, captured_source, applied)
             .await?;
         applied.metrics.files_scanned += discovery.files_scanned;
         applied.metrics.data_files_written += discovery.data_files_written;

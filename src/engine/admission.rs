@@ -14,8 +14,14 @@ pub(in crate::engine) struct AdmissionDependencies {
     pub base: Option<VersionRef>,
     pub coverage: Option<InputCoverage>,
     pub inputs: BTreeMap<String, ObjectRef>,
+    /// Exact physical source consumed by a source update or incremental refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_source: Option<TablePin>,
+}
+
+pub(super) fn captures_source(request: &OperationRequest) -> bool {
+    matches!(request, OperationRequest::Update(_))
+        || matches!(request, OperationRequest::Refresh(spec) if spec.mode == RefreshMode::Incremental)
 }
 
 pub(super) struct PreparedAdmission {
@@ -121,8 +127,7 @@ impl Engine {
             _ => {}
         }
         if dependencies.update_source.as_ref().is_some_and(|source| {
-            !matches!(&request, OperationRequest::Update(_))
-                || source.metadata.owner != *request.dataset()
+            !captures_source(&request) || source.metadata.owner != *request.dataset()
         }) {
             return Err(invalid());
         }

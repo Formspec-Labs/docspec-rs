@@ -29,9 +29,9 @@ files), and `target_file_bytes`. It preserves the logical version and selects an
 equivalent physical representation for managed reads. Source occurrence IDs
 survive rewrites so retained computed groups remain readable. Target file size
 is a preference; metadata limits may close a file sooner. Old exact pins remain
-retained. Source updates capture and reuse eligible compacted files, including
-on resume; later compaction cannot change an admitted update. Compaction does not
-reclaim old storage.
+retained. Source updates and incremental joins/summaries capture and reuse eligible
+compacted output files, including on resume; later compaction cannot change an
+admitted write. Compaction does not reclaim old storage.
 
 Create a local restore point before maintenance, then restore it only after
 closing the engine and all reader streams:

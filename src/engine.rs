@@ -882,18 +882,17 @@ impl Engine {
                 #[cfg(feature = "test-util")]
                 work_started("processing");
                 let directory = self.reserve_attempt(spec, operation, "processing").await?;
-                let (_capture_memory, update_source) =
-                    if matches!(spec, OperationRequest::Update(_)) {
-                        let view = lifecycle.open(spec.dataset()).await?;
-                        let memory = self.admission_memory(&view, spec.operation()).await?;
-                        let source = self
-                            .admitted_dependencies(&view, spec.operation())
-                            .await?
-                            .and_then(|dependencies| dependencies.update_source);
-                        (Some(memory), source)
-                    } else {
-                        (None, None)
-                    };
+                let (_capture_memory, update_source) = if admission::captures_source(spec) {
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    let memory = self.admission_memory(&view, spec.operation()).await?;
+                    let source = self
+                        .admitted_dependencies(&view, spec.operation())
+                        .await?
+                        .and_then(|dependencies| dependencies.update_source);
+                    (Some(memory), source)
+                } else {
+                    (None, None)
+                };
                 let prepared = match spec {
                     OperationRequest::Build(build) => {
                         self.process_build(build, &directory, &admission).await?
@@ -910,8 +909,14 @@ impl Engine {
                             .await?
                     }
                     OperationRequest::Refresh(refresh) => {
-                        Box::pin(self.process_refresh(refresh, &directory, &admission, operation))
-                            .await?
+                        Box::pin(self.process_refresh(
+                            refresh,
+                            &directory,
+                            &admission,
+                            operation,
+                            update_source.as_ref(),
+                        ))
+                        .await?
                     }
                     OperationRequest::Backfill(_) => {
                         return Err(Error::refusal(
@@ -1033,9 +1038,12 @@ impl Engine {
                         // previous selection; no previous payload is consumed.
                         let base = spec.base().and_then(|_| authority.release.take());
                         let mut decoding = decoding.expect("new admission reserved decoding");
-                        let update_source = if matches!(spec, OperationRequest::Update(_)) {
+                        let update_source = if admission::captures_source(spec) {
                             let base = base.as_ref().ok_or_else(|| {
-                                Error::refusal("invalid_base", "update has no base result")
+                                Error::refusal(
+                                    "invalid_base",
+                                    "incremental write has no base result",
+                                )
                             })?;
                             let canonical = base.dataset.groups.get("source").ok_or_else(|| {
                                 Error::refusal("invalid_base", "base has no source table")

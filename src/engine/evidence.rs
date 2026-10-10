@@ -135,25 +135,18 @@ pub(super) fn adopts_receipts(
 impl Engine {
     pub(super) fn source_replacement<'a>(
         &'a self,
-        base: &'a ReleasePin,
+        dataset: &'a Id,
+        captured: (&'a TablePin, &'a iceberg::table::Table),
         directory: &'a Path,
         replacement: DataFrame,
         keys: &'a [String],
     ) -> futures::future::BoxFuture<'a, Result<(TablePin, DataFrame)>> {
         Box::pin(async move {
-            let source = base
-                .dataset
-                .groups
-                .get("source")
-                .ok_or_else(|| invalid("base lacks source"))?;
-            let mut native = storage::open_pin(source).await?;
+            let (source, native) = captured;
+            let mut native = native.clone();
             let before = if !storage::identity::has_origins(native.metadata().current_schema())? {
                 let pin = self
-                    .source_with_origins(
-                        &base.dataset.dataset,
-                        source,
-                        &directory.join("source-origins"),
-                    )
+                    .source_with_origins(dataset, source, &directory.join("source-origins"))
                     .await?;
                 native = storage::open_pin(&pin).await?;
                 pin

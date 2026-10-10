@@ -1112,3 +1112,6 @@ mod forward_changes;
 
 #[path = "related_refresh/history_keys.rs"]
 mod history_keys;
+
+#[path = "related_refresh/compaction.rs"]
+mod compaction;

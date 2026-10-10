@@ -61,8 +61,12 @@ that a crate is compiled or linked for this target.
   It checks logical identity, row count and public schema before reading an
   admitted compacted representation. This consolidates interpretation checks;
   it is not a general metadata cache or elimination of every metadata open.
-  Its executing owner controls qualification and commits. Do not duplicate this
-  change from an earlier audit's recommendation.
+  After this audit, the implementation owner completed the
+  [focused checks](reviews/compacted-related-targeted-2-2026-10-10.log) and
+  [repository gate](reviews/compacted-related-full-check-2026-10-10.log), with an
+  [independent review](reviews/compacted-related-review-2026-10-10.md). These are
+  implementation evidence, not execution by this audit or a speed measurement.
+  Do not duplicate this change from an earlier audit's recommendation.
 
 ### Complete current direct-package matrix
 

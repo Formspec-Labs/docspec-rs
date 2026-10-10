@@ -112,9 +112,17 @@ impl Engine {
         directory: &Path,
         admission: &PhaseResult,
         operation: &Operation,
+        captured_source: Option<&TablePin>,
     ) -> Result<Prepared> {
         if spec.mode == RefreshMode::Incremental {
-            return Box::pin(self.process_incremental(spec, directory, admission, operation)).await;
+            return Box::pin(self.process_incremental(
+                spec,
+                directory,
+                admission,
+                operation,
+                captured_source,
+            ))
+            .await;
         }
         let coverage = admission.coverage.as_ref().ok_or_else(invalid)?;
         if coverage.inputs != spec.inputs() {

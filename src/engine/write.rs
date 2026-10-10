@@ -36,6 +36,33 @@ pub(super) struct Applied {
     pub metrics: WriteMetrics,
 }
 
+/// Opens an admitted physical source without changing its canonical logical meaning.
+///
+/// # Errors
+/// Refuses changed logical identity, row count, or public schema, and unreadable metadata.
+pub(super) async fn open_captured_source(canonical: &TablePin, source: &TablePin) -> Result<Table> {
+    if source.logical_metadata() != canonical.logical_metadata() || source.rows != canonical.rows {
+        return Err(Error::refusal(
+            "invalid_admission_dependencies",
+            "captured source differs from its logical base",
+        ));
+    }
+    let native = storage::open_pin(source).await?;
+    if source.metadata != canonical.metadata {
+        let canonical = storage::open_pin(canonical).await?;
+        if !storage::identity::preserves_schema(
+            canonical.metadata().current_schema(),
+            native.metadata().current_schema(),
+        )? {
+            return Err(Error::refusal(
+                "invalid_admission_dependencies",
+                "captured source changes the logical schema",
+            ));
+        }
+    }
+    Ok(native)
+}
+
 impl Engine {
     pub(super) async fn create_output(
         &self,
@@ -198,48 +225,25 @@ impl Engine {
         // Older admissions consume their canonical source; retries never resolve
         // a newer physical representation after the request has been retained.
         let captured_before = captured_source.unwrap_or(canonical_before);
+        let captured_native = open_captured_source(canonical_before, captured_before).await?;
         let before_with_origins;
-        let before = if !storage::identity::has_origins(
-            storage::open_pin(captured_before)
-                .await?
-                .metadata()
-                .current_schema(),
-        )? {
-            // Source occurrences survive the first value rewrite even without
-            // receipts. Add optional origin fields through native metadata;
-            // the existing reader fills original file/row before filtering.
-            before_with_origins = self
-                .source_with_origins(
-                    &spec.dataset,
-                    captured_before,
-                    &directory.join("source-origins"),
-                )
-                .await?;
-            &before_with_origins
-        } else {
-            captured_before
-        };
-        if before.logical_metadata() != canonical_before.logical_metadata()
-            || before.rows != canonical_before.rows
-        {
-            return Err(Error::refusal(
-                "invalid_admission_dependencies",
-                "captured update source differs from its logical base",
-            ));
-        }
-        let native = storage::open_pin(before).await?;
-        if before.metadata != canonical_before.metadata {
-            let canonical = storage::open_pin(canonical_before).await?;
-            if !storage::identity::preserves_schema(
-                canonical.metadata().current_schema(),
-                native.metadata().current_schema(),
-            )? {
-                return Err(Error::refusal(
-                    "invalid_admission_dependencies",
-                    "captured update source changes the logical schema",
-                ));
-            }
-        }
+        let (before, native) =
+            if !storage::identity::has_origins(captured_native.metadata().current_schema())? {
+                // Source occurrences survive the first value rewrite even without
+                // receipts. Add optional origin fields through native metadata;
+                // the existing reader fills original file/row before filtering.
+                before_with_origins = self
+                    .source_with_origins(
+                        &spec.dataset,
+                        captured_before,
+                        &directory.join("source-origins"),
+                    )
+                    .await?;
+                let native = storage::open_pin(&before_with_origins).await?;
+                (&before_with_origins, native)
+            } else {
+                (captured_before, captured_native)
+            };
         let context = self.context();
         let request = OperationRequest::Update(spec.clone());
         for ((name, _), object) in request.inputs().iter().zip(&admission.outputs) {

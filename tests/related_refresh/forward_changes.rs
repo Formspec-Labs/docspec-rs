@@ -45,7 +45,12 @@ async fn change_rows(
     (descriptor, batch)
 }
 
-async fn check_forward(engine: &Engine, before: &ReleasePin, after: &ReleasePin, names: &[&str]) {
+pub(super) async fn check_forward(
+    engine: &Engine,
+    before: &ReleasePin,
+    after: &ReleasePin,
+    names: &[&str],
+) {
     let native = storage::open_pin(&after.dataset.groups["source"])
         .await
         .unwrap();

@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.66s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 5 tests
+test related_refresh::compaction::global_summary_compaction_preserves_empty_nonempty_and_noop_transitions ... ok
+test related_refresh::compaction::edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes ... ok
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen has been running for over 60 seconds
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout has been running for over 60 seconds
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage has been running for over 60 seconds
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout ... ok
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage ... ok
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 105.24s
+

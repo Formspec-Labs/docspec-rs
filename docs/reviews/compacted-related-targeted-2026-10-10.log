@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.34s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 2 tests
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen has been running for over 60 seconds
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage has been running for over 60 seconds
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage ... ok
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 85.07s
+

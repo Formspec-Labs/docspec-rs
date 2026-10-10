@@ -188,7 +188,9 @@ impl Engine {
         base: &ReleasePin,
         previous: &LoadedInputs,
         current: &LoadedInputs,
+        captured: (&TablePin, &iceberg::table::Table),
     ) -> Result<write::Prepared> {
+        let (captured_source, captured_native) = captured;
         let RefreshTransform::Aggregate(aggregate) = &spec.transform else {
             return Err(invalid());
         };
@@ -251,11 +253,10 @@ impl Engine {
             context.register_table("scoped", scoped.into_view())?;
             aggregate_frame(&context, &aggregate.grouping, "scoped").await?
         };
-        let native = storage::open_pin(before).await?;
         let key_field_ids = key_names
             .iter()
             .map(|key| {
-                native
+                captured_native
                     .metadata()
                     .current_schema()
                     .field_by_name(key)
@@ -264,7 +265,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>>>()?;
         let (write_before, replacement) = self
-            .source_replacement(base, directory, replacement, &key_names)
+            .source_replacement(&spec.dataset, captured, directory, replacement, &key_names)
             .await?;
         let applied = self
             .replace_keys(Replacement {
@@ -278,7 +279,7 @@ impl Engine {
             })
             .await?;
         let mut applied = self
-            .finish_source_replacement(&spec.dataset, directory, before, applied)
+            .finish_source_replacement(&spec.dataset, directory, captured_source, applied)
             .await?;
         applied.metrics.files_scanned += scanned;
         applied.metrics.data_files_written += discovery_files;
