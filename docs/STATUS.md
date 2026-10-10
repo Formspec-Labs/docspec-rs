@@ -5,7 +5,7 @@
 The full [implementation plan](PLAN.md) remains **incomplete**. Local processing,
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
-specific limits. Remaining delivery includes dependency-correction semantics and
+specific limits. Remaining delivery includes [scoped dependency correction](dependency-corrections.md) and
 continuous-ingestion cutover; change-history composition; remaining protection
 lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and the remaining
