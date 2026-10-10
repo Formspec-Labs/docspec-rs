@@ -6,9 +6,8 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes broader dependency correction beyond
-the local scalar case and continuous-ingestion cutover; shared R5 change-history
-discovery; remaining protection lifetimes, maintenance integration and broader
-failure qualification; remote
+the local scalar case and continuous-ingestion cutover; remaining protection
+lifetimes, maintenance integration and broader failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and the remaining
 Q1–Q8 and update/backfill/recovery performance qualification. The defined full
 local 10-million-Comments performance gate now **passes**: three fresh workspaces
@@ -45,10 +44,10 @@ identities/types refuse streamed comparison instead of silently casting values.
 Source updates, incremental joins and summaries preserve stored origins on kept
 rows through the shared replacement path, including receipt-free datasets.
 Zero applied rows preserve the exact captured source and matching empty change
-schemas. Related refresh currently discovers affected keys from changed physical
-files; it can deliberately recompute equal-valued groups. Those applied outputs
-receive new birth identities, while rows outside the applied scope retain theirs.
-Narrowing discovery remains separate optimization work.
+schemas. Related refresh now uses qualified applied rows to discover old/new keys,
+with changed physical files as the conservative fallback. It can deliberately
+recompute equal-valued groups when contributors change. Applied outputs receive
+new birth identities, while rows outside the applied scope retain theirs.
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) caught whole-partition
 window buffering outside DataFusion's memory pool. The comparison now uses
@@ -146,9 +145,61 @@ worker-isolation and documentation checks in one run. The retained Comments
 physical-plan probe remains explicitly ignored because it requires its external
 run path; this gate does not rerun the full-data performance workload.
 
-Shared R5 accelerated discovery and durable consumer adoption, schema-mapping
-comparisons, portable trust and remaining R4/R7 scaling cases are unfinished.
-No full-data performance rerun or speedup claim accompanies this increment.
+Shared local R5 discovery is implemented below. Schema-mapping comparisons,
+portable trust and remaining R4/R7 scaling cases are unfinished. No full-data
+performance rerun or speedup claim accompanies this increment.
+
+## Shared history for dependent refresh
+
+Incremental joins and summaries now use the same qualified local history resolver
+as endpoint comparison. The resolver checks exact result/certificate authority,
+continuity, native schemas and the existing link/metadata limits. Refresh reads
+only key columns from the raw removed and added sides. It does not cancel equal
+keys: a same-docket text edit, changed measure or new occurrence still affects that
+group. Complete affected-group recomputation and contributor evidence remain.
+Each delta inventory is captured once and reused by its selected-column reader;
+readers open sequentially. Global summaries need only whether applied rows exist.
+
+Missing or retired optional history and supported discovery fallbacks use the
+existing changed-file path. Present corrupt history refuses without changing the
+selected result. The complete local refresh already holds maintenance admission;
+no new lock, persistent chain grant or discovery phase was added. Completed
+processing retains its own outputs, base and exact input coverage through the
+existing protections. A retry before processing can use fallback after history
+retirement; a retry after processing resolves that completion before discovery.
+The [independent design review](reviews/r5-change-discovery-design-2026-10-10.md)
+traces these lifetimes and explains why retaining consumed history would add disk
+without improving recovery.
+
+The [focused checks](reviews/r5-history-targeted-2026-10-10.log) exercise multi-hop
+join and summary updates, same-key edits, moved groups, new matches, duplicates
+and nulls. Independent value/contributor oracles and fresh full outputs agree.
+Unrelated output origins stay exact even when input keys shared a rewritten file.
+Completed processing resumes after its optional input descriptor is retired and
+damaged. The [negative/fallback check](reviews/r5-history-fallback-2026-10-10.log)
+requires active corruption to refuse, then completes the same captured operation
+through conservative discovery after explicit history retirement.
+
+The [independent implementation review](reviews/r5-history-implementation-review-2026-10-10.md)
+approves the local change. Its static lifetime trace and existing shared-guard
+tests support transient consumption; a dedicated in-flight R5 retirement/crash
+race remains part of broader failure qualification.
+
+The [repository gate](reviews/r5-history-full-check-2026-10-10.log) passes
+formatting, strict Clippy and all executable and documentation suites. The
+retained Comments physical-plan probe remains explicitly ignored because it
+requires an external run path. This gate includes the metadata/hash cleanup
+below; it does not rerun the full-data performance workload.
+
+This narrows discovery and unnecessary output replacement; it does not establish
+complete-path speed or disk savings. Cold catalog lookup, later scoped joins,
+contributor queries and required inventory checks still have population/history
+costs. Raw key staging grows with the sum of retained delta rows, so high-churn
+histories can stage more keys than endpoint-file discovery. The existing link
+and metadata caps do not bound those key bytes. Writers retain their buffer and
+free-space checks; counters include written key files but exclude several later
+input scans. Qualify crossover, peak additional disk, retained bytes, spill,
+old/new coexistence and failed attempts before claiming a complete resource gain.
 
 ## Optional applied-change history
 
@@ -211,9 +262,8 @@ The independent [admission review](reviews/chain-admission-architecture-2026-10-
 and [resource review](reviews/chain-resource-architecture-2026-10-10.md) informed
 the forward implementation: one captured certificate resolver, existing
 maintenance custody, sequential native delta readers and shared occurrence-first
-operators. R5 refresh adoption remains separate: it must derive old/new affected
-keys before discarding changed values, because key-only value cancellation can
-hide a real same-key update.
+operators. R5 shares the qualified raw sides and derives old/new affected keys
+without key-only value cancellation, which could hide a real same-key update.
 
 ## Native column selection
 
@@ -306,6 +356,17 @@ unchanged manifests. It marks selected-key reading, native Cargo target grouping
 and maintained sequential stream composition as adopted. The ranked metadata,
 join-scan and native-layout opportunities remain; no additional package, optional
 feature or infrastructure is justified by this source review.
+
+The remaining pure hash-only request fingerprint and physical-schema identity
+sites now use the same streamed JSON digest helper, preserving their normalized
+values and exact compact bytes. Original-table construction shares the admitted
+Iceberg metadata `Arc` instead of cloning its object graph; the existing reuse
+fixture now asserts shared pointer identity. The
+[independent review](reviews/metadata-hash-reuse-review-2026-10-10.md) approves
+serialization, error behavior and ownership. These changes remove temporary byte
+vectors and a metadata copy. The shared
+[repository gate](reviews/r5-history-full-check-2026-10-10.log) passes;
+process-memory and throughput savings are unmeasured.
 
 The hash-only file reader now uses BLAKE3's `update_reader` and `count`, removing
 the custom read/count loop and its one-MiB heap buffer. The pinned reader uses a
@@ -1772,8 +1833,8 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; continuous-ingestion catch-up and cutover |
-| R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers | Shared R5 accelerated discovery and protected durable consumer adoption; schema-mapping comparison, portable trust and remaining scaling/failure qualification |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
+| R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers; shared qualified history discovery for local R5 consumers under existing maintenance and processing protection | Schema-mapping comparison, portable trust and remaining scaling/failure qualification |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare/changes, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |
 

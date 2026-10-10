@@ -6,7 +6,7 @@ use docspec::model::{
     OperationRequest,
 };
 
-fn summary(input: &ReleasePin, global: bool) -> RefreshSpec {
+pub(super) fn summary(input: &ReleasePin, global: bool) -> RefreshSpec {
     RefreshSpec {
         dataset: id(if global { "global" } else { "summary" }),
         operation: id("initial"),
@@ -42,7 +42,7 @@ fn aggregate_mut(spec: &mut RefreshSpec) -> &mut AggregateTransform {
     };
     aggregate
 }
-fn next(base: &ReleasePin, input: &ReleasePin, operation: &str) -> RefreshSpec {
+pub(super) fn next(base: &ReleasePin, input: &ReleasePin, operation: &str) -> RefreshSpec {
     let mut spec = base.dataset.related.as_ref().unwrap().request.clone();
     spec.base = Some(base.id.clone());
     spec.operation = id(operation);
@@ -51,7 +51,7 @@ fn next(base: &ReleasePin, input: &ReleasePin, operation: &str) -> RefreshSpec {
     spec
 }
 type Value = (i64, i64, Option<i128>, Option<i64>, Option<i64>);
-async fn values(
+pub(super) async fn values(
     engine: &Engine,
     release: &ReleasePin,
     global: bool,
@@ -86,7 +86,12 @@ async fn values(
     }
     result
 }
-async fn check_summary(engine: &Engine, release: &ReleasePin, input: &ReleasePin, global: bool) {
+pub(super) async fn check_summary(
+    engine: &Engine,
+    release: &ReleasePin,
+    input: &ReleasePin,
+    global: bool,
+) {
     let mut expected: BTreeMap<Option<i64>, Value> = BTreeMap::new();
     let mut contributors = Vec::new();
     if global {

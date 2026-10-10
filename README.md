@@ -499,8 +499,8 @@ Compatible local source histories use `forward_changes` to read retained applied
 rows. Missing or retired history, unsupported comparisons and history limits use
 full endpoint comparison with an explicit reason; invalid present history refuses.
 `--force-full` bypasses history. See [optional change history](docs/optional-change-history.md)
-for eligibility, bounds and independent retirement. Portable certificate trust and
-shared dependent-refresh adoption remain unfinished.
+for eligibility, bounds and independent retirement. Local dependent refresh uses
+the same qualified history; portable certificate trust remains unfinished.
 
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement
@@ -635,12 +635,13 @@ related bindings, and based refresh preserves selected scalar group definitions.
 Use refresh to change a related output; raw build/update replacement refuses.
 
 Refresh defaults to `"mode": "full"`. Set `"mode": "incremental"` to replace
-complete match groups affected by old and new keys in changed native input files.
-This includes newly possible matches, removed partners, duplicate fanout and
-partial-null keys. Rewritten input files have new occurrence identities, so their
-complete key groups are recomputed. Source and evidence files outside the affected
-scope remain shared; identical input files under new versions adopt the exact
-prior output and evidence pins while advancing coverage.
+complete match groups affected by old and new keys. Qualified local change history
+supplies those keys from applied removed/added rows, including same-key value
+edits. Missing or retired history uses conservative changed-file discovery;
+present corrupt history refuses. This includes newly possible matches, removed
+partners, duplicate fanout and partial-null keys. Unaffected output occurrences
+and source/evidence files remain shared. Unchanged logical source identities
+under newer coverage adopt the exact prior output and evidence pins.
 
 Incremental mode requires a selected related base with unchanged join definition,
 input roles, native schemas and output eligibility. Unsupported changes return
@@ -685,17 +686,21 @@ Contributor evidence retains typed group keys and exact input file/row positions
 it contains no rows for empty input. For joined inputs, those positions identify
 joined rows whose retained tuples identify the original contributors.
 
-`mode: "incremental"` replaces complete groups reached by old/new keys in changed
-native files. It handles moved keys, deleted final members and equal aggregate
-values with different contributors. Any file change affects a global summary.
+`mode: "incremental"` replaces complete groups reached by raw old/new keys from
+qualified changes, with changed native files as fallback. It handles moved keys,
+deleted final members and equal aggregate values with different contributors.
+Any applied source rows affect a global summary; key discovery needs no payload
+values for that global case.
 Unchanged native inputs adopt exact source/evidence pins while advancing coverage.
 Use a full refresh to change the recipe or native input schema. Both modes use
 the same recovery, eligibility, captured/latest selection and scalar-group refresh.
 Combined reads hide the global key; native reads expose it for evidence matching.
 
-Discovery and contributor processing still scan retained
-relations. File sharing reduces demonstrated rewrites; complete-path speed and
-10M Comments performance remain unmeasured.
+History narrows discovery, while scoped computation and contributor processing
+still scan retained relations. Long, high-churn histories can stage more keys than
+the fallback. Peak additional disk, retained storage and complete-path incremental
+performance remain unmeasured; the separate full-refresh Comments gate does not
+qualify these costs.
 
 ## HTTP access
 
@@ -732,9 +737,10 @@ keys and change tables; metadata and verification I/O are not included in these
 write counters. Incremental join counters also omit scoped input scans, tuple
 discovery and cardinality preflights; they are partial writer/discovery counters,
 not total file decodes or complete-path I/O. Distinct affected keys are prepared once using bounded native
-writers and DataFusion execution. Discovery still probes every source file, and
-verification still reads the complete result and retained inputs. These limits
-prevent a claim that update time is independent of dataset size. Disk preflight
+writers and DataFusion execution. Qualified history narrows join/summary key
+reads; fallback still inventories endpoints and reads changed files. Required
+inventory checks and explicit deep verification retain whole-state costs. These
+limits prevent a claim that update time is independent of dataset size. Disk preflight
 uses compressed-file estimates where available. Join fanout has no input-byte
 upper bound: it preflights affected rewrites and scratch, then checks free space
 as replacement batches reach the admitted writer. Native flushes and concurrent

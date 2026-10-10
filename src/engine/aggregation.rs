@@ -196,14 +196,14 @@ impl Engine {
         let before = source(base)?;
         let context = self.context();
         register_input(&context, aggregate, &current.borrowed(), budget).await?;
-        let old = source(&previous.releases[&aggregate.input.dataset])?;
-        let new = source(&current.releases[&aggregate.input.dataset])?;
         let (affected, scanned) = self
             .changed_keys(
                 &spec.dataset,
                 &directory.join("affected"),
-                old,
-                new,
+                (
+                    &previous.releases[&aggregate.input.dataset],
+                    &current.releases[&aggregate.input.dataset],
+                ),
                 &aggregate.grouping.keys,
             )
             .await?;

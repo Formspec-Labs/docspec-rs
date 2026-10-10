@@ -1,0 +1,11 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.47s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 3 tests
+test related_refresh::history_keys::completed_processing_resumes_after_optional_input_history_retirement ... ok
+test related_refresh::history_keys::summary_history_preserves_untouched_groups_and_recomputes_same_group_measures ... ok
+test related_refresh::history_keys::join_history_narrows_rewritten_files_without_cancelling_same_key_edits ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 246 filtered out; finished in 10.04s
+

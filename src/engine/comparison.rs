@@ -1,6 +1,5 @@
 //! One admitted comparison context for counts and streamed endpoint members.
 
-mod chain;
 mod window;
 
 use super::*;
@@ -26,6 +25,38 @@ struct Plan {
 }
 
 impl Engine {
+    fn forward_relation(
+        &self,
+        chain: changes::Chain,
+        fields: &Fields,
+        located: bool,
+    ) -> Result<Option<DataFrame>> {
+        let context = self.context();
+        let budget = &self.inner.lifecycle.budget;
+        let mut frames = Vec::with_capacity(chain.tables.len());
+        for delta in chain.tables {
+            let provider = if located {
+                crate::query::occurrences(delta.table, budget.clone(), Some(delta.rows))?
+            } else {
+                crate::query::table(delta.table, budget.clone(), Some(delta.rows))?
+            };
+            frames.push(signed_frame(
+                context.read_table(provider)?,
+                fields,
+                located,
+                delta.weight,
+            )?);
+        }
+        if frames.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(context.read_table(crate::query::sequence(
+                frames,
+                chain.memory,
+            )?)?))
+        }
+    }
+
     /// Compares visible values and duplicate counts between exact retained endpoints.
     ///
     /// # Errors
@@ -334,27 +365,26 @@ impl Engine {
         let mut forward = None;
         if comparable && !unchanged && !options.force_full {
             let outcome = if group != "source" || computed {
-                chain::Forward::Fallback(ComparisonFallback::UnsupportedGroup)
+                changes::Forward::Fallback(ComparisonFallback::UnsupportedGroup)
             } else if !same_schema {
-                chain::Forward::Fallback(ComparisonFallback::SchemaChanged)
+                changes::Forward::Fallback(ComparisonFallback::SchemaChanged)
             } else {
-                self.forward_changes(
+                self.change_chain(
                     &after_view,
                     (before, after),
                     (canonical_first, canonical_second),
                     &left,
-                    (&fields, located),
-                    chain::MAX_LINKS,
+                    changes::MAX_LINKS,
                 )
                 .await?
             };
             match outcome {
-                chain::Forward::Eligible(relation) => {
+                changes::Forward::Eligible(chain) => {
                     descriptor.path = ComparisonPath::ForwardChanges;
                     descriptor.fallback = None;
-                    forward = Some(relation.map(|frame| *frame));
+                    forward = Some(self.forward_relation(chain, &fields, located)?);
                 }
-                chain::Forward::Fallback(reason) => descriptor.fallback = Some(reason),
+                changes::Forward::Fallback(reason) => descriptor.fallback = Some(reason),
             }
         }
         let relation = if !comparable || unchanged {

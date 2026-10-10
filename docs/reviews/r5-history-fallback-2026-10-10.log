@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.04s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 1 test
+test related_refresh::history_keys::invalid_active_history_refuses_but_retired_history_falls_back_on_same_operation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 249 filtered out; finished in 4.33s
+

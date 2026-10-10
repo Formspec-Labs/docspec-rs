@@ -1,5 +1,7 @@
 //! Complete affected-key recomputation over immutable native occurrence files.
 
+mod history;
+
 use super::{refresh, write::Replacement, *};
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
 use refresh::{TUPLE, tuple_columns};
@@ -154,8 +156,10 @@ impl Engine {
                 .changed_keys(
                     &spec.dataset,
                     &directory.join(format!("discovery-{index}")),
-                    old,
-                    new,
+                    (
+                        &previous.releases[&old_version.dataset],
+                        &current.releases[&new_version.dataset],
+                    ),
                     &keys,
                 )
                 .await?;
@@ -319,11 +323,12 @@ impl Engine {
         &self,
         dataset: &Id,
         directory: &Path,
-        old: &TablePin,
-        new: &TablePin,
+        versions: (&ReleasePin, &ReleasePin),
         keys: &[String],
     ) -> Result<(TablePin, u64)> {
         let budget = &self.inner.lifecycle.budget;
+        let old = source(versions.0)?;
+        let new = source(versions.1)?;
         let old_native = storage::open_pin(old).await?;
         let schema = storage::occurrence_schema(&old_native)?;
         let indices = keys
@@ -360,6 +365,19 @@ impl Engine {
         // this before file discovery so physical rewrites never generate work keys.
         if old.logical_metadata() == new.logical_metadata() {
             return Ok((storage::pin(dataset, &table, 0, budget, &[]).await?, 0));
+        }
+        if let Some(discovered) = self
+            .history_keys(
+                dataset,
+                &table,
+                versions,
+                &old_native,
+                keys,
+                key_schema.clone(),
+            )
+            .await?
+        {
+            return Ok(discovered);
         }
         let new_native = storage::open_pin(new).await?;
         let old_scan = storage::OccurrenceScan::open(&old_native, budget).await?;

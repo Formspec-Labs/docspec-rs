@@ -1,4 +1,4 @@
-//! Local forward certificates feed the shared comparison without endpoint payload scans.
+//! Shared qualified history for comparison and affected-key refresh discovery.
 
 use super::*;
 
@@ -7,12 +7,25 @@ mod tests;
 
 // Bound planning latency and retained tiny/empty transitions as well as byte size.
 // This conservative safety limit is not a measured crossover point; longer
-// histories explicitly use complete endpoint comparison.
-pub(super) const MAX_LINKS: usize = 64;
+// histories explicitly use the consumer's conservative endpoint path.
+pub(in crate::engine) const MAX_LINKS: usize = 64;
 
-pub(super) enum Forward {
-    Eligible(Option<Box<DataFrame>>),
+pub(in crate::engine) enum Forward {
+    Eligible(Chain),
     Fallback(ComparisonFallback),
+}
+
+/// Admitted native deltas; consumers choose their required columns and semantics.
+pub(in crate::engine) struct Chain {
+    pub tables: Vec<Delta>,
+    // Drop native metadata before releasing its admission.
+    pub memory: Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
+}
+
+pub(in crate::engine) struct Delta {
+    pub table: iceberg::table::Table,
+    pub rows: u64,
+    pub weight: i64,
 }
 
 fn invalid() -> Error {
@@ -28,13 +41,12 @@ fn charge(total: &mut usize, additional: usize, budget: &Budget) -> bool {
 }
 
 impl Engine {
-    pub(super) async fn forward_changes(
+    pub(in crate::engine) async fn change_chain(
         &self,
         view: &View,
         endpoints: (&ReleasePin, &ReleasePin),
         canonical: (&TablePin, &TablePin),
         native: &iceberg::table::Table,
-        output: (&Fields, bool),
         max_links: usize,
     ) -> Result<Forward> {
         let (before, after) = endpoints;
@@ -149,7 +161,6 @@ impl Engine {
         // Eligibility is complete before opening delta table metadata or payloads.
         // Keep decoded descriptors and parsed native metadata admitted through
         // the last stream owner, rather than only through this planning call.
-        let context = self.context();
         let expected_schema = storage::identity::public_schema(native)?;
         let public_rules = |schema: &iceberg::spec::Schema| {
             schema
@@ -161,7 +172,7 @@ impl Engine {
                 .collect::<Vec<_>>()
         };
         let expected_rules = public_rules(native.metadata().current_schema());
-        let mut frames = Vec::new();
+        let mut tables = Vec::new();
         for source in pins {
             for (pin, weight) in [(source.removed, -1_i64), (source.added, 1_i64)] {
                 let table_memory = Arc::new(
@@ -179,27 +190,15 @@ impl Engine {
                     return Err(invalid());
                 }
                 if pin.rows != 0 {
-                    let provider = if output.1 {
-                        crate::query::occurrences(table, budget.clone(), Some(pin.rows))?
-                    } else {
-                        crate::query::table(table, budget.clone(), Some(pin.rows))?
-                    };
-                    frames.push(signed_frame(
-                        context.read_table(provider)?,
-                        output.0,
-                        output.1,
+                    tables.push(Delta {
+                        table,
+                        rows: pin.rows,
                         weight,
-                    )?);
+                    });
                     memory.push(table_memory);
                 }
             }
         }
-        Ok(Forward::Eligible(if frames.is_empty() {
-            None
-        } else {
-            Some(Box::new(
-                context.read_table(crate::query::sequence(frames, memory)?)?,
-            ))
-        }))
+        Ok(Forward::Eligible(Chain { tables, memory }))
     }
 }

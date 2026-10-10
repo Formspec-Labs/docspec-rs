@@ -1,6 +1,11 @@
 //! Discovery limits and catalog corruption are independent of payload reconstruction.
 
 use super::*;
+use arrow::{
+    array::Int64Array,
+    datatypes::{DataType, Field, Schema},
+    record_batch::RecordBatch,
+};
 use parquet::arrow::ArrowWriter;
 
 fn id(value: &str) -> Id {
@@ -73,9 +78,8 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
     let native = storage::open_pin(&before.dataset.groups["source"])
         .await
         .unwrap();
-    let schema = storage::identity::public_schema(&native).unwrap();
     let result = engine
-        .forward_changes(
+        .change_chain(
             &view,
             (&before, &after),
             (
@@ -83,7 +87,6 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
                 &after.dataset.groups["source"],
             ),
             &native,
-            (schema.fields(), true),
             1,
         )
         .await

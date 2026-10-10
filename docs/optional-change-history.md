@@ -68,7 +68,16 @@ Missing/retired optional history, reverse or unrelated versions, unsupported
 field groups, changed schema rules and planning limits select `full` with an
 explicit reason. Corrupt or inconsistent present history refuses. `force_full`
 always selects the endpoint comparison; it does not read optional certificates.
-Durable dependent-refresh adoption and portable trust remain separate work.
+Local incremental joins and summaries share this resolver, then read raw old/new
+key columns without value cancellation. Their conservative fallback reads changed
+endpoint files. The admitted refresh protects transient history consumption;
+completed processing retains its own outputs and inputs, so recovery does not
+require keeping that optional history. Portable trust remains separate work.
+
+High-churn histories can write more temporary keys than the fallback because
+staging grows with total delta rows before downstream key deduplication. Link and
+metadata limits are not a bound on key bytes. Complete-path timing and peak/retained
+disk qualification remain required; see [current status](STATUS.md#shared-history-for-dependent-refresh).
 
 ## Verification and existing results
 

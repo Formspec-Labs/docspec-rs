@@ -4,6 +4,8 @@ use super::write::identifier as quote;
 use super::*;
 
 mod certificates;
+mod chain;
+pub(super) use chain::{Chain, Forward, MAX_LINKS};
 mod retirement;
 pub(super) use certificates::{
     PreparedChanges, WRITE_RULES, change_selection, check_applied, check_certificate,
