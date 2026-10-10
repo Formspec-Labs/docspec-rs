@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.08s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 2 tests
+test comparison::forward::reversions_duplicates_nulls_and_compacted_updates_match_exact_full_endpoints ... ok
+test comparison::forward::receipt_only_middle_hop_preserves_evidence_effects_and_corrupt_history_refuses ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 243 filtered out; finished in 4.57s
+

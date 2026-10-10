@@ -54,6 +54,11 @@ impl SnapshotRows {
         self.values.get(key).map(|(revision, _)| *revision)
     }
 
+    /// Reports retained JSON size before a bounded consumer decodes it.
+    pub(crate) fn record_bytes(&self, key: &str) -> usize {
+        self.values.get(key).map_or(0, |(_, json)| json.len())
+    }
+
     /// Iterates matching current records without allocating another record map.
     pub(crate) fn prefix<'a>(
         &'a self,

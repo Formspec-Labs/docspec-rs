@@ -1,5 +1,6 @@
 //! One admitted comparison context for counts and streamed endpoint members.
 
+mod chain;
 mod window;
 
 use super::*;
@@ -205,6 +206,7 @@ impl Engine {
         // Keep metadata, descriptor and schemas admitted with the returned plan/stream.
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(3))?);
         let identical = first == second;
+        let (canonical_first, canonical_second) = (first, second);
         let first = self
             .representation_pin(&before_view, &before.id, group, first)
             .await?;
@@ -302,7 +304,7 @@ impl Engine {
             })
             .collect::<Result<Vec<_>>>()?;
         let unchanged = identical && !options.force_full;
-        let descriptor = ChangeDescriptor {
+        let mut descriptor = ChangeDescriptor {
             format: 1,
             before: before.version_ref(),
             after: after.version_ref(),
@@ -328,32 +330,52 @@ impl Engine {
             after_key_field_ids: after_keys,
             effects: effects(before, after, same_schema),
         };
+        let located = addresses || options.identity == ComparisonIdentity::Occurrences;
+        let mut forward = None;
+        if comparable && !unchanged && !options.force_full {
+            let outcome = if group != "source" || computed {
+                chain::Forward::Fallback(ComparisonFallback::UnsupportedGroup)
+            } else if !same_schema {
+                chain::Forward::Fallback(ComparisonFallback::SchemaChanged)
+            } else {
+                self.forward_changes(
+                    &after_view,
+                    (before, after),
+                    (canonical_first, canonical_second),
+                    &left,
+                    (&fields, located),
+                    chain::MAX_LINKS,
+                )
+                .await?
+            };
+            match outcome {
+                chain::Forward::Eligible(relation) => {
+                    descriptor.path = ComparisonPath::ForwardChanges;
+                    descriptor.fallback = None;
+                    forward = Some(relation.map(|frame| *frame));
+                }
+                chain::Forward::Fallback(reason) => descriptor.fallback = Some(reason),
+            }
+        }
         let relation = if !comparable || unchanged {
             None
+        } else if let Some(relation) = forward {
+            relation
         } else {
             let context = self.context();
             let mut frames = Vec::new();
             for (table, pin, weight) in [(left, first, -1_i64), (right, second, 1_i64)] {
-                let located = addresses || options.identity == ComparisonIdentity::Occurrences;
                 let provider = if located && !computed {
                     crate::query::occurrences(table, budget.clone(), Some(pin.rows))?
                 } else {
                     crate::query::table(table, budget.clone(), Some(pin.rows))?
                 };
-                let frame = context.read_table(provider)?;
-                let mut columns = fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, field)| literal_column(field.name()).alias(format!("c{i}")))
-                    .collect::<Vec<_>>();
-                if located {
-                    columns.extend([
-                        literal_column(storage::OCCURRENCE_FILE).alias("file"),
-                        literal_column(storage::OCCURRENCE_ROW).alias("row"),
-                    ]);
-                }
-                columns.push(lit(weight).alias("weight"));
-                frames.push(frame.select(columns)?);
+                frames.push(signed_frame(
+                    context.read_table(provider)?,
+                    &fields,
+                    located,
+                    weight,
+                )?);
             }
             let after = frames.pop().expect("two endpoint frames");
             Some(frames.pop().expect("two endpoint frames").union(after)?)
@@ -435,6 +457,27 @@ impl Engine {
         });
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, batches)))
     }
+}
+
+fn signed_frame(
+    frame: DataFrame,
+    fields: &Fields,
+    located: bool,
+    weight: i64,
+) -> Result<DataFrame> {
+    let mut columns = fields
+        .iter()
+        .enumerate()
+        .map(|(i, field)| literal_column(field.name()).alias(format!("c{i}")))
+        .collect::<Vec<_>>();
+    if located {
+        columns.extend([
+            literal_column(storage::OCCURRENCE_FILE).alias("file"),
+            literal_column(storage::OCCURRENCE_ROW).alias("row"),
+        ]);
+    }
+    columns.push(lit(weight).alias("weight"));
+    Ok(frame.select(columns)?)
 }
 
 fn change_members(

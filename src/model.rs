@@ -711,6 +711,8 @@ pub struct ComparisonOptions {
 pub enum ComparisonPath {
     /// The exact retained field-group pin is shared by both endpoints.
     Unchanged,
+    /// Compose qualified local applied writes from the exact before version.
+    ForwardChanges,
     /// Reconstruct differences from both complete endpoint relations.
     Full,
 }
@@ -720,8 +722,14 @@ pub enum ComparisonPath {
 #[serde(rename_all = "snake_case")]
 pub enum ComparisonFallback {
     Forced,
-    /// Retained forward-chain composition is not yet qualified by this service.
+    /// Optional local change evidence is absent or retired.
     HistoryNotQualified,
+    /// Endpoints do not form a supported forward relationship.
+    NotForward,
+    /// This field group has no qualified applied-change reader.
+    UnsupportedGroup,
+    /// Optional history exceeds the declared link or cumulative metadata bound.
+    HistoryLimit,
     /// Differing schemas cannot be compared through an implicit cast.
     SchemaChanged,
 }

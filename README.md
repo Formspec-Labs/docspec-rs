@@ -494,9 +494,13 @@ effect with zero value differences; incompatible fields refuse streamed comparis
 HTTP `POST /compare` and `POST /changes` accept `before` and `after` release pins,
 an optional `group` (default `source`), and optional `options` containing `identity`
 (`values` or `occurrences`) and `force_full`. Omitted options follow the respective
-CLI defaults. Identical field-group pins skip payload reads unless forced; other
-comparisons reconstruct both endpoints. Retained-chain acceleration, portable
-change certificates and independent change-history retirement remain unfinished.
+CLI defaults. Identical field-group pins skip payload reads unless forced.
+Compatible local source histories use `forward_changes` to read retained applied
+rows. Missing or retired history, unsupported comparisons and history limits use
+full endpoint comparison with an explicit reason; invalid present history refuses.
+`--force-full` bypasses history. See [optional change history](docs/optional-change-history.md)
+for eligibility, bounds and independent retirement. Portable certificate trust and
+shared dependent-refresh adoption remain unfinished.
 
 `invalidate` fences unfinished work and future processing reuse while retaining
 the old selected release. Pass `--definition comments-v2` to activate a replacement

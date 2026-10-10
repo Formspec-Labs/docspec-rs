@@ -6,7 +6,8 @@ use super::*;
 mod certificates;
 mod retirement;
 pub(super) use certificates::{
-    PreparedChanges, WRITE_RULES, check_applied, check_certificate, check_prepared,
+    PreparedChanges, WRITE_RULES, change_selection, check_applied, check_certificate,
+    check_prepared, local_certificate,
 };
 
 /// Independently reconstructs an optional applied transition from exact endpoints.

@@ -1,0 +1,9 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 9.40s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 1 test
+test related_refresh::forward_changes::join_and_summary_forward_chains_match_full_typed_changes_and_addresses ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 245 filtered out; finished in 10.55s
+

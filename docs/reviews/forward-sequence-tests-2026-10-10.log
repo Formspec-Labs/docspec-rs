@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.64s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 4 tests
+test query::sequence::tests::early_drop_does_not_open_later_child_and_releases_stream_admission ... ok
+test query::sequence::tests::next_child_waits_for_eof_and_only_one_child_is_active ... ok
+test query::sequence::tests::later_child_error_propagates ... ok
+test query::sequence::tests::admission_survives_eof_until_provider_and_stream_owners_drop ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 203 filtered out; finished in 0.02s
+

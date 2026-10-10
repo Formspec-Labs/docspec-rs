@@ -6,8 +6,9 @@ The full [implementation plan](PLAN.md) remains **incomplete**. Local processing
 recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes broader dependency correction beyond
-the local scalar case and continuous-ingestion cutover; change-history composition; remaining protection
-lifetimes, maintenance integration and broader failure qualification; remote
+the local scalar case and continuous-ingestion cutover; shared R5 change-history
+discovery; remaining protection lifetimes, maintenance integration and broader
+failure qualification; remote
 publication and R2/Basin; broader Dagster worker recovery; and the remaining
 Q1–Q8 and update/backfill/recovery performance qualification. The defined full
 local 10-million-Comments performance gate now **passes**: three fresh workspaces
@@ -30,8 +31,12 @@ metadata interpretation. Consumers needing both should count the streamed rows,
 without requesting another full comparison.
 
 Identical field-group pins skip payload reads unless full comparison is requested.
-Other comparisons explicitly report `full` and `history_not_qualified` (or
-`forced`). Metadata effects distinguish input references, coverage, definitions,
+Compatible local source comparisons can report `forward_changes`, reading the
+qualified applied rows between the requested versions. Missing or retired history,
+reverse comparisons, unsupported groups, changed schema rules and history limits
+select `full` with an explicit reason; `force_full` always uses the endpoint path.
+Present invalid history refuses instead of silently falling back.
+Metadata effects distinguish input references, coverage, definitions,
 schema rules, source/contributor evidence and computed execution evidence.
 Default-only rule edits can report a schema effect and no value difference.
 Computed groups use their retained source addresses. Incompatible visible field
@@ -64,8 +69,8 @@ cover endpoint membership, composed signed relations, hot duplicate groups,
 insufficient operator memory and oversized sorted batches. The earlier resource
 failure exhausted the operator pool before reaching the byte guard; only that
 fixture's pool was enlarged to isolate the intended check. Production limits are
-unchanged. The fixture demonstrates composition algebra, not trusted chain
-discovery or an enabled accelerated path.
+unchanged. That earlier fixture demonstrates composition algebra; the forward-history
+qualification below separately exercises trusted discovery and public acceleration.
 Value mode adds an initial aggregate; its cost depends on how many occurrences
 cancel before ranking. High-churn time, memory and spill remain to be measured.
 
@@ -106,10 +111,44 @@ interrupted build superseded by the final resource-admission correction. The
 [independent review](reviews/change-stream-implementation-review.md) records
 resolved findings and remaining qualification limits.
 
-This delivers the full-comparison foundation of R4. Forward-chain composition,
-shared R5 accelerated discovery, schema-mapping comparisons, portable trust and
-the remaining R4/R7 scaling cases are unfinished. No full-data performance rerun
-or speedup claim accompanies this increment.
+Local R4 forward composition now reuses the qualified certificates and the same
+occurrence-first operators. Selection checks exact co-committed result identities,
+decreasing native revisions, source continuity and delta schema rules from one
+captured catalog view. Receipt-only transitions preserve logical source identity;
+retired intermediate complete results do not invalidate retained certificates.
+
+Planning is limited to 64 links and the configured cumulative metadata bound.
+The link limit is a conservative safety bound, not a measured crossover. A finite
+DataFusion `StreamingTable` and futures sequencing open one native delta reader
+at a time. Shared memory admissions and maintenance custody remain with the
+returned stream. This creates no additional durable delta copy. Cold catalog
+resolution still reads lifecycle history; admission estimates do not prove a
+whole-process memory ceiling or reduced peak disk use.
+
+The [history checks](reviews/forward-history-tests-2026-10-10.log) compare exact
+members and addresses with forced full comparison under both identities, covering
+reversions, duplicates, nulls, compaction, intermediate retirement, receipt-only
+hops and corrupt descriptors. They also prove that the accelerated path avoids an
+endpoint payload required by the full path. The
+[related-output check](reviews/forward-related-tests-2026-10-10.log) covers
+one- and two-link join and grouped-summary histories with typed equality and
+independent final-output expectations. The
+[sequence checks](reviews/forward-sequence-tests-2026-10-10.log) cover lazy child
+activation, errors, early drop and permit lifetime; the
+[authority check](reviews/forward-authority-tests-2026-10-10.log) covers link-limit
+fallback and a certificate rewritten at the wrong revision. The
+[independent review](reviews/forward-changes-review-2026-10-10.md) approves this
+local scope after resolving related-output coverage.
+
+The [repository gate](reviews/forward-changes-full-check-2026-10-10.log) passes
+formatting, strict Clippy and all-feature library, integration, restore,
+worker-isolation and documentation checks in one run. The retained Comments
+physical-plan probe remains explicitly ignored because it requires its external
+run path; this gate does not rerun the full-data performance workload.
+
+Shared R5 accelerated discovery and durable consumer adoption, schema-mapping
+comparisons, portable trust and remaining R4/R7 scaling cases are unfinished.
+No full-data performance rerun or speedup claim accompanies this increment.
 
 ## Optional applied-change history
 
@@ -163,19 +202,18 @@ preceding run, including actual history removal, restore and semantic forgeries.
 The [package follow-up](reviews/dependency-audit-followup-2026-10-10.md#build-storage-follow-up)
 records native Cargo target grouping as a separate remedy for build amplification.
 
-This implements local certificate selection and optional-history retirement;
-accelerated chain admission/composition, portable trust and population-scale
-resource qualification remain open. Ordinary public comparison still uses the
-unchanged/full paths. No new throughput or disk-reduction measurement is claimed.
+Local certificate selection, optional-history retirement and the local forward
+comparison described above are implemented. Portable trust and population-scale
+resource qualification remain open. No new throughput or disk-reduction
+measurement is claimed.
 
 The independent [admission review](reviews/chain-admission-architecture-2026-10-10.md)
-and [resource review](reviews/chain-resource-architecture-2026-10-10.md) constrain
-the next implementation: share one captured certificate resolver, retain existing
-maintenance custody, and activate a bounded number of native delta readers.
-Reuse the current occurrence-first comparison operators. Refresh must derive
-old/new affected keys before discarding changed values; key-only value cancellation
-can hide a real same-key update. These are reviewed implementation decisions,
-not enabled acceleration or runtime qualification.
+and [resource review](reviews/chain-resource-architecture-2026-10-10.md) informed
+the forward implementation: one captured certificate resolver, existing
+maintenance custody, sequential native delta readers and shared occurrence-first
+operators. R5 refresh adoption remains separate: it must derive old/new affected
+keys before discarding changed values, because key-only value cancellation can
+hide a real same-key update.
 
 ## Native column selection
 
@@ -261,6 +299,13 @@ captured-metadata reuse, avoiding redundant join scans and native layout qualifi
 Scalar preparation has a similar opportunity but also needs expression indices
 rebound to the selected schema. Package features and versions remain unchanged;
 these findings establish no measured speedup.
+
+The [current package recheck](reviews/package-utilization-audit-2026-10-10.md)
+confirms every direct package and selected material transitive APIs against the
+unchanged manifests. It marks selected-key reading, native Cargo target grouping
+and maintained sequential stream composition as adopted. The ranked metadata,
+join-scan and native-layout opportunities remain; no additional package, optional
+feature or infrastructure is justified by this source review.
 
 The hash-only file reader now uses BLAKE3's `update_reader` and `count`, removing
 the custom read/count loop and its one-MiB heap buffer. The pinned reader uses a
@@ -1727,7 +1772,7 @@ or compatibility layer for legacy DocSpec.
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
 | R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; continuous-ingestion catch-up and cutover |
-| R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal | Forward-chain composition and shared R5 accelerated discovery; protected accelerated-consumer admission; schema-mapping comparison, portable trust and remaining scaling/failure qualification |
+| R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers | Shared R5 accelerated discovery and protected durable consumer adoption; schema-mapping comparison, portable trust and remaining scaling/failure qualification |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
 | R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation recovery and unused owner-grant retirement; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compaction adoption by incremental derived writes and obsolete representation retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare/changes, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss and replacement Python worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster mid-operation worker loss, host crashes and wider route qualification |

@@ -1,5 +1,9 @@
 //! Native snapshot streams connected to maintained DataFusion execution.
 
+mod sequence;
+#[doc(inline)]
+pub(crate) use sequence::sequence;
+
 use crate::{Result, budget::Budget, storage};
 use arrow::datatypes::SchemaRef;
 use datafusion::{

@@ -23,8 +23,8 @@ change set. Independent consumer protections remain authoritative.
 `Engine::change_certificate` accepts an exact `VersionRef` and returns bounded
 metadata. Missing or retired history returns `None`; malformed present evidence
 refuses. Inspection reads no row payloads and creates no lasting protection for
-the caller. Full endpoint comparison continues to be the public comparison path;
-certificate discovery does not enable change-chain acceleration.
+the caller. Public comparison can use qualified local history as described below;
+inspection alone does not reserve it for a later operation.
 
 The CLI provides `inspect-changes`, `plan-change-retirement` and
 `retire-changes`. HTTP provides the same services at `/changes/inspect`,
@@ -39,6 +39,36 @@ promise through the existing phase or operation retirement service, then use
 retention inspection and the supported removal planner to identify eligible
 objects. The descriptor has owner creation evidence, just like other removable
 outputs. A saved retirement plan is not permission to bypass a current blocker.
+
+## Forward comparison
+
+`compare` and `changes` use qualified local source history when it reaches the
+exact requested before version from the after version. The selected certificate
+and result must share a native commit revision; predecessor revisions must
+decrease. Each source transition binds the adjacent physical metadata identities.
+Receipt-only transitions preserve logical source identity, including verified
+compaction. Native field identities, types and interpretation rules must match.
+Metadata effects still describe the requested endpoints.
+
+The engine checks this chain from one captured catalog view before opening delta
+readers. It composes retained removed/added rows through the same DataFusion
+operators used by full comparison. Exact intermediate occurrences cancel before
+value-only representatives are chosen, preserving duplicates, nulls and actual
+endpoint addresses. Intermediate complete-result retirement does not end the
+independent history promise.
+
+Planning admits at most 64 links and the configured cumulative metadata bytes.
+The link cap is a safety bound, not a measured performance crossover. Native
+readers open sequentially through a maintained finite streaming table; existing
+memory admissions and maintenance custody last through the returned stream.
+Cold catalog lookup can still scan lifecycle history. No new durable delta files
+are written, and this path makes no whole-process memory or peak-disk guarantee.
+
+Missing/retired optional history, reverse or unrelated versions, unsupported
+field groups, changed schema rules and planning limits select `full` with an
+explicit reason. Corrupt or inconsistent present history refuses. `force_full`
+always selects the endpoint comparison; it does not read optional certificates.
+Durable dependent-refresh adoption and portable trust remain separate work.
 
 ## Verification and existing results
 

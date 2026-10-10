@@ -174,11 +174,13 @@ async fn streaming_values_and_occurrences_match_independent_bags_in_both_directi
             assert_eq!(description.before, first.version_ref());
             assert_eq!(description.after, second.version_ref());
             assert_eq!(description.identity, identity);
-            assert_eq!(description.path, ComparisonPath::Full);
-            assert_eq!(
-                description.fallback,
-                Some(ComparisonFallback::HistoryNotQualified)
-            );
+            if first.id == before.id {
+                assert_eq!(description.path, ComparisonPath::ForwardChanges);
+                assert_eq!(description.fallback, None);
+            } else {
+                assert_eq!(description.path, ComparisonPath::Full);
+                assert_eq!(description.fallback, Some(ComparisonFallback::NotForward));
+            }
             assert_eq!(description.field_ids, vec![1, 2]);
             for (side, member) in &rows {
                 assert!(
@@ -483,3 +485,6 @@ async fn returned_change_stream_holds_maintenance_admission_until_drop() {
         .unwrap()
         .unwrap();
 }
+
+#[path = "comparison/forward.rs"]
+mod forward;

@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.72s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 6 tests
+test comparison::unchanged_pins_skip_payloads_and_force_full_preserves_read_failures ... ok
+test comparison::returned_change_stream_holds_maintenance_admission_until_drop ... ok
+test comparison::schema_changes_are_explicit_in_counts_and_refused_for_streams ... ok
+test comparison::default_only_changes_report_schema_rules_without_inventing_value_changes ... ok
+test comparison::streaming_values_and_occurrences_match_independent_bags_in_both_directions ... ok
+test comparison::computed_groups_use_retained_addresses_and_report_added_definitions ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 237 filtered out; finished in 3.14s
+

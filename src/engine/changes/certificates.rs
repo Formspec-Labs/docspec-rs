@@ -67,11 +67,66 @@ struct Selected {
 struct SelectedDataset {
     dataset: Id,
     version: Id,
+    groups: SelectedGroups,
 }
 
-pub(in crate::engine) fn check_certificate(
+#[derive(Deserialize)]
+struct SelectedGroups {
+    source: SelectedSource,
+}
+
+#[derive(Deserialize)]
+struct SelectedSource {
+    metadata: ObjectRef,
+    logical_metadata: Option<ObjectRef>,
+}
+
+/// Compact source identity from a locally selected result, without opening its files.
+pub(in crate::engine) struct ChangeSelection {
+    pub revision: i64,
+    pub metadata: ObjectRef,
+    pub logical_metadata: ObjectRef,
+    _memory: tokio::sync::OwnedSemaphorePermit,
+}
+
+fn selected_result(rows: &SnapshotRows, result: &VersionRef) -> Result<(i64, Selected)> {
+    let (revision, _, selected): (_, _, Selected) = rows
+        .get_record(&format!("result/{}", result.version))?
+        .ok_or_else(invalid)?;
+    if revision <= 0
+        || selected.id != result.version
+        || selected.dataset.version != result.version
+        || selected.dataset.dataset != result.dataset
+        || selected.manifest != result.manifest
+        || result.manifest.owner != result.dataset
+        || !selected.verified
+    {
+        return Err(invalid());
+    }
+    Ok((revision, selected))
+}
+
+pub(in crate::engine) fn change_selection(
     rows: &SnapshotRows,
+    result: &VersionRef,
+    budget: &Budget,
+) -> Result<ChangeSelection> {
+    let memory = rows.reserve_decoded(budget, &[&format!("result/{}", result.version)])?;
+    let (revision, selected) = selected_result(rows, result)?;
+    let source = selected.dataset.groups.source;
+    Ok(ChangeSelection {
+        revision,
+        logical_metadata: source
+            .logical_metadata
+            .unwrap_or_else(|| source.metadata.clone()),
+        metadata: source.metadata,
+        _memory: memory,
+    })
+}
+
+fn certificate_binding(
     revision: i64,
+    selected_revision: i64,
     key: &str,
     certificate: &ChangeCertificate,
 ) -> Result<()> {
@@ -81,22 +136,47 @@ pub(in crate::engine) fn check_certificate(
         &format!("prepared-changes/{}", after.version),
         &after.dataset,
     )?;
-    let (selected_revision, _, selected): (_, _, Selected) = rows
-        .get_record(&format!("result/{}", after.version))?
-        .ok_or_else(invalid)?;
     if revision <= 0
         || revision != selected_revision
         || key != format!("change-certificate/{}", after.version)
         || after.manifest.owner != after.dataset
-        || selected.id != after.version
-        || selected.dataset.version != after.version
-        || selected.dataset.dataset != after.dataset
-        || selected.manifest != after.manifest
-        || !selected.verified
     {
         return Err(invalid());
     }
     Ok(())
+}
+
+pub(in crate::engine) fn check_certificate(
+    rows: &SnapshotRows,
+    revision: i64,
+    key: &str,
+    certificate: &ChangeCertificate,
+) -> Result<()> {
+    let (selected_revision, _) = selected_result(rows, &certificate.after)?;
+    certificate_binding(revision, selected_revision, key, certificate)
+}
+
+/// Shares captured local authority; callers already hold maintenance admission.
+pub(in crate::engine) fn local_certificate(
+    view: &View,
+    rows: &SnapshotRows,
+    result: &VersionRef,
+    selected: &ChangeSelection,
+    budget: &Budget,
+) -> Result<Option<(ChangeCertificate, Arc<tokio::sync::OwnedSemaphorePermit>)>> {
+    let key = format!("change-certificate/{}", result.version);
+    let memory = Arc::new(rows.reserve_decoded(budget, &[&key])?);
+    let Some((revision, _, certificate)) = rows.get_record::<ChangeCertificate>(&key)? else {
+        return Ok(None);
+    };
+    if record_retired(rows, view, &key, revision, budget)? {
+        return Ok(None);
+    }
+    certificate_binding(revision, selected.revision, &key, &certificate)?;
+    if certificate.after != *result || revision > view.revision {
+        return Err(invalid());
+    }
+    Ok(Some((certificate, memory)))
 }
 
 pub(in crate::engine) fn check_applied(
@@ -253,30 +333,12 @@ impl Engine {
                 .check_operation_available(&view, &result.version)
                 .await?;
             let rows = lifecycle.rows(&view).await?;
-            let key = format!("change-certificate/{}", result.version);
-            let result_key = format!("result/{}", result.version);
-            let _decoded = rows.reserve_decoded(&lifecycle.budget, &[&key, &result_key])?;
-            let (_, _, selected): (_, _, Selected) =
-                rows.get_record(&result_key)?.ok_or_else(invalid)?;
-            if selected.id != result.version
-                || selected.dataset.version != result.version
-                || selected.dataset.dataset != result.dataset
-                || selected.manifest != result.manifest
-                || !selected.verified
-            {
-                return Err(invalid());
-            }
-            let Some((revision, _, certificate)) = rows.get_record::<ChangeCertificate>(&key)?
+            let selected = change_selection(&rows, &result, &lifecycle.budget)?;
+            let Some((certificate, _certificate_memory)) =
+                local_certificate(&view, &rows, &result, &selected, &lifecycle.budget)?
             else {
                 return Ok(None);
             };
-            if record_retired(&rows, &view, &key, revision, &lifecycle.budget)? {
-                return Ok(None);
-            }
-            check_certificate(&rows, revision, &key, &certificate)?;
-            if certificate.after != result {
-                return Err(invalid());
-            }
             let memory = Arc::new(
                 lifecycle
                     .budget
@@ -287,7 +349,7 @@ impl Engine {
                     .await?;
             check_applied(&changes, &(&certificate).into())?;
             Ok(Some(CertifiedChanges {
-                revision,
+                revision: selected.revision,
                 certificate,
                 changes,
             }))
