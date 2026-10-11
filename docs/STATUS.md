@@ -19,6 +19,70 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Native read measurements and shared footer inspection
+
+Qualification can now retain maintained Iceberg `ScanMetrics` while consuming
+ordinary, projected and occurrence streams. The optional observer keeps one
+active counter plus completed totals, with no extra payload pass or per-file
+history. Ordinary readers create no observer. The counter measures attempted
+native range bytes, including footers and delete files; it excludes manifest
+planning, backend retries and transport overhead. Early drop/error samples are
+observations, not final canceled-I/O totals.
+
+The [focused fixture](reviews/native-scan-observation-error-tests-2026-10-10.log)
+passes exact values, nulls, schemas and independently read occurrence locations.
+On its wide-text input, full reads request **5,313,491 bytes**, while narrow reads
+request **1,050,136 bytes**, through the same native implementation. Per-file
+scalar selection shows the same reduction. Error and partial-drop cases retain
+sampleable counters without new I/O. These are fixture range measurements, not a
+representative speedup or network measurement. The
+[blind review](reviews/native-scan-observation-review-2026-10-10.md) approves.
+
+Routine footer inspection now uses the table's native FileIO and maintained
+Parquet push decoder. It reads the final eight bytes once, bounds the declared
+footer before requesting its disjoint body, and preserves size/schema/row checks,
+known-file reuse and admitted worker ownership. The
+[focused tests](reviews/shared-footer-tests-2026-10-10.log) exercise local and
+maintained memory storage, exact requested ranges, short reads, malformed tails
+and refusal before oversized body requests. The already locked `bytes` package
+is now a direct test dependency for the counting reader; no package version or
+production dependency changed. Decoder heap and backend buffering remain outside
+an exact RSS claim. The surrounding admission/pin service still requires remote
+integration; changing this helper does not make that service remote-capable.
+The [independent review](reviews/shared-footer-provider-probe-review-2026-10-10.md)
+approves the prerequisite and records the remaining qualification limits.
+
+The [full repository gate](reviews/native-readers-full-check-2026-10-10.log)
+passes formatting, strict all-target/all-feature Clippy, library/integration,
+restore, worker-initialization and documentation checks. The existing external
+Comments physical-plan probe remains explicitly ignored. This checkpoint adds no
+production dependency and does not rerun the accepted full-data benchmark.
+
+## Live R2 create-only primitives
+
+The [frozen probe](../experiments/r2_conditional_create.py) and
+[provider evidence](reviews/r2-conditional-create-provider-2026-10-10.jsonl)
+qualify a prerequisite for immutable remote objects in the existing SpicyRegs
+bucket. In a fresh isolated prefix, concurrent conditional PUTs produce one
+success and one HTTP 412 refusal; repeating the winning PUT also refuses. Two
+multipart uploads start before either completes: the first completion succeeds,
+the delayed competing completion refuses with HTTP 412, and exact size/SHA-256
+readback confirms the original winner. Each selected object is read once after
+the competing writes. This tests provider primitives through retained boto3
+1.42.33, not Rust integration, transport-response loss or throughput.
+
+The visible synthetic objects and the losing unfinished multipart upload remain
+retained under the exact prefix and upload identities in the evidence. No
+production object, catalog table, policy or expiration setting changed. The
+accepted multipart object is 5,242,896 bytes; incomplete-part storage is separate
+and not claimed as reclaimed. No corpus download or local acceptance rerun occurred.
+
+The pinned OpenDAL S3 implementation carries `If-None-Match: *` on both PUT and
+multipart completion. Iceberg FileIO still exposes no conditional-write option,
+so the Rust object adapter must use and qualify that maintained capability before
+remote publication. The provider result does not close bulk transfer reuse,
+single-authority selection, multi-host fencing, remote protection or restore.
+
 ## Avoid redundant join and metadata reads
 
 Cardinality checks now first prove the constrained input's matchable keys unique

@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.43s
+     Running unittests src/lib.rs (target/debug/deps/docspec-c8ec5067ef8717ed)
+
+running 1 test
+scalar requested ranges: full=NativeScanSample { requested_range_bytes: 2656731, scans_started: 1 } narrow=NativeScanSample { requested_range_bytes: 525068, scans_started: 1 }
+scalar requested ranges: full=NativeScanSample { requested_range_bytes: 2656760, scans_started: 1 } narrow=NativeScanSample { requested_range_bytes: 525068, scans_started: 1 }
+native requested ranges: full=NativeScanSample { requested_range_bytes: 5313491, scans_started: 1 } narrow=NativeScanSample { requested_range_bytes: 1050136, scans_started: 1 }; occurrences full=NativeScanSample { requested_range_bytes: 5313491, scans_started: 2 } narrow=NativeScanSample { requested_range_bytes: 1050136, scans_started: 2 }
+test storage::occurrences::tests::observed_projection_requests_fewer_ranges_with_exact_values_and_occurrences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 249 filtered out; finished in 0.55s
+

@@ -64,6 +64,7 @@ name = "r2_catalog_probe"
 required-features = ["remote"]
 
 [dev-dependencies]
+bytes = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 

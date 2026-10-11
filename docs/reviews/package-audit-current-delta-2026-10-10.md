@@ -2,8 +2,9 @@
 
 **Keep the stack. The main missing evidence is remote-package efficiency and
 actual I/O savings.** The implementation follow-up below closes the identified
-redundant join scan and metadata reread. More package inventories will add less
-value than collecting the missing measurements during useful work.
+redundant join scan and metadata reread; the native-read follow-up also supplies
+requested-range evidence. More package inventories will add less value than
+collecting the missing measurements during useful work.
 
 This bounded static check compares the five user-attached package reports in
 `/tmp/codex-remote-attachments/01a116b5-a9a6-7363-acec-cc4bcb984f9a/78eed266-e922-415d-b761-a6d3b57061aa/`
@@ -113,7 +114,7 @@ and metadata-reread implementation items are now addressed:
   not yet qualify real-provider pinned release reads or the lifetime of all
   returned metadata/cache allocations.
 
-Native scan metrics, representative remote requests/transfers/retries, update
+At that checkpoint, native scan metrics, representative remote requests/transfers/retries, update
 and history scaling, and measured native layout/spill choices remain open.
 Complete remote publication and maintenance remain in [STATUS](../STATUS.md);
 an injected metadata reader does not complete that delivery.
@@ -123,3 +124,62 @@ The [metadata review](pinned-metadata-review-2026-10-10.md) records an initial
 fixed-buffer admission regression caught by the earlier gate and the corrected
 small-budget/cancellation behavior. The correction shares the existing worker
 limiter and introduces no new executor or cache.
+
+## Native-read and immutable-write follow-up
+
+Native scan observation is now implemented behind the existing `test-util`
+feature. It retains maintained Iceberg `ScanMetrics` with constant additional
+state across files; ordinary readers allocate no observer. The
+[focused fixture](native-scan-observation-error-tests-2026-10-10.log) observes
+5,313,491 requested bytes for full reads and 1,050,136 for narrow reads while
+checking exact values, schemas and independent occurrence locations. Scalar
+per-file selection follows the same path. This closes the missing metric handle
+and bounded fixture evidence, not representative elapsed time, backend retries,
+network traffic, manifest planning or aggregate memory. The
+[blind review](native-scan-observation-review-2026-10-10.md) approves the scope.
+
+Footer inspection now passes two disjoint native FileIO ranges into Parquet's
+maintained push decoder instead of reopening a local file and rereading its tail.
+The [tests](shared-footer-tests-2026-10-10.log) prove range boundaries, short-read
+refusal and local/memory parity. A direct **dev-only** `bytes` declaration uses
+the existing locked 1.12.1 package for the counting `FileRead` fixture; no new
+package/version or production dependency was introduced. The earlier manifest
+digests remain historical records, not claims about the latest manifest.
+
+For remote immutable writes, [Cloudflare documents conditional PUT support](https://developers.cloudflare.com/r2/api/s3/api/).
+The current table does not separately specify conditional multipart completion.
+The [actual-provider probe](r2-conditional-create-provider-2026-10-10.jsonl)
+therefore tests both: competing conditional PUT and delayed competing multipart
+completion preserve exact winning bytes. This establishes the needed provider
+primitive through boto3 1.42.33; it does not qualify the Rust uploader or claim
+transport-response-loss recovery. The bounded synthetic objects and losing
+unfinished multipart upload remain recorded and retained.
+
+Pinned dependency inspection narrows the next implementation choice:
+
+- OpenDAL 0.57.0 exposes `writer_with(...).if_not_exists(true)`. Its S3 core sends
+  `If-None-Match: *` for both PUT and multipart completion
+  (`opendal-service-s3-0.57.0/src/core.rs:327`, `:1069`). Reuse this maintained
+  capability and qualify the actual Rust path; do not build an S3 signer.
+- Iceberg FileIO 0.10.1 does not expose this option: `OutputFile::write` overwrites,
+  and `writer` forwards an unconditional writer (`src/io/file_io.rs:363-376`).
+  Its OpenDAL adapter's operator construction is private. Remote composition
+  therefore still needs an explicit maintained conditional-writer connection;
+  an `exists` check followed by FileIO write cannot provide it.
+- The already pinned `object_store` 0.13.2 supports conditional single PUT, but
+  `PutMultipartOptions` lacks a create-only mode (`src/lib.rs:1813-1830`), and
+  its S3 multipart completion uses `CompleteMultipartMode::Overwrite`
+  (`src/aws/mod.rs:434-446`). Switching upload stacks solely to obtain safe
+  multipart creation would not solve this boundary at the pinned version.
+
+Do not add a second durable selection, alternate transfer lifecycle, custom
+signer or broad storage framework to bridge this API boundary. Remote lifetime,
+actual buffering, interrupted transfer reuse and request/byte measurements still
+need the complete Rust path. Neither this fixture nor static package support
+completes [STATUS](../STATUS.md).
+
+The combined implementation passes the
+[full repository gate](native-readers-full-check-2026-10-10.log), and the
+[shared-footer/provider-probe review](shared-footer-provider-probe-review-2026-10-10.md)
+approves its bounded scope. The exact provider-probe source digest matches the
+retained run. No accepted corpus workload was repeated.

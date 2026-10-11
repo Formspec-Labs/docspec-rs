@@ -67,8 +67,42 @@ pub(crate) async fn read_projected_occurrences(
     budget: &Budget,
     projection: Option<&[usize]>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    read_projected_occurrences_inner(table, budget, projection, None).await
+}
+
+/// Reads selected occurrences while observing attempted native data ranges.
+///
+/// `None` selects every value and both occurrence fields. Successful complete
+/// consumption retains the same coverage checks as `read_occurrences`.
+///
+/// # Errors
+/// Refuses invalid scans/selections, exhausted capacity, or oversized batches.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn read_occurrences_observed(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+) -> Result<(
+    impl Stream<Item = Result<RecordBatch>> + Send + use<>,
+    super::scan_metrics::NativeScanObservation,
+)> {
+    let observation = super::scan_metrics::NativeScanObservation::default();
+    let stream =
+        read_projected_occurrences_inner(table, budget, projection, Some(observation.clone()))
+            .await?;
+    Ok((stream, observation))
+}
+
+async fn read_projected_occurrences_inner(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+    observation: Option<super::scan_metrics::NativeScanObservation>,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     let inventory = super::snapshot_files(table, budget).await?;
-    let state = Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
+    let mut state =
+        Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
+    state.observation = observation;
     Ok(futures::stream::try_unfold(state, |mut state| async move {
         Ok(state.next().await?.map(|batch| (batch, state)))
     }))
@@ -86,6 +120,7 @@ struct Occurrences {
     reader: ArrowReader,
     expected: BTreeMap<String, DataFile>,
     current: Option<FileRows>,
+    observation: Option<super::scan_metrics::NativeScanObservation>,
     schema: SchemaRef,
     native_schema: iceberg::spec::SchemaRef,
     selection: Option<super::selection::Selection>,
@@ -161,6 +196,7 @@ impl Occurrences {
             reader,
             expected,
             current: None,
+            observation: None,
             schema,
             native_schema,
             selection,
@@ -211,6 +247,9 @@ impl Occurrences {
                         "decoded rows differ from the captured native count",
                     ));
                 }
+                if let Some(observation) = &self.observation {
+                    observation.finish();
+                }
                 self.current = None;
             }
             let Some(task) = self.tasks.try_next().await? else {
@@ -231,11 +270,14 @@ impl Occurrences {
             check_task(&task, &file)?;
             let path = task.data_file_path.clone();
             let rows = file.record_count();
-            let stream = self
+            let result = self
                 .reader
                 .clone()
-                .read(futures::stream::once(async move { Ok(task) }).boxed())?
-                .stream();
+                .read(futures::stream::once(async move { Ok(task) }).boxed())?;
+            if let Some(observation) = &self.observation {
+                observation.attach(&result);
+            }
+            let stream = result.stream();
             self.current = Some(FileRows {
                 stream,
                 path,
@@ -380,7 +422,7 @@ impl OccurrenceScan {
                 )
             })
             .transpose()?;
-        self.read_selection_file(task, file, budget, selection)
+        self.read_selection_file(task, file, budget, selection, None)
     }
 
     /// Selects scalar columns only when a requested physical column is evidenced.
@@ -395,6 +437,33 @@ impl OccurrenceScan {
         path: &str,
         budget: &Budget,
         projection: &[usize],
+    ) -> Result<(impl Stream<Item = Result<RecordBatch>> + Send + use<>, bool)> {
+        self.read_scalar_file_inner(path, budget, projection, None)
+    }
+
+    #[cfg(test)]
+    fn read_scalar_file_observed(
+        &self,
+        path: &str,
+        budget: &Budget,
+        projection: &[usize],
+    ) -> Result<(
+        impl Stream<Item = Result<RecordBatch>> + Send + use<>,
+        bool,
+        super::scan_metrics::NativeScanObservation,
+    )> {
+        let observation = super::scan_metrics::NativeScanObservation::default();
+        let (stream, projected) =
+            self.read_scalar_file_inner(path, budget, projection, Some(observation.clone()))?;
+        Ok((stream, projected, observation))
+    }
+
+    fn read_scalar_file_inner(
+        &self,
+        path: &str,
+        budget: &Budget,
+        projection: &[usize],
+        observation: Option<super::scan_metrics::NativeScanObservation>,
     ) -> Result<(impl Stream<Item = Result<RecordBatch>> + Send + use<>, bool)> {
         let (task, file) = self.tasks.get(path).ok_or_else(|| {
             Error::refusal("occurrence_tasks", "file is outside the captured source")
@@ -415,8 +484,13 @@ impl OccurrenceScan {
                 && selection.fields.contains(&field.id)
                 && file.column_sizes().contains_key(&field.id)
         });
-        let stream =
-            self.read_selection_file(task, file, budget, projected.then_some(selection))?;
+        let stream = self.read_selection_file(
+            task,
+            file,
+            budget,
+            projected.then_some(selection),
+            observation,
+        )?;
         Ok((stream, projected))
     }
 
@@ -426,6 +500,7 @@ impl OccurrenceScan {
         file: &DataFile,
         budget: &Budget,
         selection: Option<super::selection::Selection>,
+        observation: Option<super::scan_metrics::NativeScanObservation>,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
         let mut task = task.clone();
         if let Some(selection) = &selection {
@@ -441,6 +516,7 @@ impl OccurrenceScan {
             located: self.located,
             expected,
             current: None,
+            observation,
             limit: budget.limits.max_batch_bytes,
             _batches: budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?,
             _metadata: self._metadata.clone(),

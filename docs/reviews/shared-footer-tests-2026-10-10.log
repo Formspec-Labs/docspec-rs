@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.35s
+     Running unittests src/lib.rs (target/debug/deps/docspec-98334ad7a15c39ce)
+
+running 4 tests
+test storage::inspection::tests::impossible_footer_lengths_do_not_request_a_body ... ok
+test storage::inspection::tests::malformed_tail_and_declared_lengths_refuse_before_body_decode ... ok
+test storage::inspection::tests::ranges_are_disjoint_and_short_reads_refuse_without_retry ... ok
+test storage::inspection::tests::local_and_memory_use_the_same_bounded_footer_decoder ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 0.01s
+

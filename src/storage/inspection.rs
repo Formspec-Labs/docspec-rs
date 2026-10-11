@@ -2,8 +2,90 @@
 
 use super::*;
 use futures::StreamExt;
-use parquet::file::metadata::{FooterTail, ParquetMetaDataReader};
-use std::io::{Seek, SeekFrom};
+use iceberg::io::{FileRead, InputFile};
+use parquet::{
+    DecodeResult,
+    file::metadata::{FooterTail, PageIndexPolicy, ParquetMetaData, ParquetMetaDataPushDecoder},
+};
+
+/// Reads bounded footer ranges through the table's maintained native I/O.
+///
+/// The caller owns memory admission and runs this on an admitted blocking worker.
+/// Serialized bytes are bounded; native decoder allocations are not an RSS bound.
+async fn read_footer(input: &InputFile, file_size: u64, limit: usize) -> Result<ParquetMetaData> {
+    if input.metadata().await?.size != file_size {
+        return Err(Error::refusal(
+            "file_size_mismatch",
+            "file size differs from native metadata",
+        ));
+    }
+    let reader = input.reader().await?;
+    let mut decoder = footer_decoder(reader.as_ref(), file_size, limit).await?;
+    if input.metadata().await?.size != file_size {
+        return Err(Error::refusal(
+            "file_size_mismatch",
+            "file size differs from native metadata",
+        ));
+    }
+    match decoder.try_decode()? {
+        DecodeResult::Data(metadata) => Ok(metadata),
+        _ => Err(parquet::errors::ParquetError::General(
+            "Parquet footer could not be decoded from its complete ranges".into(),
+        )
+        .into()),
+    }
+}
+
+// Keep native I/O injected so exact ranges and short reads can be checked.
+async fn footer_decoder(
+    reader: &dyn FileRead,
+    file_size: u64,
+    limit: usize,
+) -> Result<ParquetMetaDataPushDecoder> {
+    // Parquet's final eight bytes hold the serialized metadata length and magic.
+    let tail_start = file_size.checked_sub(8).ok_or_else(|| {
+        parquet::errors::ParquetError::General(
+            "Parquet file is shorter than its footer tail".into(),
+        )
+    })?;
+    let tail = reader.read(tail_start..file_size).await?;
+    if tail.len() != 8 {
+        return Err(parquet::errors::ParquetError::General(
+            "short Parquet footer tail read".into(),
+        )
+        .into());
+    }
+    let size = FooterTail::try_from(tail.as_ref())?.metadata_length();
+    if size > limit {
+        return Err(Error::refusal(
+            "metadata_capacity",
+            "Parquet footer exceeds metadata allowance",
+        ));
+    }
+    let start = tail_start
+        .checked_sub(u64::try_from(size).map_err(|_| {
+            Error::refusal(
+                "metadata_capacity",
+                "Parquet footer length exceeds addressable bytes",
+            )
+        })?)
+        .ok_or_else(|| {
+            parquet::errors::ParquetError::General("Parquet footer length exceeds file size".into())
+        })?;
+    // Read only the body: the retained tail is fed to the same native decoder.
+    let body = reader.read(start..tail_start).await?;
+    if body.len() != size {
+        return Err(parquet::errors::ParquetError::General(
+            "short Parquet footer body read".into(),
+        )
+        .into());
+    }
+    let mut decoder = ParquetMetaDataPushDecoder::try_new(file_size)?
+        .with_page_index_policy(PageIndexPolicy::Skip);
+    decoder.push_range(tail_start..file_size, tail)?;
+    decoder.push_range(start..tail_start, body)?;
+    Ok(decoder)
+}
 
 /// Known bytes and possible physical schemas, shared within one operation only.
 pub(crate) struct CheckedFile {
@@ -87,6 +169,8 @@ pub(crate) async fn inspect_table(
     let rows = pin.rows;
     let metadata_limit = budget.limits.max_metadata_bytes;
     let footer_memory = budget.reserve(metadata_limit)?;
+    let file_io = table.file_io().clone();
+    let handle = tokio::runtime::Handle::current();
     let (mut result, selected, known) = budget.blocking(move || {
         let _memory = (footer_memory, admission);
         let mut known = known;
@@ -117,19 +201,12 @@ pub(crate) async fn inspect_table(
             }
             #[cfg(feature = "test-util")]
             eprintln!("DOCSPEC_TEST_INSPECT_FILE {}", native.file_path());
-            let mut file = File::open(native.file_path())?;
-            if file.metadata()?.len() != native.file_size_in_bytes() {
-                return Err(Error::refusal("file_size_mismatch", "file size differs from native metadata"));
-            }
-            // Parse with the maintained reader, after bounding serialized footer bytes.
-            file.seek(SeekFrom::End(-8))?;
-            let mut tail = [0; 8];
-            file.read_exact(&mut tail)?;
-            let size = FooterTail::try_from(tail)?.metadata_length();
-            if size > metadata_limit {
-                return Err(Error::refusal("metadata_capacity", "Parquet footer exceeds metadata allowance"));
-            }
-            let footer = ParquetMetaDataReader::new().parse_and_finish(&file)?;
+            let input = file_io.new_input(native.file_path())?;
+            // Filesystem FileIO may block internally; remote I/O uses the existing
+            // runtime while the admitted worker retains cancellation ownership.
+            let footer = handle.block_on(read_footer(
+                &input, native.file_size_in_bytes(), metadata_limit,
+            ))?;
             let physical = parquet::arrow::parquet_to_arrow_schema(
                 footer.file_metadata().schema_descr(), None,
             )?;
@@ -199,3 +276,6 @@ pub(crate) async fn inspect_table(
     }
     Ok((result, known))
 }
+
+#[cfg(test)]
+mod tests;

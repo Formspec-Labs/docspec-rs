@@ -10,11 +10,18 @@ pub use pinned::{open_pin, open_pin_with_io};
 #[cfg(feature = "remote")]
 pub mod remote;
 pub(crate) mod removal;
+mod scan_metrics;
+#[cfg(any(test, feature = "test-util"))]
+#[doc(inline)]
+pub use scan_metrics::{NativeScanObservation, NativeScanSample};
 mod schema;
 mod selection;
 pub(crate) use selection::reserve_projection;
 mod tables;
 pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};
+#[cfg(any(test, feature = "test-util"))]
+#[doc(inline)]
+pub use occurrences::read_occurrences_observed;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
 pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
@@ -114,6 +121,37 @@ pub(crate) async fn read_projected_batches(
     budget: &Budget,
     projection: Option<&[usize]>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    read_projected_batches_inner(table, budget, projection, None).await
+}
+
+/// Reads selected columns while observing attempted native data ranges.
+///
+/// `None` selects all values; indices preserve requested output order.
+/// Use the returned observer during qualification without another payload pass.
+///
+/// # Errors
+/// Refuses invalid selections, exhausted capacity, or oversized decoded batches.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn read_batches_observed(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+) -> Result<(
+    impl Stream<Item = Result<RecordBatch>> + Send + use<>,
+    NativeScanObservation,
+)> {
+    let observation = NativeScanObservation::default();
+    let stream =
+        read_projected_batches_inner(table, budget, projection, Some(observation.clone())).await?;
+    Ok((stream, observation))
+}
+
+async fn read_projected_batches_inner(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+    observation: Option<scan_metrics::NativeScanObservation>,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
     let limit = budget.limits.max_batch_bytes;
@@ -133,17 +171,23 @@ pub(crate) async fn read_projected_batches(
         Some(selection) => schema::plan_selected_files(table, selection.fields.clone()).await?,
         None => schema::plan_files(table).await?,
     };
-    let stream = table
+    let result = table
         .reader_builder()
         .with_data_file_concurrency_limit(1)
         .with_batch_size(budget.limits.batch_rows)
         .build()
-        .read(tasks)?
-        .stream();
+        .read(tasks)?;
+    if let Some(observation) = &observation {
+        observation.attach(&result);
+    }
+    let stream = result.stream();
     Ok(futures::stream::try_unfold(
-        (stream, reservation, selection),
-        move |(mut stream, reservation, selection)| async move {
+        (stream, reservation, selection, observation),
+        move |(mut stream, reservation, selection, observation)| async move {
             let Some(batch) = stream.try_next().await? else {
+                if let Some(observation) = &observation {
+                    observation.finish();
+                }
                 return Ok(None);
             };
             let batch = schema::strip_file_column(batch, limit)?;
@@ -151,7 +195,7 @@ pub(crate) async fn read_projected_batches(
                 Some(selection) => selection.apply(batch, None, limit)?,
                 None => batch,
             };
-            Ok(Some((batch, (stream, reservation, selection))))
+            Ok(Some((batch, (stream, reservation, selection, observation))))
         },
     ))
 }
