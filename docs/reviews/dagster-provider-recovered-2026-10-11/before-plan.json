@@ -1,0 +1,26 @@
+{
+  "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+  "operation": "dagster-inflight-update",
+  "completed": false,
+  "reusable_phases": [
+    "readback"
+  ],
+  "reusable_phase_origins": {
+    "readback": {
+      "key": "readback/dagster-inflight-update",
+      "revision": 48
+    }
+  },
+  "required_phases": [
+    "selection"
+  ],
+  "required_phase_reasons": {},
+  "limits": {
+    "compute_threads": 2,
+    "memory_bytes": 536870912,
+    "scratch_bytes": 16777216,
+    "batch_rows": 8,
+    "max_batch_bytes": 1048576,
+    "max_metadata_bytes": 4194304
+  }
+}

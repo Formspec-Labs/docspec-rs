@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/tmp/docspec-provider-reconcile-inspect.py", line 9, in <module>
+    from test_rust_integration import RustIntegrationTests
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/tests/test_rust_integration.py", line 23, in <module>
+    from docspec_dagster.definitions import DocSpecResource, docspec_job
+ModuleNotFoundError: No module named 'docspec_dagster'

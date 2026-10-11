@@ -1,0 +1,11 @@
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - ENGINE_EVENT - Executing steps in process (pid: 60329)
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - LOGS_CAPTURED - Capturing logs for process (pid: 60329).
+2026-10-11 09:56:18 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 09:56:25 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 09:56:25 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 09:56:25 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 7.58s.
+2026-10-11 09:56:25 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - ENGINE_EVENT - Finished steps in process (pid: 60329) in 7.58s
+2026-10-11 09:56:25 -0400 - dagster - DEBUG - docspec_job - 3e73243f-61bf-42b3-9189-5c8f8c853e7c - 60329 - RUN_SUCCESS - Finished execution of run for "docspec_job".

@@ -16,8 +16,10 @@ struct Consumer {
 }
 
 impl Consumer {
-    fn open(root: &Path, pin: &ExportPin) -> Self {
-        storage::verify_object(&pin.object).unwrap();
+    fn open(root: &Path, pin: &ExportPin, metadata: Option<&str>) -> Self {
+        if metadata.is_none() {
+            storage::verify_object(&pin.object).unwrap();
+        }
         std::fs::create_dir(root).unwrap();
         // The fixture adds a table name, preserving the exact immutable bytes.
         std::fs::hard_link(&pin.object.path, root.join("comments.parquet")).unwrap();
@@ -25,16 +27,35 @@ impl Consumer {
             .expect("set DOCSPEC_SPICY_REGS_PYTHON to the existing sibling Python environment");
         let repository = std::env::var_os("DOCSPEC_SPICY_REGS_REPO")
             .expect("set DOCSPEC_SPICY_REGS_REPO to the existing sibling checkout");
-        let mut child = Command::new(python)
+        let binding = root.join("docspec-exports.json");
+        if let Some(metadata) = metadata {
+            std::fs::write(
+                &binding,
+                serde_json::to_vec(&json!({
+                    "version": 1, "metadata_url": metadata, "binary": env!("CARGO_BIN_EXE_docspec"),
+                    "tables": {"comments": {"file": "comments.parquet", "export": pin}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let mut command = Command::new(python);
+        command.env_clear();
+        if metadata.is_some() {
+            command.env("SPICY_REGS_DOCSPEC_EXPORTS", &binding);
+        }
+        let mut child = command
             .arg(
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/qualification/spicy_regs_mcp.py"),
             )
             .arg(repository)
             .arg(root)
-            .env_clear()
             .env("SPICY_REGS_DATA_DIR", root)
             .env("SPICY_REGS_HOME_DIR", root)
-            .env("SPICY_REGS_CONNECTION_TTL", "86400")
+            .env(
+                "SPICY_REGS_CONNECTION_TTL",
+                if metadata.is_some() { "0" } else { "86400" },
+            )
             .env("SPICY_REGS_MEMORY_LIMIT", "256MB")
             .env("PYTHONIOENCODING", "utf-8")
             .stdin(Stdio::piped())
@@ -194,9 +215,26 @@ async fn assert_receipt(
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires the explicitly configured existing SpicyRegs checkout and Python environment"]
 async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
+    reads_across_updates(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the explicitly configured existing SpicyRegs checkout and Python environment"]
+async fn actual_spicy_regs_mcp_admits_exact_exports_and_release_evidence() {
+    reads_across_updates(true).await;
+}
+
+struct MetadataHost(tokio::task::JoinHandle<()>);
+impl Drop for MetadataHost {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn reads_across_updates(trusted: bool) {
     let root = tempfile::tempdir().unwrap();
     let rows = vec![
         (Some(1), Some("duplicate".into()), "private-canary".into()),
@@ -209,6 +247,19 @@ async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
         .unwrap();
+    let (metadata, _host) = if trusted {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let router = docspec::http::router(engine.clone());
+        (
+            Some(url),
+            Some(MetadataHost(tokio::spawn(async move {
+                axum::serve(listener, router).await.unwrap();
+            }))),
+        )
+    } else {
+        (None, None)
+    };
     let initial = engine
         .run(&RunSpec {
             dataset: id("comments"),
@@ -233,7 +284,11 @@ async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
     )
     .await;
     let first = engine.export(&request(&initial, "first")).await.unwrap();
-    let mut old_reader = Consumer::open(&root.path().join("reader-first"), &first);
+    let mut old_reader = Consumer::open(
+        &root.path().join("reader-first"),
+        &first,
+        metadata.as_deref(),
+    );
     let old_values = json!([
         [1, "duplicate"],
         [1, "duplicate"],
@@ -241,7 +296,18 @@ async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
         [3, ""],
         [null, "雪 🌶"]
     ]);
-    assert_eq!(old_reader.query()["rows"], old_values);
+    let first_reply = old_reader.query();
+    assert_eq!(first_reply["rows"], old_values);
+    if trusted {
+        assert_eq!(
+            first_reply["publication"]["export"],
+            serde_json::to_value(&first).unwrap()
+        );
+        assert_eq!(
+            first_reply["publication"]["evidence"]["manifest_blake3"],
+            first.source.manifest.digest
+        );
+    }
 
     let corrected = engine
         .update(&UpdateSpec {
@@ -267,7 +333,11 @@ async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
     let mut spec = request(&corrected, "second");
     spec.expected = Some(first.id.clone());
     let second = engine.export(&spec).await.unwrap();
-    let mut new_reader = Consumer::open(&root.path().join("reader-second"), &second);
+    let mut new_reader = Consumer::open(
+        &root.path().join("reader-second"),
+        &second,
+        metadata.as_deref(),
+    );
     let new_values = json!([[1, "corrected"], [3, ""], [null, "雪 🌶"]]);
     assert_eq!(new_reader.query()["rows"], new_values);
     assert_eq!(old_reader.query()["rows"], old_values);
@@ -292,8 +362,30 @@ async fn actual_spicy_regs_mcp_reads_immutable_exports_across_updates() {
     assert_eq!(third.source, changed.version_ref());
     assert_ne!(third.source, second.source);
     assert_eq!(independent_rows(&third), independent_rows(&second));
-    let mut evidence_reader = Consumer::open(&root.path().join("reader-third"), &third);
-    assert_eq!(evidence_reader.query()["rows"], new_values);
+    let mut evidence_reader = Consumer::open(
+        &root.path().join("reader-third"),
+        &third,
+        metadata.as_deref(),
+    );
+    let third_reply = evidence_reader.query();
+    assert_eq!(third_reply["rows"], new_values);
+    if trusted {
+        assert_eq!(
+            third_reply["publication"]["export"],
+            serde_json::to_value(&third).unwrap()
+        );
+        assert_eq!(
+            third_reply["publication"]["evidence"]["version"],
+            changed.id.to_string()
+        );
+        assert_eq!(third_reply["publication"]["evidence"]["row_mapping"], false);
+        let frozen = old_reader.query();
+        assert_eq!(
+            frozen["publication"]["export"],
+            serde_json::to_value(&first).unwrap()
+        );
+        assert_eq!(frozen["admissions"], json!({"metadata": 2, "hash": 1}));
+    }
     // Completed retries keep exact artifacts; evidence was checked by DocSpec, not MCP.
     assert_eq!(engine.export(&spec).await.unwrap(), third);
     assert_eq!(old_reader.query()["rows"], old_values);

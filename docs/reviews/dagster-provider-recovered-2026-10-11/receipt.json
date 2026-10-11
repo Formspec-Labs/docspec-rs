@@ -1,0 +1,142 @@
+{
+  "passed": true,
+  "stage": "completed",
+  "started_utc": "2026-10-11T13:56:13.278316+00:00",
+  "operation": "dagster-inflight-update",
+  "prior_failure": "docs/reviews/dagster-inflight-provider-fixed-2026-10-11",
+  "scope": "Actual worker/host loss after retained readback and before publication; same computer, fresh local host directory; no throughput, power-loss or restore claim.",
+  "update-two_arrow_sha256": "cba2cb3f53f493a066fa29d67da925d33ed729a7b32efb14fb38f3fe5fca6834",
+  "dagster-inflight-update_arrow_sha256": "617d317380a4805ecf03f5c91d8176fce93bff82780c540823f0d6171116d0be",
+  "repeated_phase_work": [],
+  "retained_readback_unchanged": true,
+  "retained_phases_unchanged": true,
+  "original_input_absent": true,
+  "result": {
+    "dataset": {
+      "boundary": 4,
+      "computed": {},
+      "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+      "definition": "source-update-v1",
+      "eligibility": 0,
+      "format": 12,
+      "groups": {
+        "source": {
+          "metadata": {
+            "bytes": 964,
+            "digest": "45b37616edbd623255d96faefa97753843411e829d69cca35edf614220dbcdbc",
+            "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+            "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/e7c2295858884a87a14ab2dbeb0fb7da/data/metadata/00001-01a12b3c-7535-7aa0-bcb2-9df0a03abfb7.gz.metadata.json"
+          },
+          "objects": [
+            {
+              "bytes": 2275,
+              "digest": "1923a9855360d5d657e6bda202362ae0677ebec52514bd5c79b2f40a983f7852",
+              "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+              "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/926e1c6b9b35496486382bb66367b038/data/data/43528d12-f18b-486d-9c02-f398994fadcb-00000.parquet"
+            },
+            {
+              "bytes": 2143,
+              "digest": "bc494ca603ad0e2a841921923ba1116dbd44f892b364d65db8872e458644435a",
+              "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+              "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/e7c2295858884a87a14ab2dbeb0fb7da/data/data/5e7b273b-6680-4e19-848a-1a5e9e6adb47-00000.parquet"
+            },
+            {
+              "bytes": 964,
+              "digest": "45b37616edbd623255d96faefa97753843411e829d69cca35edf614220dbcdbc",
+              "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+              "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/e7c2295858884a87a14ab2dbeb0fb7da/data/metadata/00001-01a12b3c-7535-7aa0-bcb2-9df0a03abfb7.gz.metadata.json"
+            },
+            {
+              "bytes": 4615,
+              "digest": "5ba761b30ac2bf506e9ba85a7054c202c1186f0f43384ac9685f333b5a4cda27",
+              "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+              "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/e7c2295858884a87a14ab2dbeb0fb7da/data/metadata/01a12b3c-7137-7000-9b6e-a0bb91522cf0-m0.avro"
+            },
+            {
+              "bytes": 1788,
+              "digest": "6a0ba9bb589ef1410166fb025158be4123e895ad045d4645b36ade9d4b2b291a",
+              "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+              "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/e7c2295858884a87a14ab2dbeb0fb7da/data/metadata/snap-4385557954972517694-0-01a12b3c-7137-7000-9b6e-a0bb91522cf0.avro"
+            }
+          ],
+          "rows": 5,
+          "schema_id": 1,
+          "snapshot": 4385557954972517694,
+          "table": "data_cb5f053392854149b0cc40b604af1305"
+        }
+      },
+      "inputs": {
+        "dagster-inflight-update/replacements": {
+          "bytes": 1148,
+          "digest": "1a424c2ecdf8f9887e773416f634a44f09a2622f109f2ffc9184c6a24392594f",
+          "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/5734a7931621425695843ce0f78a8624/replacements.parquet"
+        },
+        "input": {
+          "bytes": 1167,
+          "digest": "f8b89af46576d741121896a60150aea9a32035d53904b29da430987a7fc6b96e",
+          "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/bec8f78565e846cca8381785ccdda8ec/input.parquet"
+        },
+        "update-one/deletions": {
+          "bytes": 480,
+          "digest": "c9eec08cced7754d14f70e95ded0ebc1bc340f7336af687f34ae86a990e7c73b",
+          "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/c1a78954d16d48e68d0c55dbf89efe05/deletions.parquet"
+        },
+        "update-one/replacements": {
+          "bytes": 1147,
+          "digest": "17c299e35c2aa9e1e117745d3508cb623e0339f42c1d622336abcbff630f1a4e",
+          "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/c1a78954d16d48e68d0c55dbf89efe05/replacements.parquet"
+        },
+        "update-two/replacements": {
+          "bytes": 1132,
+          "digest": "37f35fcccee9eedb802c2499ff5bb2194c114761b082a41296e1596bc82fb59c",
+          "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/0c6a4a9d099a428889714a48365d5a56/replacements.parquet"
+        }
+      },
+      "parent_manifest": {
+        "bytes": 5840,
+        "digest": "7942b583c780e2b9e307d63e14d7f0b688a620ed97a2793eef749b4c78893492",
+        "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+        "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/60ff8b1abb8f4da39382034d44e14ee9/release.json"
+      },
+      "processor": "docspec.dataset.v10",
+      "related": null,
+      "relationship": {
+        "kind": "independent"
+      },
+      "request": {
+        "kind": "update",
+        "spec": {
+          "base": "update-two",
+          "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+          "definition": "source-update-v1",
+          "deletions": null,
+          "keys": [
+            "counter"
+          ],
+          "operation": "dagster-inflight-update",
+          "replacements": {
+            "digest": "1a424c2ecdf8f9887e773416f634a44f09a2622f109f2ffc9184c6a24392594f",
+            "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-inflight-provider-fixed-2026-10-11/producer.parquet"
+          }
+        }
+      },
+      "validation": "routine",
+      "version": "dagster-inflight-update"
+    },
+    "id": "dagster-inflight-update",
+    "manifest": {
+      "bytes": 6368,
+      "digest": "59c5bd7f4fd8a789bbf44ea6396631634be55d9e3989cfb47aaa5f273b393e92",
+      "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+      "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/96cfe18d1c1e4fc7a75ce13df6db7422/release.json"
+    },
+    "verified": true
+  },
+  "replacement_pid": 60329,
+  "finished_utc": "2026-10-11T13:56:31.799649+00:00"
+}

@@ -16,6 +16,23 @@ sys.path.insert(0, str(repository / "src"))
 from starlette.testclient import TestClient
 from spicy_regs import mcp_server
 
+trusted = "SPICY_REGS_DOCSPEC_EXPORTS" in os.environ
+admissions = {"metadata": 0, "hash": 0}
+if trusted:
+    from spicy_regs import docspec_exports
+    original_record, original_hash = docspec_exports._record, docspec_exports._hash
+
+    def record(*args, **kwargs):
+        admissions["metadata"] += 1
+        return original_record(*args, **kwargs)
+
+    def hashed(*args, **kwargs):
+        admissions["hash"] += 1
+        return original_hash(*args, **kwargs)
+
+    docspec_exports._record, docspec_exports._hash = record, hashed
+
+
 
 def call(client, sql):
     response = client.post(
@@ -44,8 +61,14 @@ with TestClient(mcp_server.build_app()) as client:
         assert command.strip() == "query"
         reply = call(client, "SELECT id, public FROM comments ORDER BY id NULLS LAST, public NULLS FIRST")
         assert reply["columns"] == ["id", "public"], reply
-        # Honest application limit: these explicit files have no application release/evidence binding.
-        assert reply["publication"]["comments"]["status"] == "local_unversioned", reply
+        binding = reply["publication"]["comments"]
+        assert binding["status"] == ("docspec_immutable_export" if trusted else "local_unversioned"), reply
+        if trusted:
+            assert binding["evidence"]["row_mapping"] is False
+            assert binding["evidence"]["manifest_blake3"] == binding["export"]["source"]["manifest"]["digest"]
         schema = call(client, "DESCRIBE comments")
         assert [row[:2] for row in schema["rows"]] == [["public", "VARCHAR"], ["id", "BIGINT"]], schema
-        print(json.dumps({"rows": reply["rows"], "scope": "MCP values; separate DocSpec evidence proof"}, ensure_ascii=False), flush=True)
+        if trusted:
+            assert admissions == {"metadata": 2, "hash": 1}, admissions
+        print(json.dumps({"rows": reply["rows"], "publication": binding, "admissions": admissions,
+                          "scope": "MCP values and exact release reference; separate DocSpec receipt proof"}, ensure_ascii=False), flush=True)

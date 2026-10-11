@@ -1,0 +1,2 @@
+{"stage": "retained_preflight", "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00", "operation": "dagster-inflight-update"}
+{"passed": false, "stage": "retained_preflight", "receipt": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-inflight-provider-2026-10-11/receipt.json"}

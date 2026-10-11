@@ -1,0 +1,11 @@
+{
+  "started_utc": "2026-10-11T13:54:15.155405+00:00",
+  "command": [
+    "/Users/mikewolfd/.cache/uv/archive-v0/XvCPYDWAYzhWtC2y--S-W/bin/python3",
+    "/tmp/docspec-provider-reconcile-inspect.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-inflight-provider-reconcile-2026-10-11"
+  ],
+  "deadline_seconds": 420,
+  "exit_code": 1,
+  "finished_utc": "2026-10-11T13:54:15.235216+00:00"
+}

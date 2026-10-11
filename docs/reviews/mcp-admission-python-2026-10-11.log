@@ -1,0 +1,117 @@
+........................................................................ [ 64%]
+.................F....................F.                                 [100%]
+=================================== FAILURES ===================================
+________ test_each_rulemaking_view_describes_as_the_dictionary_declares ________
+
+tmp_path = PosixPath('/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/pytest-of-mikewolfd/pytest-354/test_each_rulemaking_view_desc0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b44ac90>
+
+    def test_each_rulemaking_view_describes_as_the_dictionary_declares(tmp_path, monkeypatch):
+        """The writers' own files, read through the views, carry the declared types, DATE, INTEGER and BOOLEAN included."""
+        from tests.test_mcp_server import _tool_data
+    
+        locations = write_rulemaking(tmp_path, SNAPSHOT_A, "EPA-A")
+        built = connection_fixture(
+            monkeypatch,
+            pub.empty_index(),
+            locations,
+            tables=dd.RULEMAKING_TABLES,
+            documents=rulemaking_documents(SNAPSHOT_A),
+        )
+        mcp_server._build_connection()
+        [con] = built
+        monkeypatch.setattr(mcp_server, "_get_connection", lambda: con)
+        server = mcp_server.build_server()
+>       declared = dd.expected_schemas()
+                   ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_generation_mcp.py:442: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/spicy_regs/data_dictionary.py:827: in expected_schemas
+    from_contracts = contract_schemas()
+                     ^^^^^^^^^^^^^^^^^^
+src/spicy_regs/data_dictionary.py:764: in contract_schemas
+    return {name: described_columns(contracts[name]) for name in CONTRACT_TABLES}
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/spicy_regs/contract_types.py:46: in described_columns
+    return described_schema(arrow_schema(contract))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/spicy_regs/contract_types.py:53: in described_schema
+    return native_described_schema(schema)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+schema = publisher_id: string
+name: string
+abbreviation: string
+aliases_json: string
+homepage_url: string
+scorecard_index_url: string
+observed_at: string
+capture_id: string
+source_url: string
+source_path: string
+
+    @lru_cache(maxsize=256)
+    def described_schema(schema: pa.Schema) -> list[tuple[str, str]]:
+        """Describe exactly the native types a Parquet reader observes."""
+        with _connect() as con:
+>           con.register("native_schema", schema.empty_table())
+            ^^^^^^^^^^^^
+E           AttributeError: 'Connection' object has no attribute 'register'
+
+src/spicy_regs/native_types.py:37: AttributeError
+__ test_dictionary_discovery_reads_the_rulemaking_tables_through_the_pointer ___
+
+tmp_path = PosixPath('/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/pytest-of-mikewolfd/pytest-354/test_dictionary_discovery_read0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1215be990>
+
+    def test_dictionary_discovery_reads_the_rulemaking_tables_through_the_pointer(tmp_path, monkeypatch):
+        """``check --source r2`` DESCRIBEs each snapshot table at the URL the pointer names, typed as its writer wrote it."""
+        locations = write_rulemaking(tmp_path, SNAPSHOT_A, "EPA-A")
+        connection_fixture(monkeypatch, pub.empty_index(), locations, documents=rulemaking_documents(SNAPSHOT_A))
+        with pytest.raises(dd.SchemaDiscoveryError) as error:  # the legacy base objects are not served here
+            dd.discover_schemas("r2", mcp_server.R2_BASE_URL)
+>       expected = dd.expected_schemas()
+                   ^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_generation_mcp.py:617: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/spicy_regs/data_dictionary.py:827: in expected_schemas
+    from_contracts = contract_schemas()
+                     ^^^^^^^^^^^^^^^^^^
+src/spicy_regs/data_dictionary.py:764: in contract_schemas
+    return {name: described_columns(contracts[name]) for name in CONTRACT_TABLES}
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/spicy_regs/contract_types.py:46: in described_columns
+    return described_schema(arrow_schema(contract))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/spicy_regs/contract_types.py:53: in described_schema
+    return native_described_schema(schema)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+schema = publisher_id: string
+name: string
+abbreviation: string
+aliases_json: string
+homepage_url: string
+scorecard_index_url: string
+observed_at: string
+capture_id: string
+source_url: string
+source_path: string
+
+    @lru_cache(maxsize=256)
+    def described_schema(schema: pa.Schema) -> list[tuple[str, str]]:
+        """Describe exactly the native types a Parquet reader observes."""
+        with _connect() as con:
+>           con.register("native_schema", schema.empty_table())
+            ^^^^^^^^^^^^
+E           AttributeError: 'Connection' object has no attribute 'register'
+
+src/spicy_regs/native_types.py:37: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_generation_mcp.py::test_each_rulemaking_view_describes_as_the_dictionary_declares
+FAILED tests/test_generation_mcp.py::test_dictionary_discovery_reads_the_rulemaking_tables_through_the_pointer
+2 failed, 110 passed in 16.44s

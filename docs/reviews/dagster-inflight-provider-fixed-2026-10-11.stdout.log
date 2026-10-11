@@ -1,0 +1,4 @@
+{"stage": "retained_preflight", "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00", "operation": "dagster-inflight-update"}
+{"stage": "dagster_processing", "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00", "operation": "dagster-inflight-update"}
+{"stage": "capturing_retained_processing", "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00", "operation": "dagster-inflight-update"}
+{"passed": false, "stage": "capturing_retained_processing", "receipt": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-inflight-provider-fixed-2026-10-11/receipt.json"}

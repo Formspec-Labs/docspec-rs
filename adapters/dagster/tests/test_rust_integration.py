@@ -462,20 +462,25 @@ class RustIntegrationTests(unittest.TestCase):
         return (self._get(port, "/datasets/dagster_fixture/latest"),
                 self._get(port, "/datasets/dagster_fixture"), self._retained_files(workspace))
 
-    def _worker(self, root, config_path, url, name):
+    def _worker(self, root, config_path, url, name, timeout_seconds=60, environment=None):
         report = root / f"{name}-report.json"
         log = root / f"{name}-worker.log"
         with log.open("wb") as output:
             process = subprocess.Popen(
-                [sys.executable, str(Path(__file__).with_name("native_worker.py")), str(config_path), url, str(report)],
-                stdout=output, stderr=output,
+                [sys.executable, str(Path(__file__).with_name("native_worker.py")), str(config_path), url, str(report), str(timeout_seconds)],
+                stdout=output, stderr=output, env=environment,
             )
             try:
-                process.wait(timeout=90)
+                process.wait(timeout=timeout_seconds + 30)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=10)
                 self.fail("Python worker exceeded its fixture deadline: " + self._tail(log))
+            except BaseException:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=10)
+                raise
         self.assertEqual(process.returncode, 0, self._tail(log))
         self.assertTrue(report.is_file(), self._tail(log))
         self.assertLessEqual(report.stat().st_size, 4096)

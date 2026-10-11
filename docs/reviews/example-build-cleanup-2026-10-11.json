@@ -1,0 +1,193 @@
+{
+  "utc": "2026-10-11T14:03:58.339438+00:00",
+  "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/examples",
+  "lsof_exit": 1,
+  "open_files": false,
+  "logical_bytes": 997980728,
+  "allocated_directory_entries_bytes": 998055936,
+  "files": [
+    {
+      "path": "comments_codec-952883c057a66706.d",
+      "bytes": 286,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "comments_codec-952883c057a66706",
+      "bytes": 29595536,
+      "allocated_bytes": 29597696
+    },
+    {
+      "path": "layout_probe.d",
+      "bytes": 6079,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "r2_candidate_probe.d",
+      "bytes": 6091,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "layout_probe",
+      "bytes": 23601632,
+      "allocated_bytes": 23605248
+    },
+    {
+      "path": "comments_codec-2279f1607cc9a49e.d",
+      "bytes": 425,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "r2_catalog_probe",
+      "bytes": 101707664,
+      "allocated_bytes": 101707776
+    },
+    {
+      "path": "r2_objects_probe-8f154a7037defac3.d",
+      "bytes": 296,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "r2_candidate_probe",
+      "bytes": 104655824,
+      "allocated_bytes": 104656896
+    },
+    {
+      "path": "r2_candidate_probe-81fe3c462335840a.d",
+      "bytes": 445,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "r2_objects_probe.d",
+      "bytes": 6087,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "r2_candidate_probe-81382de0d47942ab",
+      "bytes": 104655824,
+      "allocated_bytes": 104656896
+    },
+    {
+      "path": "r2_catalog_probe.d",
+      "bytes": 6087,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "comments_codec.d",
+      "bytes": 6083,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "comments_scan-c855779be2929378.d",
+      "bytes": 281,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "comments_codec",
+      "bytes": 29595536,
+      "allocated_bytes": 29597696
+    },
+    {
+      "path": "r2_catalog_probe-b7c8567a90378546",
+      "bytes": 101707664,
+      "allocated_bytes": 101707776
+    },
+    {
+      "path": "comments_scan.d",
+      "bytes": 6081,
+      "allocated_bytes": 8192
+    },
+    {
+      "path": "comments_scan-9de78ea48c179073.d",
+      "bytes": 420,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "libcomments_scan-9de78ea48c179073.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "r2_objects_probe-675c036440bd411f.d",
+      "bytes": 435,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "r2_catalog_probe-b7c8567a90378546.d",
+      "bytes": 296,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "layout_probe-33a646e73d16e125.d",
+      "bytes": 415,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "comments_scan",
+      "bytes": 199154208,
+      "allocated_bytes": 199155712
+    },
+    {
+      "path": "libcomments_codec-2279f1607cc9a49e.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "liblayout_probe-33a646e73d16e125.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "libr2_objects_probe-675c036440bd411f.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "r2_catalog_probe-832b0cf51b624144.d",
+      "bytes": 435,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "layout_probe-ecd361c8ca71aad7.d",
+      "bytes": 276,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "libr2_catalog_probe-832b0cf51b624144.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "r2_objects_probe",
+      "bytes": 40255088,
+      "allocated_bytes": 40255488
+    },
+    {
+      "path": "r2_objects_probe-8f154a7037defac3",
+      "bytes": 40255088,
+      "allocated_bytes": 40255488
+    },
+    {
+      "path": "libr2_candidate_probe-81fe3c462335840a.rmeta",
+      "bytes": 0,
+      "allocated_bytes": 0
+    },
+    {
+      "path": "r2_candidate_probe-81382de0d47942ab.d",
+      "bytes": 306,
+      "allocated_bytes": 4096
+    },
+    {
+      "path": "layout_probe-ecd361c8ca71aad7",
+      "bytes": 23601632,
+      "allocated_bytes": 23605248
+    },
+    {
+      "path": "comments_scan-c855779be2929378",
+      "bytes": 199154208,
+      "allocated_bytes": 199155712
+    }
+  ],
+  "free_before": 3292659712,
+  "scope": "Inactive rebuildable Cargo example outputs only; retained data, final logs and frozen experiment binaries unchanged.",
+  "free_after": 3792015360
+}

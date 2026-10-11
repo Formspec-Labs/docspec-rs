@@ -1,0 +1,24 @@
+{
+  "started_utc": "2026-10-11T13:59:27.425972+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "exports::mcp::actual_spicy_regs_mcp_admits_exact_exports_and_release_evidence",
+    "--",
+    "--ignored",
+    "--nocapture"
+  ],
+  "free_before_bytes": 4594442240,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 68778,
+  "min_free_bytes": 3902119936,
+  "last_observed_utc": "2026-10-11T13:59:55.767943+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 3857444864,
+  "finished_utc": "2026-10-11T13:59:57.777606+00:00"
+}

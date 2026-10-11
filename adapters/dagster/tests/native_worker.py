@@ -36,7 +36,12 @@ class ObservedResource(DocSpecResource):
 
 
 if __name__ == "__main__":
-    config_path, url, report_path = sys.argv[1:]
+    config_path, url, report_path, *timeouts = sys.argv[1:]
+    if len(timeouts) > 1:
+        raise ValueError("one optional request timeout is supported")
+    timeout_seconds = int(timeouts[0]) if timeouts else 60
+    if not 1 <= timeout_seconds <= 240:
+        raise ValueError("fixture request timeout must be between 1 and 240 seconds")
     config = json.loads(Path(config_path).read_text())
     request = config["ops"]["docspec_operation"]["config"]
     identity = {
@@ -49,7 +54,7 @@ if __name__ == "__main__":
     Path(report_path).write_text(json.dumps({**identity, "started": True}))
     result = docspec_job.execute_in_process(
         run_config=config,
-        resources={"docspec": ObservedResource(base_url=url, uncertain_retries=0, timeout_seconds=60, report_path=report_path)},
+        resources={"docspec": ObservedResource(base_url=url, uncertain_retries=0, timeout_seconds=timeout_seconds, report_path=report_path)},
         raise_on_error=False,
     )
     if result.success:

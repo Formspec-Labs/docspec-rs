@@ -1,0 +1,152 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.39s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/630664508d024815b99e63bcc339d488/data/382be5cd-becc-4976-b6fe-8668706c37f9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/1221effbfc36407b94a107855dd100fa/data/data/7c9fa761-2fc3-4a2a-b624-829b0fd5d4bd-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+[10/11/26 09:59:44] INFO     StreamableHTTP       streamable_http_manager.py:162
+                             session manager                                    
+                             started                                            
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/exports/first "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/versions/receipt-before                      
+                             "HTTP/1.1 200 OK"                                  
+[10/11/26 09:59:50] INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK receipts
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/d543213f3159451499fa3fb30e0acab9/data/data/34436380-f9cd-40dd-8a48-3fbefcece11e-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/d543213f3159451499fa3fb30e0acab9/data/data/788bcdf7-0d5f-4ef1-8e5f-af7943272b3e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/d543213f3159451499fa3fb30e0acab9/removed/data/7f0f17aa-5547-4dbc-926b-12908fbcd261-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+[10/11/26 09:59:52] INFO     StreamableHTTP       streamable_http_manager.py:162
+                             session manager                                    
+                             started                                            
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/exports/second "HTTP/1.1 200                 
+                             OK"                                                
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/versions/corrected "HTTP/1.1                 
+                             200 OK"                                            
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+[10/11/26 09:59:52] INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/f46885b499274bdba2af6dd1eb3198fc/data/data/21c3947a-c54c-4b7a-bf9d-39d87090d2c0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpZmfzHW/workspace/objects/comments/f46885b499274bdba2af6dd1eb3198fc/removed/data/cb7f6957-a5c9-4afa-ad42-e2c7d6a3117b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+[10/11/26 09:59:55] INFO     StreamableHTTP       streamable_http_manager.py:162
+                             session manager                                    
+                             started                                            
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/exports/third "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:49470/datasets/com                
+                             ments/versions/receipt-after                       
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+[10/11/26 09:59:55] INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+[10/11/26 09:59:55] INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     StreamableHTTP       streamable_http_manager.py:166
+                             session manager                                    
+                             shutting down                                      
+                    INFO     StreamableHTTP       streamable_http_manager.py:166
+                             session manager                                    
+                             shutting down                                      
+                    INFO     StreamableHTTP       streamable_http_manager.py:166
+                             session manager                                    
+                             shutting down                                      
+test exports::mcp::actual_spicy_regs_mcp_admits_exact_exports_and_release_evidence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 312 filtered out; finished in 13.82s
+
