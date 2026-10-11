@@ -104,9 +104,10 @@ Build supports a dataset's first selection and recovery of that same operation;
 a new Build after selection refuses before source or lifecycle mutation. Other remote
 source mutations refuse before lifecycle effects. Primitive-column exports of
 that initial source are implemented with protected host staging, conditional
-remote transfer and retained completion. Maintenance, computed and related groups
-remain unqualified. Host stages currently remain retained alongside remote
-objects; unfinished transfers require the original host. See the status record
+remote transfer and retained completion. A completed export can explicitly reclaim
+its exact original host stage after durable remote verification; unfinished
+transfers require the original host. Remote object maintenance, computed and
+related groups remain unqualified. See the status record
 for the exact recovery and resource limits. CLI and loopback HTTP startup accept the
 same explicit remote configuration. See [current qualification](docs/STATUS.md).
 
@@ -214,6 +215,28 @@ target/debug/docspec verify release.json
 target/debug/docspec read release.json comments.arrow
 ```
 
+Start with `plan` when deciding whether to resume. `completed: true` means this
+operation already has its original retained result, even if a newer operation is
+now selected. Otherwise, `reusable_phases` names retained work and
+`required_phases` names remaining handoffs. A plan requiring only `selection`
+can resume from retained readback. `no_retained_completion` means there is no
+completion under the exact reuse key; `recovery_retired` means its recovery
+promise was explicitly ended. Neither reason claims a worker failed or is running.
+Repeat the same request with `resume` to perform the remaining eligible work.
+`reusable_phase_origins` links each reported reusable phase to its exact saved
+record key and native revision. Use that key in `inspect` to find consumed inputs
+and the original operation; the link records this observation and adds no retention
+promise. Completed/readback plans do not reopen earlier phases merely to list them.
+
+During new work, CLI stderr reports phase timing and sampled native-writer
+progress through the existing logger. `rows_accepted` and
+`decoded_bytes_accepted` describe batches accepted by the writer; shared Arrow
+buffers can count again across batches. They are not committed rows, output size
+or process memory. Totals remain `unknown`. Writer close precedes snapshot and
+phase commits; consult `plan` or retained completions after failure or disconnect.
+Ordinary reads and completed retries emit no new writer progress. Tiny lifecycle
+writes stay quiet. Library hosts control the tracing subscriber.
+
 `read` writes an Arrow IPC stream. Its result and `verify` need the retained files,
 but do not need the catalog. Files referenced by a release remain local absolute
 paths; the release is not yet a portable or public distribution.
@@ -248,6 +271,22 @@ equivalent copy elsewhere. This records small metadata references during existin
 work, without another payload read. Older completions remain resumable; missing
 dependency information does not authorize cleanup. Explicit local removal requires
 qualified identities and fresh protection checks; broader maintenance remains unfinished.
+
+For a specific provenance or reuse question, `inspect DATASET` exposes the saved
+records. A phase's `dependencies` names its actual admitted copies, related input
+sources, base/schema metadata and consumed snapshots. `request/<operation>` holds
+request provenance; its input locator may differ from the retained copy actually
+used. Reused work can originate with another operation, so follow the phase's
+original operation to `runtime/<operation>` for its processor, package, dependency
+lock and configured limits. Phase `rows` and `metrics` describe completed writer
+work, not total I/O or whole-process memory. `input-progress/<release>` records
+related-input lag at selection, not a fresh provider observation.
+
+Backfill plans expose committed file progress, failures and selection refusals;
+continuous-backfill plans also show the current round, child and intake fence.
+These are durable observations, not live per-batch progress. `inspect` returns
+history within the configured metadata bound; use it for a question or diagnosis,
+not as a per-batch polling loop. Ordinary reads need no inspection step.
 
 When investigating retained disk use, `inspect-retention objects.json` accepts a
 JSON array of exact object references already present in release pins. It reports
@@ -442,6 +481,23 @@ does not claim another unlink or freed disk blocks.
 HTTP exposes the same services through `POST /retention/removal/plan`,
 `POST /retention/removal/execute`, `GET /datasets/{dataset}/removals/{removal}`,
 and `POST /datasets/{dataset}/removals/{removal}/resume`.
+
+For a completed remote export, the original configured host can preview its exact
+closed stage without enumerating object storage:
+
+```sh
+docspec --workspace ./workspace --remote remote.json plan-export-stage-removal \
+  --dataset comments --removal export-stage-1 --operation export-1 \
+  --reason 'Verified remote copy retained' > stage-removal.json
+docspec --workspace ./workspace --remote remote.json remove-objects --plan stage-removal.json
+```
+
+The HTTP equivalent is `POST /retention/removal/export-stage/plan` with `dataset`,
+`removal`, `operation` and `reason`; execution, inspection and resume use the
+existing removal routes. The remote materialization and validation must already
+be committed together. Active owner grants and admitted readers still block
+removal. Cleanup preserves remote objects and all completion metadata. Partial
+or losing stages remain protected and require separate lifecycle work.
 
 To stop an unfinished operation, use:
 
@@ -732,8 +788,10 @@ To rebuild an enriched selection, use the normal run request with `"base"` set t
 the exact selected version, a new `"operation"`, and the complete replacement
 input/query. Keep the active definition, or activate a changed definition first.
 The engine preserves every selected group definition and computes it over the
-new source. Missing fields or incompatible expressions leave the prior release
-selected. The replacement input supplies this version's evidence; the exact parent
+new source. Based Builds preserve native field IDs, public order, hidden-field
+history and defaults even when SQL columns are reordered. Use `schema` to change
+that interpretation. Missing fields or incompatible expressions leave the prior
+release selected. The replacement input supplies this version's evidence; the exact parent
 manifest retains its relationship to history.
 
 `plan`, `run`, `resume` and the corresponding HTTP routes handle rebuilds directly.

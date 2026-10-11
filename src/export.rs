@@ -68,7 +68,7 @@ pub struct ExportValidation {
 /// Identifies an independently readable file selected through the dataset catalog.
 ///
 /// Resolve a channel once and retain this pin while reading its immutable file.
-/// Configured remote source exports retain host staging as protected custody.
+/// Host staging stays protected until verified remote completion permits explicit cleanup.
 /// Neither placement establishes anonymous public hosting or application evidence access.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

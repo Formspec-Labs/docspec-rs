@@ -49,6 +49,7 @@ mod refresh;
 mod related_refresh;
 mod remote_cli;
 mod restore_catalog;
+mod retention_build_ancestry;
 mod retention_inspection;
 mod scalar_bindings;
 mod scalar_dependency_reads;

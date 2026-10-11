@@ -18,6 +18,18 @@ pub(in crate::engine) struct ExportAttempt {
     destination: String,
 }
 
+/// Immutable creation evidence for one closed original host stage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::engine) struct CompletedStage {
+    pub(in crate::engine) object: ObjectRef,
+    pub(in crate::engine) remote: ObjectRef,
+    pub(in crate::engine) attempt: Id,
+    pub(in crate::engine) operation_revision: i64,
+    pub(in crate::engine) stage_revision: i64,
+    pub(in crate::engine) completion_revision: i64,
+    pub(in crate::engine) host_prefix: String,
+}
+
 impl Engine {
     pub(super) async fn remote_materialize_export(
         &self,
@@ -424,6 +436,14 @@ pub(in crate::engine) fn validate_record(
     } else if family != "export-staged" {
         return Err(invalid_export());
     }
+    if let Some(completed) = completed_stage(rows, &operation.request.operation, budget)? {
+        if completed.object != staged.object {
+            return Err(invalid_export());
+        }
+        // The closed bytes are now durable remotely. Original stage metadata
+        // remains creation proof; it no longer promises host payload availability.
+        return Ok(None);
+    }
     Ok(Some(staged.object))
 }
 
@@ -435,7 +455,7 @@ pub(in crate::engine) fn check_completed(
     validation: &ExportValidation,
     rows: &SnapshotRows,
     budget: Option<&Budget>,
-) -> Result<()> {
+) -> Result<CompletedStage> {
     let revision = rows
         .revision(&format!("export-operation/{}", operation.request.operation))
         .ok_or_else(invalid_export)?;
@@ -480,6 +500,15 @@ pub(in crate::engine) fn check_completed(
     {
         return Err(invalid_export());
     }
+    let completed = CompletedStage {
+        object: staged.object.clone(),
+        remote: materialized.object.clone(),
+        attempt: attempt.id.clone(),
+        operation_revision: revision,
+        stage_revision,
+        completion_revision: materialized_revision,
+        host_prefix: attempt.host_prefix.clone(),
+    };
     let expected = ObjectRef {
         path: attempt.destination,
         ..staged.object.clone()
@@ -497,7 +526,66 @@ pub(in crate::engine) fn check_completed(
     {
         return Err(invalid_export());
     }
-    Ok(())
+    Ok(completed)
+}
+
+pub(in crate::engine) fn completed_stage(
+    rows: &SnapshotRows,
+    operation: &Id,
+    budget: Option<&Budget>,
+) -> Result<Option<CompletedStage>> {
+    let operation_key = format!("export-operation/{operation}");
+    let materialized_key = format!("export-materialized/{operation}");
+    let validation_key = format!("export-validation/{operation}");
+    let _memory = budget
+        .map(|budget| {
+            rows.reserve_decoded(
+                budget,
+                &[&operation_key, &materialized_key, &validation_key],
+            )
+        })
+        .transpose()?;
+    let output = rows.get_record::<ExportMaterialized>(&materialized_key)?;
+    if output
+        .as_ref()
+        .is_some_and(|(_, _, output)| !output.object.path.starts_with("s3://"))
+    {
+        return Ok(None);
+    }
+    let validation = rows.get_record::<ExportValidation>(&validation_key)?;
+    let (Some((_, _, output)), Some((_, _, validation))) = (output, validation) else {
+        if rows.contains_key(&materialized_key) || rows.contains_key(&validation_key) {
+            return Err(invalid_export());
+        }
+        return Ok(None);
+    };
+    if !output.object.path.starts_with("s3://") {
+        return Ok(None);
+    }
+    let (_, _, operation): (_, _, ExportOperation) = rows
+        .get_record(&operation_key)?
+        .ok_or_else(invalid_export)?;
+    validate_operation_record(&operation)?;
+    check_completed(&operation, &output, &validation, rows, budget).map(Some)
+}
+
+/// Ends only a completed export's host prefix, preserving remote protection.
+pub(in crate::engine) fn completed_host_prefix(
+    protection: &Protection,
+    rows: &SnapshotRows,
+) -> Result<Option<String>> {
+    let Some(operation) = protection.purpose.strip_suffix("/export") else {
+        return Ok(None);
+    };
+    let operation = Id::new(operation)?;
+    let Some(stage) = completed_stage(rows, &operation, None)? else {
+        return Ok(None);
+    };
+    if stage.attempt == protection.id {
+        Ok(Some(stage.host_prefix))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(in crate::engine) fn check_pin_binding(
@@ -702,3 +790,6 @@ fn check_stage_order(attempt_key: &str, staged_key: &str, rows: &SnapshotRows) -
     }
     Ok(())
 }
+
+#[cfg(all(test, feature = "remote", feature = "test-util", unix))]
+mod stage_removal_tests;

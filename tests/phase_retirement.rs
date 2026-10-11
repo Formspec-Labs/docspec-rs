@@ -186,6 +186,10 @@ async fn exact_generation_retries_do_not_retire_recomputed_work() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        engine.plan(&request).await.unwrap().reusable_phase_origins["processing"],
+        stale.records[0]
+    );
     let mut forged = stale.clone();
     forged.retirement = id("unknown-native-boundary");
     forged.snapshot_id = i64::MAX;
@@ -214,6 +218,7 @@ async fn exact_generation_retries_do_not_retire_recomputed_work() {
     );
     assert!(!plan.required_phase_reasons.contains_key("admission"));
     assert!(!plan.required_phase_reasons.contains_key("selection"));
+    assert!(!plan.reusable_phase_origins.contains_key("processing"));
     std::fs::rename(&offline, &request.input).unwrap();
     let inspection = engine
         .inspect_retention(std::slice::from_ref(&candidate))
@@ -257,6 +262,10 @@ async fn exact_generation_retries_do_not_retire_recomputed_work() {
         .unwrap();
     assert!(fresh.records[0].revision > retired.plan.records[0].revision);
     assert_eq!(fresh.records[0].key, key);
+    assert_eq!(
+        engine.plan(&request).await.unwrap().reusable_phase_origins["processing"],
+        fresh.records[0]
+    );
     assert_eq!(
         engine.retire_phases(&stale).await.unwrap_err().code(),
         "stale_retirement"
@@ -362,6 +371,12 @@ async fn retained_readback_selects_after_upstream_retirement_without_source() {
     assert!(!plan.completed);
     assert_eq!(plan.required_phases, ["selection"]);
     assert_eq!(plan.reusable_phases, ["readback"]);
+    assert_eq!(plan.reusable_phase_origins.len(), 1);
+    assert_eq!(
+        plan.reusable_phase_origins["readback"].key,
+        "readback/initial"
+    );
+    assert!(plan.reusable_phase_origins["readback"].revision > 0);
     assert_eq!(engine.run(&request).await.unwrap(), retained);
     assert_eq!(engine.latest(&request.dataset).await.unwrap(), retained);
     let after = engine.inspect(&request.dataset).await.unwrap();

@@ -177,23 +177,21 @@ impl Engine {
                 &self.inner.lifecycle.budget,
             )
             .await?;
-            if storage::defaults::evolved(native.metadata())
-                || storage::identity::has_origins(native.metadata().current_schema())?
-            {
-                let dataframe = schema::normalize(
-                    dataframe,
-                    native.metadata().current_schema(),
-                    &[],
-                    &self.inner.lifecycle.budget,
-                )
+            // An explicit base fixes field meaning, order and allocation history.
+            // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
+            let dataframe = schema::normalize(
+                dataframe,
+                native.metadata().current_schema(),
+                &[],
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
+            let table = self
+                .replacement_output(&spec.dataset, directory, &native)
                 .await?;
-                let table = self
-                    .replacement_output(&spec.dataset, directory, &native)
-                    .await?;
-                let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
-                prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
-                return Ok(prepared);
-            }
+            let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
+            prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
+            return Ok(prepared);
         }
         check_build_fields(&dataframe)?;
         self.write_frame(&spec.dataset, directory, dataframe).await

@@ -10,6 +10,16 @@ use std::{
 
 /// Kills the CLI only after it acknowledges the requested durable handoff.
 pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phase: &str) {
+    drop(kill_after_with_work(root, request, kind, phase));
+}
+
+/// Kills at the same durable handoff and returns actual phase-start receipts.
+pub fn kill_after_with_work(
+    root: &Path,
+    request: &impl serde::Serialize,
+    kind: &str,
+    phase: &str,
+) -> Vec<String> {
     let spec = root.join("request.json");
     std::fs::write(&spec, serde_json::to_vec(request).unwrap()).unwrap();
     // These correctness fixtures need bounded scratch, not the production
@@ -46,7 +56,11 @@ pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phas
     let (send, receive) = mpsc::sync_channel(1);
     let reader = std::thread::spawn(move || {
         let mut recent = std::collections::VecDeque::new();
+        let mut work = Vec::new();
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(phase) = line.strip_prefix("DOCSPEC_TEST_WORK ") {
+                work.push(phase.to_owned());
+            }
             if line == "DOCSPEC_TEST_PAUSED" {
                 let _ = send.send(());
                 break;
@@ -57,14 +71,14 @@ pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phas
                 recent.pop_front();
             }
         }
-        recent
+        (recent, work)
     });
     // These are small correctness fixtures; a deadline prevents a hung worker
     // from stalling the gate. It is not a performance acceptance threshold.
     let reached = receive.recv_timeout(Duration::from_secs(30));
     let killed = child.kill();
     let status = child.wait().unwrap();
-    let recent = reader.join().unwrap();
+    let (recent, work) = reader.join().unwrap();
     assert!(
         reached.is_ok(),
         "{kind}/{phase}: worker did not acknowledge the handoff: {recent:?} ({status})"
@@ -81,6 +95,7 @@ pub fn kill_after(root: &Path, request: &impl serde::Serialize, kind: &str, phas
         );
     }
     eprintln!("killed {kind} worker after {phase}; status={status}");
+    work
 }
 
 /// Resumes through another CLI process using the request retained by `kill_after`.

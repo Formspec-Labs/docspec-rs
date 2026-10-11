@@ -104,6 +104,49 @@ async fn processing_keeps_its_consumed_input_when_an_admission_key_is_rebound() 
         let view = lifecycle.open(&build.dataset).await.unwrap();
         lifecycle.commit(&view, vec![change_record]).await.unwrap();
         std::fs::remove_file(&build.input).unwrap();
+        if !legacy {
+            let expected = engine
+                .plan_phase_retirement(
+                    &build.dataset,
+                    &id("observe-processing"),
+                    &[(*processing_key).clone()],
+                    "observe the original completion generation",
+                )
+                .await
+                .unwrap();
+            let before_plan = engine.inspect(&build.dataset).await.unwrap();
+            let planned = if update {
+                engine.plan_update(&change).await.unwrap()
+            } else {
+                // A different operation can reuse the exact original work even
+                // when the request locator no longer exists and admission moved.
+                engine
+                    .plan(&RunSpec {
+                        operation: id("reuse-from-another-operation"),
+                        input: root
+                            .path()
+                            .join("unavailable.parquet")
+                            .to_string_lossy()
+                            .into_owned(),
+                        ..build.clone()
+                    })
+                    .await
+                    .unwrap()
+            };
+            let origin = &planned.reusable_phase_origins["processing"];
+            assert_eq!(origin, &expected.records[0]);
+            let observed: PhaseResult =
+                serde_json::from_value(before_plan[&origin.key].clone()).unwrap();
+            assert_eq!(observed.operation, build.operation);
+            assert_eq!(
+                observed.dependencies.as_ref().unwrap().admitted_inputs[input_name],
+                *exact
+            );
+            if !update {
+                assert_ne!(observed.operation, planned.operation);
+            }
+            assert_eq!(engine.inspect(&build.dataset).await.unwrap(), before_plan);
+        }
         let release = if update {
             engine.update(&change).await.unwrap()
         } else {

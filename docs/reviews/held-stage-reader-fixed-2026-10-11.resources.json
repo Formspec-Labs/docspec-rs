@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-10-11T06:58:44.500053+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "--",
+    "engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream"
+  ],
+  "free_before_bytes": 18409758720,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 18326671360,
+  "free_after_bytes": 18387722240,
+  "finished_utc": "2026-10-11T06:59:08.593127+00:00"
+}

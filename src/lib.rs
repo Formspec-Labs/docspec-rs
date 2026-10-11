@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod export;
 pub mod http;
 pub mod model;
+mod progress;
 mod query;
 pub mod restore;
 pub mod storage;

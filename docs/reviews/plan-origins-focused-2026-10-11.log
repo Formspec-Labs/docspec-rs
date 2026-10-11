@@ -1,0 +1,47 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.68s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 39 tests
+test lifecycle::initial_plan_names_every_missing_handoff_including_selection_without_input_reads ... ok
+test lifecycle::bad_input_and_non_query_sql_never_select_a_release ... ok
+test lifecycle::dependency_correction_fences_adoption_without_output_change ... ok
+test lifecycle::independent_reader_rejects_same_size_corruption ... ok
+test lifecycle::exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test lifecycle::completed_plan_remains_complete_after_later_selection_without_reselecting_old_result ... ok
+test lifecycle::every_acknowledged_metadata_update_survives_cache_loss ... ok
+test lifecycle::native_snapshot_guard_rejects_stale_application_state ... ok
+test lifecycle::live_workspace_owner_and_conflicting_operation_refuse ... ok
+test lifecycle::empty_output_keeps_schema_and_readable_history ... ok
+test lifecycle::comparison_preserves_duplicates_and_historical_release ... ok
+test lifecycle::local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test lifecycle::native_readers_hold_shared_admission_until_stream_drop ... ok
+test dependency_correction_lifecycle::correction_after_export_validation_blocks_selection_and_keeps_completed_output ... ok
+test lifecycle::oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test lifecycle::relocated_build_retry_keeps_the_original_readback_request ... ok
+test lifecycle::plan_and_run_apply_the_same_definition_fence ... ok
+test lifecycle::routine_checks_reject_damaged_footer_and_declared_counts ... ok
+test lifecycle::new_operation_reuses_qualified_values_and_original_generation ... ok
+test dependency_correction_lifecycle::corrected_computed_export_admission_preserves_completed_replay_and_source_exports ... ok
+test lifecycle::routine_checks_report_scope_and_deep_checks_find_same_size_input_damage ... ok
+test lifecycle::older_preparation_cannot_replace_newer_coverage ... ok
+test lifecycle::unstable_functions_do_not_become_reusable_results ... ok
+test lifecycle::cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test lifecycle::simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test lifecycle::routine_samples_allow_several_individually_bounded_wide_batches ... ok
+test phase_retirement::processing_recovers_after_admission_retirement_and_restart ... ok
+test phase_retirement::exact_generation_retries_do_not_retire_recomputed_work ... ok
+test lifecycle::killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_work ... ok
+test phase_retirement::retained_readback_selects_after_upstream_retirement_without_source ... ok
+test lifecycle::every_durable_phase_survives_reopen_and_source_loss ... ok
+test phase_retirement::validation_requires_explicit_retirement_after_processing_replacement ... ok
+test dependency_correction_lifecycle::qualified_inherited_group_restores_original_evidence_after_recovery_retirement ... ok
+test phase_retirement::evidence_requires_explicit_retirement_after_source_replacement ... ok
+test phase_retirement::scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test phase_retirement::retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test lifecycle::killed_cli_worker_resumes_every_completed_handoff ... ok
+test phase_dependencies::evolved_build_keeps_exact_consumed_schema_metadata ... ok
+test phase_dependencies::processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 266 filtered out; finished in 12.97s
+

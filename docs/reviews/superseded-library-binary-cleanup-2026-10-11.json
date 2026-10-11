@@ -1,0 +1,11 @@
+{
+  "observed_utc": "2026-10-11T06:34:33.060695+00:00",
+  "removed_path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-8efaad379e46ee74",
+  "reason": "Inactive superseded all-feature library test executable; current Cargo test uses docspec-f22faff8f24325f2. Maintained dependency/build caches retained.",
+  "lsof_exit": 1,
+  "removed_logical_bytes": 286868896,
+  "removed_allocated_bytes": 286871552,
+  "replacement_path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-f22faff8f24325f2",
+  "free_before_bytes": 1784426496,
+  "free_after_bytes": 2071302144
+}

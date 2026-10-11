@@ -382,6 +382,23 @@ async fn selection_wins_over_abandonment_even_when_its_response_is_lost() {
 async fn newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it() {
     let root = TempDir::new().unwrap();
     let (engine, base, _) = fixture(root.path(), false).await;
+    // Establish hidden row-origin fields before capture: the later update must
+    // change values only, so exact retained schema history remains reusable.
+    let base = engine
+        .update(&UpdateSpec {
+            dataset: base.dataset.dataset.clone(),
+            operation: id("establish-origins"),
+            definition: base.dataset.definition.clone(),
+            base: base.id.clone(),
+            keys: vec!["id".into()],
+            replacements: input(
+                &root.path().join("origins.parquet"),
+                &[(Some(9000), Some("initial origin".into()))],
+            ),
+            deletions: None,
+        })
+        .await
+        .unwrap();
     let base = engine
         .backfill(&spec(
             &base,

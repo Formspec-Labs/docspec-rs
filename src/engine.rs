@@ -152,7 +152,7 @@ struct Operation {
     definition: String,
     base: Option<Id>,
     base_manifest: Option<ObjectRef>,
-    /// Material native schema/history for full rebuilds with omission rules.
+    /// Material native schema/history when a rebuild cannot reuse its exact source.
     #[serde(default)]
     schema_key: Option<String>,
     /// Explicit rebuilds fence later source admissions before replacing the selection.
@@ -188,6 +188,10 @@ pub struct RunPlan {
     /// This operation has a retained selection result, even after a later selection.
     pub completed: bool,
     pub reusable_phases: Vec<String>,
+    /// Exact retained records supporting the reusable phases at this observation.
+    /// Keys locate consumed references and original operation identity in `inspect`.
+    /// Readback fast paths do not revisit earlier phases; this grants no protection.
+    pub reusable_phase_origins: BTreeMap<String, RetainedGeneration>,
     /// Missing durable handoffs, including final selection when not completed.
     pub required_phases: Vec<String>,
     /// Known reasons for required durable phases; final selection is a separate handoff.
@@ -198,8 +202,8 @@ pub struct RunPlan {
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
 const PROCESSOR: &str = "docspec.dataset.v10";
-// Format 11 changes schema coverage metadata, not material processing/reuse keys.
-pub(crate) const FORMAT: u32 = 11;
+// Format 12 makes explicitly based Builds preserve exact native schema history.
+pub(crate) const FORMAT: u32 = 12;
 const PREVIOUS_FORMAT: u32 = 10;
 
 fn previous_format() -> u32 {
@@ -207,7 +211,8 @@ fn previous_format() -> u32 {
 }
 
 fn supported_format(format: u32) -> bool {
-    matches!(format, PREVIOUS_FORMAT | FORMAT)
+    // Format 11 changed schema coverage; its retained results remain readable.
+    matches!(format, PREVIOUS_FORMAT | 11 | FORMAT)
 }
 
 impl Engine {
@@ -467,22 +472,30 @@ impl Engine {
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
         }
+        let readback_key = format!("readback/{}", spec.operation());
         let readback = lifecycle
-            .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
+            .rows(&view)
             .await?
-            .is_some();
+            .get_record::<ReleasePin>(&readback_key)?
+            .map(|(revision, _, _)| RetainedGeneration {
+                key: readback_key,
+                revision,
+            });
         // A readback preserves expensive work but still needs guarded selection.
         // A retained result completes this operation independently of today's head.
-        if completed || readback {
+        if completed || readback.is_some() {
             return Ok(RunPlan {
                 dataset: spec.dataset().clone(),
                 operation: spec.operation().clone(),
                 completed,
-                reusable_phases: if readback {
+                reusable_phases: if readback.is_some() {
                     vec!["readback".into()]
                 } else {
                     Vec::new()
                 },
+                reusable_phase_origins: readback
+                    .map(|origin| BTreeMap::from([("readback".into(), origin)]))
+                    .unwrap_or_default(),
                 required_phases: if completed {
                     Vec::new()
                 } else {
@@ -493,6 +506,7 @@ impl Engine {
             });
         }
         let mut reusable_phases = Vec::new();
+        let mut reusable_phase_origins = BTreeMap::new();
         let mut required_phases = Vec::new();
         let mut required_phase_reasons = BTreeMap::new();
         let mut phases = PHASES.to_vec();
@@ -522,7 +536,7 @@ impl Engine {
         }
         let schema_key = match &operation {
             Some(operation) => operation.schema_key.clone(),
-            None => self.schema_key(&authority, spec).await?,
+            None => self.schema_key(&view, &authority, spec).await?,
         };
         let mut retained_processing = false;
         let mut adopted_receipts = false;
@@ -530,55 +544,62 @@ impl Engine {
             if phase == "receipts" && adopted_receipts {
                 continue;
             }
-            let (exists, reason) = if phase == "groups" {
+            let (origin, reason) = if phase == "groups" {
+                let key = format!("groups/{}", spec.operation());
                 let (completion, reason) = self
-                    .completion_with_reason::<CompletedGroups>(
-                        &view,
-                        &format!("groups/{}", spec.operation()),
-                    )
+                    .completion_with_reason::<CompletedGroups>(&view, &key)
                     .await?;
-                (completion.is_some(), reason)
-            } else if phase == "readback" {
-                let exists = lifecycle
-                    .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
-                    .await?
-                    .is_some();
                 (
-                    exists,
-                    (!exists).then_some(PlanPhaseReason::NoRetainedCompletion),
+                    completion.map(|(revision, _)| RetainedGeneration { key, revision }),
+                    reason,
                 )
+            } else if phase == "readback" {
+                // The same immutable view's readback was already resolved above.
+                (None, Some(PlanPhaseReason::NoRetainedCompletion))
             } else {
                 let eligibility = operation
                     .as_ref()
                     .map_or(authority.eligibility, |o| o.eligibility);
+                let key = phase_key(
+                    spec,
+                    &request,
+                    eligibility,
+                    phase,
+                    operation
+                        .as_ref()
+                        .and_then(|o| o.base_manifest.as_ref())
+                        .or_else(|| captured_manifest(&authority, spec)),
+                    schema_key.as_ref(),
+                )?;
                 let (completion, reason) = self
-                    .completion_with_reason::<PhaseResult>(
-                        &view,
-                        &phase_key(
-                            spec,
-                            &request,
-                            eligibility,
-                            phase,
-                            operation
-                                .as_ref()
-                                .and_then(|o| o.base_manifest.as_ref())
-                                .or_else(|| captured_manifest(&authority, spec)),
-                            schema_key.as_ref(),
-                        )?,
-                    )
+                    .completion_with_reason::<PhaseResult>(&view, &key)
                     .await?;
                 if phase == "processing" {
+                    if let Some((_, completed)) = &completion {
+                        self.check_reused_build_schema(
+                            &view,
+                            spec,
+                            operation.as_ref().map_or(FORMAT, |o| o.result_format),
+                            schema_key.as_ref(),
+                            completed,
+                        )
+                        .await?;
+                    }
                     retained_processing = completion
                         .as_ref()
-                        .is_some_and(|phase| phase.dependencies.is_some());
-                    if let (Some(processing), Some(base)) = (&completion, &receipt_base) {
+                        .is_some_and(|(_, phase)| phase.dependencies.is_some());
+                    if let (Some((_, processing)), Some(base)) = (&completion, &receipt_base) {
                         adopted_receipts = evidence::adopts_receipts(spec, processing, base)?;
                     }
                 }
-                (completion.is_some(), reason)
+                (
+                    completion.map(|(revision, _)| RetainedGeneration { key, revision }),
+                    reason,
+                )
             };
-            if exists {
+            if let Some(origin) = origin {
                 reusable_phases.push(phase.to_owned());
+                reusable_phase_origins.insert(phase.to_owned(), origin);
             } else {
                 required_phases.push(phase.to_owned());
                 if let Some(reason) = reason {
@@ -596,6 +617,7 @@ impl Engine {
             operation: spec.operation().clone(),
             completed,
             reusable_phases,
+            reusable_phase_origins,
             required_phases,
             required_phase_reasons,
             limits: lifecycle.budget.limits.clone(),
@@ -955,230 +977,242 @@ impl Engine {
             } else if let OperationRequest::Schema(schema) = spec {
                 self.admit_schema(schema, operation).await?
             } else {
-                #[cfg(feature = "test-util")]
-                work_started("admission");
-                let view = lifecycle.open(spec.dataset()).await?;
-                let _memory = self.admission_memory(&view, spec.operation()).await?;
-                let captured = self
-                    .admitted_dependencies(&view, spec.operation())
-                    .await?
-                    .unwrap_or_default();
-                let inputs = spec.inputs();
-                let size = if self.inner.retained.is_local() {
-                    inputs
-                        .iter()
-                        .try_fold(0u64, |sum, (name, input)| -> Result<u64> {
-                            // Reused managed inputs consume no new input-copy space;
-                            // retain the existing estimate for output/intermediate work.
-                            let bytes = if let Some(object) = captured.inputs.get(name) {
-                                object.bytes.saturating_mul(2)
-                            } else {
-                                std::fs::metadata(&input.path)?.len().saturating_mul(3)
-                            };
-                            Ok(sum.saturating_add(bytes))
-                        })?
-                } else {
-                    0
-                };
-                // Remote retained bytes consume no host copy/output capacity.
-                // Scratch remains host-local and is checked before any transfer.
-                let available = fs2::available_space(&self.inner.root)?;
-                if available < size.saturating_add(lifecycle.budget.limits.scratch_bytes) {
-                    return Err(Error::refusal(
-                        "disk_capacity",
-                        "input, output and declared scratch do not fit available disk",
-                    ));
-                }
-                let remote = !self.inner.retained.is_local();
-                if remote && !matches!(spec, OperationRequest::Build(_)) {
-                    return Err(locations::unsupported());
-                }
-                let pending = if remote && captured.inputs.len() != inputs.len() {
-                    Some(
-                        self.reserve_source_attempt(spec, operation, &view, &captured.inputs)
-                            .await?,
-                    )
-                } else {
-                    None
-                };
-                if pending.is_some() {
-                    stop_after(stop, "source-reservation")?;
-                }
-                let directory = if captured.inputs.len() == inputs.len() || remote {
-                    None
-                } else {
-                    Some(self.reserve_location(spec, operation, "admission").await?)
-                };
-                let mut outputs = Vec::new();
-                for (name, input) in inputs {
-                    if let Some(retained) = captured.inputs.get(&name) {
-                        outputs.push(retained.clone());
-                        continue;
-                    }
-                    let source = PathBuf::from(&input.path);
-                    let expected = if let Some((pending, _)) = &pending {
-                        pending
-                            .inputs
-                            .get(&name)
-                            .cloned()
-                            .ok_or_else(locations::invalid)?
+                crate::progress::phase(spec.dataset(), spec.operation(), "admission", async {
+                    #[cfg(feature = "test-util")]
+                    work_started("admission");
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    let _memory = self.admission_memory(&view, spec.operation()).await?;
+                    let captured = self
+                        .admitted_dependencies(&view, spec.operation())
+                        .await?
+                        .unwrap_or_default();
+                    let inputs = spec.inputs();
+                    let size = if self.inner.retained.is_local() {
+                        inputs
+                            .iter()
+                            .try_fold(0u64, |sum, (name, input)| -> Result<u64> {
+                                // Reused managed inputs consume no new input-copy space;
+                                // retain the existing estimate for output/intermediate work.
+                                let bytes = if let Some(object) = captured.inputs.get(name) {
+                                    object.bytes.saturating_mul(2)
+                                } else {
+                                    std::fs::metadata(&input.path)?.len().saturating_mul(3)
+                                };
+                                Ok(sum.saturating_add(bytes))
+                            })?
                     } else {
-                        ObjectRef {
-                            owner: spec.dataset().clone(),
-                            path: directory
-                                .as_ref()
-                                .expect("input has reserved directory")
-                                .child(&format!("{name}.parquet"))?
-                                .as_string()?,
-                            bytes: 0, // Local copy_verified derives the retained length.
-                            digest: input.digest,
-                        }
+                        0
                     };
-                    outputs.push(
-                        self.inner
-                            .objects
-                            .admit_source(
-                                &expected,
-                                source,
-                                &lifecycle.budget,
-                                pending.as_ref().is_some_and(|(_, resuming)| *resuming),
-                            )
-                            .await?,
-                    );
-                }
-                if remote {
-                    stop_after(stop, "source-transfer")?;
-                }
-                let phase = PhaseResult {
-                    operation: spec.operation().clone(),
-                    phase: "admission".into(),
-                    request_digest: request.to_owned(),
-                    eligibility: operation.eligibility,
-                    outputs,
-                    table: None,
-                    rows: 0,
-                    changes: None,
-                    coverage: None,
-                    metrics: WriteMetrics::default(),
-                    dependencies: Some(PhaseDependencies::default()),
-                };
-                let protections = self.request_protections(&view, spec.operation()).await?;
-                self.complete(spec, operation, phase, protections).await?
+                    // Remote retained bytes consume no host copy/output capacity.
+                    // Scratch remains host-local and is checked before any transfer.
+                    let available = fs2::available_space(&self.inner.root)?;
+                    if available < size.saturating_add(lifecycle.budget.limits.scratch_bytes) {
+                        return Err(Error::refusal(
+                            "disk_capacity",
+                            "input, output and declared scratch do not fit available disk",
+                        ));
+                    }
+                    let remote = !self.inner.retained.is_local();
+                    if remote && !matches!(spec, OperationRequest::Build(_)) {
+                        return Err(locations::unsupported());
+                    }
+                    let pending = if remote && captured.inputs.len() != inputs.len() {
+                        Some(
+                            self.reserve_source_attempt(spec, operation, &view, &captured.inputs)
+                                .await?,
+                        )
+                    } else {
+                        None
+                    };
+                    if pending.is_some() {
+                        stop_after(stop, "source-reservation")?;
+                    }
+                    let directory = if captured.inputs.len() == inputs.len() || remote {
+                        None
+                    } else {
+                        Some(self.reserve_location(spec, operation, "admission").await?)
+                    };
+                    let mut outputs = Vec::new();
+                    for (name, input) in inputs {
+                        if let Some(retained) = captured.inputs.get(&name) {
+                            outputs.push(retained.clone());
+                            continue;
+                        }
+                        let source = PathBuf::from(&input.path);
+                        let expected = if let Some((pending, _)) = &pending {
+                            pending
+                                .inputs
+                                .get(&name)
+                                .cloned()
+                                .ok_or_else(locations::invalid)?
+                        } else {
+                            ObjectRef {
+                                owner: spec.dataset().clone(),
+                                path: directory
+                                    .as_ref()
+                                    .expect("input has reserved directory")
+                                    .child(&format!("{name}.parquet"))?
+                                    .as_string()?,
+                                bytes: 0, // Local copy_verified derives the retained length.
+                                digest: input.digest,
+                            }
+                        };
+                        outputs.push(
+                            self.inner
+                                .objects
+                                .admit_source(
+                                    &expected,
+                                    source,
+                                    &lifecycle.budget,
+                                    pending.as_ref().is_some_and(|(_, resuming)| *resuming),
+                                )
+                                .await?,
+                        );
+                    }
+                    if remote {
+                        stop_after(stop, "source-transfer")?;
+                    }
+                    let phase = PhaseResult {
+                        operation: spec.operation().clone(),
+                        phase: "admission".into(),
+                        request_digest: request.to_owned(),
+                        eligibility: operation.eligibility,
+                        outputs,
+                        table: None,
+                        rows: 0,
+                        changes: None,
+                        coverage: None,
+                        metrics: WriteMetrics::default(),
+                        dependencies: Some(PhaseDependencies::default()),
+                    };
+                    let protections = self.request_protections(&view, spec.operation()).await?;
+                    self.complete(spec, operation, phase, protections).await
+                })
+                .await?
             };
             stop_after(stop, "admission")?;
 
             let processing = if let Some(phase) = self.phase(spec, operation, "processing").await? {
                 phase
             } else {
-                #[cfg(feature = "test-util")]
-                work_started("processing");
-                let (prepared, update_source, _capture_memory) =
-                    if let OperationRequest::Build(build) = spec
-                        && build.base.is_none()
-                    {
-                        (
-                            self.process_initial_build(build, operation, &admission)
-                                .await?,
-                            None,
-                            None,
-                        )
-                    } else {
-                        // Remaining processing shapes preserve their local location APIs.
-                        let directory = self.reserve_attempt(spec, operation, "processing").await?;
-                        let (_capture_memory, update_source) = if admission::captures_source(spec) {
-                            let view = lifecycle.open(spec.dataset()).await?;
-                            let memory = self.admission_memory(&view, spec.operation()).await?;
-                            let source = self
-                                .admitted_dependencies(&view, spec.operation())
-                                .await?
-                                .and_then(|dependencies| dependencies.update_source);
-                            (Some(memory), source)
+                crate::progress::phase(spec.dataset(), spec.operation(), "processing", async {
+                    #[cfg(feature = "test-util")]
+                    work_started("processing");
+                    let (prepared, update_source, _capture_memory) =
+                        if let OperationRequest::Build(build) = spec
+                            && build.base.is_none()
+                        {
+                            (
+                                self.process_initial_build(build, operation, &admission)
+                                    .await?,
+                                None,
+                                None,
+                            )
                         } else {
-                            (None, None)
-                        };
-                        let prepared = match spec {
-                            OperationRequest::Build(build) => {
-                                self.process_build(build, &directory, &admission).await?
-                            }
-                            OperationRequest::Update(update) => {
-                                self.process_update(
-                                    update,
-                                    &directory,
-                                    &admission,
-                                    update_source.as_ref(),
-                                )
-                                .await?
-                            }
-                            OperationRequest::Schema(schema) => {
-                                self.process_schema(schema, &directory, operation).await?
-                            }
-                            OperationRequest::Evidence(evidence) => {
-                                self.process_receipts(evidence, &directory, &admission)
+                            // Remaining processing shapes preserve their local location APIs.
+                            let directory =
+                                self.reserve_attempt(spec, operation, "processing").await?;
+                            let (_capture_memory, update_source) =
+                                if admission::captures_source(spec) {
+                                    let view = lifecycle.open(spec.dataset()).await?;
+                                    let memory =
+                                        self.admission_memory(&view, spec.operation()).await?;
+                                    let source = self
+                                        .admitted_dependencies(&view, spec.operation())
+                                        .await?
+                                        .and_then(|dependencies| dependencies.update_source);
+                                    (Some(memory), source)
+                                } else {
+                                    (None, None)
+                                };
+                            let prepared = match spec {
+                                OperationRequest::Build(build) => {
+                                    self.process_build(build, &directory, &admission).await?
+                                }
+                                OperationRequest::Update(update) => {
+                                    self.process_update(
+                                        update,
+                                        &directory,
+                                        &admission,
+                                        update_source.as_ref(),
+                                    )
                                     .await?
-                            }
-                            OperationRequest::Refresh(refresh) => {
-                                Box::pin(self.process_refresh(
-                                    refresh,
-                                    &directory,
-                                    &admission,
-                                    operation,
-                                    update_source.as_ref(),
-                                ))
-                                .await?
-                            }
-                            OperationRequest::Backfill(_) => {
-                                return Err(Error::refusal(
-                                    "invalid_operation",
-                                    "use the backfill service",
-                                ));
-                            }
+                                }
+                                OperationRequest::Schema(schema) => {
+                                    self.process_schema(schema, &directory, operation).await?
+                                }
+                                OperationRequest::Evidence(evidence) => {
+                                    self.process_receipts(evidence, &directory, &admission)
+                                        .await?
+                                }
+                                OperationRequest::Refresh(refresh) => {
+                                    Box::pin(self.process_refresh(
+                                        refresh,
+                                        &directory,
+                                        &admission,
+                                        operation,
+                                        update_source.as_ref(),
+                                    ))
+                                    .await?
+                                }
+                                OperationRequest::Backfill(_) => {
+                                    return Err(Error::refusal(
+                                        "invalid_operation",
+                                        "use the backfill service",
+                                    ));
+                                }
+                            };
+                            (prepared, update_source, _capture_memory)
                         };
-                        (prepared, update_source, _capture_memory)
+                    let mut outputs = prepared.table.objects.clone();
+                    if let Some(changes) = &prepared.changes {
+                        outputs.push(changes.base_manifest.clone());
+                        outputs.extend(changes.removed.objects.clone());
+                        outputs.extend(changes.added.objects.clone());
+                    }
+                    outputs.sort_by(|left, right| left.path.cmp(&right.path));
+                    outputs.dedup();
+                    let phase = PhaseResult {
+                        operation: spec.operation().clone(),
+                        phase: "processing".into(),
+                        request_digest: request.to_owned(),
+                        eligibility: operation.eligibility,
+                        outputs,
+                        rows: prepared.table.rows,
+                        table: Some(prepared.table),
+                        changes: prepared.changes,
+                        coverage: admission.coverage.clone(),
+                        metrics: prepared.metrics,
+                        dependencies: Some(PhaseDependencies {
+                            input_sources: admission
+                                .dependencies
+                                .as_ref()
+                                .map(|dependencies| dependencies.input_sources.clone())
+                                .unwrap_or_default(),
+                            admitted_inputs: spec
+                                .inputs()
+                                .keys()
+                                .cloned()
+                                .zip(admission.outputs.iter().cloned())
+                                .collect(),
+                            base_manifest: operation.base_manifest.clone(),
+                            schema_metadata: prepared.schema_input.into_iter().collect(),
+                            tables: update_source
+                                .as_ref()
+                                .map(NativeSnapshotRef::from)
+                                .into_iter()
+                                .collect(),
+                        }),
                     };
-                let mut outputs = prepared.table.objects.clone();
-                if let Some(changes) = &prepared.changes {
-                    outputs.push(changes.base_manifest.clone());
-                    outputs.extend(changes.removed.objects.clone());
-                    outputs.extend(changes.added.objects.clone());
-                }
-                outputs.sort_by(|left, right| left.path.cmp(&right.path));
-                outputs.dedup();
-                let phase = PhaseResult {
-                    operation: spec.operation().clone(),
-                    phase: "processing".into(),
-                    request_digest: request.to_owned(),
-                    eligibility: operation.eligibility,
-                    outputs,
-                    rows: prepared.table.rows,
-                    table: Some(prepared.table),
-                    changes: prepared.changes,
-                    coverage: admission.coverage.clone(),
-                    metrics: prepared.metrics,
-                    dependencies: Some(PhaseDependencies {
-                        input_sources: admission
-                            .dependencies
-                            .as_ref()
-                            .map(|dependencies| dependencies.input_sources.clone())
-                            .unwrap_or_default(),
-                        admitted_inputs: spec
-                            .inputs()
-                            .keys()
-                            .cloned()
-                            .zip(admission.outputs.iter().cloned())
-                            .collect(),
-                        base_manifest: operation.base_manifest.clone(),
-                        schema_metadata: prepared.schema_input.into_iter().collect(),
-                        tables: update_source
-                            .as_ref()
-                            .map(NativeSnapshotRef::from)
-                            .into_iter()
-                            .collect(),
-                    }),
-                };
-                let view = lifecycle.open(spec.dataset()).await?;
-                let mut protections = self.request_protections(&view, spec.operation()).await?;
-                ReferenceProtections::inherit(&mut protections, admission.protections.as_ref())?;
-                self.complete(spec, operation, phase, protections).await?
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    let mut protections = self.request_protections(&view, spec.operation()).await?;
+                    ReferenceProtections::inherit(
+                        &mut protections,
+                        admission.protections.as_ref(),
+                    )?;
+                    self.complete(spec, operation, phase, protections).await
+                })
+                .await?
             };
             stop_after(stop, "processing")?;
 
@@ -1355,7 +1389,7 @@ impl Engine {
                         definition: authority.definition.clone(),
                         base: spec.base().cloned(),
                         base_manifest: captured_manifest(&authority, spec).cloned(),
-                        schema_key: self.schema_key(&authority, spec).await?,
+                        schema_key: self.schema_key(&view, &authority, spec).await?,
                         require_current_boundary: matches!(spec, OperationRequest::Schema(_))
                             || matches!(spec, OperationRequest::Build(build) if build.base.is_some()),
                     };
@@ -1532,60 +1566,72 @@ impl Engine {
                 }
                 validated
             } else {
-                #[cfg(feature = "test-util")]
-                work_started("validation");
-                checks.table(&table, &lifecycle.budget).await?;
-                verify_changes(
-                    spec,
-                    &table,
-                    if evidence_only {
-                        None
-                    } else {
-                        processing.changes.as_ref()
-                    },
-                    &lifecycle.budget,
-                    &mut checks,
-                )
-                .await?;
-                if let Some(receipts) = &receipts {
-                    evidence::verify_prepared(
+                crate::progress::phase(spec.dataset(), spec.operation(), "validation", async {
+                    #[cfg(feature = "test-util")]
+                    work_started("validation");
+                    checks.table(&table, &lifecycle.budget).await?;
+                    verify_changes(
                         spec,
                         &table,
-                        base.as_ref().ok_or_else(|| {
-                            Error::refusal("invalid_evidence", "receipts require a captured base")
-                        })?,
-                        receipts,
+                        if evidence_only {
+                            None
+                        } else {
+                            processing.changes.as_ref()
+                        },
                         &lifecycle.budget,
                         &mut checks,
                     )
                     .await?;
-                }
-                if let Some(related) = &related {
-                    Box::pin(refresh::verify_related(
-                        &table,
-                        related,
-                        &lifecycle.budget,
-                        &mut checks,
-                    ))
-                    .await?;
-                }
-                let phase = PhaseResult {
-                    phase: "validation".into(),
-                    dependencies: validation_dependencies,
-                    ..processing.value.clone()
-                };
-                let mut protections = processing
-                    .protections
-                    .as_ref()
-                    .map(ReferenceProtections::duplicate)
-                    .transpose()?;
-                if let Some(related) = &related {
-                    ReferenceProtections::inherit(&mut protections, related.protections.as_ref())?;
-                }
-                if let Some(receipts) = &receipts {
-                    ReferenceProtections::inherit(&mut protections, receipts.protections.as_ref())?;
-                }
-                self.complete(spec, &operation, phase, protections).await?
+                    if let Some(receipts) = &receipts {
+                        evidence::verify_prepared(
+                            spec,
+                            &table,
+                            base.as_ref().ok_or_else(|| {
+                                Error::refusal(
+                                    "invalid_evidence",
+                                    "receipts require a captured base",
+                                )
+                            })?,
+                            receipts,
+                            &lifecycle.budget,
+                            &mut checks,
+                        )
+                        .await?;
+                    }
+                    if let Some(related) = &related {
+                        Box::pin(refresh::verify_related(
+                            &table,
+                            related,
+                            &lifecycle.budget,
+                            &mut checks,
+                        ))
+                        .await?;
+                    }
+                    let phase = PhaseResult {
+                        phase: "validation".into(),
+                        dependencies: validation_dependencies,
+                        ..processing.value.clone()
+                    };
+                    let mut protections = processing
+                        .protections
+                        .as_ref()
+                        .map(ReferenceProtections::duplicate)
+                        .transpose()?;
+                    if let Some(related) = &related {
+                        ReferenceProtections::inherit(
+                            &mut protections,
+                            related.protections.as_ref(),
+                        )?;
+                    }
+                    if let Some(receipts) = &receipts {
+                        ReferenceProtections::inherit(
+                            &mut protections,
+                            receipts.protections.as_ref(),
+                        )?;
+                    }
+                    self.complete(spec, &operation, phase, protections).await
+                })
+                .await?
             };
             stop_after(stop, "validation")?;
             self.prepare_changes(
@@ -1820,42 +1866,51 @@ impl Engine {
                         .await?,
                 }
             } else {
-                #[cfg(feature = "test-util")]
-                work_started("readback");
-                let manifest = self
-                    .create_release(spec, &operation, &dataset, stop)
-                    .await?;
-                let release = ReleasePin {
-                    id: spec.operation().clone(),
-                    dataset,
-                    manifest,
-                    verified: true,
-                };
-                // Prepared tables were validated at their durable phase boundaries.
-                // Equality above verifies serialization without scanning them again.
-                let _guard = lock.lock().await;
-                let view = lifecycle.open(spec.dataset()).await?;
-                self.check_completion(&view, &operation, spec.operation())
-                    .await?;
-                if let Some(completed) = lifecycle.get::<ReleasePin>(&view, &readback_key).await? {
-                    Retained {
-                        value: completed,
-                        protections: self.retained_protections(&view, &readback_key).await?,
-                    }
-                } else {
-                    let records = completion_records(
-                        spec.dataset(),
-                        &view,
-                        &readback_key,
-                        &release,
-                        readback_protections.as_ref(),
-                    )?;
-                    lifecycle.commit(&view, records).await?;
-                    Retained {
-                        value: release,
-                        protections: readback_protections,
-                    }
-                }
+                crate::progress::phase(spec.dataset(), spec.operation(), "readback", async {
+                    #[cfg(feature = "test-util")]
+                    work_started("readback");
+                    let manifest = self
+                        .create_release(spec, &operation, &dataset, stop)
+                        .await?;
+                    let release = ReleasePin {
+                        id: spec.operation().clone(),
+                        dataset,
+                        manifest,
+                        verified: true,
+                    };
+                    // Prepared tables were validated at their durable phase boundaries.
+                    // Equality above verifies serialization without scanning them again.
+                    let _guard = lock.lock().await;
+                    let view = lifecycle.open(spec.dataset()).await?;
+                    self.check_completion(&view, &operation, spec.operation())
+                        .await?;
+                    Ok(
+                        if let Some(completed) =
+                            lifecycle.get::<ReleasePin>(&view, &readback_key).await?
+                        {
+                            Retained {
+                                value: completed,
+                                protections: self
+                                    .retained_protections(&view, &readback_key)
+                                    .await?,
+                            }
+                        } else {
+                            let records = completion_records(
+                                spec.dataset(),
+                                &view,
+                                &readback_key,
+                                &release,
+                                readback_protections.as_ref(),
+                            )?;
+                            lifecycle.commit(&view, records).await?;
+                            Retained {
+                                value: release,
+                                protections: readback_protections,
+                            }
+                        },
+                    )
+                })
+                .await?
             };
             stop_after(stop, "readback")?;
             self.select_prepared(spec, &operation, release, stop).await
@@ -1973,6 +2028,16 @@ impl Engine {
         )?;
         let found: Option<PhaseResult> = self.active_completion(&view, &key).await?;
         if let Some(found) = found {
+            if phase == "processing" {
+                self.check_reused_build_schema(
+                    &view,
+                    spec,
+                    operation.result_format,
+                    operation.schema_key.as_ref(),
+                    &found,
+                )
+                .await?;
+            }
             let objects = self.inner.objects.clone();
             let handle = tokio::runtime::Handle::current();
             // The worker owns the retained completion until its size checks finish,
@@ -2111,8 +2176,8 @@ fn phase_key(
         return Ok(format!("phase/input/{}/{phase}", hash.finalize().to_hex()));
     }
     if let OperationRequest::Build(build) = spec {
-        // The selected composition determines admission and promotion, but does
-        // not change source SQL results. A rebased rebuild reuses this exact work.
+        // Input bytes, SQL and retained field history determine source work.
+        // Compatible selections may reuse it; promotion still checks authority.
         let mut hash = blake3::Hasher::new();
         for value in [
             PROCESSOR,

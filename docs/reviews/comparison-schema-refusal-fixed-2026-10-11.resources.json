@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T07:11:21.909713+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources"
+  ],
+  "free_before_bytes": 16689954816,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 16657743872,
+  "free_after_bytes": 16667979776,
+  "finished_utc": "2026-10-11T07:11:37.962421+00:00"
+}

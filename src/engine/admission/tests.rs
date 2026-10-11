@@ -405,6 +405,18 @@ async fn missing_external_locator_reuses_material_work_and_captures_selected_his
     std::fs::remove_file(&request.input).unwrap();
     request.operation = id("reused");
     request.base = Some(original.id.clone());
+    let before = engine.inspect(&request.dataset).await.unwrap();
+    let plan = engine.plan(&request).await.unwrap();
+    assert!(plan.reusable_phase_origins.contains_key("processing"));
+    assert!(plan.reusable_phase_origins.contains_key("validation"));
+    let origin = &plan.reusable_phase_origins["processing"];
+    let phase: PhaseResult = serde_json::from_value(before[&origin.key].clone()).unwrap();
+    assert_eq!(phase.operation, original.id);
+    assert_eq!(
+        phase.table.as_ref(),
+        Some(&original.dataset.groups["source"])
+    );
+    assert_eq!(engine.inspect(&request.dataset).await.unwrap(), before);
     let release = engine.run(&request).await.unwrap();
     assert_eq!(
         release.dataset.groups["source"],
@@ -770,5 +782,133 @@ async fn based_managed_rebuild_keeps_distinct_scopes_from_the_same_owner() {
                 .code(),
             "invalid_owner_protection"
         );
+    }
+}
+
+#[tokio::test]
+async fn captured_based_build_checks_recreated_schema_less_generation_before_reuse() {
+    for incompatible in [false, true] {
+        let (root, engine) = fixture().await;
+        let initial = request(root.path(), "comments");
+        let original = engine.run(&initial).await.unwrap();
+        let based = RunSpec {
+            operation: id("based"),
+            base: Some(original.id.clone()),
+            ..initial.clone()
+        };
+        assert_eq!(
+            engine
+                .run_until(&based, "admission")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        let lifecycle = &engine.inner.lifecycle;
+        let view = lifecycle.open(&based.dataset).await.unwrap();
+        let operation: Operation = lifecycle
+            .get(&view, "operation/based")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(operation.schema_key.is_none());
+        let request = OperationRequest::Build(based.clone());
+        let key = phase_key(
+            &request,
+            &operation.request_digest,
+            operation.eligibility,
+            "processing",
+            None,
+            None,
+        )
+        .unwrap();
+        let old: PhaseResult = lifecycle.get(&view, &key).await.unwrap().unwrap();
+        let retirement = engine
+            .plan_phase_retirement(
+                &based.dataset,
+                &id("old-processing"),
+                std::slice::from_ref(&key),
+                "allow a late writer to replace this generation",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&retirement).await.unwrap();
+
+        // Model the native completion boundary of an already admitted schema-less
+        // writer. Only immutable native output and the retired slot change; the
+        // based operation's captured result and active selection stay unchanged.
+        let schema = iceberg::spec::Schema::builder()
+            .with_fields(vec![Arc::new(iceberg::spec::NestedField::required(
+                if incompatible { 42 } else { 1 },
+                "id",
+                iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
+            ))])
+            .build()
+            .unwrap();
+        let directory = engine
+            .reserve_attempt(&request, &operation, "processing")
+            .await
+            .unwrap();
+        let native = engine
+            .create_output(&based.dataset, &directory, schema)
+            .await
+            .unwrap();
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)])),
+            vec![Arc::new(Int64Array::from(vec![1, 1, 2]))],
+        )
+        .unwrap();
+        let files = storage::write_batches(
+            &native,
+            futures::stream::iter([Ok(batch)]),
+            &lifecycle.budget,
+        )
+        .await
+        .unwrap();
+        let native = storage::append(&native, lifecycle.catalog.as_ref(), files)
+            .await
+            .unwrap();
+        let table = engine
+            .pin_output(&based.dataset, &native, 3, &[])
+            .await
+            .unwrap();
+        assert_ne!(table.metadata, original.dataset.groups["source"].metadata);
+        let replacement = PhaseResult {
+            operation: based.operation.clone(),
+            request_digest: operation.request_digest.clone(),
+            outputs: table.objects.clone(),
+            table: Some(table.clone()),
+            ..old
+        };
+        engine
+            .complete(&request, &operation, replacement, None)
+            .await
+            .unwrap();
+        std::fs::remove_file(&based.input).unwrap();
+        let before = engine.inspect(&based.dataset).await.unwrap();
+        if incompatible {
+            assert_eq!(
+                engine.plan(&based).await.unwrap_err().code(),
+                "phase_generation_conflict"
+            );
+            assert_eq!(
+                engine.run(&based).await.unwrap_err().code(),
+                "phase_generation_conflict"
+            );
+        } else {
+            let plan = engine.plan(&based).await.unwrap();
+            assert_eq!(plan.reusable_phase_origins["processing"].key, key);
+            assert!(
+                plan.reusable_phase_origins["processing"].revision > retirement.records[0].revision
+            );
+            let reused = engine
+                .phase(&request, &operation, "processing")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(reused.table.as_ref(), Some(&table));
+        }
+        assert_eq!(engine.inspect(&based.dataset).await.unwrap(), before);
+        assert_eq!(engine.latest(&based.dataset).await.unwrap(), original);
     }
 }

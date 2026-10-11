@@ -222,7 +222,7 @@ async fn backfill_hidden_admission_case(stop: &str, previous_format: bool) {
     .unwrap();
     assert_eq!(
         prepared.dataset.format,
-        if previous_format { 10 } else { 11 }
+        if previous_format { 10 } else { 12 }
     );
     let times = file_times(&prepared);
     drop(engine);

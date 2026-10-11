@@ -65,6 +65,7 @@ pub(crate) async fn verify_groups(
                 super::super::schema::verify_rebuild(
                     base.groups.get("source").ok_or_else(invalid_group)?,
                     source,
+                    dataset.format,
                     budget,
                 )
                 .await?;

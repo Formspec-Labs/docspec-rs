@@ -455,7 +455,7 @@ pub(super) fn reference_roots(
 enum Expansion {
     Origins,
     Declaration,
-    Release,
+    Release { payloads: bool },
     Changes(PreparedChanges),
     Restore(crate::restore::RestorePointRef),
     Native(Option<(Option<i64>, i32)>),
@@ -483,6 +483,7 @@ struct VisitedMetadata {
     binding: Option<(Option<i64>, i32)>,
     change_binding: Option<blake3::Hash>,
     complete: bool,
+    release_payloads: bool,
 }
 
 struct GrantClaim {
@@ -805,7 +806,7 @@ impl Inventory {
         let (tag, binding) = match &kind {
             Expansion::Origins => (MetadataKind::Origins, None),
             Expansion::Declaration => (MetadataKind::Declaration, None),
-            Expansion::Release => (MetadataKind::Release, None),
+            Expansion::Release { .. } => (MetadataKind::Release, None),
             Expansion::Changes(_) => (MetadataKind::Changes, None),
             Expansion::Restore(_) => (MetadataKind::Restore, None),
             Expansion::Native(binding) => (MetadataKind::Native, *binding),
@@ -814,6 +815,7 @@ impl Inventory {
             Expansion::Changes(prepared) => Some(storage::json_digest(prepared)?),
             _ => None,
         };
+        let release_payloads = matches!(&kind, Expansion::Release { payloads: true });
         if let Some(old) = self.visited.get_mut(&object.path) {
             if old.object != *object
                 || old.kind != tag
@@ -826,6 +828,23 @@ impl Inventory {
             }
             if old.binding.is_none() {
                 old.binding = binding;
+            }
+            if release_payloads && !old.release_payloads {
+                // An independently retained availability/recovery root wins over
+                // interpretation history, even after that history was expanded.
+                old.release_payloads = true;
+                old.complete = false;
+                self.charge(
+                    reference_bytes(object)
+                        .saturating_add(origin.table.len() + origin.key.len() + 128),
+                )?;
+                if !self.shallow {
+                    self.pending.push(Pending {
+                        object: object.clone(),
+                        kind,
+                        origin: origin.clone(),
+                    });
+                }
             }
             return Ok(());
         }
@@ -849,6 +868,7 @@ impl Inventory {
                 binding,
                 change_binding,
                 complete: false,
+                release_payloads,
             },
         );
         if self.shallow {
@@ -868,7 +888,7 @@ impl Inventory {
     }
 
     fn release(&mut self, object: &ObjectRef, origin: &RetentionBlocker) -> Result<()> {
-        self.enqueue(object, Expansion::Release, origin)
+        self.enqueue(object, Expansion::Release { payloads: true }, origin)
     }
 
     fn snapshot(&mut self, snapshot: &NativeSnapshotRef, origin: &RetentionBlocker) -> Result<()> {
@@ -923,7 +943,16 @@ impl Inventory {
         Ok(())
     }
 
-    fn computed(&mut self, computed: &ComputedGroup, origin: &RetentionBlocker) -> Result<()> {
+    fn history(&mut self, object: &ObjectRef, origin: &RetentionBlocker) -> Result<()> {
+        self.enqueue(object, Expansion::Release { payloads: false }, origin)
+    }
+
+    fn computed(
+        &mut self,
+        computed: &ComputedGroup,
+        origin: &RetentionBlocker,
+        history: bool,
+    ) -> Result<()> {
         self.object(&computed.source_metadata, origin)?;
         if let Some(origins) = &computed.origins {
             self.enqueue(origins, Expansion::Origins, origin)?;
@@ -931,7 +960,11 @@ impl Inventory {
         if let Some(qualification) = &computed.qualification {
             self.qualification(qualification, origin)?;
         }
-        self.release(&computed.base_manifest, origin)
+        if history {
+            self.history(&computed.base_manifest, origin)
+        } else {
+            self.release(&computed.base_manifest, origin)
+        }
     }
 
     fn qualification(
@@ -1015,11 +1048,18 @@ impl Inventory {
         if !supported_format(dataset.format) {
             return Err(invalid_inventory("unsupported release format"));
         }
+        // A complete independent Build computes fresh values and origins. Its
+        // predecessor establishes field/definition history, not availability
+        // of superseded inputs. Other operation modes keep their full closure.
+        let history = matches!(&dataset.request, OperationRequest::Build(spec) if spec.base.is_some())
+            && dataset.relationship == SourceRelationship::Independent
+            && dataset.related.is_none()
+            && dataset.evidence.is_none();
         for table in dataset.groups.values() {
             self.table(table, origin)?;
         }
         for computed in dataset.computed.values() {
-            self.computed(computed, origin)?;
+            self.computed(computed, origin, history)?;
         }
         for input in dataset.inputs.values() {
             self.object(input, origin)?;
@@ -1032,7 +1072,38 @@ impl Inventory {
             self.table(&evidence.table, origin)?;
         }
         if let Some(parent) = &dataset.parent_manifest {
-            self.release(parent, origin)?;
+            if history {
+                self.history(parent, origin)?;
+            } else {
+                self.release(parent, origin)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn interpretation(&mut self, dataset: &DatasetPin, origin: &RetentionBlocker) -> Result<()> {
+        if !supported_format(dataset.format) {
+            return Err(invalid_inventory("unsupported release format"));
+        }
+        // Historical binding checks read exact owning selections and native
+        // schema metadata. They do not reconstruct each predecessor's rows.
+        for table in dataset.groups.values() {
+            self.object(&table.metadata, origin)?;
+            if let Some(logical) = &table.logical_metadata {
+                self.object(logical, origin)?;
+            }
+        }
+        for computed in dataset.computed.values() {
+            self.object(&computed.source_metadata, origin)?;
+            if let Some(proof) = &computed.qualification {
+                // Historical qualification still validates original executions
+                // and their availability; preserve this explicit payload edge.
+                self.qualification(proof, origin)?;
+            }
+            self.history(&computed.base_manifest, origin)?;
+        }
+        if let Some(parent) = &dataset.parent_manifest {
+            self.history(parent, origin)?;
         }
         Ok(())
     }
@@ -1390,7 +1461,7 @@ impl Inventory {
                 self.native(target, origin)?;
             }
             if let Some(binding) = &capture.target_binding {
-                self.computed(binding, origin)?;
+                self.computed(binding, origin, false)?;
             }
             if let Some(related) = &capture.related {
                 self.related(related, origin)?;
@@ -1549,7 +1620,12 @@ impl Inventory {
         } else if key.starts_with("protection/") {
             let protection: Protection = decode(json)?;
             if !protection.retired {
+                let completed_host =
+                    crate::engine::export::remote::completed_host_prefix(&protection, rows)?;
                 for prefix in &protection.paths {
+                    if completed_host.as_ref() == Some(prefix) {
+                        continue;
+                    }
                     if !prefix.ends_with('/') {
                         return Err(invalid_inventory("unsupported protection path"));
                     }
@@ -1636,7 +1712,7 @@ impl Inventory {
                     )
                     .await?;
                 }
-                Expansion::Release => {
+                Expansion::Release { .. } => {
                     let Strict(dataset): Strict<DatasetPin> = inputs::read_manifest(
                         &storage::Objects::Local,
                         &object,
@@ -1648,7 +1724,11 @@ impl Inventory {
                     if dataset.dataset != object.owner {
                         return Err(invalid_inventory("release owner differs"));
                     }
-                    self.dataset(&dataset, &origin)?;
+                    if self.visited[&object.path].release_payloads {
+                        self.dataset(&dataset, &origin)?;
+                    } else {
+                        self.interpretation(&dataset, &origin)?;
+                    }
                 }
                 Expansion::Changes(prepared) => {
                     let Strict(applied): Strict<AppliedChangeSet> = inputs::read_manifest(
@@ -2274,4 +2354,92 @@ fn required_record<T: DeserializeOwned>(
     rows.get_record(key)?
         .map(|(_, _, value)| value)
         .ok_or_else(unknown_dependencies)
+}
+
+#[cfg(test)]
+mod release_history_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn full_release_upgrades_interpretation_history_in_either_order() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = Id::new("history-owner").unwrap();
+        let payload = ObjectRef {
+            owner: owner.clone(),
+            path: root
+                .path()
+                .join("old-input.parquet")
+                .to_string_lossy()
+                .into_owned(),
+            digest: "0".repeat(64),
+            bytes: 37,
+        };
+        let dataset = DatasetPin {
+            format: FORMAT,
+            dataset: owner.clone(),
+            version: Id::new("old").unwrap(),
+            groups: BTreeMap::new(),
+            computed: BTreeMap::new(),
+            inputs: BTreeMap::from([("input".into(), payload.clone())]),
+            relationship: SourceRelationship::Independent,
+            related: None,
+            evidence: None,
+            definition: "v1".into(),
+            eligibility: 0,
+            boundary: 1,
+            request: OperationRequest::Build(RunSpec {
+                dataset: owner.clone(),
+                operation: Id::new("old").unwrap(),
+                base: None,
+                relationship: None,
+                input: payload.path.clone(),
+                expected_digest: payload.digest.clone(),
+                sql: "SELECT * FROM input".into(),
+                definition: "v1".into(),
+            }),
+            parent_manifest: None,
+            processor: "fixture".into(),
+            validation: VerificationLevel::Routine,
+        };
+        let bytes = serde_json::to_vec(&dataset).unwrap();
+        let path = root.path().join("old.json");
+        storage::write_new(&path, &bytes).unwrap();
+        let manifest = ObjectRef {
+            owner,
+            path: path.to_string_lossy().into_owned(),
+            digest: blake3::hash(&bytes).to_hex().to_string(),
+            bytes: bytes.len() as u64,
+        };
+        let origin = RetentionBlocker {
+            table: "owner".into(),
+            key: "result/old".into(),
+            revision: 1,
+        };
+        let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+        for history_first in [true, false] {
+            let mut inventory = Inventory::new(std::slice::from_ref(&payload), 1 << 20).unwrap();
+            if history_first {
+                inventory.history(&manifest, &origin).unwrap();
+                inventory.expand(&budget, root.path()).await.unwrap();
+                assert!(inventory.candidates[&payload.path].blocker.is_none());
+            }
+            inventory.release(&manifest, &origin).unwrap();
+            inventory.expand(&budget, root.path()).await.unwrap();
+            inventory.history(&manifest, &origin).unwrap();
+            inventory.expand(&budget, root.path()).await.unwrap();
+            assert!(inventory.candidates[&payload.path].blocker.is_some());
+            assert!(inventory.visited[&manifest.path].release_payloads);
+            assert_eq!(
+                inventory.metadata_objects_read,
+                if history_first { 2 } else { 1 }
+            );
+        }
+        // Both strengths queued before decoding use only the stronger expansion.
+        let mut inventory = Inventory::new(std::slice::from_ref(&payload), 1 << 20).unwrap();
+        inventory.history(&manifest, &origin).unwrap();
+        inventory.release(&manifest, &origin).unwrap();
+        inventory.expand(&budget, root.path()).await.unwrap();
+        assert!(inventory.candidates[&payload.path].blocker.is_some());
+        assert_eq!(inventory.metadata_objects_read, 1);
+    }
 }

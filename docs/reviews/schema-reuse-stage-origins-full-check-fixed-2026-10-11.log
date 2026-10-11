@@ -1,0 +1,722 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 15.53s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.24s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 314 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test budget::tests::canceled_small_worker_keeps_its_owned_bytes_and_worker_slot ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test catalog::tests::cold_reservation_validation_rejects_malformed_and_dangling_states ... ok
+test engine::aggregation::tests::qualified_row_limit_bounds_every_signed_partial_sum ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+test catalog::tests::invalid_removal_references_refuse_before_native_commit ... ok
+test catalog::tests::retained_snapshot_survives_cache_replacement_and_holds_its_reservation ... ok
+test catalog::tests::cold_and_warm_reservations_count_only_current_states ... ok
+test catalog::tests::ordinary_commit_preserves_exact_terminal_headroom ... ok
+test engine::admission::tests::provisional_managed_file_refuses_before_request_acknowledgment ... ok
+test engine::backfill::expressions::tests::constants_ignore_schema_but_consumed_types_and_metadata_observers_invalidate ... ok
+test engine::backfill::expressions::tests::rename_reorder_and_name_reuse_preserve_bound_values_and_material_identity ... ok
+test engine::admission::tests::missing_external_locator_reuses_material_work_and_captures_selected_history ... ok
+test engine::backfill::origins::checks::tests::cached_originals_reuse_metadata_and_recheck_caller_association ... ok
+test engine::admission::tests::lost_initial_request_reply_retains_exact_dependencies_without_reacquiring_owners ... ok
+test engine::backfill::continuous::tests::parent_abandoned_after_intent_capture_cannot_acquire_a_fence ... ok
+test engine::backfill::continuous::tests::completed_parent_cannot_reacquire_a_fence_from_its_captured_intent ... ok
+test engine::backfill::tests::aggregate_completion_descriptors_cannot_exceed_assembly_allowance ... ok
+test engine::backfill::preparation::tests::completion_descriptors_refuse_duplicate_outputs_and_changed_bytes ... ok
+test engine::backfill::preparation::tests::concurrent_acknowledgments_assemble_one_winner_with_its_own_scope ... ok
+test engine::admission::tests::managed_input_admission_reuses_its_recorded_owner_without_copying_or_hashing ... ok
+test engine::backfill::verification::tests::equal_counts_do_not_prove_coverage ... ok
+test engine::backfill::verification::tests::history_reuses_exact_manifests_and_bounds_combined_admission ... ok
+test engine::comparison::tests::addressed_differences_cancel_occurrences_before_choosing_value_members ... ok
+test engine::backfill::preparation::tests::retired_completion_gets_a_new_generation_and_retry_keeps_that_winner ... ok
+test engine::comparison::tests::field_alignment_refuses_changed_ids_types_nullability_and_membership ... ok
+test engine::comparison::tests::oversized_sorted_batches_refuse_before_window_even_when_values_cancel ... ok
+test engine::backfill::continuous::tests::optimistic_same_parent_worker_adopts_live_fence_and_closes_it_with_selection ... ok
+test engine::corrections::records::tests::invalid_requests_leave_native_revision_unchanged ... ok
+test engine::corrections::records::tests::concurrent_corrections_preserve_both_fields_and_retry_generations ... ok
+test engine::corrections::records::tests::lost_commit_response_reconciles_actual_native_generation ... ok
+test engine::admission::tests::captured_based_build_checks_recreated_schema_less_generation_before_reuse ... ok
+test engine::corrections::records::tests::retry_conflict_and_cumulative_corrections_preserve_authority ... ok
+test engine::admission::tests::backfill_admission_binds_its_capture_and_foreign_base_in_one_native_commit ... ok
+test engine::comparison::tests::duplicate_ranking_uses_causal_sorted_windows_and_shared_aggregates ... ok
+test engine::admission::tests::based_managed_rebuild_keeps_distinct_scopes_from_the_same_owner ... ok
+test engine::backfill::tests::completed_plan_qualifies_admission_and_result_without_opening_inputs ... ok
+test engine::export::tests::schema_authorization_removes_metadata_and_refuses_internal_or_nested_columns ... ok
+test engine::backfill::tests::native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning ... ok
+test engine::backfill::correction_tests::fresh_readback_view_fences_target_proof_changes_but_allows_siblings ... ok
+test engine::history::admissions::tests::refuses_metadata_before_decoding_an_oversized_request ... ok
+test engine::history::admissions::tests::later_full_selection_does_not_hide_earlier_preparation_or_stale_request ... ok
+test engine::backfill::continuous::tests::corrupted_child_request_association_refuses_before_and_after_selection ... ok
+test engine::history::admissions::tests::legacy_schema_counts_as_source_while_current_schema_does_not ... ok
+test engine::admission::tests::refresh_request_captures_and_protects_unused_members_of_its_producer_seal ... ok
+test engine::history::admissions::tests::rejects_abandonment_not_bound_to_original_admission ... ok
+test engine::history::admissions::tests::rejects_missing_and_duplicate_source_boundaries ... ok
+test engine::history::admissions::tests::rejects_orphan_result_and_forged_selected_receipt ... ok
+test engine::history::admissions::tests::selected_chain_remains_covered_with_retired_unavailable_payloads ... ok
+test engine::history::target::tests::absent_target_and_equal_endpoints_remain_valid ... ok
+test engine::history::target::tests::absent_target_cannot_appear_and_disappear_in_intervening_history ... ok
+test engine::backfill::continuous::tests::first_capture_race_retains_protected_admission_without_computing_obsolete_work ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_refuses_forged_child_and_changed_bytes ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_refuses_symlink_without_removing_target ... ok
+test engine::inputs::tests::canceled_manifest_read_keeps_admission_until_its_blocking_work_exits ... ok
+test engine::inputs::tests::canceled_partial_input_lock_acquisition_releases_prior_locks ... ok
+test engine::intake::tests::exact_live_requires_full_generation_equality ... ok
+test engine::intake::tests::malformed_records_fail_closed ... ok
+test engine::intake::tests::monotonic_deadline_and_host_bound_liveness ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_honors_exact_retained_grant_until_retirement ... ok
+test engine::inputs::tests::canceled_remote_manifest_read_keeps_worker_and_admission_through_decode ... ok
+test engine::history::target::tests::rejects_forged_endpoints_and_unrelated_or_backward_history ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream ... ok
+test engine::locations::release::tests::remote_release_absence_is_only_initial_head_not_permission_error ... ok
+test engine::export::tests::retained_lookup_binds_requested_identity_and_output_is_protected ... ok
+test engine::intake::tests::reopened_host_expires_previous_host_generation ... ok
+test engine::history::target::tests::allows_coordinated_updates_siblings_schema_and_evidence_after_retirement ... ok
+test engine::intake::tests::retry_reuses_deadline_and_stale_close_preserves_successor ... ok
+test engine::history::target::tests::competing_same_definition_and_aba_replacements_conflict ... ok
+test engine::locations::remote_tests::present_remote_destination_with_wrong_digest_never_triggers_upload ... ok
+test engine::locations::tests::exact_local_attempt_location_preserves_owned_prefix_and_host_separation ... ok
+test engine::locations::tests::remote_location_never_becomes_a_host_path_or_crosses_an_attempt_prefix ... ok
+test engine::locations::remote_tests::lost_remote_put_response_reconciles_exact_intent_and_completes_admission ... ok
+test engine::refresh::cardinality_scans::unique_keys_skip_partner_execution_and_duplicates_run_matched_proof ... ok
+test engine::locations::remote_tests::readable_in_scope_remote_input_has_no_ownership_without_creation_evidence ... ok
+test engine::refresh::plan_probe::retained_comments_join_physical_plans ... ignored, requires DOCSPEC_JOIN_PLAN_RUN pointing to a retained Comments run
+test engine::remote_build_provider_tests::exports::native_remote_export_recovers_missing_stage_and_reads_from_a_fresh_host ... ignored, requires a separate fresh qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::native_remote_build_recovers_then_reads_from_a_fresh_host ... ignored, requires explicit fresh qualification UUID and isolated live R2/Basin configuration
+test engine::locations::remote_tests::pending_remote_intent_does_not_poison_another_operation_with_same_material_request ... ok
+test engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet ... ok
+test engine::locations::remote_tests::reserved_remote_admission_resumes_same_destination_then_reuses_completed_phase ... ok
+test engine::locations::remote_tests::saved_remote_intent_does_not_turn_auth_failure_into_absence ... ok
+test engine::restore::tests::verification_hashes_shared_inode_once_and_refuses_conflicting_claims ... ok
+test engine::restore::tests::incomplete_cleanup_refuses_symlinks_and_completed_artifacts_without_deleting ... ok
+test engine::changes::chain::tests::limits_and_wrong_revisions_do_not_become_empty_changes ... ok
+test engine::locations::remote_tests::transferred_remote_admission_recovers_without_original_source_or_second_put ... ok
+test engine::remote_startup_tests::remote_constructor_keeps_host_custody_and_refuses_before_catalog_effects ... ok
+test engine::locations::release::tests::interrupted_release_reuses_exact_uri_and_completed_readback_without_second_decode ... ok
+test engine::backfill::protection_tests::scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen ... ok
+test engine::refresh::inventory_tests::cardinality_and_main_join_replay_without_manifest_and_share_self_join_admission ... ok
+test engine::refresh::inventory_tests::one_shot_join_inputs_keep_inventory_lazy ... ok
+test engine::history::target::tests::refuses_remapped_authored_ids_and_uncoordinated_binding_changes ... ok
+test engine::retention::availability::tests::lost_reply_and_concurrent_retry_preserve_one_availability_decision ... ok
+test engine::history::target::tests::rejects_request_receipt_and_chain_inconsistency ... ok
+test engine::remote_startup_tests::remote_selection_refuses_second_prepared_initial_but_reuses_completed_first ... ok
+test engine::retention::compaction_recovery::tests::compaction_helper_grants_logical_metadata_without_obsolete_payload_in_selection_scope ... ok
+test engine::retention::grants::tests::orphan_grant_planning_does_not_create_a_consumer_lifecycle ... ok
+test engine::retention::compaction_recovery::tests::lost_retirement_reply_and_concurrent_retry_keep_one_decision_and_current_layout ... ok
+test engine::retention::grants::tests::corrupt_binding_revision_cannot_authorize_retirement ... ok
+test engine::retention::grants::tests::a_new_claim_blocks_stale_execution_until_every_exact_claim_retires ... ok
+test engine::retention::availability::tests::inconsistent_current_authority_cannot_authorize_retirement ... ok
+test engine::retention::inventory::collector_tests::conflicts_refuse_and_duplicate_references_do_not_consume_more_capacity ... ok
+test engine::retention::inventory::collector_tests::closure_collects_history_computation_coverage_and_seals_without_payload_reads ... ok
+test engine::retention::grants::tests::lost_reply_and_concurrent_retry_preserve_reacquired_and_unrelated_grants ... ok
+test engine::retention::inventory::collector_tests::native_paths_require_exact_identities_discovered_anywhere_in_the_closure ... ok
+test engine::retention::inventory::collector_tests::native_expansion_never_assigns_the_metadata_owner_to_an_unknown_sidecar ... ok
+test engine::retention::inventory::collector_tests::authority_reuses_its_result_identity_without_lending_protection_to_unknown_results ... ok
+test engine::retention::inventory::collector_tests::oversized_roots_refuse_before_following_missing_metadata ... ok
+test engine::retention::inventory::correction_tests::qualification_recovery_can_retire_without_retiring_correction_authority ... ok
+test engine::retention::inventory::collector_tests::empty_authority_has_no_selected_result_or_protection_claim ... ok
+test engine::retention::inventory::collector_tests::repeated_bindings_share_claim_memory_and_owner_changes_refuse_inspection ... ok
+test engine::retention::inventory::correction_tests::correction_registry_is_typed_object_free_and_revision_bound ... ok
+test engine::retention::grants::tests::oversized_grant_plan_refuses_before_metadata_mutation ... ok
+test engine::retention::inventory::history_tests::history_receipts_do_not_expand_unavailable_endpoints_but_results_keep_captured_inputs ... ok
+test engine::retention::inventory::legacy_fields_tests::compatibility_is_limited_to_supported_typed_complete_states ... ok
+test engine::retention::inventory::legacy_fields_tests::required_phase_changes_remain_part_of_the_decoded_recovery_claim ... ok
+test engine::retention::inventory::legacy_fields_tests::release_and_authority_do_not_ignore_changes_outside_the_complete_state ... ok
+test engine::retention::inventory::legacy_fields_tests::unrelated_and_malformed_dependency_fields_still_refuse ... ok
+test engine::retention::inventory::legacy_fields_tests::supported_state_release_and_authority_accept_null_and_typed_legacy_members ... ok
+test engine::retention::inventory::optional_changes_tests::descriptor_expands_once_without_opening_or_retaining_whole_endpoints ... ok
+test engine::retention::inventory::optional_changes_tests::duplicate_descriptor_paths_cannot_borrow_another_operation_binding ... ok
+test engine::retention::inventory::optional_changes_tests::present_descriptor_must_match_its_exact_prepared_binding ... ok
+test engine::retention::inventory::scalar_origins_tests::legacy_execution_absence_and_null_remain_unknown_with_strict_decoding ... ok
+test engine::retention::inventory::scalar_origins_tests::shallow_original_roots_keep_schema_as_a_leaf_and_do_not_queue_reads ... ok
+test engine::retention::inventory::release_history_tests::full_release_upgrades_interpretation_history_in_either_order ... ok
+test engine::retention::inventory::scalar_origins_tests::typed_origins_expand_once_and_retain_original_file_closure ... ok
+test engine::retention::inventory::history_tests::existing_succession_bindings_and_owner_grants_remain_enforced ... ok
+test engine::retention::compaction_recovery::tests::forged_compaction_receipt_cannot_end_another_attempt_or_omit_completed_work ... ok
+test engine::export::remote::stage_removal_tests::completed_remote_stage_cleanup_reconciles_intent_and_unlink_gaps ... ok
+test engine::retention::inventory::collector_tests::authority_alias_refuses_missing_mismatched_and_incomplete_selection_metadata ... ok
+test engine::retention::inventory::history_tests::succession_roots_refuse_unanchored_or_malformed_ordering_receipts ... ok
+test engine::history::target::tests::refuses_bounded_metadata_traversal_before_history_grows_unbounded ... ok
+test engine::retention::grants::tests::sealed_generation_binding_blocks_retirement_of_its_exact_owner_grants ... ok
+test engine::retention::inventory::history_tests::progress_roots_refuse_wrong_receipts_endpoints_and_coverage ... ok
+test engine::retention::owners::phase_tests::an_earlier_binding_requires_retirement_of_its_exact_native_generation ... ok
+test engine::retention::owners::phase_tests::material_reuse_carries_original_owner_scope_into_validation_and_readback ... ok
+test engine::retention::availability::tests::pointer_receipt_and_marker_must_form_one_native_decision ... ok
+test engine::retention::owners::phase_tests::refresh_evidence_inherits_the_exact_captured_producer_scope ... ok
+test engine::retention::owners::tests::a_reserved_path_without_completed_identity_cannot_grant_a_reference ... ok
+test engine::retention::owners::tests::forged_object_identities_cannot_acquire_owner_protection ... ok
+test engine::retention::owners::phase_tests::retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation ... ok
+test engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object ... ok
+test engine::retention::owners::tests::a_family_that_owns_a_member_needs_no_foreign_grant_for_its_own_objects ... ok
+test engine::retention::owners::tests::lost_native_owner_reply_reconciles_without_another_commit ... ok
+test engine::retention::owners::tests::owner_availability_and_grants_conflict_at_the_native_boundary ... ok
+test engine::retention::owners::tests::owner_grant_retry_and_reopen_reuse_one_native_commit ... ok
+test engine::retention::owners::phase_tests::succession_keeps_actual_predecessor_without_inheriting_its_payload_scope ... ok
+test engine::retention::owners::tests::failed_consumer_handoff_keeps_grants_for_a_successful_retry ... ok
+test engine::retention::owners::tests::shared_owner_grant_survives_retirement_of_its_creation_phase ... ok
+test engine::retention::owners::tests::lost_consumer_seal_reply_reuses_the_committed_binding_and_owner_grants ... ok
+test engine::retention::owners::phase_tests::unknown_predecessor_scope_does_not_erase_the_selected_results_known_scope ... ok
+test engine::retention::recovery::tests::lost_response_concurrent_retry_and_cold_replay_preserve_the_selected_result ... ok
+test engine::retention::owners::phase_tests::schema_admission_and_coordinated_groups_preserve_foreign_base_scope ... ok
+test engine::retention::owners::tests::partial_owner_handoff_refuses_sealing_and_reuses_prior_protection_on_retry ... ok
+test engine::retention::recovery::tests::otherwise_consistent_selection_cannot_complete_a_different_request ... ok
+test engine::retention::recovery::tests::saved_recovery_validation_reserves_original_metadata_on_retry ... ok
+test engine::retention::recovery::tests::execution_rechecks_the_complete_attempt_set_and_canonical_owner ... ok
+test engine::retention::owners::tests::retained_seal_refuses_forged_binding_or_missing_owner_token ... ok
+test engine::retention::owners::tests::sealing_binds_exact_owner_grants_in_the_same_native_consumer_commit ... ok
+test engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end ... ok
+test engine::retention::owners::tests::validation_only_origins_qualify_original_creations_after_cache_replacement ... ok
+test engine::retention::owners::tests::nested_release_grants_follow_each_actual_owner_without_rehashing_payloads ... ok
+test engine::retention::grants::tests::retired_seal_preserves_selected_consumer_and_cold_readback ... ok
+test engine::retention::retirement::tests::change_history_and_recovery_have_distinct_exact_retirement_scopes ... ok
+test engine::retention::removal::native_tests::active_engine_reader_delays_physical_removal_until_eof ... ok
+test engine::retention::removal::fault_tests::terminal_absence_reconciliation_uses_reserved_floor_when_no_topup_can_fit ... ok
+test engine::retention::removal::native_tests::malformed_reserved_marker_refuses_inventory_and_resume_before_effects ... ok
+test engine::retention::removal::native_tests::new_native_heads_block_preview_execution_and_pending_resume_without_expanding_effects ... ok
+test engine::retention::retirement::tests::lost_native_reply_and_concurrent_retry_record_one_retirement ... ok
+test engine::retention::removal::native_tests::provisional_native_head_detaches_while_selected_shared_data_remains_readable ... ok
+test engine::retention::tests::abandoned_gap_refuses_huge_or_reversed_intervals_without_expanding_them ... ok
+test engine::retention::tests::abandoned_gap_accepts_complete_interval_without_opening_inputs ... ok
+test engine::schema::tests::material_schema_identity_ignores_set_order_but_keeps_allocation_state ... ok
+test engine::retention::retirement::tests::receipt_membership_and_marker_presence_are_required ... ok
+test engine::worker::tests::canceled_caller_keeps_blocking_work_gate_and_host_until_real_exit ... ok
+test engine::retention::removal::tests::already_absent_target_reports_absence_without_newly_unlinked_bytes ... ok
+test engine::worker::tests::canceled_callers_cannot_accumulate_unbounded_owned_requests ... ok
+test engine::retention::removal::tests::exact_batch_removes_retired_data_and_native_metadata_without_requiring_them_on_cold_retry ... ok
+test engine::worker::tests::canceled_stream_open_keeps_custody_until_opening_really_finishes ... ok
+test engine::retention::removal::tests::exact_deletion_preserves_selected_values_and_completed_cold_retries_skip_effects ... ok
+test engine::retention::tests::abandoned_gap_counts_legacy_schema_but_not_composition_operations ... ok
+test engine::retention::retirement::tests::legacy_processing_cannot_adopt_a_replacement_admission ... ok
+test engine::worker::tests::canceled_maintenance_keeps_exclusion_until_its_native_decision_finishes ... ok
+test engine::worker::tests::private_worker_panic_quarantines_host_and_prevents_reopen ... ok
+test engine::retention::removal::tests::fresh_owner_protection_shrinks_a_stale_preview_without_deletion ... ok
+test engine::worker::tests::shutdown_closes_admission_and_resumes_drain_after_its_wait_is_dropped ... ok
+test engine::worker::tests::unrelated_shared_work_can_enter_before_either_operation_finishes ... ok
+test engine::worker::tests::stream_retains_maintenance_admission_and_host_until_eof_or_drop ... ok
+test engine::write::build::tests::stale_candidate_append_refuses_before_native_manifest_effects ... ok
+test engine::retention::removal::tests::same_size_corruption_retains_failure_and_unavailability_until_exact_resume ... ok
+test engine::write::tests::captured_source_requires_logical_identity_count_and_public_schema ... ok
+test engine::write::tests::oversized_candidate_metadata_refuses_before_writing_any_object ... ok
+test engine::write::tests::empty_candidate_clears_snapshot_state_but_preserves_native_schema_history ... ok
+test evidence::tests::current_receipt_state_roundtrips_without_change_history ... ok
+test evidence::tests::legacy_change_history_is_ignored_without_becoming_state ... ok
+test evidence::tests::unrelated_unknown_receipt_fields_are_refused ... ok
+test http::ipc::tests::demand_controls_batch_reads_and_chunks_keep_admission_until_last_clone_drops ... ok
+test http::ipc::tests::dictionaries_and_changing_batch_schemas_refuse ... ok
+test http::ipc::tests::encoded_chunks_refuse_before_growing_beyond_their_admission ... ok
+test http::ipc::tests::encoding_preserves_strings_nulls_duplicates_and_complete_empty_streams ... ok
+test http::ipc::tests::failures_abort_the_body_without_emitting_a_successful_end ... ok
+test http::tests::correction_refusals_preserve_codes_and_return_conflict ... ok
+test engine::write::tests::value_only_key_probes_skip_wide_fields_and_keep_reader_admission ... ok
+test engine::write::build::tests::initial_candidate_recovers_committed_snapshot_without_producer_or_second_append ... ok
+test engine::worker::tests::engine_reads_block_maintenance_and_shutdown_refuses_new_streams ... ok
+test engine::worker::tests::engine_reads_require_this_hosts_exact_available_result ... ok
+test engine::retention::tests::abandoned_gap_requires_original_admission_and_later_visible_abandonment ... ok
+test query::sequence::tests::admission_survives_eof_until_provider_and_stream_owners_drop ... ok
+test query::sequence::tests::early_drop_does_not_open_later_child_and_releases_stream_admission ... ok
+test query::sequence::tests::later_child_error_propagates ... ok
+test query::sequence::tests::next_child_waits_for_eof_and_only_one_child_is_active ... ok
+test engine::retention::removal::fault_tests::lost_intent_and_outcome_replies_reconcile_the_same_saved_operation ... ok
+test engine::worker::tests::availability_retirement_waits_for_reader_and_then_refuses_new_engine_reads ... ok
+test engine::write::tests::renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_files ... ok
+test engine::retention::removal::native_tests::forged_saved_registration_cannot_drop_lifecycle_or_unrelated_selected_native_table ... ok
+test query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices ... ok
+test query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior ... ok
+test storage::flat::tests::local_flat_reader_holds_shared_capacity_until_stream_drop ... ok
+test storage::inspection::tests::impossible_footer_lengths_do_not_request_a_body ... ok
+test query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics ... ok
+test storage::inspection::tests::malformed_tail_and_declared_lengths_refuse_before_body_decode ... ok
+test storage::inspection::tests::ranges_are_disjoint_and_short_reads_refuse_without_retry ... ok
+test storage::inspection::tests::local_and_memory_use_the_same_bounded_footer_decoder ... ok
+test query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation ... ok
+test query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test engine::write::tests::reused_key_name_with_new_id_matches_absence_and_empty_noop_results ... ok
+test storage::occurrences::tests::locators_match_independent_parquet_order_across_files_row_groups_and_batch_sizes ... ok
+test storage::occurrences::tests::locator_columns_participate_in_batch_admission ... ok
+test storage::occurrences::tests::malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverage ... ok
+test query::tests::native_statistics_preserve_filtered_offset_counts ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test storage::occurrences::tests::nested_selection::selected_nested_roots_preserve_children_repeats_and_occurrence_rows ... ok
+test storage::occurrences::tests::observed_reader_error_keeps_attempts_sampleable_without_new_ranges ... ok
+test storage::occurrences::tests::reservations_survive_partial_reads_and_release_on_drop_eof_and_error ... ok
+test storage::occurrences::tests::defaults::native_v3_defaults_and_presence_survive_upgrade_append_rewrite_and_reopen ... ok
+test storage::occurrences::tests::reserved_names_and_unqualified_schema_changes_refuse ... ok
+test storage::occurrences::tests::observed_projection_requests_fewer_ranges_with_exact_values_and_occurrences ... ok
+test storage::occurrences::tests::schema::all_fields_hidden_and_a_user_file_name_preserve_values_and_occurrences ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_reorders_equal_types_by_id ... ok
+test storage::occurrences::tests::schema::new_id_with_reused_name_never_reads_old_values ... ok
+test storage::pinned::tests::gzip_requires_complete_trailer_one_member_and_bounded_json ... ok
+test storage::pinned::tests::injected_reader_preserves_plain_and_gzip_metadata_location_and_io ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test storage::occurrences::tests::schema::transient_native_column_is_validated_and_charged_before_removal ... ok
+test storage::pinned::tests::local_entry_point_uses_the_same_metadata_reader ... ok
+test storage::pinned::tests::rejects_changed_bytes_sizes_and_snapshot_schema_bindings ... ok
+test storage::pinned::tests::stored_and_decoded_caps_apply_before_returning_a_table ... ok
+test storage::remote::objects::tests::conditional_conflict_and_uncertain_outcome_have_distinct_refusals ... ok
+test storage::occurrences::tests::schema::native_current_schema_projection_preserves_field_ids_nullable_additions_and_historical_files ... ok
+test storage::occurrences::tests::schema::unqualified_schema_interpretations_refuse_before_reading_payload ... ok
+test storage::remote::objects::tests::configuration_errors_and_debug_never_disclose_secret_values ... ok
+test storage::occurrences::tests::selection::selected_locations_keep_original_offsets_across_files_and_empty_columns ... ok
+test query::tests::native_statistics_choose_the_smaller_build_in_both_directions ... ok
+test engine::retention::tests::abandoned_gap_refuses_incomplete_or_conflicting_identities ... ok
+test storage::remote::objects::tests::changed_source_identity_refuses_before_publication ... ok
+test storage::occurrences::tests::selective_scan_skips_unrequested_payloads_and_keeps_stream_admission ... ok
+test storage::remote::objects::tests::empty_metadata_and_changed_availability_use_no_payload_read ... ok
+test storage::occurrences::tests::selection::sql_native_and_captured_reads_skip_a_damaged_unselected_page ... ok
+test storage::remote::objects::tests::flat::flat_reader_bounds_footer_before_decode_and_releases_failed_open_capacity ... ok
+test storage::occurrences::tests::selection::selected_origins_keep_pairs_fallback_and_validation ... ok
+test storage::remote::objects::tests::flat::flat_reader_reuses_one_footer_and_preserves_duplicates_null_and_empty ... ok
+test storage::remote::objects::tests::incorrect_or_oversized_metadata_refuses_before_provider_io ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+test storage::remote::objects::tests::scope_rejects_aliases_and_cross_prefix_destinations ... ok
+test storage::remote::objects::tests::metadata_reader_hashes_one_get_and_availability_reads_only_metadata ... ok
+test engine::retention::removal::fault_tests::cold_resume_reconciles_each_durable_effect_boundary_without_inventing_unlinks ... ok
+test storage::remote::objects::tests::metadata_spare_capacity_is_admitted_before_provider_io ... ok
+test storage::remote::objects::tests::empty_readback_uses_only_stats_and_scope_refusal_performs_no_io ... ok
+test storage::remote::objects::tests::pinning::configured_inspection_refuses_manifest_scope_before_native_decode ... ok
+test engine::worker::tests::queued_writer_does_not_deadlock_public_build_or_refresh_internal_reads ... ok
+test storage::remote::objects::tests::pinning::populated_gzip_selected_metadata_preserves_absent_write_property_and_shared_identities ... ok
+test storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity ... ok
+test storage::remote::objects::tests::writes::accepted_put_with_lost_response_reconciles_without_another_write ... ok
+test storage::remote::objects::tests::writes::canceled_http_caller_keeps_owned_capacity_until_worker_finishes ... ok
+test storage::remote::objects::tests::writes::canceled_remote_candidate_keeps_original_admission_until_put_finishes ... ok
+test storage::remote::objects::tests::pinning::configured_pin_open_and_availability_refuse_entire_scope_before_io ... ok
+test storage::remote::tests::missing_required_configuration_is_refused_before_connecting ... ok
+test storage::removal::tests::absence_reconciliation_skips_present_bytes_and_rejects_unsafe_types ... ok
+test storage::removal::tests::deletes_exact_file_and_reconciles_absence ... ok
+test storage::removal::tests::failed_directory_sync_reports_uncertainty_then_reconciles_absence ... ok
+test storage::removal::tests::failed_unlink_preserves_bytes_and_does_not_synchronize ... ok
+test storage::removal::tests::refuses_ancestor_symlink ... ok
+test storage::removal::tests::refuses_directory_and_leaf_symlink ... ok
+test storage::removal::tests::refuses_escaped_paths_and_wrong_owner ... ok
+test storage::removal::tests::refuses_same_size_changed_bytes ... ok
+test storage::remote::objects::tests::pinning::configured_inspection_preserves_evolved_nullable_and_default_field_ids ... ok
+test storage::tables::tests::metadata_serialization_stops_at_exact_byte_limit ... ok
+test storage::tests::canceled_inventory_checks_keep_worker_owned_metadata_admission ... ok
+test storage::tables::cancellation_tests::canceled_metadata_worker_keeps_admission_until_durable_write_finishes ... ok
+test storage::tests::digest_matches_complete_bytes_for_empty_and_multi_buffer_files ... ok
+test storage::tests::digest_preserves_file_open_failure ... ok
+test storage::tests::digest_reader_preserves_io_failure_after_partial_input ... ok
+test storage::tests::digest_reader_retries_interruptions_and_accepts_short_reads ... ok
+test storage::tests::json_digest_preserves_nested_maps_unicode_and_unsized_values ... ok
+test storage::tests::json_digest_preserves_serialization_errors ... ok
+test storage::tests::json_digest_preserves_typed_request_serialization ... ok
+test storage::tests::candidate_snapshots_share_unchanged_files_with_complete_owned_inventories ... ok
+test storage::remote::objects::tests::writes::remote_candidate_keeps_created_metadata_when_catalog_registration_fails ... ok
+test storage::remote::objects::tests::pinning::configured_inspection_reuses_one_inventory_and_bounded_samples_then_streams_values ... ok
+test storage::remote::objects::tests::writes::bad_digest_after_part_upload_aborts_only_its_unpublished_upload ... ok
+test storage::remote::objects::tests::writes::remote_candidate_refuses_mismatched_location_and_compression_without_effects ... ok
+test storage::remote::objects::tests::writes::source_admission_transfers_once_and_qualifies_exact_remote_bytes ... ok
+test storage::remote::tests::debug_redacts_dummy_secrets_without_network_requests ... ok
+test storage::remote::objects::tests::writes::accepted_complete_with_lost_response_reconciles_without_reupload ... ok
+test storage::remote::objects::tests::pinning::populated_pin_binds_native_inventory_and_identities_to_configured_backend ... ok
+test storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change ... ok
+test storage::remote::objects::tests::metadata_reader_refuses_changed_bytes_lengths_and_scope ... ok
+test storage::remote::objects::tests::writes::remote_candidate_creation_sends_one_conditional_put_before_registration ... ok
+test storage::remote::objects::tests::pinning::populated_pin_guards_manifest_list_and_manifest_before_native_read ... ok
+
+test result: ok. 311 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 49.26s
+
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 305 tests
+test backfill::combined_values_preserve_duplicate_null_empty_and_unicode_occurrences ... ok
+test availability_retirement::retired_historical_build_refuses_lookup_and_own_retries_but_keeps_history_and_files ... ok
+test abandonment::schema_requires_every_uncaptured_source_to_be_abandoned ... ok
+test abandonment::abandoned_backfill_preserves_file_reuse_and_refuses_every_retry ... ok
+test admission_formats::original_backfill_does_not_silently_adopt_new_gap_rules ... ok
+test abandonment::backfill_prepares_during_pending_input_and_selects_after_its_abandonment ... ok
+test availability_retirement::abandoned_backfill_retires_every_saved_composition_without_recomputing_on_retry ... ok
+test backfill::competing_independent_backfills_both_survive_selection ... ok
+test availability_retirement::retained_dependent_refresh_resumes_after_source_retirement_while_fresh_capture_refuses ... ok
+test backfill::empty_source_has_typed_complete_coverage_without_fake_rows ... ok
+test abandonment::http_and_cli_share_the_durable_decision ... ok
+test backfill::http_backfill_routes_use_the_same_progress_and_conflict_rules ... ok
+test backfill::identical_concurrent_attempts_reconcile_one_recorded_result ... ok
+test backfill::joined_output_respects_a_limit_that_each_individual_input_fits ... ok
+test backfill::nonlocal_and_volatile_expressions_refuse_before_selection ... ok
+test admission_formats::original_admissions_resume_and_mixed_history_stays_readable ... ok
+test abandonment::abandoning_a_later_admission_does_not_revive_an_old_cutover_capture ... ok
+test abandonment::abandonment_fences_updates_and_schema_without_rewinding_source_admission ... ok
+test backfill::failed_files_remain_distinct_from_successful_nulls_and_completed_files_survive ... ok
+test abandonment::abandonment_survives_reopen_and_preserves_shared_phases_and_readback ... ok
+test backfill::refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_reuse ... ok
+test backfill::missing_cached_objects_cannot_be_selected_after_readback ... ok
+test backfill::concurrent_groups_merge_fresh_selection_and_same_group_writers_conflict ... ok
+test backfill_dependencies::legacy_file_reuse_keeps_original_execution_unknown ... ok
+test backfill::stale_source_retains_files_and_catchup_reuses_unchanged_objects ... ok
+test change_transport::cli_changes_preserves_descriptor_and_values_selection ... ok
+test compaction::competing_representation_keeps_stale_completed_work_without_reselection ... ok
+test change_transport::http_defaults_and_explicit_options_preserve_engine_comparisons ... ok
+test compaction::admitted_compaction_survives_retired_historical_result_availability ... ok
+test compaction::empty_source_and_partial_file_groups_preserve_exact_membership ... ok
+test backfill_dependencies::empty_source_completions_retain_dependencies_without_file_work ... ok
+test compaction::native_nested_decimal_time_and_null_values_survive_typed_rewrite ... ok
+test compaction::huge_target_rotates_bounded_footer_windows_without_limiting_total_rows ... ok
+test backfill::native_malformed_group_coverage_and_field_mapping_refuse ... ok
+test backfill_dependencies::legacy_group_completions_resume_and_keep_unknown_dependencies ... ok
+test change_origins::receipt_free_updates_preserve_original_addresses_and_new_births ... ok
+test compaction::tiny_targets_refuse_bounded_descriptor_inventory_without_selecting_partial_files ... ok
+test compaction_retirement::concurrent_identical_compactions_leave_one_exact_retirable_recovery_bundle ... ok
+test compaction::sibling_backfill_keeps_the_shared_equivalent_source_representation ... ok
+test backfill::killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+test compaction::saved_rewrites_and_verification_resume_after_reopen_without_replacement ... ok
+test compaction::source_compaction_preserves_duplicates_backfill_identity_and_logical_selection ... ok
+test backfill::retained_file_handoffs_resume_after_reopen_and_external_input_loss ... ok
+test compaction_retirement::captured_update_keeps_intermediate_layout_until_both_operation_and_phase_recovery_end ... ok
+test compaction::admitted_updates_resume_the_captured_representation_after_later_compaction ... ok
+test compaction::repeated_compaction_noop_updates_reuse_groups_first_computed_on_a_representation ... ok
+test compaction_retirement_transport::cli_http_compaction_retirement_preserves_reads_and_reconciles_exact_retry ... ok
+test compaction::schema_defaults_and_supplied_state_remain_native_and_exact ... ok
+test compaction_retirement::identical_operation_ids_keep_normal_and_compaction_attempt_retirement_separate ... ok
+test compaction_retirement::retired_chain_reclaims_intermediate_data_and_metadata_without_changing_selected_layout ... ok
+test comparison::returned_change_stream_holds_maintenance_admission_until_drop ... ok
+test change_origins::receipt_free_related_refresh_preserves_partial_file_survivors_and_noop ... ok
+test comparison::unchanged_pins_skip_payloads_and_force_full_preserves_read_failures ... ok
+test comparison::default_only_changes_report_schema_rules_without_inventing_value_changes ... ok
+test comparison::schema_changes_are_explicit_in_counts_and_refused_for_streams ... ok
+test comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources ... FAILED
+test compaction_retirement::interrupted_bundles_retire_exactly_after_reopen_and_later_completion_invalidates_preview ... ok
+test comparison::streaming_values_and_occurrences_match_independent_bags_in_both_directions ... ok
+test comparison::computed_groups_use_retained_addresses_and_report_added_definitions ... ok
+test compaction::updates_share_partial_compaction_and_preserve_surviving_occurrences ... ok
+test completed_backfill_plan::completed_retries_skip_unavailable_recovery_inputs_and_preserve_identity ... ok
+test comparison::stable_source_ids_compare_actual_changes_after_rename_and_reorder ... ok
+test comparison::forward::reversions_duplicates_nulls_and_compacted_updates_match_exact_full_endpoints ... ok
+test completed_backfill_plan::completed_plan_honors_own_availability_independently_of_base_availability ... ok
+test continuous_backfill::parent_abandonment_survives_reopen_and_keeps_completed_files ... ok
+test continuous_backfill::parent_identity_conflicts_and_public_child_entry_points_refuse ... ok
+test comparison::forward::receipt_only_middle_hop_preserves_evidence_effects_and_corrupt_history_refuses ... ok
+test continuous_backfill::expired_drain_returns_pending_ids_reopens_intake_and_preserves_work ... ok
+test continuous_backfill::active_fence_refuses_new_intake_but_drains_already_accepted_source ... ok
+test comparison::stable_source_ids_compare_renames_reorders_and_reused_display_names ... ok
+test continuous_backfill::restore_point_recovers_unfinished_parent_and_protects_active_and_selected_outputs ... ok
+test continuous_backfill::selected_parent_retries_exact_child_after_successor_and_honors_availability ... ok
+test cutover_admissions::format_10_backfill_refuses_hidden_admission_and_reuses_exact_completion ... ok
+test continuous_backfill_retention::superseded_child_promises_retire_independently_before_exact_removal ... ok
+test continuous_backfill::absent_target_keeps_authored_ids_across_reordered_based_rebuild ... ok
+test cutover_admissions::retired_selected_history_does_not_become_a_source_backlog ... ok
+test dependency_correction_transport::http_and_cli_reconcile_the_same_decision_after_reopen ... ok
+test defaults::update_scope_refuses_omitted_keys_without_changing_selection ... ok
+test dependency_correction_lifecycle::corrected_computed_export_admission_preserves_completed_replay_and_source_exports ... ok
+test continuous_backfill::interrupted_parent_catches_up_replacements_deletions_and_insertions ... ok
+test dependency_correction_lifecycle::correction_after_export_validation_blocks_selection_and_keeps_completed_output ... ok
+test defaults::invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules ... ok
+test continuous_backfill_process::killed_parent_catches_up_source_edits_and_keeps_original_file_evidence ... ok
+test dependency_corrections::missing_original_field_is_unknown_and_new_deficient_execution_is_mismatch ... ok
+test dependency_corrections::correction_after_readback_requires_new_operation_and_reuses_originals ... ok
+test continuous_backfill::cold_retry_recovers_every_durable_handoff_with_exact_parent_result ... ok
+test dependency_correction_lifecycle::qualified_inherited_group_restores_original_evidence_after_recovery_retirement ... ok
+test dependency_corrections::inherited_sibling_selection_adds_cumulative_proof_without_rewriting_values ... ok
+test evidence_updates::adopted_receipts_do_not_appear_as_pending_after_cold_validation_recovery ... ok
+test evidence_updates::nested_receipt_lists_preserve_order_empty_and_null_distinctions ... ok
+test cutover_admissions::backfill_refuses_hidden_admission_and_reuses_completed_work_after_abandonment ... ok
+test cutover_admissions::schema_refuses_hidden_admission_and_keeps_old_writer_until_exact_retry ... ok
+test evidence_updates::active_backfill_adopts_new_receipts_without_recomputing_values ... ok
+test dependency_corrections::correction_committed_at_actual_file_reuse_blocks_changed_language_context ... ok
+test continuous_backfill_process::killed_parent_resumes_only_missing_work_and_selects_exact_child ... ok
+test evidence_updates::inherited_receipt_deletions_survive_process_loss_without_repeating_work ... ok
+test evidence_updates::receipt_processing_survives_process_loss_without_original_input ... ok
+test exports::mcp::actual_spicy_regs_mcp_reads_immutable_exports_across_updates ... ignored, requires the explicitly configured existing SpicyRegs checkout and Python environment
+test evidence_updates::evidence_only_refresh_reuses_values_and_contributors_with_new_coverage ... ok
+test evidence_updates::receipt_associations_refuse_unknown_rows_overlap_and_conflicting_retries ... ok
+test exports::empty_snapshot_keeps_standalone_schema_and_explicit_policy ... ok
+test evidence_updates::first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_file ... ok
+test exports::cli_compaction_and_offline_restore_share_the_application_paths ... ok
+test exports::independent_parquet_contains_only_authorized_columns_and_exact_occurrences ... ok
+test evidence_updates::optional_history::equal_null_receipts_cannot_hide_a_changed_native_payload_type ... ok
+test evidence_updates::optional_history::terminal_recovery_retirement_releases_receipt_history_without_losing_receipts ... ok
+test defaults::additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history ... ok
+test exports::primitive_exports_preserve_types_values_nulls_and_authorized_column_order ... ok
+test exports::small_read_batches_export_exact_data_with_bounded_footer ... ok
+test exports::http_exports_compaction_and_restore_points_use_the_shared_services ... ok
+test http_read::empty_streams_keep_schema_and_known_failures_return_structured_errors ... ok
+test exports::validation_and_selection_resume_without_opening_the_source_again ... ok
+test exports::memory_driven_footer_limit_preserves_prior_selection_and_can_resume ... ok
+test http_read::catalog_free_cli_uses_the_shared_group_reader ... ok
+test exports::stale_authority_and_channel_keep_completed_output_without_promotion ... ok
+test grant_retirement_transport::grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry ... ok
+test evidence_updates::receipt_replacement_preserves_duplicates_nulls_source_and_computed_pins ... ok
+test http_read::in_flight_response_keeps_workspace_ownership_until_canceled ... ok
+test http_optional_changes::saved_http_plan_retires_optional_changes_and_reconciles_retry ... ok
+test exports::replacements_deletions_and_old_downloads_follow_their_exact_snapshots ... ok
+test grant_retirement_transport::foreign_seal_protects_old_scalar_origins_after_cache_keys_are_recomputed ... ok
+test http_read::rebound_catalog_results_cannot_change_an_exact_version_url ... ok
+test lifecycle::bad_input_and_non_query_sql_never_select_a_release ... ok
+test input_generations::invalid_seals_and_rebound_input_keys_refuse ... ok
+test input_generations::cli_and_http_use_the_same_generation_guards ... ok
+test http_read::http_reads_exact_historical_source_and_combined_values_in_bounded_frames ... ok
+test input_generations::generation_retirement_matches_cli_http_and_keeps_the_exact_seal ... ok
+test exports::killed_export_workers_resume_without_repeating_completed_work ... ok
+test input_generations::offline_relationship_checks_need_only_captured_manifests_and_detect_tampering ... ok
+test lifecycle::dependency_correction_fences_adoption_without_output_change ... ok
+test lifecycle::cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test lifecycle::initial_plan_names_every_missing_handoff_including_selection_without_input_reads ... ok
+test input_generations::independent_release_verification_rejects_rewritten_producer_relationships ... ok
+test input_generations::omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base ... ok
+test lifecycle::completed_plan_remains_complete_after_later_selection_without_reselecting_old_result ... ok
+test lifecycle::every_acknowledged_metadata_update_survives_cache_loss ... ok
+test lifecycle::exact_readback_idempotency_and_independent_catalog_free_read ... ok
+test lifecycle::comparison_preserves_duplicates_and_historical_release ... ok
+test lifecycle::native_snapshot_guard_rejects_stale_application_state ... ok
+test lifecycle::empty_output_keeps_schema_and_readable_history ... ok
+test lifecycle::independent_reader_rejects_same_size_corruption ... ok
+test lifecycle::live_workspace_owner_and_conflicting_operation_refuse ... ok
+test input_generations::stable_family_membership_and_exact_retry_survive_restart_and_invalidation ... ok
+test lifecycle::local_http_returns_the_engine_selection_and_structured_conflicts ... ok
+test lifecycle::native_readers_hold_shared_admission_until_stream_drop ... ok
+test lifecycle::killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_work ... ok
+test lifecycle::oversized_output_refuses_then_resumes_from_admitted_input ... ok
+test lifecycle::plan_and_run_apply_the_same_definition_fence ... ok
+test lifecycle::new_operation_reuses_qualified_values_and_original_generation ... ok
+test lifecycle::relocated_build_retry_keeps_the_original_readback_request ... ok
+test lifecycle::routine_checks_reject_damaged_footer_and_declared_counts ... ok
+test lifecycle::routine_checks_report_scope_and_deep_checks_find_same_size_input_damage ... ok
+test lifecycle::unstable_functions_do_not_become_reusable_results ... ok
+test lifecycle::older_preparation_cannot_replace_newer_coverage ... ok
+test evidence_updates::one_receipt_on_many_origin_files_uses_a_fixed_reader_budget ... ok
+test lifecycle::simultaneous_retries_reconcile_to_one_immutable_release ... ok
+test lifecycle::routine_samples_allow_several_individually_bounded_wide_batches ... ok
+test operation_retirement::active_operation_must_be_abandoned_and_its_phases_remain_independent ... ok
+test operation_retirement::completed_recovery_retirement_keeps_phases_reusable_and_creator_evidence_readable ... ok
+test phase_retirement::processing_recovers_after_admission_retirement_and_restart ... ok
+test input_generations::independent_and_coupled_inputs_follow_the_entire_consumed_member_map ... ok
+test phase_retirement::retained_readback_selects_after_upstream_retirement_without_source ... ok
+test phase_retirement::exact_generation_retries_do_not_retire_recomputed_work ... ok
+test operation_retirement_transport::cli_http_retirement_preserves_selected_values_and_reconciles_after_reopen ... ok
+test lifecycle::every_durable_phase_survives_reopen_and_source_loss ... ok
+test operation_retirement::all_explicit_a_promises_retire_while_independent_selected_b_stays_protected ... ok
+test input_generations::updates_and_backfills_inherit_but_resealing_requires_exact_new_members ... ok
+test phase_retirement::validation_requires_explicit_retirement_after_processing_replacement ... ok
+test phase_retirement_transport::availability_retirement_matches_cli_http_and_preserves_latest_after_cold_retry ... ok
+test physical_removal_transport::cli_http_preview_agrees_and_keeps_protected_bytes ... ok
+test phase_retirement_transport::cli_and_http_share_exact_retirement_and_preserve_the_release ... ok
+test lifecycle::killed_cli_worker_resumes_every_completed_handoff ... ok
+test phase_retirement::scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test phase_retirement::retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test phase_retirement::evidence_requires_explicit_retirement_after_source_replacement ... ok
+test phase_dependencies::evolved_build_keeps_exact_consumed_schema_metadata ... ok
+test qualification_roots::unselected_qualification_promise_ends_after_explicit_retirement ... ok
+test phase_dependencies::processing_keeps_its_consumed_input_when_an_admission_key_is_rebound ... ok
+test rebuild::based_rebuild_preserves_renamed_hidden_fields_and_new_nullable_defaults ... ok
+test qualification_roots::sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+test rebuild::retained_legacy_rebuild_interpretation_stays_readable_while_new_pins_require_stable_ids ... ok
+test rebuild::rebuild_retry_identity_includes_base_and_self_base_refuses_before_admission ... ok
+test rebuild_completion::lost_abandonment_response_reconciles_without_another_native_commit ... ok
+test physical_removal_process::sigkill_at_each_removal_boundary_resumes_exact_effects_in_a_fresh_cli ... ok
+test qualification_roots::qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+test rebuild_completion::abandoned_workers_cannot_acknowledge_late_native_source_or_group_commits ... ok
+test rebuild::failed_or_invalidated_rebuild_keeps_previous_complete_selection ... ok
+test rebuild::reordered_full_rebuild_preserves_source_and_computed_field_meaning ... ok
+test rebuild_completion::selection_wins_over_abandonment_even_when_its_response_is_lost ... ok
+test rebuild::independent_rebuild_verifier_rejects_false_composition_and_input_claims ... ok
+test rebuild_completion::disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutdown ... ok
+test rebuild::based_rebuild_recomputes_only_when_retained_schema_history_changes ... ok
+test rebuild::full_rebuild_requalifies_source_and_every_group_without_changing_history ... ok
+test rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... FAILED
+test refresh::invalidated_source_refuses_incremental_admission_without_changing_authority ... ok
+test refresh::failed_group_keeps_prepared_source_and_other_groups_without_partial_selection ... ok
+test related_refresh::abandoned_refresh_cannot_select_but_new_operation_reuses_its_result ... ok
+test rebuild::later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work ... ok
+test refresh::independent_refresh_verifier_rejects_missing_groups_inputs_and_false_source_interpretations ... ok
+test refresh::noop_and_delete_all_keep_complete_group_semantics_without_recomputing_unchanged_files ... ok
+test refresh::refresh_reuses_unchanged_file_computation_and_selects_all_groups_together ... ok
+test refresh::relocated_retry_preserves_original_request_and_readback ... ok
+test related_refresh::aggregation::joined_summary_retains_catalog_free_transitive_occurrence_evidence ... ok
+test related_refresh::aggregation::summaries_match_integer_oracle_with_duplicates_nulls_and_extreme_sums ... ok
+test refresh::noop_target_reselection_is_a_stale_group_conflict_and_inherited_siblings_are_exact ... ok
+test related_refresh::aggregation::summary_refuses_changed_recipes_and_wrong_native_contributors ... ok
+test refresh::refresh_and_backfill_races_preserve_captured_source_and_selected_groups ... ok
+test related_refresh::cached_readback_checks_missing_transitive_objects_and_live_ancestor_eligibility ... ok
+test related_refresh::aggregation_types::quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly ... ok
+test related_refresh::backfill_preserves_related_binding_and_noop_refresh_fences_old_cutover ... ok
+test related_refresh::captured_selection_records_lag_latest_refuses_and_coverage_cannot_regress ... ok
+test related_refresh::cardinality_guards_reject_fanout_and_self_joins_keep_exact_roles ... ok
+test related_refresh::aggregation::summaries_share_unaffected_files_and_selected_computed_groups ... ok
+test rebuild::rebuild_resumes_source_partial_groups_readback_and_lost_selection_response has been running for over 60 seconds
+test rebuild::rebuild_resumes_source_partial_groups_readback_and_lost_selection_response ... ok
+test related_refresh::all_join_kinds_preserve_duplicate_and_partial_null_occurrences ... ok
+test related_refresh::aggregation::incremental_groups_move_delete_and_replace_equal_values_with_new_contributors ... ok
+test related_refresh::aggregation::summary_coverage_guards_and_rebase_preserve_completed_work ... ok
+test refresh::refresh_resumes_after_partial_groups_readback_and_lost_selection_response ... ok
+test related_refresh::aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact has been running for over 60 seconds
+test related_refresh::aggregation::summary_workers_resume_only_remaining_phases_after_sigkill ... ok
+test related_refresh::compaction::legacy_summary_processing_resumes_canonical_inputs_without_recomputation ... ok
+test related_refresh::coupled_refresh_refuses_mixed_generations_then_advances_exact_coverage ... ok
+test related_refresh::aggregation::grouped_and_global_empty_transitions_and_noop_pins_remain_exact ... ok
+test related_refresh::history_keys::completed_processing_resumes_after_optional_input_history_retirement ... ok
+test related_refresh::cardinality::composite_duplicates_only_refuse_when_the_constrained_keys_match has been running for over 60 seconds
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen has been running for over 60 seconds
+test related_refresh::compaction::completed_refresh_keeps_its_producer_layout_after_later_compaction_and_new_admission has been running for over 60 seconds
+test related_refresh::compaction::edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes has been running for over 60 seconds
+test related_refresh::history_keys::invalid_active_history_refuses_but_retired_history_falls_back_on_same_operation ... ok
+test related_refresh::compaction::global_summary_compaction_preserves_empty_nonempty_and_noop_transitions ... ok
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout has been running for over 60 seconds
+test related_refresh::http_refresh_and_catalog_free_cli_verification_use_shared_services ... ok
+test related_refresh::cardinality::composite_duplicates_only_refuse_when_the_constrained_keys_match ... ok
+test related_refresh::completed_phases_resume_and_original_selection_reconciles_after_invalidation ... ok
+test related_refresh::compaction::new_refresh_reads_selected_producer_layout_and_preserves_exact_contributors has been running for over 60 seconds
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage has been running for over 60 seconds
+test related_refresh::history_keys::summary_history_preserves_untouched_groups_and_recomputes_same_group_measures ... ok
+test related_refresh::compaction::subsequent_incremental_refresh_uses_old_and_new_captured_producer_layouts has been running for over 60 seconds
+test related_refresh::forward_changes::join_and_summary_forward_chains_match_full_typed_changes_and_addresses ... ok
+test related_refresh::history_keys::join_history_narrows_rewritten_files_without_cancelling_same_key_edits ... ok
+test related_refresh::incremental::incremental_refuses_unqualified_recipes_before_admission_and_binds_mode ... ok
+test related_refresh::incremental::incremental_disk_refusal_retains_admission_for_a_smaller_resource_profile ... ok
+test related_refresh::incremental::incremental_phase_reuse_fences_rebased_outputs_and_exact_manifests ... ok
+test related_refresh::offline_parent_rules_reject_related_conversion_and_role_rebinding ... ok
+test related_refresh::compaction::subsequent_incremental_refresh_uses_old_and_new_captured_producer_layouts ... ok
+test related_refresh::offline_verifier_reconstructs_values_contributors_and_exact_input_graph ... ok
+test remote_cli::independent_local_commands_refuse_remote_before_config_limits_and_output_effects ... ok
+test remote_cli::local_default_retains_independent_hash_without_opening_host ... ok
+test remote_cli::malformed_remote_config_redacts_parser_values_and_unknown_keys ... ok
+test remote_cli::non_loopback_serve_refuses_before_host_or_configuration_effects ... ok
+test remote_cli::selected_source_read_and_loopback_serve_use_explicit_remote_configuration ... ok
+test related_refresh::output_base_and_producer_eligibility_fence_selection_without_losing_work ... ok
+test related_refresh::incremental::incremental_verifier_refuses_balanced_foreign_removals_and_unsupported_provenance ... ok
+test restore_catalog::restore_reconstructs_an_unpromised_native_registration ... ok
+test related_refresh::quoted_helper_names_and_unmatched_duplicate_keys_are_supported ... ok
+test retention_inspection::admitted_refresh_request_protects_inputs_before_any_phase_completes ... ok
+test retention_inspection::candidate_identity_capacity_and_transport_boundaries_are_explicit ... ok
+test retention_build_ancestry::based_full_build_reclaims_obsolete_payloads_after_recovery_retirement ... ok
+test retention_inspection::completed_and_interrupted_roots_protect_without_opening_payloads ... ok
+test retention_inspection::family_only_namespace_retains_external_release_dependencies_once ... ok
+test retention_build_ancestry::based_full_build_keeps_historical_inline_qualification_payloads ... ok
+test related_refresh::incremental::incremental_killed_workers_reuse_processing_evidence_and_readback has been running for over 60 seconds
+test related_refresh::incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders has been running for over 60 seconds
+test related_refresh::incremental::incremental_killed_workers_reuse_processing_evidence_and_readback ... ok
+test related_refresh::selected_keys::reversed_nonleading_keys_refresh_joins_and_summaries_with_exact_evidence ... ok
+test retention_inspection::selected_and_prepared_roots_retain_original_executions_without_old_phases ... ok
+test related_refresh::incremental::incremental_shares_unaffected_output_and_evidence_and_adopts_exact_noop_pins ... ok
+test retention_inspection::unknown_and_legacy_roots_refuse_instead_of_reporting_unprotected ... ok
+test retention_inspection::schema_admission_and_evolved_group_metadata_preserve_native_interpretation ... ok
+test related_refresh::compaction::edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes ... ok
+test scalar_bindings::opposite_boolean_outputs_cannot_hide_each_other_in_value_comparison ... ok
+test retention_inspection::each_backfill_completion_independently_protects_its_consumed_source ... ok
+test scalar_dependency_reads::all_absent_optional_and_default_dependencies_preserve_full_batch_admission ... ok
+test scalar_dependency_reads::wide_unused_values_do_not_consume_the_scalar_batch_allowance ... ok
+test scalar_dependency_reads::uncompacted_wide_literal_preserves_full_batch_admission ... ok
+test scalar_dependency_reads::literal_only_reads_preserve_stored_origins_after_compaction ... ok
+test schema::cached_related_result_checks_schema_input_history ... ok
+test schema::http_and_cli_schema_routes_use_the_same_retained_request ... ok
+test related_refresh::compaction::new_refresh_reads_selected_producer_layout_and_preserves_exact_contributors ... ok
+test schema::rewritten_native_state_cannot_masquerade_as_a_schema_edit ... ok
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout ... ok
+test related_refresh::compaction::completed_refresh_keeps_its_producer_layout_after_later_compaction_and_new_admission ... ok
+test schema::hidden_fields_stay_historical_and_new_writes_use_the_selected_schema ... ok
+test schema::invalid_edits_refuse_before_admission_and_empty_sources_evolve ... ok
+test succession::identity_mismatch_and_orphan_branches_cannot_establish_coverage ... ok
+test succession::admission_and_prepared_releases_do_not_create_accepted_history ... ok
+test schema::rename_reorder_keeps_source_and_computed_files_and_old_reads ... ok
+test scalar_bindings::cached_readback_requires_older_binding_manifests_and_origin_schemas ... ok
+test succession::small_history_budget_refuses_and_transports_share_the_proof_service ... ok
+test updates::affected_base_with_changed_file_size_refuses_before_rewrite ... ok
+test schema::schema_cutover_fences_old_workers_and_later_admissions ... ok
+test scalar_bindings::redirected_rehashed_ancestor_does_not_change_an_authored_expression ... ok
+test updates::composite_nullable_quoted_keys_match_as_tuples ... ok
+test updates::http_update_routes_share_recovery_and_stale_base_refusals ... ok
+test updates::applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+test updates::identical_competing_updates_reconcile_and_noop_preserves_files ... ok
+test schema::killed_schema_workers_resume_only_missing_phases ... ok
+test updates::independent_verifier_requires_changes_and_exact_endpoints ... ok
+test succession::selected_head_cannot_predeclare_a_future_commit_or_disagree_with_its_release ... ok
+test updates::legacy_changes::recovered_processing_without_production_marker_does_not_mint_a_certificate ... ok
+test updates::nested_replacements_preserve_values_and_native_field_ids ... ok
+test succession::every_selection_records_actual_predecessor_in_the_same_native_commit ... ok
+test updates::paired_writer_refusal_retains_admission_and_can_resume ... ok
+test updates::routine_verification_inspects_required_state_files_once ... ok
+test schema::schema_phases_resume_and_cached_readback_requires_base_schema ... ok
+test updates::update_creation_inspects_only_new_files_without_duplicate_change_checks ... ok
+test updates::overlap_refuses_and_empty_replacement_can_delete_every_row ... ok
+test updates::stale_updates_cannot_overwrite_a_selected_result ... ok
+test succession::missing_malformed_rebound_and_cyclic_history_refuses_without_payload_reads ... ok
+test updates::optional_history::local_certificates_require_the_exact_result_revision_and_well_formed_endpoints ... ok
+test updates::optional_history::removed_optional_deltas_preserve_complete_state_and_independent_consumers ... ok
+test updates::killed_update_workers_resume_retained_handoffs_and_exact_changes ... ok
+test updates::update_handoffs_reuse_completed_work_after_input_loss ... ok
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage ... ok
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen ... ok
+test related_refresh::incremental::incremental_matches_oracle_across_key_moves_nulls_duplicates_and_both_input_orders ... ok
+
+failures:
+
+---- comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppOc556/workspace/objects/comments/1667b03fde1148e58cc65eca1c03569d/data/be3a7c69-9bc6-4c81-8c2c-afa39d8e1ccb-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppOc556/workspace/objects/comments/1667b03fde1148e58cc65eca1c03569d/data/be3a7c69-9bc6-4c81-8c2c-afa39d8e1ccb-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppOc556/workspace/objects/comments/1667b03fde1148e58cc65eca1c03569d/data/be3a7c69-9bc6-4c81-8c2c-afa39d8e1ccb-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppOc556/workspace/objects/unrelated/faa4cd00c5da41bbad82768d8a20fde5/data/a5ec3f11-499e-4c74-bfe7-44580a80c7d4-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJc2mFl/workspace/objects/comments/da680392f61e4b2e913af9c028cf8d92/data/6215b6d1-8cf0-44f1-b32e-86a11f5e9646-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJc2mFl/workspace/objects/comments/da680392f61e4b2e913af9c028cf8d92/data/6215b6d1-8cf0-44f1-b32e-86a11f5e9646-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJc2mFl/workspace/objects/comments/da680392f61e4b2e913af9c028cf8d92/data/6215b6d1-8cf0-44f1-b32e-86a11f5e9646-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+
+thread 'comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources' (47751235) panicked at tests/comparison.rs:305:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "schema_mismatch", message: "input contains a field outside the selected source schema", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/e5d1cf8773b24f2a989f2319c6f78007/data/010126bf-2338-4c99-aa3c-6e13669c322e-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/e5d1cf8773b24f2a989f2319c6f78007/data/010126bf-2338-4c99-aa3c-6e13669c322e-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/e5d1cf8773b24f2a989f2319c6f78007/data/010126bf-2338-4c99-aa3c-6e13669c322e-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/db73f7a976fb4dcd9a37dc265330917c/data/32dd81f1-5e18-4049-bf68-495768afd387-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/db73f7a976fb4dcd9a37dc265330917c/data/823fb98a-b435-4bb5-b1fb-b000c842f8ba-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/db73f7a976fb4dcd9a37dc265330917c/data/9f33a768-c575-41c9-a049-517931a1ff1d-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/658b645a4e44442f84c0b2b9e2a15793/data/data/5131e6f9-3a84-46d7-9fce-80172cda84ab-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpzOPJMw/workspace/objects/comments/60168f60c0a640928558eadb02e2899e/data/8d5b6067-5e0e-4d0d-89f0-0af1d726f611-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it' (47779933) panicked at tests/rebuild_completion.rs:511:5:
+assertion failed: plan.reusable_phases.contains(&"processing".into())
+
+
+failures:
+    comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources
+    rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it
+
+test result: FAILED. 302 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 399.52s
+
+error: test failed, to rerun pass `--test integration`

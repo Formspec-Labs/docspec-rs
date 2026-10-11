@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T06:53:41.904248+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "--",
+    "engine::export::remote::stage_removal_tests::",
+    "engine::admission::tests::missing_external_locator_reuses_material_work_and_captures_selected_history",
+    "engine::admission::tests::captured_based_build_checks_recreated_schema_less_generation_before_reuse"
+  ],
+  "free_before_bytes": 2407317504,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 2022957056,
+  "free_after_bytes": 2106142720,
+  "finished_utc": "2026-10-11T06:54:14.011796+00:00"
+}

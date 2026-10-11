@@ -288,6 +288,31 @@ pub(crate) fn write_batches_sized<'a, S>(
 where
     S: Stream<Item = Result<RecordBatch>> + Send + 'a,
 {
+    write_batches_inner(table, batches, budget, target_file_bytes, true)
+}
+
+// Lifecycle commits use the same bounded writer without data-progress noise.
+pub(crate) fn write_catalog_batches<'a, S>(
+    table: &'a Table,
+    batches: S,
+    budget: &'a Budget,
+) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
+where
+    S: Stream<Item = Result<RecordBatch>> + Send + 'a,
+{
+    write_batches_inner(table, batches, budget, budget.limits.max_batch_bytes, false)
+}
+
+fn write_batches_inner<'a, S>(
+    table: &'a Table,
+    batches: S,
+    budget: &'a Budget,
+    target_file_bytes: usize,
+    report_progress: bool,
+) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
+where
+    S: Stream<Item = Result<RecordBatch>> + Send + 'a,
+{
     Box::pin(async move {
         if target_file_bytes == 0 {
             return Err(Error::refusal(
@@ -344,106 +369,117 @@ where
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
         let origin = format!("docspec:{}", uuid::Uuid::new_v4());
         let mut next_row = 0u64;
-        futures::pin_mut!(batches);
-        while let Some(batch) = batches.try_next().await? {
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            let batch =
-                identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
-            next_row = next_row
-                .checked_add(batch.num_rows() as u64)
-                .ok_or_else(|| {
-                    Error::refusal(
-                        "occurrence_count",
-                        "writer occurrence positions exceed the supported range",
-                    )
-                })?;
-            let bytes = batch.get_array_memory_size();
-            if bytes > budget.limits.max_batch_bytes {
-                return Err(Error::refusal(
-                    "oversized_batch",
-                    format!(
-                        "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
-                        budget.limits.max_batch_bytes
-                    ),
-                ));
-            }
-            // A write can finish the preceding row group, create new groups, and
-            // roll a file. This conservative total also covers descriptors retained
-            // after the underlying file closes. It is admission, not an RSS estimate.
-            let units = batch
-                .num_rows()
-                .div_ceil(budget.limits.batch_rows)
-                .saturating_add(1);
-            let incoming = units.saturating_mul(unit_metadata_bytes);
-            // Periodically finish the maintained writer, releasing its accumulated
-            // footers. Keep only bounded file descriptors, so this admission grows
-            // with output files instead of every row group in the entire population.
-            if metadata_bytes != 0
-                && metadata_bytes.saturating_add(incoming) > budget.limits.max_metadata_bytes / 2
-            {
-                let files = writer.close().await?;
-                for file in &files {
-                    retained_bytes = retained_bytes
-                        .saturating_add(unit_metadata_bytes)
-                        .saturating_add(file.file_path().len().saturating_mul(4))
-                        .saturating_add(
-                            file.split_offsets()
-                                .map_or(0, |offsets| offsets.len().saturating_mul(16)),
-                        );
+        let mut progress = report_progress.then(|| crate::progress::Writer::new(&origin));
+        let result = async {
+            futures::pin_mut!(batches);
+            while let Some(batch) = batches.try_next().await? {
+                if batch.num_rows() == 0 {
+                    continue;
                 }
-                completed.extend(files);
-                writer = new_writer();
-                metadata_bytes = 0;
-            }
-            metadata_bytes = metadata_bytes.saturating_add(incoming);
-            if retained_bytes.saturating_add(metadata_bytes) > budget.limits.max_metadata_bytes {
-                return Err(Error::refusal(
-                    "metadata_capacity",
-                    "native writer file and row-group metadata exceed the declared allowance",
-                ));
-            }
-            // Literal expressions may be non-nullable even for optional native
-            // fields. Preserve the native physical nullability, without copying values.
-            let expected = table.metadata().current_schema();
-            let mut columns = batch.columns().to_vec();
-            let fields = batch
-                .schema()
-                .fields()
-                .iter()
-                .enumerate()
-                .map(|(index, field)| {
-                    let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                let batch =
+                    identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
+                next_row = next_row
+                    .checked_add(batch.num_rows() as u64)
+                    .ok_or_else(|| {
                         Error::refusal(
-                            "schema_mismatch",
-                            "writer field is absent from native schema",
+                            "occurrence_count",
+                            "writer occurrence positions exceed the supported range",
                         )
                     })?;
-                    let mut field = field.as_ref().clone().with_nullable(!native.required);
-                    let target = expected_arrow.field_with_name(field.name())?.data_type();
-                    // Iceberg stores zoned timestamps as UTC. Arrow can label that
-                    // same instant with "UTC", "+00:00", or another zone; normalize
-                    // only zone metadata, retaining the exact unit and epoch values.
-                    if let (
-                        arrow::datatypes::DataType::Timestamp(unit, Some(_)),
-                        arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
-                    ) = (field.data_type(), target)
-                        && unit == target_unit
-                        && field.data_type() != target
-                    {
-                        columns[index] = arrow::compute::cast(&columns[index], target)?;
-                        field = field.with_data_type(target.clone());
+                let bytes = batch.get_array_memory_size();
+                if bytes > budget.limits.max_batch_bytes {
+                    return Err(Error::refusal(
+                        "oversized_batch",
+                        format!(
+                            "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
+                            budget.limits.max_batch_bytes
+                        ),
+                    ));
+                }
+                // A write can finish the preceding row group, create new groups, and
+                // roll a file. This conservative total also covers descriptors retained
+                // after the underlying file closes. It is admission, not an RSS estimate.
+                let units = batch
+                    .num_rows()
+                    .div_ceil(budget.limits.batch_rows)
+                    .saturating_add(1);
+                let incoming = units.saturating_mul(unit_metadata_bytes);
+                // Periodically finish the maintained writer, releasing its accumulated
+                // footers. Keep only bounded file descriptors, so this admission grows
+                // with output files instead of every row group in the entire population.
+                if metadata_bytes != 0
+                    && metadata_bytes.saturating_add(incoming) > budget.limits.max_metadata_bytes / 2
+                {
+                    let files = writer.close().await?;
+                    for file in &files {
+                        retained_bytes = retained_bytes
+                            .saturating_add(unit_metadata_bytes)
+                            .saturating_add(file.file_path().len().saturating_mul(4))
+                            .saturating_add(
+                                file.split_offsets()
+                                    .map_or(0, |offsets| offsets.len().saturating_mul(16)),
+                            );
                     }
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let batch =
-                RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
-            writer.write(batch).await?;
+                    completed.extend(files);
+                    writer = new_writer();
+                    metadata_bytes = 0;
+                }
+                metadata_bytes = metadata_bytes.saturating_add(incoming);
+                if retained_bytes.saturating_add(metadata_bytes) > budget.limits.max_metadata_bytes {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "native writer file and row-group metadata exceed the declared allowance",
+                    ));
+                }
+                // Literal expressions may be non-nullable even for optional native
+                // fields. Preserve the native physical nullability, without copying values.
+                let expected = table.metadata().current_schema();
+                let mut columns = batch.columns().to_vec();
+                let fields = batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| {
+                        let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                            Error::refusal(
+                                "schema_mismatch",
+                                "writer field is absent from native schema",
+                            )
+                        })?;
+                        let mut field = field.as_ref().clone().with_nullable(!native.required);
+                        let target = expected_arrow.field_with_name(field.name())?.data_type();
+                        // Iceberg stores zoned timestamps as UTC. Arrow can label that
+                        // same instant with "UTC", "+00:00", or another zone; normalize
+                        // only zone metadata, retaining the exact unit and epoch values.
+                        if let (
+                            arrow::datatypes::DataType::Timestamp(unit, Some(_)),
+                            arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
+                        ) = (field.data_type(), target)
+                            && unit == target_unit
+                            && field.data_type() != target
+                        {
+                            columns[index] = arrow::compute::cast(&columns[index], target)?;
+                            field = field.with_data_type(target.clone());
+                        }
+                        Ok(field)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let batch =
+                    RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
+                let rows = batch.num_rows() as u64;
+                writer.write(batch).await?;
+                if let Some(progress) = &mut progress {
+                    progress.accepted(rows, bytes as u64);
+                }
+            }
+            completed.extend(writer.close().await?);
+            Ok(completed)
+        }.await;
+        if let Some(progress) = progress {
+            progress.finish(&result);
         }
-        completed.extend(writer.close().await?);
-        Ok(completed)
+        result
     })
 }
 

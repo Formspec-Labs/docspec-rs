@@ -4,6 +4,7 @@ use super::*;
 use crate::catalog::{SnapshotRows, history_row_bytes};
 use iceberg::{NamespaceIdent, TableIdent};
 
+mod export_stage;
 #[cfg(test)]
 mod fault_tests;
 #[cfg(test)]
@@ -220,6 +221,7 @@ impl Engine {
             .removal_registrations(&inspection.objects, &inspection.boundaries)
             .await?;
         let plan = RemovalPlan {
+            scope: RemovalScope::Objects,
             dataset,
             removal,
             reason,
@@ -284,7 +286,9 @@ impl Engine {
         let dataset = dataset.clone();
         let removal = removal.clone();
         self.admit_work(memory, move |engine| async move {
-            engine.removal_catalog()?;
+            if matches!(&engine.inner.objects, storage::Objects::Local) {
+                engine.removal_catalog()?;
+            }
             let view = engine.existing_removal_view(&dataset).await?;
             let rows = engine.inner.lifecycle.rows(&view).await?;
             let _memory = rows.reserve_decoded(
@@ -292,6 +296,7 @@ impl Engine {
                 &[&intent_key(&removal), &state_key(&removal)],
             )?;
             let (intent, progress) = engine.saved_removal(&rows, &view, &removal)?;
+            engine.check_removal_scope(&intent.plan.scope)?;
             status(intent, progress)
         })
         .await
@@ -306,7 +311,9 @@ impl Engine {
         let dataset = dataset.clone();
         let removal = removal.clone();
         self.maintain_work(memory, move |engine| async move {
-            engine.removal_catalog()?;
+            if matches!(&engine.inner.objects, storage::Objects::Local) {
+                engine.removal_catalog()?;
+            }
             let lock = engine.lock(&dataset).await;
             let _guard = lock.lock().await;
             let view = engine.existing_removal_view(&dataset).await?;
@@ -328,6 +335,9 @@ impl Engine {
         plan: &RemovalPlan,
         stop: Option<&str>,
     ) -> Result<RemovalStatus> {
+        if !matches!(&plan.scope, RemovalScope::Objects) {
+            return self.remove_export_stage_admitted(plan, stop).await;
+        }
         self.removal_catalog()?;
         let lock = self.lock(&plan.dataset).await;
         let _guard = lock.lock().await;
@@ -423,6 +433,17 @@ impl Engine {
         // keeping their inventory permit would charge these same values twice
         // while the catalog writer admits its own buffers and metadata.
         drop(inventory_memory);
+        self.start_removal(view, intent, stop).await
+    }
+
+    async fn start_removal(
+        &self,
+        view: View,
+        intent: RemovalIntent,
+        stop: Option<&str>,
+    ) -> Result<RemovalStatus> {
+        let lifecycle = &self.inner.lifecycle;
+        let plan = &intent.plan;
         let mut progress = RemovalProgress {
             intent_revision: intent.revision,
             reserved_future_bytes: 0,
@@ -555,6 +576,15 @@ impl Engine {
         intent: &RemovalIntent,
     ) -> Result<()> {
         self.validate_removal_plan(view, &intent.plan)?;
+        if !matches!(&intent.plan.scope, RemovalScope::Objects) {
+            self.validate_export_stage_plan(rows, view, &intent.plan)?;
+            if intent.objects != [0]
+                || !intent.registrations.is_empty()
+                || !intent.blocked.is_empty()
+            {
+                return Err(invalid());
+            }
+        }
         if key != intent_key(&intent.plan.removal)
             || revision != intent.revision
             || revision <= 0
@@ -573,7 +603,12 @@ impl Engine {
             if entry.blocker.is_some() {
                 return Err(invalid());
             }
-            self.check_object_owner(rows, &intent.plan.dataset, &entry.object)?;
+            if matches!(&intent.plan.scope, RemovalScope::Objects) {
+                self.check_object_owner(rows, &intent.plan.dataset, &entry.object)?;
+            }
+            // Host stages use the exact original attempt and co-completion proof
+            // checked above; the generic retained-prefix owner rule is remote.
+
             let (marker_revision, _, marker) = rows
                 .get_record::<super::owners::UnavailableObject>(&super::owners::unavailable_key(
                     &entry.object.path,
@@ -605,14 +640,25 @@ impl Engine {
         stop: Option<&str>,
         eligibility_checked: bool,
     ) -> Result<RemovalStatus> {
+        self.check_removal_scope(&intent.plan.scope)?;
         let lifecycle = &self.inner.lifecycle;
+        if !matches!(&intent.plan.scope, RemovalScope::Objects) {
+            let rows = lifecycle.rows(&view).await?;
+            let stage = self.validate_export_stage_plan(&rows, &view, &intent.plan)?;
+            self.inner
+                .objects
+                .validate_retained_path(&stage.remote.path)?;
+            if !finished(&progress) {
+                self.check_stage_grants(&rows, &view, &stage.object)?;
+            }
+        }
         let floor = validate_progress(&intent, &progress)? as u64;
         if finished(&progress) {
             return status(intent, progress);
         }
         // Completed retries return above. Unresolved retries check current roots
         // and native heads, but can only perform the original exact effects.
-        if !eligibility_checked {
+        if !eligibility_checked && matches!(&intent.plan.scope, RemovalScope::Objects) {
             // New namespaces can enlarge the fresh inspection independently of
             // the saved intent. Charge returned collections until checks finish.
             let _inspection_memory = lifecycle

@@ -990,6 +990,17 @@ async fn visit_creation(
             for object in &created.backups {
                 observe(object)?;
             }
+        } else if let Some(suffix) = key.strip_prefix("export-staged/") {
+            crate::engine::export::remote::validate_record(key, json, rows, None)?;
+            let (operation, _) = suffix.split_once('/').ok_or_else(invalid)?;
+            if let Some(stage) =
+                crate::engine::export::remote::completed_stage(rows, &Id::new(operation)?, None)?
+            {
+                if rows.revision(key) != Some(stage.stage_revision) {
+                    return Err(invalid());
+                }
+                observe(&stage.object)?;
+            }
         } else if let Some(id) = key.strip_prefix("export-materialized/") {
             let output: crate::engine::export::ExportMaterialized = serde_json::from_str(json)?;
             if output.object.path.starts_with("s3://") {

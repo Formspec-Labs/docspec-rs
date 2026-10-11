@@ -57,6 +57,10 @@ pub fn router(engine: Engine) -> Router {
         .route("/dependencies/corrections", post(correct_dependencies))
         .route("/retention/inspect", post(inspect_retention))
         .route("/retention/removal/plan", post(plan_removal))
+        .route(
+            "/retention/removal/export-stage/plan",
+            post(plan_export_stage_removal),
+        )
         .route("/retention/removal/execute", post(remove_objects))
         .route(
             "/datasets/{dataset}/removals/{removal}",
@@ -210,6 +214,31 @@ struct RemovalRequest {
     removal: Id,
     objects: Vec<ObjectRef>,
     reason: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportStageRemovalRequest {
+    dataset: Id,
+    removal: Id,
+    operation: Id,
+    reason: String,
+}
+
+async fn plan_export_stage_removal(
+    State(engine): State<Engine>,
+    Json(request): Json<ExportStageRemovalRequest>,
+) -> Result<Json<RemovalPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_export_stage_removal(
+                &request.dataset,
+                &request.removal,
+                &request.operation,
+                &request.reason,
+            )
+            .await?,
+    ))
 }
 
 async fn plan_removal(

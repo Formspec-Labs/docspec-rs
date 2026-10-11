@@ -396,7 +396,7 @@ impl Lifecycle {
             self.budget.limits.max_metadata_bytes,
         )?;
         check_cache_size(&next_values, self.budget.limits.max_metadata_bytes)?;
-        let files = storage::write_batches(
+        let files = storage::write_catalog_batches(
             &view.table,
             futures::stream::iter(vec![Ok(batch)]),
             &self.budget,
@@ -669,6 +669,7 @@ mod tests {
     fn removal_intent(id: &str) -> RemovalIntent {
         RemovalIntent {
             plan: RemovalPlan {
+                scope: crate::model::RemovalScope::Objects,
                 dataset: Id::new("owner").unwrap(),
                 removal: Id::new(id).unwrap(),
                 reason: "catalog reservation test".into(),

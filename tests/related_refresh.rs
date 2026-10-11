@@ -599,6 +599,174 @@ async fn captured_selection_records_lag_latest_refuses_and_coverage_cannot_regre
 
 #[cfg(feature = "test-util")]
 #[tokio::test]
+async fn policy_change_reuses_same_consumer_processing_but_rechecks_latest_inputs() {
+    let root = TempDir::new().unwrap();
+    let (engine, left, right) = fixture(root.path()).await;
+    let captured = recipe(&left, &right);
+    let expected = oracle(&left, &right, &join(&captured).join).await;
+    let frozen_inputs = BTreeMap::from([
+        (left.dataset.dataset.clone(), left.version_ref()),
+        (right.dataset.dataset.clone(), right.version_ref()),
+    ]);
+    // External producers are no longer needed; authoritative native inputs stay.
+    std::fs::remove_file(root.path().join("comments-initial.parquet")).unwrap();
+    std::fs::remove_file(root.path().join("dockets-initial.parquet")).unwrap();
+    drop(engine);
+    assert_eq!(
+        support::kill_after_with_work(root.path(), &captured, "refresh", "processing"),
+        ["admission", "processing"]
+    );
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let before = engine.inspect(&captured.dataset).await.unwrap();
+    let (processing_key, processing) = before
+        .iter()
+        .find_map(|(key, value)| {
+            let phase =
+                serde_json::from_value::<docspec::model::PhaseResult>(value.clone()).ok()?;
+            (phase.phase == "processing").then_some((key.clone(), phase))
+        })
+        .unwrap();
+    let protection_binding = format!(
+        "reference-binding/{}",
+        blake3::hash(processing_key.as_bytes()).to_hex(),
+    );
+    assert!(before.contains_key(&protection_binding));
+    assert_eq!(processing.operation, captured.operation);
+    assert_eq!(processing.coverage.as_ref().unwrap().inputs, frozen_inputs);
+    let generation = engine
+        .plan_phase_retirement(
+            &captured.dataset,
+            &id("observe-original-processing"),
+            std::slice::from_ref(&processing_key),
+            "observe the retained processing generation",
+        )
+        .await
+        .unwrap()
+        .records[0]
+        .clone();
+    let mut latest = captured.clone();
+    latest.operation = id("latest-policy");
+    latest.policy = RefreshPolicy::Latest;
+    let plan = engine.plan_refresh(&latest).await.unwrap();
+    assert_eq!(plan.reusable_phase_origins["processing"], generation);
+    assert_eq!(engine.inspect(&captured.dataset).await.unwrap(), before);
+    drop(engine);
+    // Same dataset/material slot: policy affects selection, not joined values.
+    assert_eq!(
+        support::kill_after_with_work(root.path(), &latest, "refresh", "readback"),
+        ["evidence", "validation", "readback"]
+    );
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let after = engine.inspect(&captured.dataset).await.unwrap();
+    assert_eq!(after[&processing_key], before[&processing_key]);
+    assert_eq!(after[&protection_binding], before[&protection_binding]);
+    assert_eq!(
+        engine
+            .plan_phase_retirement(
+                &captured.dataset,
+                &id("observe-policy-processing"),
+                std::slice::from_ref(&processing_key),
+                "observe unchanged native generation",
+            )
+            .await
+            .unwrap()
+            .records[0],
+        generation
+    );
+    for operation in [&captured.operation, &latest.operation] {
+        assert_eq!(
+            after[&format!("request-dependencies/{operation}")]["coverage"]["inputs"],
+            serde_json::to_value(&frozen_inputs).unwrap()
+        );
+    }
+    let retained: ReleasePin =
+        serde_json::from_value(after[&format!("readback/{}", latest.operation)].clone()).unwrap();
+    assert_eq!(
+        retained.dataset.groups["source"],
+        *processing.table.as_ref().unwrap()
+    );
+    assert_eq!(
+        retained.dataset.related.as_ref().unwrap().coverage.inputs,
+        frozen_inputs
+    );
+    let newer = source(
+        &engine,
+        root.path(),
+        "comments",
+        "advanced",
+        Some(left.id.clone()),
+        &[(Some(1), Some(2), Some("corrected-new-head".into()))],
+    )
+    .await;
+    assert_ne!(newer.version_ref(), left.version_ref());
+    assert_eq!(
+        engine
+            .release(&left.dataset.dataset, &left.id)
+            .await
+            .unwrap(),
+        left
+    );
+    assert_eq!(
+        engine
+            .release(&right.dataset.dataset, &right.id)
+            .await
+            .unwrap(),
+        right
+    );
+    let before_refusal = engine.inspect(&captured.dataset).await.unwrap();
+    assert_eq!(
+        engine.refresh(&latest).await.unwrap_err().code(),
+        "stale_input"
+    );
+    assert_eq!(
+        engine.inspect(&captured.dataset).await.unwrap(),
+        before_refusal
+    );
+    assert_eq!(
+        engine.latest(&captured.dataset).await.unwrap_err().code(),
+        "no_release"
+    );
+    drop(engine);
+    let captured_path = root.path().join("captured-request.json");
+    std::fs::write(&captured_path, serde_json::to_vec(&captured).unwrap()).unwrap();
+    let (selected, work): (ReleasePin, _) =
+        support::run_cli(root.path(), &["refresh", captured_path.to_str().unwrap()]);
+    assert_eq!(work, ["readback"]);
+    assert_eq!(
+        selected.dataset.groups["source"],
+        retained.dataset.groups["source"]
+    );
+    let related = selected.dataset.related.as_ref().unwrap();
+    assert_eq!(related.request.policy, RefreshPolicy::Captured);
+    assert_eq!(related.coverage.inputs, frozen_inputs);
+    assert_eq!(
+        related.evidence,
+        retained.dataset.related.as_ref().unwrap().evidence
+    );
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    check(&engine, &selected, &expected).await;
+    verify_release(&selected, limits()).await.unwrap();
+    let records = engine.inspect(&captured.dataset).await.unwrap();
+    let progress: BTreeMap<Id, SuccessionProof> =
+        serde_json::from_value(records[&format!("input-progress/{}", captured.operation)].clone())
+            .unwrap();
+    assert_eq!(
+        progress[&left.dataset.dataset].observed_head,
+        newer.version_ref()
+    );
+    assert_eq!(progress[&left.dataset.dataset].selections_behind, 1);
+    assert_eq!(records[&processing_key], before[&processing_key]);
+    assert_eq!(records[&protection_binding], before[&protection_binding]);
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
 async fn completed_phases_resume_and_original_selection_reconciles_after_invalidation() {
     for phase in [
         "admission",

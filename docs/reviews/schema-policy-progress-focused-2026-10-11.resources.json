@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T07:08:50.290489+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources",
+    "rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it",
+    "related_refresh::policy_change_reuses_same_consumer_processing_but_rechecks_latest_inputs",
+    "lifecycle::cli_validates_once_then_reads_and_resumes_without_inspection"
+  ],
+  "free_before_bytes": 16887410688,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 16576172032,
+  "free_after_bytes": 16834703360,
+  "finished_utc": "2026-10-11T07:09:26.428866+00:00"
+}

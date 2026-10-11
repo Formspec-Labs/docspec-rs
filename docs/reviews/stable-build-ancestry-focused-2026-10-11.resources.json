@@ -1,0 +1,24 @@
+{
+  "started_utc": "2026-10-11T06:30:57.840040+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "rebuild::",
+    "retention_build_ancestry::",
+    "continuous_backfill::",
+    "schema::",
+    "defaults::",
+    "--nocapture"
+  ],
+  "free_before_bytes": 3004764160,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 2421501952,
+  "free_after_bytes": 2800570368,
+  "finished_utc": "2026-10-11T06:32:24.120224+00:00"
+}

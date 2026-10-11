@@ -1,0 +1,39 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.85s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 7 tests
+test engine::admission::tests::missing_external_locator_reuses_material_work_and_captures_selected_history ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream ... FAILED
+test engine::export::remote::stage_removal_tests::stage_cleanup_refuses_forged_child_and_changed_bytes ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_refuses_symlink_without_removing_target ... ok
+test engine::export::remote::stage_removal_tests::stage_cleanup_honors_exact_retained_grant_until_retirement ... ok
+test engine::admission::tests::captured_based_build_checks_recreated_schema_less_generation_before_reuse ... ok
+test engine::export::remote::stage_removal_tests::completed_remote_stage_cleanup_reconciles_intent_and_unlink_gaps ... ok
+
+failures:
+
+---- engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp8S3mwG/host/objects/data/c7fb4542ff51416f8479aea35e7e4a9f/data/3480a081-6f68-4cfc-ab7a-62bef1188fdc-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+
+thread 'engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream' (47630706) panicked at src/engine/export/remote/stage_removal_tests.rs:559:76:
+called `Result::unwrap()` on an `Err` value: Error { code: "export_read", message: "immutable Parquet object cannot be read", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream' (47630706) panicked at src/engine/export/remote/stage_removal_tests.rs:576:10:
+called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(4784), "called `Result::unwrap()` on an `Err` value: Error { code: \"export_read\", message: \"immutable Parquet object cannot be read\", source: None, backtrace: <disabled> }", ...)
+
+
+failures:
+    engine::export::remote::stage_removal_tests::stage_cleanup_waits_for_configured_reader_and_its_admitted_stream
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 307 filtered out; finished in 6.57s
+
+error: test failed, to rerun pass `--lib`

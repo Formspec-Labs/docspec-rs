@@ -1,0 +1,21 @@
+{
+  "observed_utc": "2026-10-11T06:51:26.194842+00:00",
+  "command": [
+    "cargo",
+    "--offline",
+    "clean",
+    "-p",
+    "docspec",
+    "--profile",
+    "dev"
+  ],
+  "scope": "Only Cargo-generated docspec package dev artifacts; dependencies, retained workspaces, source, reports and input assets remain. No DocSpec job was running; compilation of changed code already requires rebuilding these package targets.",
+  "lsof_exit": 1,
+  "preview_existing_file_logical_bytes": 126933,
+  "preview_existing_file_allocated_bytes": 585728,
+  "free_before_bytes": 222625792,
+  "free_after_bytes": 2432344064,
+  "exit_code": 0,
+  "cargo_output": "     Removed 220 files, 2.8GiB total\n",
+  "preview_measurement_scope": "Literal existing regular-file paths only; Cargo dry-run wildcard entries and directory contents are not included. This is not a complete removed-byte count. Cargo output reports its own completed cleanup total; observed volume free space also includes concurrent allocations."
+}

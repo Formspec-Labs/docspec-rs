@@ -793,7 +793,7 @@ async fn restore_point_recovers_unfinished_parent_and_protects_active_and_select
 }
 
 #[tokio::test]
-async fn absent_target_refuses_same_type_source_field_id_remapping() {
+async fn absent_target_keeps_authored_ids_across_reordered_based_rebuild() {
     let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     for phase in ["files", "readback"] {
         let root = tempfile::tempdir().unwrap();
@@ -802,7 +802,8 @@ async fn absent_target_refuses_same_type_source_field_id_remapping() {
             panic!("scalar fixture must retain its original Build");
         };
         source.operation = id("authored-source");
-        source.base = Some(initial.id.clone());
+        // Author a new unbased source interpretation before the scalar intent.
+        source.base = None;
         source.sql = "SELECT text, CAST(id AS VARCHAR) AS alternate FROM input".into();
         let authored = engine.run(&source).await.unwrap();
         assert!(!authored.dataset.groups.contains_key("length"));
@@ -833,40 +834,32 @@ async fn absent_target_refuses_same_type_source_field_id_remapping() {
             .current_schema()
             .field_by_name("text")
             .unwrap();
-        let reused_id = new_table
+        let retained_text = new_table
             .metadata()
             .current_schema()
-            .field_by_name("alternate")
+            .field_by_name("text")
             .unwrap();
+        assert_eq!(original_text, retained_text);
         assert_eq!(
-            original_text.id, reused_id.id,
-            "native auto IDs reused across reordered columns"
+            original_table.metadata().current_schema(),
+            new_table.metadata().current_schema()
+        );
+        let release = engine.continuous_backfill(&request).await.unwrap();
+        assert_eq!(
+            release.dataset.groups["source"],
+            reordered.dataset.groups["source"]
         );
         assert_eq!(
-            original_text.field_type, reused_id.field_type,
-            "the remap cannot be caught by type checking"
-        );
-        assert_eq!(
-            engine
-                .continuous_backfill(&request)
-                .await
-                .unwrap_err()
-                .code(),
-            "backfill_source_identity_changed"
+            release.dataset.computed["length"].input_fields["text"],
+            original_text.id
         );
         assert_eq!(
             engine.latest(&authored.dataset.dataset).await.unwrap(),
-            reordered
+            release
         );
-        assert!(
-            !engine
-                .latest(&authored.dataset.dataset)
-                .await
-                .unwrap()
-                .dataset
-                .groups
-                .contains_key("length")
-        );
+        docspec::engine::verify_release(&release, limits())
+            .await
+            .unwrap();
         assert_retained(
             &before,
             &engine.inspect(&authored.dataset.dataset).await.unwrap(),

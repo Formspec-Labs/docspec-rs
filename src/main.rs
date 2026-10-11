@@ -81,6 +81,17 @@ enum Command {
         #[arg(long)]
         reason: String,
     },
+    /// Preview one completed remote export's exact original host stage.
+    PlanExportStageRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        reason: String,
+    },
     /// Execute only freshly eligible targets from a saved removal plan.
     RemoveObjects {
         #[arg(long)]
@@ -489,6 +500,21 @@ async fn main() -> anyhow::Result<()> {
                             &Id::new(dataset)?,
                             &Id::new(removal)?,
                             &read_json::<Vec<ObjectRef>>(objects)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::PlanExportStageRemoval {
+                    dataset,
+                    removal,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_export_stage_removal(
+                            &Id::new(dataset)?,
+                            &Id::new(removal)?,
+                            &Id::new(operation)?,
                             &reason,
                         )
                         .await?,

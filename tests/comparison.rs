@@ -286,25 +286,38 @@ async fn coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources
         let root = tempfile::tempdir().unwrap();
         let (engine, before, original) = scalar::fixture(root.path(), false).await;
         let input = scalar::input(&root.path().join("rebuild.parquet"), &original);
-        let after = engine
-            .run(&RunSpec {
-                dataset: if same_dataset {
-                    before.dataset.dataset.clone()
-                } else {
-                    scalar::id("unrelated")
-                },
-                operation: scalar::id("fresh-build"),
-                base: same_dataset.then(|| before.id.clone()),
-                relationship: None,
-                input: input.path,
-                expected_digest: input.digest,
-                sql: "SELECT id AS temperature_c, text AS description FROM input".into(),
-                definition: "v1".into(),
-            })
-            .await
-            .unwrap();
-        // Both ordinary builds auto-allocate the same numbers, with matching
-        // types and values. Those numbers do not prove stable field meaning.
+        let fresh = RunSpec {
+            dataset: if same_dataset {
+                before.dataset.dataset.clone()
+            } else {
+                scalar::id("unrelated")
+            },
+            operation: scalar::id("fresh-build"),
+            base: None,
+            relationship: None,
+            input: input.path,
+            expected_digest: input.digest,
+            sql: "SELECT id AS temperature_c, text AS description FROM input".into(),
+            definition: "v1".into(),
+        };
+        if same_dataset {
+            let based = RunSpec {
+                operation: scalar::id("silent-rename"),
+                base: Some(before.id.clone()),
+                ..fresh.clone()
+            };
+            assert_eq!(
+                engine.run(&based).await.unwrap_err().code(),
+                "schema_mismatch"
+            );
+            assert_eq!(
+                engine.latest(&before.dataset.dataset).await.unwrap(),
+                before.clone()
+            );
+        }
+        let after = engine.run(&fresh).await.unwrap();
+        // Independent authoring can allocate coincident numbers. A based Build
+        // must instead preserve existing meaning and refuses the silent rename.
         for release in [&before, &after] {
             let native = storage::open_pin(&release.dataset.groups["source"], &pin_budget)
                 .await

@@ -283,6 +283,23 @@ impl ReadFixture {
         )
     }
 
+    // Held flat readers need the same exact URI/range responses as inventory.
+    pub(crate) fn held_inventory(
+        contents: HashMap<String, Vec<u8>>,
+    ) -> (
+        Self,
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (reached, received) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        (
+            Self::serve(Vec::new(), [0; 2], Some(contents), Some((reached, held))),
+            received,
+            release,
+        )
+    }
+
     fn serve(
         payload: Vec<u8>,
         sizes: [u64; 2],

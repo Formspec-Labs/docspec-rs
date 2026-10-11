@@ -634,10 +634,35 @@ pub struct RemovalRegistration {
     pub metadata: String,
 }
 
+/// Exact supported authority for a removal plan.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemovalScope {
+    /// Owned embedded-catalog inventory and native registrations.
+    #[default]
+    Objects,
+    /// One original host stage whose verified remote completion is durable.
+    ExportHostStage {
+        operation: Id,
+        operation_revision: i64,
+        stage_revision: i64,
+        completion_revision: i64,
+        host_root: String,
+    },
+}
+
+impl RemovalScope {
+    fn is_objects(&self) -> bool {
+        matches!(self, Self::Objects)
+    }
+}
+
 /// Bounded explicit removal candidates and their observed protection boundaries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemovalPlan {
+    #[serde(default, skip_serializing_if = "RemovalScope::is_objects")]
+    pub scope: RemovalScope,
     pub dataset: Id,
     pub removal: Id,
     pub reason: String,

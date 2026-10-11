@@ -220,6 +220,7 @@ fn cli_validates_once_then_reads_and_resumes_without_inspection() {
     std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
     let run = |args: &[&std::ffi::OsStr]| {
         let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+            .env("RUST_LOG", "docspec=info")
             .arg("--workspace")
             .arg(root.path().join("workspace"))
             .arg("--limits")
@@ -239,6 +240,8 @@ fn cli_validates_once_then_reads_and_resumes_without_inspection() {
     let stderr = String::from_utf8(created.stderr).unwrap();
     assert_eq!(stderr.matches("DOCSPEC_TEST_INSPECT_TABLE").count(), 1);
     assert!(!stderr.contains("DOCSPEC_TEST_DEEP_TABLE"));
+    assert!(stderr.contains("native_writer_progress"));
+    assert!(stderr.contains("phase_work_finished"));
     for args in [
         vec!["resume".as_ref(), request.as_os_str()],
         vec![
@@ -251,6 +254,8 @@ fn cli_validates_once_then_reads_and_resumes_without_inspection() {
         let stderr = String::from_utf8(result.stderr).unwrap();
         assert!(!stderr.contains("DOCSPEC_TEST_INSPECT_TABLE"));
         assert!(!stderr.contains("DOCSPEC_TEST_DEEP_TABLE"));
+        assert!(!stderr.contains("native_writer_"));
+        assert!(!stderr.contains("phase_work_started"));
     }
     let routine = run(&["verify".as_ref(), release_path.as_os_str()]);
     let report: serde_json::Value = serde_json::from_slice(&routine.stdout).unwrap();
@@ -943,6 +948,7 @@ async fn initial_plan_names_every_missing_handoff_including_selection_without_in
     let plan = engine.plan(&spec).await.unwrap();
     assert!(!plan.completed);
     assert!(plan.reusable_phases.is_empty());
+    assert!(plan.reusable_phase_origins.is_empty());
     assert_eq!(
         plan.required_phases,
         vec![
@@ -985,6 +991,17 @@ fn killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_w
     );
     assert_eq!(plan["completed"], false);
     assert_eq!(plan["reusable_phases"], serde_json::json!(["readback"]));
+    assert_eq!(plan["reusable_phase_origins"].as_object().unwrap().len(), 1);
+    assert_eq!(
+        plan["reusable_phase_origins"]["readback"]["key"],
+        format!("readback/{}", spec.operation)
+    );
+    assert!(
+        plan["reusable_phase_origins"]["readback"]["revision"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(plan["required_phases"], serde_json::json!(["selection"]));
     let (after_plan, work): (serde_json::Value, _) =
         support::run_cli(directory.path(), &["inspect", spec.dataset.as_str()]);
@@ -1015,6 +1032,10 @@ fn killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_w
     assert!(work.is_empty());
     assert_eq!(completed["completed"], true);
     assert_eq!(completed["required_phases"], serde_json::json!([]));
+    assert_eq!(
+        completed["reusable_phase_origins"],
+        plan["reusable_phase_origins"]
+    );
 }
 
 #[tokio::test]
@@ -1035,6 +1056,11 @@ async fn completed_plan_remains_complete_after_later_selection_without_reselecti
     let plan = engine.plan(&spec).await.unwrap();
     assert!(plan.completed);
     assert!(plan.required_phases.is_empty());
+    assert_eq!(plan.reusable_phase_origins.len(), 1);
+    assert_eq!(
+        plan.reusable_phase_origins["readback"].key,
+        format!("readback/{}", spec.operation)
+    );
     assert_eq!(engine.run(&spec).await.unwrap(), original);
     assert_eq!(engine.latest(&spec.dataset).await.unwrap(), later);
     assert_eq!(engine.inspect(&spec.dataset).await.unwrap(), before);

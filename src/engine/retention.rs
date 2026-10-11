@@ -102,7 +102,7 @@ impl Engine {
                 request,
                 OperationRequest::Backfill(_) | OperationRequest::Evidence(_)
             ) || (matches!(request, OperationRequest::Schema(_))
-                && operation.result_format == FORMAT)
+                && operation.result_format != PREVIOUS_FORMAT)
             {
                 continue;
             }
@@ -361,6 +361,7 @@ mod tests {
         let mut legacy_abandoned = None;
         for (name, format, is_schema) in [
             ("modern_schema", FORMAT, true),
+            ("retained_schema", 11, true),
             ("old_backfill", PREVIOUS_FORMAT, false),
             ("new_backfill", FORMAT, false),
             ("legacy_schema", PREVIOUS_FORMAT, true),

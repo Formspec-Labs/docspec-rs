@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 impl Engine {
     pub(super) async fn schema_key(
         &self,
+        view: &View,
         authority: &Authority,
         request: &OperationRequest,
     ) -> Result<Option<String>> {
@@ -20,15 +21,69 @@ impl Engine {
             .as_ref()
             .and_then(|s| s.groups.get("source"))
             .ok_or_else(invalid)?;
-        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
-        if !storage::defaults::evolved(native.metadata()) {
+        // An unchanged first based Build can retain the original material key.
+        // Later reuse rechecks compatibility if that exact generation changes.
+        let key = phase_key(
+            request,
+            &fingerprint(request)?,
+            authority.eligibility,
+            "processing",
+            None,
+            None,
+        )?;
+        let exact_source = {
+            let rows = self.inner.lifecycle.rows(view).await?;
+            let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[&key])?;
+            self.active_completion::<PhaseResult>(view, &key)
+                .await?
+                .is_some_and(|phase| phase.table.as_ref() == Some(source))
+        };
+        if exact_source {
             return Ok(None);
         }
+        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         Ok(Some(schema_identity(
             native.metadata(),
             &self.inner.lifecycle.budget,
         )?))
     }
+    /// Qualifies a reused schema-less generation against the exact captured base.
+    pub(super) async fn check_reused_build_schema(
+        &self,
+        view: &View,
+        request: &OperationRequest,
+        format: u32,
+        schema_key: Option<&String>,
+        phase: &PhaseResult,
+    ) -> Result<()> {
+        let OperationRequest::Build(build) = request else {
+            return Ok(());
+        };
+        let Some(base) = &build.base else {
+            return Ok(());
+        };
+        if format < 12 || schema_key.is_some() {
+            return Ok(());
+        }
+        let key = format!("result/{base}");
+        let rows = self.inner.lifecycle.rows(view).await?;
+        let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[&key])?;
+        let (_, _, captured) = rows.get_record::<ReleasePin>(&key)?.ok_or_else(invalid)?;
+        let before = captured.dataset.groups.get("source").ok_or_else(invalid)?;
+        let after = phase.table.as_ref().ok_or_else(invalid)?;
+        if before == after {
+            return Ok(());
+        }
+        verify_rebuild(before, after, format, &self.inner.lifecycle.budget).await
+            .map_err(|error| {
+                if error.code() == "invalid_schema" {
+                    Error::refusal("phase_generation_conflict", "retained processing generation changes the captured schema; retire that processing generation before retrying")
+                } else {
+                    error
+                }
+            })
+    }
+
     /// Plans a source schema edit against an exact selected version.
     ///
     /// # Errors
@@ -231,10 +286,13 @@ fn schema_identity(metadata: &TableMetadata, budget: &Budget) -> Result<String> 
 pub(super) async fn verify_rebuild(
     before: &TablePin,
     after: &TablePin,
+    format: u32,
     budget: &Budget,
 ) -> Result<()> {
     let before = storage::open_pin(before, budget).await?;
-    if !storage::defaults::evolved(before.metadata()) {
+    // Older results allowed name-corresponded rebuilds without stable native IDs.
+    // Their retained interpretation stays readable; new based Builds are exact.
+    if format < 12 && !storage::defaults::evolved(before.metadata()) {
         return Ok(());
     }
     let after = storage::open_pin(after, budget).await?;

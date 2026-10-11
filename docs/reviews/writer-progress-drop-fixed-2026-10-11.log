@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.47s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test progress::tests::writer_close_reports_totals_without_committing_and_catalog_writes_stay_quiet ... ok
+test progress::tests::held_writer_reports_accepted_work_before_failure_or_abandonment ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 314 filtered out; finished in 0.04s
+

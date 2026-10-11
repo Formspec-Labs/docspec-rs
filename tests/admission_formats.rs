@@ -1,4 +1,4 @@
-//! Retained format-10 admissions keep their meaning across format-11 cutovers.
+//! Retained format-10 admissions keep their meaning across current-format cutovers.
 #![cfg(feature = "test-util")]
 
 use super::scalar;
@@ -176,7 +176,7 @@ async fn original_admissions_resume_and_mixed_history_stays_readable() {
     backfill.definition = "v2".into();
     let group = engine.backfill(&backfill).await.unwrap();
     assert_eq!(
-        group.dataset.format, 11,
+        group.dataset.format, 12,
         "cloning an old pin must not inherit its release format"
     );
     assert_eq!(group.dataset.boundary, old_schema.dataset.boundary);
@@ -184,7 +184,7 @@ async fn original_admissions_resume_and_mixed_history_stays_readable() {
         .evolve_schema(&schema(&group, "new-schema", "v3"))
         .await
         .unwrap();
-    assert_eq!(new.dataset.format, 11);
+    assert_eq!(new.dataset.format, 12);
     assert_eq!(new.dataset.boundary, group.dataset.boundary);
     for release in [&old, &old_schema, &group, &new] {
         assert_eq!(
@@ -250,6 +250,6 @@ async fn original_backfill_does_not_silently_adopt_new_gap_rules() {
         Some(0)
     );
     let release = engine.backfill(&request).await.unwrap();
-    assert_eq!(release.dataset.format, 11);
+    assert_eq!(release.dataset.format, 12);
     assert_eq!(release.dataset.boundary, base.dataset.boundary);
 }

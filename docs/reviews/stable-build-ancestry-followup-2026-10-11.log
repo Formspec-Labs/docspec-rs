@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 13.45s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 8 tests
+test admission_formats::original_backfill_does_not_silently_adopt_new_gap_rules ... ok
+test retention_build_ancestry::based_full_build_reclaims_obsolete_payloads_after_recovery_retirement ... ok
+test cutover_admissions::format_10_backfill_refuses_hidden_admission_and_reuses_exact_completion ... ok
+test cutover_admissions::retired_selected_history_does_not_become_a_source_backlog ... ok
+test admission_formats::original_admissions_resume_and_mixed_history_stays_readable ... ok
+test retention_build_ancestry::based_full_build_keeps_historical_inline_qualification_payloads ... ok
+test cutover_admissions::schema_refuses_hidden_admission_and_keeps_old_writer_until_exact_retry ... ok
+test cutover_admissions::backfill_refuses_hidden_admission_and_reuses_completed_work_after_abandonment ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 297 filtered out; finished in 11.73s
+

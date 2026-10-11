@@ -1,0 +1,50 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 26.48s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 4 tests
+test comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources ... FAILED
+test rebuild_completion::newer_admission_preserves_finished_source_before_acknowledgment_and_rebase_reuses_it ... ok
+test lifecycle::cli_validates_once_then_reads_and_resumes_without_inspection ... ok
+test related_refresh::policy_change_reuses_same_consumer_processing_but_rechecks_latest_inputs ... ok
+
+failures:
+
+---- comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp8yZGDx/workspace/objects/comments/626b2fccaf334dfda9e79e88fe907c7f/data/abff7a39-f2c7-4059-bb90-e88cc24de61e-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp8yZGDx/workspace/objects/comments/626b2fccaf334dfda9e79e88fe907c7f/data/abff7a39-f2c7-4059-bb90-e88cc24de61e-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp8yZGDx/workspace/objects/comments/626b2fccaf334dfda9e79e88fe907c7f/data/abff7a39-f2c7-4059-bb90-e88cc24de61e-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp8yZGDx/workspace/objects/unrelated/5da7a69353c2428dbb8400d150645126/data/7bd5ffdd-d72b-45e6-92ab-3f051435bcfc-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN3lDgi/workspace/objects/comments/1698dccd2cb54df595b0f1f0bbf38b71/data/704d1f4a-f5aa-4428-9ca1-37fbc9ba9800-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN3lDgi/workspace/objects/comments/1698dccd2cb54df595b0f1f0bbf38b71/data/704d1f4a-f5aa-4428-9ca1-37fbc9ba9800-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpN3lDgi/workspace/objects/comments/1698dccd2cb54df595b0f1f0bbf38b71/data/704d1f4a-f5aa-4428-9ca1-37fbc9ba9800-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+
+thread 'comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources' (47879375) panicked at tests/comparison.rs:309:13:
+assertion `left == right` failed
+  left: "schema_mismatch"
+ right: "invalid_schema"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    comparison::coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 302 filtered out; finished in 7.28s
+
+error: test failed, to rerun pass `--test integration`

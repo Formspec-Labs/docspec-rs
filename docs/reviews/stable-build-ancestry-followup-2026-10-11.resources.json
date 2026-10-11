@@ -1,0 +1,21 @@
+{
+  "started_utc": "2026-10-11T06:35:41.903025+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "retention_build_ancestry::",
+    "admission_formats::",
+    "cutover_admissions::"
+  ],
+  "free_before_bytes": 2055012352,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 2027405312,
+  "free_after_bytes": 2055499776,
+  "finished_utc": "2026-10-11T06:36:09.952502+00:00"
+}

@@ -83,7 +83,7 @@ fn legacy_changes() -> serde_json::Value {
 
 #[test]
 fn supported_state_release_and_authority_accept_null_and_typed_legacy_members() {
-    for format in [10, 11] {
+    for format in [10, 11, FORMAT] {
         for source in [serde_json::Value::Null, legacy_changes()] {
             for receipts in [serde_json::Value::Null, legacy_changes()] {
                 let expected = state(format);
