@@ -170,6 +170,16 @@ enum CompletedGroups {
     Legacy(BTreeMap<String, ObjectRef>),
 }
 
+/// Why a durable phase has no completion available for this request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanPhaseReason {
+    /// No completion is retained under this request's exact phase key.
+    NoRetainedCompletion,
+    /// The exact retained completion's recovery promise was explicitly retired.
+    RecoveryRetired,
+}
+
 /// A bounded explanation of reuse and work remaining before selection.
 #[derive(Clone, Debug, Serialize)]
 pub struct RunPlan {
@@ -180,6 +190,9 @@ pub struct RunPlan {
     pub reusable_phases: Vec<String>,
     /// Missing durable handoffs, including final selection when not completed.
     pub required_phases: Vec<String>,
+    /// Known reasons for required durable phases; final selection is a separate handoff.
+    /// Absence does not infer failure, running work, or changed input contents.
+    pub required_phase_reasons: BTreeMap<String, PlanPhaseReason>,
     pub limits: Limits,
 }
 
@@ -475,11 +488,13 @@ impl Engine {
                 } else {
                     vec!["selection".into()]
                 },
+                required_phase_reasons: BTreeMap::new(),
                 limits: lifecycle.budget.limits.clone(),
             });
         }
         let mut reusable_phases = Vec::new();
         let mut required_phases = Vec::new();
+        let mut required_phase_reasons = BTreeMap::new();
         let mut phases = PHASES.to_vec();
         if matches!(spec, OperationRequest::Refresh(_)) {
             phases.insert(2, "evidence");
@@ -515,24 +530,29 @@ impl Engine {
             if phase == "receipts" && adopted_receipts {
                 continue;
             }
-            let exists = if phase == "groups" {
-                self.active_completion::<CompletedGroups>(
-                    &view,
-                    &format!("groups/{}", spec.operation()),
-                )
-                .await?
-                .is_some()
+            let (exists, reason) = if phase == "groups" {
+                let (completion, reason) = self
+                    .completion_with_reason::<CompletedGroups>(
+                        &view,
+                        &format!("groups/{}", spec.operation()),
+                    )
+                    .await?;
+                (completion.is_some(), reason)
             } else if phase == "readback" {
-                lifecycle
+                let exists = lifecycle
                     .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
                     .await?
-                    .is_some()
+                    .is_some();
+                (
+                    exists,
+                    (!exists).then_some(PlanPhaseReason::NoRetainedCompletion),
+                )
             } else {
                 let eligibility = operation
                     .as_ref()
                     .map_or(authority.eligibility, |o| o.eligibility);
-                let completion = self
-                    .active_completion::<PhaseResult>(
+                let (completion, reason) = self
+                    .completion_with_reason::<PhaseResult>(
                         &view,
                         &phase_key(
                             spec,
@@ -555,16 +575,20 @@ impl Engine {
                         adopted_receipts = evidence::adopts_receipts(spec, processing, base)?;
                     }
                 }
-                completion.is_some()
+                (completion.is_some(), reason)
             };
             if exists {
                 reusable_phases.push(phase.to_owned());
             } else {
                 required_phases.push(phase.to_owned());
+                if let Some(reason) = reason {
+                    required_phase_reasons.insert(phase.to_owned(), reason);
+                }
             }
         }
         if retained_processing {
             required_phases.retain(|phase| phase != "admission");
+            required_phase_reasons.remove("admission");
         }
         required_phases.push("selection".into());
         Ok(RunPlan {
@@ -573,6 +597,7 @@ impl Engine {
             completed,
             reusable_phases,
             required_phases,
+            required_phase_reasons,
             limits: lifecycle.budget.limits.clone(),
         })
     }

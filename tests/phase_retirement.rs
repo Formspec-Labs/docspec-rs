@@ -124,6 +124,8 @@ async fn processing_recovers_after_admission_retirement_and_restart() {
             .iter()
             .any(|phase| phase == "processing")
     );
+    assert!(!plan.required_phase_reasons.contains_key("admission"));
+    assert!(!plan.required_phase_reasons.contains_key("processing"));
     let release = engine.run(&request).await.unwrap();
     assert_eq!(release.dataset.groups["source"], processing.table.unwrap());
     assert_eq!(release.dataset.inputs["input"], *input);
@@ -198,6 +200,21 @@ async fn exact_generation_retries_do_not_retire_recomputed_work() {
         std::slice::from_ref(&key),
     )
     .await;
+    // Planning distinguishes deliberately retired work without reopening input bytes.
+    let offline = root.path().join("held-input.parquet");
+    std::fs::rename(&request.input, &offline).unwrap();
+    let plan = engine.plan(&request).await.unwrap();
+    assert_eq!(
+        plan.required_phase_reasons.get("processing"),
+        Some(&docspec::engine::PlanPhaseReason::RecoveryRetired)
+    );
+    assert_eq!(
+        plan.required_phase_reasons.get("validation"),
+        Some(&docspec::engine::PlanPhaseReason::NoRetainedCompletion)
+    );
+    assert!(!plan.required_phase_reasons.contains_key("admission"));
+    assert!(!plan.required_phase_reasons.contains_key("selection"));
+    std::fs::rename(&offline, &request.input).unwrap();
     let inspection = engine
         .inspect_retention(std::slice::from_ref(&candidate))
         .await

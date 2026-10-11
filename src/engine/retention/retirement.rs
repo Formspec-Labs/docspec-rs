@@ -333,17 +333,25 @@ impl Engine {
         view: &View,
         key: &str,
     ) -> Result<Option<T>> {
+        Ok(self.completion_with_reason(view, key).await?.0)
+    }
+
+    pub(in crate::engine) async fn completion_with_reason<T: DeserializeOwned>(
+        &self,
+        view: &View,
+        key: &str,
+    ) -> Result<(Option<T>, Option<PlanPhaseReason>)> {
         if !completion_key(key) {
             return Err(invalid_retirement());
         }
         let rows = self.inner.lifecycle.rows(view).await?;
         let Some(revision) = rows.revision(key) else {
-            return Ok(None);
+            return Ok((None, Some(PlanPhaseReason::NoRetainedCompletion)));
         };
         if record_retired(&rows, view, key, revision, &self.inner.lifecycle.budget)? {
-            return Ok(None);
+            return Ok((None, Some(PlanPhaseReason::RecoveryRetired)));
         }
-        Ok(rows.get_record::<T>(key)?.map(|(_, _, value)| value))
+        Ok((rows.get_record::<T>(key)?.map(|(_, _, value)| value), None))
     }
 
     /// Captures exact completion generations for explicit recovery-promise retirement.

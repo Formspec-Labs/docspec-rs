@@ -953,6 +953,13 @@ async fn initial_plan_names_every_missing_handoff_including_selection_without_in
             "selection"
         ]
     );
+    assert_eq!(plan.required_phase_reasons.len(), 4);
+    assert!(
+        plan.required_phase_reasons
+            .values()
+            .all(|reason| *reason == docspec::engine::PlanPhaseReason::NoRetainedCompletion)
+    );
+    assert!(!plan.required_phase_reasons.contains_key("selection"));
     assert_eq!(
         engine.latest(&spec.dataset).await.unwrap_err().code(),
         "no_release"
