@@ -175,8 +175,10 @@ enum CompletedGroups {
 pub struct RunPlan {
     pub dataset: Id,
     pub operation: Id,
+    /// This operation has a retained selection result, even after a later selection.
     pub completed: bool,
     pub reusable_phases: Vec<String>,
+    /// Missing durable handoffs, including final selection when not completed.
     pub required_phases: Vec<String>,
     pub limits: Limits,
 }
@@ -452,17 +454,27 @@ impl Engine {
         if !completed && let Some(operation) = &operation {
             check_authority(&authority, operation)?;
         }
-        if lifecycle
+        let readback = lifecycle
             .get::<ReleasePin>(&view, &format!("readback/{}", spec.operation()))
             .await?
-            .is_some()
-        {
+            .is_some();
+        // A readback preserves expensive work but still needs guarded selection.
+        // A retained result completes this operation independently of today's head.
+        if completed || readback {
             return Ok(RunPlan {
                 dataset: spec.dataset().clone(),
                 operation: spec.operation().clone(),
                 completed,
-                reusable_phases: vec!["readback".into()],
-                required_phases: Vec::new(),
+                reusable_phases: if readback {
+                    vec!["readback".into()]
+                } else {
+                    Vec::new()
+                },
+                required_phases: if completed {
+                    Vec::new()
+                } else {
+                    vec!["selection".into()]
+                },
                 limits: lifecycle.budget.limits.clone(),
             });
         }
@@ -554,6 +566,7 @@ impl Engine {
         if retained_processing {
             required_phases.retain(|phase| phase != "admission");
         }
+        required_phases.push("selection".into());
         Ok(RunPlan {
             dataset: spec.dataset().clone(),
             operation: spec.operation().clone(),

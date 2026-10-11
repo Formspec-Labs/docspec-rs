@@ -1,0 +1,86 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.61s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 4 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpr870wl/workspace/objects/comments/070c4ff267c843d98058fdc658452204/data/5f6be906-72ad-4dbb-887f-fa5a7b1af19e-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppl3XS6/workspace/objects/comments/8f9a14f445a5427aac4f7823217a66c8/data/1bea54f5-b19c-4671-b75d-de4971bccd82-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoRBsEi/workspace/objects/comments/677ca6c8a0434234815dede551cd6d33/data/366426f6-9ac8-4336-ac0e-a2d88cae047b-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpKCIkyG/workspace/objects/comments/7c829e8c14f3449c801b4eb40b6fdcb9/data/8cf01f86-6231-4243-81c3-0dcd12b546be-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_DEEP_TABLE
+test phase_retirement::retained_readback_selects_after_upstream_retirement_without_source ... ok
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoRBsEi/workspace/objects/comments/1ec072d565ee4edfb0a523547daab4a0/data/9e16ef4e-0ed6-41d2-94c9-fc52288e24be-00000.parquet
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpr870wl/workspace/objects/comments/ea8c54b1077a41379e5c466975f0c0be/data/f167b2b6-84fb-4268-9abd-fb88298a7c07-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppl3XS6/workspace/objects/comments/8c1aec79f23c4f8cab85b7759b4bd5fe/data/9f574610-5a1e-4c7d-92f3-201c7721c785-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoRBsEi/workspace/objects/comments/211a62abec5846609bc8c061ca587ca1/data/e7e17104-43e6-4026-8485-730fcd06f059-00000.parquet
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppl3XS6/workspace/objects/comments/014ae3d5a1634b63941e394c632a8fa7/data/3bdfce0c-681c-4c52-aa5d-bae7ea6afe6b-00000.parquet
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpr870wl/workspace/objects/comments/95159854c65048f19e3546e8e328e38a/data/5bede1ba-2a5d-4759-9c0b-65bd2f71ee0c-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'qualification_roots::qualification_promise_ends_after_independent_replacement_and_explicit_retirement' (46609717) panicked at tests/qualification_roots.rs:347:47:
+called `Result::unwrap()` on an `Err` value: Error { code: "dependent_groups", message: "provide the selected base to rebuild its computed groups together", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test qualification_roots::qualification_promise_ends_after_independent_replacement_and_explicit_retirement ... FAILED
+DOCSPEC_TEST_WORK admission
+test qualification_roots::sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test qualification_roots::qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+
+failures:
+
+failures:
+    qualification_roots::qualification_promise_ends_after_independent_replacement_and_explicit_retirement
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 296 filtered out; finished in 5.52s
+
+error: test failed, to rerun pass `--test integration`

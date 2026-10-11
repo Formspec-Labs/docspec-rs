@@ -931,3 +931,104 @@ async fn relocated_build_retry_keeps_the_original_readback_request() {
     let resumed = engine.run(&spec).await.unwrap();
     assert_eq!(serde_json::to_value(resumed).unwrap(), original);
 }
+
+#[tokio::test]
+async fn initial_plan_names_every_missing_handoff_including_selection_without_input_reads() {
+    let directory = TempDir::new().unwrap();
+    let spec = fixture(directory.path());
+    std::fs::remove_file(&spec.input).unwrap();
+    let engine = Engine::open(directory.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let plan = engine.plan(&spec).await.unwrap();
+    assert!(!plan.completed);
+    assert!(plan.reusable_phases.is_empty());
+    assert_eq!(
+        plan.required_phases,
+        vec![
+            "admission",
+            "processing",
+            "validation",
+            "readback",
+            "selection"
+        ]
+    );
+    assert_eq!(
+        engine.latest(&spec.dataset).await.unwrap_err().code(),
+        "no_release"
+    );
+}
+
+#[cfg(feature = "test-util")]
+#[test]
+fn killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_work() {
+    let directory = TempDir::new().unwrap();
+    let spec = fixture(directory.path());
+    support::kill_after(directory.path(), &spec, "build", "readback");
+    std::fs::remove_file(&spec.input).unwrap();
+    let (before, work): (serde_json::Value, _) =
+        support::run_cli(directory.path(), &["inspect", spec.dataset.as_str()]);
+    assert!(work.is_empty());
+    let request = directory.path().join("request.json");
+    let (plan, work): (serde_json::Value, _) =
+        support::run_cli(directory.path(), &["plan", request.to_str().unwrap()]);
+    assert!(
+        work.is_empty(),
+        "planning must not execute retained payload work"
+    );
+    assert_eq!(plan["completed"], false);
+    assert_eq!(plan["reusable_phases"], serde_json::json!(["readback"]));
+    assert_eq!(plan["required_phases"], serde_json::json!(["selection"]));
+    let (after_plan, work): (serde_json::Value, _) =
+        support::run_cli(directory.path(), &["inspect", spec.dataset.as_str()]);
+    assert!(work.is_empty());
+    assert_eq!(
+        after_plan, before,
+        "planning must preserve exact durable records"
+    );
+    let (release, work) = support::resume(directory.path(), "resume");
+    assert!(
+        work.is_empty(),
+        "pending selection must reuse readback without admission, SQL, validation or serialization work"
+    );
+    assert_eq!(
+        serde_json::to_value(&release).unwrap(),
+        before[format!("readback/{}", spec.operation)]
+    );
+    let (after, work): (serde_json::Value, _) =
+        support::run_cli(directory.path(), &["inspect", spec.dataset.as_str()]);
+    assert!(work.is_empty());
+    for (key, value) in before.as_object().unwrap() {
+        if key.starts_with("phase/") || key.starts_with("readback/") {
+            assert_eq!(&after[key], value, "selection must preserve {key}");
+        }
+    }
+    let (completed, work): (serde_json::Value, _) =
+        support::run_cli(directory.path(), &["plan", request.to_str().unwrap()]);
+    assert!(work.is_empty());
+    assert_eq!(completed["completed"], true);
+    assert_eq!(completed["required_phases"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn completed_plan_remains_complete_after_later_selection_without_reselecting_old_result() {
+    let directory = TempDir::new().unwrap();
+    let spec = fixture(directory.path());
+    let engine = Engine::open(directory.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let original = engine.run(&spec).await.unwrap();
+    let next = RunSpec {
+        operation: Id::new("later").unwrap(),
+        ..spec.clone()
+    };
+    let later = engine.run(&next).await.unwrap();
+    std::fs::remove_file(&spec.input).unwrap();
+    let before = engine.inspect(&spec.dataset).await.unwrap();
+    let plan = engine.plan(&spec).await.unwrap();
+    assert!(plan.completed);
+    assert!(plan.required_phases.is_empty());
+    assert_eq!(engine.run(&spec).await.unwrap(), original);
+    assert_eq!(engine.latest(&spec.dataset).await.unwrap(), later);
+    assert_eq!(engine.inspect(&spec.dataset).await.unwrap(), before);
+}

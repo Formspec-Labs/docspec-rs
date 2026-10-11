@@ -341,14 +341,10 @@ async fn retained_readback_selects_after_upstream_retirement_without_source() {
     drop(engine);
 
     let engine = open(root.path()).await;
-    assert!(
-        engine
-            .plan(&request)
-            .await
-            .unwrap()
-            .required_phases
-            .is_empty()
-    );
+    let plan = engine.plan(&request).await.unwrap();
+    assert!(!plan.completed);
+    assert_eq!(plan.required_phases, ["selection"]);
+    assert_eq!(plan.reusable_phases, ["readback"]);
     assert_eq!(engine.run(&request).await.unwrap(), retained);
     assert_eq!(engine.latest(&request.dataset).await.unwrap(), retained);
     let after = engine.inspect(&request.dataset).await.unwrap();
