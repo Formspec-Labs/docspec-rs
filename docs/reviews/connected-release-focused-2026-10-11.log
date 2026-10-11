@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.79s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test engine::locations::release::tests::remote_release_absence_is_only_initial_head_not_permission_error ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp15P25W/host/objects/dataset/b2fb4d2bfcbe4cce8033e99e28ad3734/data/3fa8ef1c-98b4-4d96-a957-197baea79462-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+test engine::locations::release::tests::interrupted_release_reuses_exact_uri_and_completed_readback_without_second_decode ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 293 filtered out; finished in 0.39s
+

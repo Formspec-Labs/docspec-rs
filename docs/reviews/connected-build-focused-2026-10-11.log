@@ -1,0 +1,110 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0277]: `{async block@src/storage.rs:191:66: 191:76}` cannot be unpinned
+    --> src/engine/write/build/tests.rs:170:36
+     |
+ 170 |     while let Some(batch) = stream.try_next().await.unwrap() {
+     |                                    ^^^^^^^^ unsatisfied trait bound
+     |
+     = help: within `__Origin<'_, (Pin<Box<...>>, ..., ..., ...), ..., ...>`, the trait `Unpin` is not implemented for `{async block@src/storage.rs:191:66: 191:76}`
+     = note: consider using the `pin!` macro
+             consider using `Box::pin` if you need to access the pinned value outside of the current scope
+note: required because it appears within the type `std::option::Option<{async block@src/storage.rs:191:66: 191:76}>`
+    --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/core/src/option.rs:600:9
+note: required because it appears within the type `__Origin<'_, (Pin<Box<...>>, ..., ..., ...), ..., ...>`
+    --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pin-project-lite-0.2.17/src/lib.rs:1251:21
+     |
+1251 |           $vis struct __Origin<'__pin, $($impl_generics)*>
+     |                       ^^^^^^^^
+     |
+    ::: /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/try_stream/try_unfold.rs:67:1
+     |
+  67 | / pin_project! {
+  68 | |     /// Stream for the [`try_unfold`] function.
+  69 | |     #[must_use = "streams do nothing unless polled"]
+  70 | |     pub struct TryUnfold<T, F, Fut> {
+...    |
+  76 | | }
+     | |_- in this macro invocation
+     = note: required for `TryUnfold<(Pin<Box<...>>, ..., ..., ...), ..., ...>` to implement `Unpin`
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:159:13
+     |
+ 159 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:128:13
+     |
+ 128 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:120:13
+     |
+ 120 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `try_next`
+    --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/try_stream/mod.rs:406:15
+     |
+ 404 |     fn try_next(&mut self) -> TryNext<'_, Self>
+     |        -------- required by a bound in this associated function
+ 405 |     where
+ 406 |         Self: Unpin,
+     |               ^^^^^ required by this bound in `TryStreamExt::try_next`
+     = note: the full name for the type has been written to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-f22faff8f24325f2.long-type-13941961965060743308.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the macro `$crate::__pin_project_make_unpin_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `{async block@src/storage.rs:191:66: 191:76}` cannot be unpinned
+    --> src/engine/write/build/tests.rs:170:47
+     |
+ 170 |     while let Some(batch) = stream.try_next().await.unwrap() {
+     |                                               ^^^^^ unsatisfied trait bound
+     |
+     = help: within `__Origin<'_, (Pin<Box<...>>, ..., ..., ...), ..., ...>`, the trait `Unpin` is not implemented for `{async block@src/storage.rs:191:66: 191:76}`
+     = note: consider using the `pin!` macro
+             consider using `Box::pin` if you need to access the pinned value outside of the current scope
+note: required because it appears within the type `std::option::Option<{async block@src/storage.rs:191:66: 191:76}>`
+    --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/core/src/option.rs:600:9
+note: required because it appears within the type `__Origin<'_, (Pin<Box<...>>, ..., ..., ...), ..., ...>`
+    --> /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pin-project-lite-0.2.17/src/lib.rs:1251:21
+     |
+1251 |           $vis struct __Origin<'__pin, $($impl_generics)*>
+     |                       ^^^^^^^^
+     |
+    ::: /Users/mikewolfd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/try_stream/try_unfold.rs:67:1
+     |
+  67 | / pin_project! {
+  68 | |     /// Stream for the [`try_unfold`] function.
+  69 | |     #[must_use = "streams do nothing unless polled"]
+  70 | |     pub struct TryUnfold<T, F, Fut> {
+...    |
+  76 | | }
+     | |_- in this macro invocation
+     = note: required for `TryUnfold<(Pin<Box<...>>, ..., ..., ...), ..., ...>` to implement `Unpin`
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:159:13
+     |
+ 159 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:128:13
+     |
+ 128 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `impl Stream<Item = Result<RecordBatch, Error>> + Send`
+    --> src/storage.rs:120:13
+     |
+ 120 | ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: required for `TryNext<'_, impl Stream<Item = Result<RecordBatch, Error>> + Send>` to implement `futures::Future`
+     = note: required for `TryNext<'_, impl Stream<Item = Result<RecordBatch, Error>> + Send>` to implement `std::future::IntoFuture`
+     = note: the full name for the type has been written to '/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-f22faff8f24325f2.long-type-2181680708986952626.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the macro `$crate::__pin_project_make_unpin_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: remove the `.await`
+     |
+ 170 -     while let Some(batch) = stream.try_next().await.unwrap() {
+ 170 +     while let Some(batch) = stream.try_next().unwrap() {
+     |
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `docspec` (lib test) due to 2 previous errors

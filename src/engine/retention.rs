@@ -157,6 +157,7 @@ impl Engine {
         operation: &OperationId,
         reason: &str,
     ) -> Result<Abandonment> {
+        self.require_local()?;
         if reason.trim().is_empty() {
             return Err(Error::refusal(
                 "missing_reason",

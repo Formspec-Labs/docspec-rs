@@ -28,7 +28,8 @@ pub use occurrences::read_occurrences_observed;
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
 pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
 pub(crate) use tables::{
-    CandidateWriter, bounded_json, fresh_metadata, register_candidate, replacement_metadata,
+    CandidateWriter, bounded_json, fresh_metadata, fresh_metadata_at, register_candidate,
+    replacement_metadata,
 };
 
 use crate::{
@@ -231,7 +232,7 @@ fn check_object_available(object: &ObjectRef) -> Result<()> {
 async fn check_objects(
     objects: Vec<ObjectRef>,
     budget: &Budget,
-    check: fn(&ObjectRef) -> Result<()>,
+    check: impl Fn(&ObjectRef) -> Result<()> + Send + 'static,
 ) -> Result<()> {
     let bytes = objects.iter().fold(
         objects
@@ -453,12 +454,15 @@ pub(crate) async fn append(
     if files.is_empty() {
         return Ok(table.clone());
     }
+    // Reuse the lifecycle boundary: native refresh must never adopt a newer
+    // candidate and append the same computed output to it a second time.
+    let guard = crate::catalog::GuardedCatalog::new(catalog, table);
     let tx = Transaction::new(table);
     Ok(tx
         .fast_append()
         .add_data_files(files)
         .apply(tx)?
-        .commit(catalog)
+        .commit(&guard)
         .await?)
 }
 

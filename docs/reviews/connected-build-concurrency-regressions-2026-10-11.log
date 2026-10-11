@@ -1,0 +1,53 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.76s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 3 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcaFKNX/workspace/objects/comments/bb0ae6f452d14ce7843e300ca473fca1/data/4ba51e2e-3b71-4a95-a9d3-ab1ac3817a61-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcaFKNX/workspace/objects/comments/bb0ae6f452d14ce7843e300ca473fca1/data/4ba51e2e-3b71-4a95-a9d3-ab1ac3817a61-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpndFdia/workspace/objects/comments/70f582a2c70745cf999166b44cb633d7/data/a9e8a522-4e57-4be6-82dc-b3307f3cbf9f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/d52adf40cd01410596921311c77c2bc0/data/b5c8850d-b78a-4e11-b606-12f0f74b22db-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/d52adf40cd01410596921311c77c2bc0/data/b5c8850d-b78a-4e11-b606-12f0f74b22db-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/d52adf40cd01410596921311c77c2bc0/data/b5c8850d-b78a-4e11-b606-12f0f74b22db-00002.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/d52adf40cd01410596921311c77c2bc0/data/b5c8850d-b78a-4e11-b606-12f0f74b22db-00003.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+test lifecycle::simultaneous_retries_reconcile_to_one_immutable_release ... ok
+DOCSPEC_TEST_DEEP_TABLE
+test lifecycle::oversized_output_refuses_then_resumes_from_admitted_input ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/df313c24c4e04ba0a90d7ce7c4b376d0/data/data/73d66da6-9cce-41bb-8f56-15f87aaf21e6-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/df313c24c4e04ba0a90d7ce7c4b376d0/data/data/7430c8e8-4640-4314-b144-05a0a45ad8c3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsKiWlm/workspace/objects/comments/df313c24c4e04ba0a90d7ce7c4b376d0/removed/data/32b5e6a7-9ee9-4278-a66d-96ec940944d0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+test updates::applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 291 filtered out; finished in 1.98s
+

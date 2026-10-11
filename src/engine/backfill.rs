@@ -155,6 +155,7 @@ impl Engine {
         &self,
         release: &ReleasePin,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
+        self.require_local()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -264,6 +265,7 @@ impl Engine {
     }
 
     async fn plan_backfill_admitted(&self, spec: &BackfillSpec) -> Result<BackfillPlan> {
+        self.require_local()?;
         validate(spec)?;
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let lifecycle = &self.inner.lifecycle;
@@ -476,6 +478,7 @@ impl Engine {
         spec: &BackfillSpec,
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
+        self.require_local()?;
         validate(spec)?;
         self.check_operation_entry(&spec.dataset, &spec.operation)
             .await?;
@@ -816,14 +819,24 @@ impl Engine {
                 if recorded.dataset != dataset {
                     return Err(invalid_group());
                 }
-                check_release_available_with_checks(&recorded, &lifecycle.budget, &mut checks)
-                    .await?;
+                check_release_available_with_checks(
+                    &self.inner.objects,
+                    &recorded,
+                    &lifecycle.budget,
+                    &mut checks,
+                )
+                .await?;
                 recorded
             } else {
                 if let Some(readback) = retained_readback.take() {
                     // A sibling changed composition, not this completed target.
-                    check_release_available_with_checks(&readback, &lifecycle.budget, &mut checks)
-                        .await?;
+                    check_release_available_with_checks(
+                        &self.inner.objects,
+                        &readback,
+                        &lifecycle.budget,
+                        &mut checks,
+                    )
+                    .await?;
                 }
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");

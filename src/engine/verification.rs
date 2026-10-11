@@ -8,6 +8,7 @@ type Key = (Id, Id);
 pub(super) struct Checks {
     pub report: VerificationReport,
     inspect_tables: bool,
+    objects: storage::Objects,
     scalar_originals: Option<Box<backfill::origins::Checks>>,
     known: BTreeMap<String, storage::CheckedFile>,
     _memory: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
@@ -22,9 +23,17 @@ impl Checks {
                 ..VerificationReport::default()
             },
             inspect_tables: true,
+            objects: storage::Objects::Local,
             scalar_originals: None,
             known: BTreeMap::new(),
             _memory: None,
+        }
+    }
+
+    pub(super) fn routine(objects: storage::Objects) -> Self {
+        Self {
+            objects,
+            ..Self::new(VerificationLevel::Routine)
         }
     }
 
@@ -212,6 +221,7 @@ impl Checks {
         } else {
             self.admit(budget)?;
             let (inspected, known) = storage::inspect_table(
+                &self.objects,
                 pin,
                 budget,
                 3usize.saturating_sub(self.report.sampled_files),

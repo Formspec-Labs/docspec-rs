@@ -15,6 +15,43 @@ pub(crate) enum Objects {
 }
 
 impl Objects {
+    // A selected immutable pin supplies identities; this backend supplies read
+    // scope and credentials, never ownership or a replacement table head.
+    pub(crate) async fn open_pin(
+        &self,
+        pin: &crate::model::TablePin,
+        budget: &crate::budget::Budget,
+    ) -> Result<Table> {
+        match self {
+            Self::Local => super::open_pin(pin, budget).await,
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => {
+                self.validate_path(&pin.metadata.path)?;
+                for object in &pin.objects {
+                    self.validate_path(&object.path)?;
+                }
+                super::open_pin_with_io(pin, objects.file_io(), budget).await
+            }
+        }
+    }
+
+    pub(crate) async fn check_available(
+        &self,
+        references: Vec<ObjectRef>,
+        budget: &crate::budget::Budget,
+    ) -> Result<()> {
+        // Refuse the complete configured scope before any availability I/O.
+        for object in &references {
+            self.validate_path(&object.path)?;
+        }
+        let objects = self.clone();
+        let handle = tokio::runtime::Handle::current();
+        super::check_objects(references, budget, move |object| {
+            objects.check_available_admitted(object, &handle)
+        })
+        .await
+    }
+
     pub(crate) fn register_query_store(
         &self,
         _runtime: &datafusion::execution::runtime_env::RuntimeEnv,
@@ -85,6 +122,60 @@ impl Objects {
         }
     }
 
+    // Exact candidate metadata creation consumes the retained serialization.
+    // A resumed or uncertain create reconciles only its protected immutable URI.
+    pub(crate) async fn create_candidate_metadata(
+        &self,
+        expected: &ObjectRef,
+        bytes: Vec<u8>,
+        budget: &crate::budget::Budget,
+        _resuming: bool,
+    ) -> Result<()> {
+        if bytes.len() as u64 != expected.bytes || bytes.len() > budget.limits.max_metadata_bytes {
+            return Err(Error::refusal(
+                "metadata_capacity",
+                "candidate bytes exceed their retained identity or allowance",
+            ));
+        }
+        self.validate_path(&expected.path)?;
+        #[cfg(feature = "remote")]
+        if let Self::Remote(objects) = self
+            && _resuming
+            && objects.verify_if_present(expected, budget).await?.is_some()
+        {
+            return Ok(());
+        }
+        let memory = budget.reserve(bytes.capacity().saturating_add(self.read_allowance()))?;
+        let objects = self.clone();
+        let retained = expected.clone();
+        let _handle = tokio::runtime::Handle::current();
+        let result = budget
+            .blocking_admitted(move || {
+                let _memory = memory;
+                match &objects {
+                    Self::Local if _resuming && Path::new(&retained.path).try_exists()? => {
+                        super::verify_object(&retained)?;
+                        super::tables::sync_candidate_parent(&retained)
+                    }
+                    Self::Local => super::tables::publish_candidate_metadata(&retained, &bytes),
+                    #[cfg(feature = "remote")]
+                    Self::Remote(_) => {
+                        objects.create_bytes_admitted(&retained.path, bytes, &_handle)
+                    }
+                }
+            })
+            .await;
+        #[cfg(feature = "remote")]
+        if let Err(error) = &result
+            && matches!(error.code(), "remote_conflict" | "remote_unconfirmed")
+            && let Self::Remote(objects) = self
+            && objects.verify_if_present(expected, budget).await?.is_some()
+        {
+            return Ok(());
+        }
+        result
+    }
+
     // Explicitly compose owned native I/O; consume no arbitrary Table credentials.
     // Remote runtime lifetime begins here, on the currently driven runtime.
     pub(crate) fn bind_table(&self, table: &Table) -> Result<PinTable> {
@@ -114,6 +205,44 @@ impl Objects {
         }
     }
 
+    pub(crate) fn read_metadata_if_present_admitted(
+        &self,
+        expected: &ObjectRef,
+        bytes: &mut [u8],
+        handle: &tokio::runtime::Handle,
+    ) -> Result<bool> {
+        let present = self.read_metadata_inner(expected, bytes, handle, true)?;
+        if present && matches!(self, Self::Local) {
+            super::tables::sync_candidate_parent(expected)?;
+        }
+        Ok(present)
+    }
+
+    pub(crate) fn create_release_metadata_admitted(
+        &self,
+        expected: &ObjectRef,
+        bytes: Vec<u8>,
+        _handle: &tokio::runtime::Handle,
+    ) -> Result<()> {
+        self.validate_path(&expected.path)?;
+        match self {
+            Self::Local => {
+                if super::tables::publish_metadata_new(expected, &bytes)? {
+                    Ok(())
+                } else {
+                    Err(Error::refusal(
+                        "metadata_conflict",
+                        "release destination already exists",
+                    ))
+                }
+            }
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => {
+                _handle.block_on(objects.create_bytes_admitted(&expected.path, bytes))
+            }
+        }
+    }
+
     // The caller retains the exact buffer and worker admission through parsing.
     // Remote transport adds a bounded stream allowance; local reads add none.
     pub(crate) fn metadata_read_allowance(&self) -> usize {
@@ -130,6 +259,17 @@ impl Objects {
         bytes: &mut [u8],
         _handle: &tokio::runtime::Handle,
     ) -> Result<()> {
+        self.read_metadata_inner(expected, bytes, _handle, false)
+            .map(|_| ())
+    }
+
+    fn read_metadata_inner(
+        &self,
+        expected: &ObjectRef,
+        bytes: &mut [u8],
+        _handle: &tokio::runtime::Handle,
+        allow_absence: bool,
+    ) -> Result<bool> {
         let corrupt = || {
             Error::refusal(
                 "corrupt_object",
@@ -142,7 +282,13 @@ impl Objects {
         match self {
             Self::Local => {
                 use std::io::Read;
-                let mut file = std::fs::File::open(&expected.path)?;
+                let mut file = match std::fs::File::open(&expected.path) {
+                    Ok(file) => file,
+                    Err(error) if allow_absence && error.kind() == std::io::ErrorKind::NotFound => {
+                        return Ok(false);
+                    }
+                    Err(error) => return Err(error.into()),
+                };
                 if file.metadata()?.len() != expected.bytes {
                     return Err(corrupt());
                 }
@@ -153,13 +299,21 @@ impl Objects {
             }
             #[cfg(feature = "remote")]
             Self::Remote(objects) => {
-                _handle.block_on(objects.read_metadata_admitted(expected, bytes))?
+                if allow_absence {
+                    if !_handle
+                        .block_on(objects.read_metadata_if_present_admitted(expected, bytes))?
+                    {
+                        return Ok(false);
+                    }
+                } else {
+                    _handle.block_on(objects.read_metadata_admitted(expected, bytes))?;
+                }
             }
         }
         if blake3::hash(bytes).to_hex().as_str() != expected.digest {
             return Err(corrupt());
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(super) fn read_allowance(&self) -> usize {
@@ -307,8 +461,7 @@ impl PinTable {
         })
     }
 
-    #[cfg(feature = "remote")]
-    pub(super) fn into_native(self) -> Table {
+    pub(crate) fn into_native(self) -> Table {
         self.table
     }
 }

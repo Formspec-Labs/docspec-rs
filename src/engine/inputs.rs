@@ -15,6 +15,7 @@ impl Engine {
     /// Refuses conflicting reseals, missing history, stale eligibility, mismatched
     /// producer declarations, invalid identities, or exhausted metadata capacity.
     pub async fn seal_generation(&self, seal: &GenerationSeal) -> Result<GenerationSeal> {
+        self.require_local()?;
         let memory = self.request_memory(seal)?;
         let seal = seal.clone();
         self.admit_work(memory, move |engine| async move {
@@ -157,6 +158,7 @@ impl Engine {
     /// Refuses unknown or invalidated versions, unsealed or mixed generations,
     /// rebound identities, missing manifests, and exhausted metadata capacity.
     pub async fn capture_inputs(&self, inputs: &BTreeMap<Id, VersionRef>) -> Result<InputCoverage> {
+        self.require_local()?;
         let memory = self.request_memory(inputs)?;
         let inputs = inputs.clone();
         self.admit_work(memory, move |engine| async move {
@@ -420,6 +422,29 @@ pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'stati
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<T> {
+    read_manifest_inner(objects, object, budget, bytes, memory, false)
+        .await?
+        .ok_or_else(|| Error::refusal("unavailable_release", "retained manifest is absent"))
+}
+
+pub(super) async fn read_manifest_if_present<T: serde::de::DeserializeOwned + Send + 'static>(
+    objects: &storage::Objects,
+    object: &ObjectRef,
+    budget: &Budget,
+    bytes: &mut usize,
+    memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<Option<T>> {
+    read_manifest_inner(objects, object, budget, bytes, memory, true).await
+}
+
+async fn read_manifest_inner<T: serde::de::DeserializeOwned + Send + 'static>(
+    objects: &storage::Objects,
+    object: &ObjectRef,
+    budget: &Budget,
+    bytes: &mut usize,
+    memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
+    allow_absence: bool,
+) -> Result<Option<T>> {
     let size = usize::try_from(object.bytes).map_err(|_| capacity())?;
     *bytes = bytes.saturating_add(size);
     check_size(*bytes, budget.limits.max_metadata_bytes)?;
@@ -435,8 +460,14 @@ pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'stati
             let _memory = memory;
             let _buffer = buffer;
             let mut bytes = vec![0; size];
-            objects.read_metadata_admitted(&object, &mut bytes, &handle)?;
-            Ok(serde_json::from_slice(&bytes)?)
+            if allow_absence {
+                if !objects.read_metadata_if_present_admitted(&object, &mut bytes, &handle)? {
+                    return Ok(None);
+                }
+            } else {
+                objects.read_metadata_admitted(&object, &mut bytes, &handle)?;
+            }
+            Ok(Some(serde_json::from_slice(&bytes)?))
         })
         .await
 }

@@ -9,13 +9,17 @@ use iceberg::{
 use std::path::Path;
 
 pub(crate) fn fresh_metadata(schema: Schema, directory: &Path) -> Result<TableMetadata> {
+    fresh_metadata_at(schema, &directory.to_string_lossy())
+}
+
+pub(crate) fn fresh_metadata_at(schema: Schema, location: &str) -> Result<TableMetadata> {
     // Native creation reassigns IDs. Reinstall the supplied schema before any
     // files exist, then discard only the unused provisional schema.
     let metadata = TableMetadataBuilder::new(
         schema.clone(),
         PartitionSpec::unpartition_spec(),
         SortOrder::unsorted_order(),
-        directory.to_string_lossy().into_owned(),
+        location.to_owned(),
         FormatVersion::V2,
         super::table_properties(),
     )?
@@ -226,6 +230,51 @@ impl std::io::Write for BoundedJson {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+// Match the existing restore publication boundary: a partial temporary never
+// becomes the final metadata selected by a retained candidate registration.
+pub(super) fn publish_candidate_metadata(
+    expected: &crate::model::ObjectRef,
+    bytes: &[u8],
+) -> Result<()> {
+    if !publish_metadata_new(expected, bytes)? {
+        super::verify_object(expected)?;
+    }
+    Ok(())
+}
+
+pub(super) fn publish_metadata_new(
+    expected: &crate::model::ObjectRef,
+    bytes: &[u8],
+) -> Result<bool> {
+    let path = Path::new(&expected.path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::refusal("metadata_location", "candidate metadata needs a parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let temporary = parent.join(format!(".{}.candidate", uuid::Uuid::new_v4().simple()));
+    super::write_new(&temporary, bytes)?;
+    match std::fs::hard_link(&temporary, path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::remove_file(&temporary)?;
+            sync_candidate_parent(expected)?;
+            return Ok(false);
+        }
+        Err(error) => return Err(error.into()),
+    }
+    std::fs::remove_file(&temporary)?;
+    sync_candidate_parent(expected)?;
+    Ok(true)
+}
+
+pub(super) fn sync_candidate_parent(expected: &crate::model::ObjectRef) -> Result<()> {
+    let parent = Path::new(&expected.path)
+        .parent()
+        .ok_or_else(|| Error::refusal("metadata_location", "candidate metadata needs a parent"))?;
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
 }
 
 #[cfg(test)]

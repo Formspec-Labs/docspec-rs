@@ -485,8 +485,26 @@ impl RemoteObjects {
         expected: &ObjectRef,
         bytes: &mut [u8],
     ) -> Result<()> {
+        if !self
+            .read_metadata_if_present_admitted(expected, bytes)
+            .await?
+        {
+            return Err(read_error());
+        }
+        Ok(())
+    }
+
+    pub(in crate::storage) async fn read_metadata_if_present_admitted(
+        &self,
+        expected: &ObjectRef,
+        bytes: &mut [u8],
+    ) -> Result<bool> {
         let key = self.scope.key(&expected.path)?;
-        let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
+        let metadata = match self.operator.stat(&key).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == opendal::ErrorKind::NotFound => return Ok(false),
+            Err(_) => return Err(read_error()),
+        };
         if !metadata.is_file() || metadata.content_length() != expected.bytes {
             return Err(mismatch());
         }
@@ -513,7 +531,7 @@ impl RemoteObjects {
         {
             return Err(mismatch());
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn identity_by_key(

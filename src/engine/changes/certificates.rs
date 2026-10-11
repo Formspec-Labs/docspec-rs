@@ -322,6 +322,7 @@ impl Engine {
         &self,
         result: &VersionRef,
     ) -> Result<Option<CertifiedChanges>> {
+        self.require_local()?;
         let memory = self.request_memory(result)?;
         let result = result.clone();
         self.admit_work(memory, move |engine| async move {

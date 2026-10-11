@@ -1,0 +1,39 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+    --> src/engine/backfill.rs:819:17
+     |
+ 819 |                 check_release_available_with_checks(&recorded, &lifecycle.budget, &mut checks)
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ --------- argument #1 of type `&object_io::Objects` is missing
+     |
+note: function defined here
+    --> src/engine.rs:2481:10
+     |
+2481 | async fn check_release_available_with_checks(
+     |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2482 |     objects: &storage::Objects,
+     |     --------------------------
+help: provide the argument
+     |
+ 819 |                 check_release_available_with_checks(/* &object_io::Objects */, &recorded, &lifecycle.budget, &mut checks)
+     |                                                     ++++++++++++++++++++++++++
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+    --> src/engine/backfill.rs:825:21
+     |
+ 825 |                     check_release_available_with_checks(&readback, &lifecycle.budget, &mut checks)
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ --------- argument #1 of type `&object_io::Objects` is missing
+     |
+note: function defined here
+    --> src/engine.rs:2481:10
+     |
+2481 | async fn check_release_available_with_checks(
+     |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2482 |     objects: &storage::Objects,
+     |     --------------------------
+help: provide the argument
+     |
+ 825 |                     check_release_available_with_checks(/* &object_io::Objects */, &readback, &lifecycle.budget, &mut checks)
+     |                                                         ++++++++++++++++++++++++++
+
+For more information about this error, try `rustc --explain E0061`.
+error: could not compile `docspec` (lib test) due to 2 previous errors

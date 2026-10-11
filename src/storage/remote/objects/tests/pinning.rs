@@ -28,7 +28,23 @@ async fn native_inventory(
         std::path::Path::new(ROOT),
     )
     .unwrap();
-    let payload = b"immutable synthetic payload; pinning does not decode Parquet".to_vec();
+    let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+        arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int64, true)
+            .with_metadata(HashMap::from([("PARQUET:field_id".into(), "7".into())])),
+    ]));
+    let batch = arrow::record_batch::RecordBatch::try_new(
+        schema.clone(),
+        vec![Arc::new(arrow::array::Int64Array::from(vec![
+            Some(11),
+            None,
+            Some(42),
+        ]))],
+    )
+    .unwrap();
+    let mut payload = Vec::new();
+    let mut writer = parquet::arrow::ArrowWriter::try_new(&mut payload, schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
     let io = iceberg::io::FileIO::new_with_fs();
     let manifest_path = temp
         .path()
@@ -449,4 +465,337 @@ async fn populated_gzip_selected_metadata_preserves_absent_write_property_and_sh
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn configured_inspection_reuses_one_inventory_and_bounded_samples_then_streams_values() {
+    use futures::TryStreamExt;
+    let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
+    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
+    let fixture = ReadFixture::inventory(contents);
+    let objects = Objects::Remote(fixture.objects());
+    let table = candidate_table(metadata, &location, &fixture.objects());
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        ..Limits::default()
+    })
+    .unwrap();
+    let pin = pin_bound(
+        &Id::new("owner").unwrap(),
+        &objects.bind_table(&table).unwrap(),
+        3,
+        &budget,
+        &[],
+    )
+    .await
+    .unwrap();
+    let before = fixture.paths.lock().unwrap().len();
+    let (inspection, known) = crate::storage::inspect_table(
+        &objects,
+        &pin,
+        &budget,
+        1,
+        budget.limits.max_batch_bytes,
+        std::collections::BTreeMap::new(),
+        Arc::new(budget.reserve(budget.limits.max_metadata_bytes).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(inspection.files, 1);
+    assert_eq!(inspection.sampled_files, 1);
+    assert_eq!(inspection.sampled_rows, 3);
+    let after_inspection = fixture.paths.lock().unwrap().clone();
+    for path in [LIST, MANIFEST, location.as_str()] {
+        assert_eq!(
+            after_inspection[before..]
+                .iter()
+                .filter(|(method, uri)| method == "GET" && uri == path)
+                .count(),
+            1,
+            "routine inspection reads each native metadata object once"
+        );
+    }
+    // Reuse known physical evidence: native inventory may be decoded, but data
+    // receives neither footer checks, sampling nor another whole-file hash.
+    let before_reuse = after_inspection.len();
+    let (reused, _) = crate::storage::inspect_table(
+        &objects,
+        &pin,
+        &budget,
+        1,
+        budget.limits.max_batch_bytes,
+        known,
+        Arc::new(budget.reserve(budget.limits.max_metadata_bytes).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reused.files, 0);
+    assert_eq!(reused.sampled_files, 0);
+    let after_reuse = fixture.paths.lock().unwrap().clone();
+    assert!(
+        after_reuse[before_reuse..]
+            .iter()
+            .all(|(method, uri)| method != "GET" || uri != DATA)
+    );
+    let before_read = after_reuse.len();
+    // Same exact-pin open used by Engine read_group; no producing catalog or
+    // original source path is consulted and no creation inspection runs.
+    let opened = objects.open_pin(&pin, &budget).await.unwrap();
+    assert_eq!(
+        opened.metadata().current_schema().as_struct().fields()[0].id,
+        7
+    );
+    let batches = crate::storage::read_batches(&opened, &budget)
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let values = batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::Int64Array>()
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(values, vec![Some(11), None, Some(42)]);
+    let paths = fixture.paths.lock().unwrap().clone();
+    for path in [LIST, MANIFEST, location.as_str()] {
+        assert_eq!(
+            paths[before_read..]
+                .iter()
+                .filter(|(method, uri)| method == "GET" && uri == path)
+                .count(),
+            1
+        );
+    }
+    let before_available = paths.len();
+    objects
+        .check_available(pin.objects.clone(), &budget)
+        .await
+        .unwrap();
+    let paths = fixture.paths.lock().unwrap().clone();
+    assert!(
+        paths[before_available..]
+            .iter()
+            .all(|(method, _)| method == "HEAD")
+    );
+    assert_eq!(paths[before_available..].len(), pin.objects.len());
+    fixture.finish();
+}
+
+#[tokio::test]
+async fn configured_pin_open_and_availability_refuse_entire_scope_before_io() {
+    let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
+    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
+    let fixture = ReadFixture::inventory(contents);
+    let objects = Objects::Remote(fixture.objects());
+    let table = candidate_table(metadata, &location, &fixture.objects());
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        ..Limits::default()
+    })
+    .unwrap();
+    let mut pin = pin_bound(
+        &Id::new("owner").unwrap(),
+        &objects.bind_table(&table).unwrap(),
+        3,
+        &budget,
+        &[],
+    )
+    .await
+    .unwrap();
+    let before = fixture.paths.lock().unwrap().len();
+    pin.objects.last_mut().unwrap().path = "s3://bucket/elsewhere/unqualified.parquet".into();
+    assert_eq!(
+        objects.open_pin(&pin, &budget).await.unwrap_err().code(),
+        "remote_scope"
+    );
+    assert_eq!(
+        objects
+            .check_available(pin.objects.clone(), &budget)
+            .await
+            .unwrap_err()
+            .code(),
+        "remote_scope"
+    );
+    assert_eq!(fixture.paths.lock().unwrap().len(), before);
+    fixture.finish();
+}
+
+#[tokio::test]
+async fn configured_inspection_preserves_evolved_nullable_and_default_field_ids() {
+    use futures::TryStreamExt;
+    use iceberg::spec::{FormatVersion, Literal, NestedField, PrimitiveType, Type};
+    let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
+    // Retain the physical original schema while the selected interpretation adds
+    // a nullable column and an initial default under distinct sparse native IDs.
+    let evolved = iceberg::spec::Schema::builder()
+        .with_schema_id(1)
+        .with_fields([
+            metadata.current_schema().as_struct().fields()[0].clone(),
+            Arc::new(NestedField::optional(
+                42,
+                "missing",
+                Type::Primitive(PrimitiveType::Long),
+            )),
+            Arc::new(
+                NestedField::optional(73, "defaulted", Type::Primitive(PrimitiveType::Long))
+                    .with_initial_default(Literal::long(99))
+                    .with_write_default(Literal::long(99)),
+            ),
+        ])
+        .build()
+        .unwrap();
+    let metadata = metadata
+        .into_builder(None)
+        .upgrade_format_version(FormatVersion::V3)
+        .unwrap()
+        .add_current_schema(evolved)
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
+    let fixture = ReadFixture::inventory(contents);
+    let objects = Objects::Remote(fixture.objects());
+    let table = candidate_table(metadata, &location, &fixture.objects());
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        ..Limits::default()
+    })
+    .unwrap();
+    let pin = pin_bound(
+        &Id::new("owner").unwrap(),
+        &objects.bind_table(&table).unwrap(),
+        3,
+        &budget,
+        &[],
+    )
+    .await
+    .unwrap();
+    let before = fixture.paths.lock().unwrap().len();
+    let (inspection, _) = crate::storage::inspect_table(
+        &objects,
+        &pin,
+        &budget,
+        1,
+        budget.limits.max_batch_bytes,
+        std::collections::BTreeMap::new(),
+        Arc::new(budget.reserve(budget.limits.max_metadata_bytes).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(inspection.sampled_rows, 3);
+    let inspected = fixture.paths.lock().unwrap().clone();
+    for path in [LIST, MANIFEST] {
+        assert_eq!(
+            inspected[before..]
+                .iter()
+                .filter(|(method, uri)| method == "GET" && uri == path)
+                .count(),
+            1
+        );
+    }
+    let table = objects.open_pin(&pin, &budget).await.unwrap();
+    let ids = table
+        .metadata()
+        .current_schema()
+        .as_struct()
+        .fields()
+        .iter()
+        .map(|field| field.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![7, 42, 73]);
+    let batches = crate::storage::read_batches(&table, &budget)
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let values = |column| {
+        batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(column)
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(values(0), vec![Some(11), None, Some(42)]);
+    assert_eq!(values(1), vec![None, None, None]);
+    assert_eq!(values(2), vec![Some(99), Some(99), Some(99)]);
+    fixture.finish();
+}
+
+#[tokio::test]
+async fn configured_inspection_refuses_manifest_scope_before_native_decode() {
+    let rejected = "s3://bucket/elsewhere/list.avro";
+    let (metadata, mut contents) = native_inventory(rejected, MANIFEST).await;
+    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
+    let identities = contents
+        .iter()
+        .filter(|(path, _)| path.as_str() != rejected)
+        .map(|(path, bytes)| ObjectRef {
+            owner: Id::new("owner").unwrap(),
+            path: path.clone(),
+            digest: blake3::hash(bytes).to_hex().to_string(),
+            bytes: bytes.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let pin = crate::model::TablePin {
+        table: "candidate".into(),
+        metadata: identities
+            .iter()
+            .find(|object| object.path == location)
+            .unwrap()
+            .clone(),
+        snapshot: Some(1),
+        schema_id: metadata.current_schema_id(),
+        objects: identities,
+        rows: 3,
+        logical_metadata: None,
+    };
+    let fixture = ReadFixture::inventory(contents);
+    let objects = Objects::Remote(fixture.objects());
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        ..Limits::default()
+    })
+    .unwrap();
+    let error = crate::storage::inspect_table(
+        &objects,
+        &pin,
+        &budget,
+        1,
+        budget.limits.max_batch_bytes,
+        std::collections::BTreeMap::new(),
+        Arc::new(budget.reserve(budget.limits.max_metadata_bytes).unwrap()),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(error.code(), "remote_scope");
+    let paths = fixture.paths.lock().unwrap().clone();
+    assert!(paths.iter().all(|(_, path)| path != rejected));
+    assert!(
+        paths
+            .iter()
+            .all(|(method, path)| method != "GET" || path == &location)
+    );
+    fixture.finish();
 }

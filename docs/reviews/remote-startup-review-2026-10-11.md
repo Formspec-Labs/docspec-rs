@@ -1,0 +1,27 @@
+# Remote library startup: independent review
+
+**Verdict: approve the scoped first independent Build interface, conditional on the parent-owned focused and repository gates.** No remaining actionable static finding. Reviewed the applied, formatted worktree on 2026-10-11, including startup patch `bcc35ad9583a04e7abde5efd521d95e01be73b8bf28e3f2e6f8e5ddb5a516806` and selection-race supplement `1b32318e60eac0965faed9029f1eb39b231334f032eec7e1b8c9e673e89e5ef2`. This reviewer did not change production source, run tests, or contact a provider.
+
+## Scope and traces
+
+- `src/engine.rs:257` consumes the existing `RemoteStorage` in `Engine::with_remote`; it retains exclusive local host custody, the shared memory/scratch/worker admission and existing composition. Remote clients are explicitly supplied; no second backend framework or ambient credential discovery is introduced. `owned_catalog` remains false, preserving destructive-maintenance refusal. Existing redacted client debug implementations and the RuntimeEnv debug path do not print supplied secrets.
+- `engine.rs:289,420,830` rejects unsupported requests before lifecycle opening or source access. Remote accepts only Build without a base and with an independent relationship. `:443,1211` rejects an incomplete new Build after a selected result exists, before source admission and processing. Completed same-operation results return first.
+- `engine.rs:1827–1883` repeats that first-selection guard against the fresh authority immediately before promotion (`:1859`). Two initially eligible operations cannot use an old decision to replace the first selected result. A competing catalog commit fails its existing guarded snapshot update; retry rechecks fresh eligibility. The completed-result return remains before this guard.
+- `engine.rs:580–598` uses an existing-only lifecycle lookup for supported remote inspect/latest/release reads. `src/engine/read.rs:68` shares that lookup. An unknown read returns `no_release` without creating a namespace or lifecycle table. Selected source reads continue through the already configured object backend; routine reads do not add payload hashing or revalidation.
+- Local-only gates precede effects in backfill and continuous backfill (`backfill.rs:268,481`, `backfill/continuous.rs:235,861`), input generation/capture (`inputs.rs:18,161`), export and export lookup (`export.rs:70,99`), compaction (`compaction.rs:112`), invalidation/abandonment (`retention.rs:160`), dependency correction (`corrections/records.rs:45`), succession (`history.rs:24`), and unsupported comparison/evidence/group readers. Existing restore, retirement, removal and source-fence entry points already require owned local catalog authority. No separate public intake mutation bypass was found.
+
+## Findings closed during review
+
+Unknown remote reads originally could create lifecycle state; the existing-only loader closes that path. Read-shaped export/succession/evidence paths and continuous/input-capture mutations now refuse before their Local assumptions are reached. Coupled relationships now refuse explicitly. An unbased Build against an existing selection previously reached Local schema/default checks; the first-selection restriction removes that unsupported path. Finally, repeating that restriction only during preparation was insufficient for two prepared operations: the fresh promotion guard and targeted fixture close the late-selection race.
+
+These changes preserve Local dispatch and use the existing guards; they do not add per-row work, redundant payload verification or a parallel lifecycle implementation.
+
+## Evidence and limits
+
+`src/engine/remote_startup_tests.rs:6` checks the actual public constructor with an unreachable configured remote endpoint and maintained Local catalog: exclusive host custody, secret-free Debug, unsupported request refusal, missing reads without namespace creation, and no operation row for a new Build after selection.
+
+The selection fixture at `:182` prepares two actual maintained native candidates and independent readbacks, selects the older boundary, and invokes remote `select_prepared` for the newer one. It expects refusal, retained readback, no second result, and exact completed-first retry with zero query entries. Payload preparation is Local in this fixture; it tests the remote selection control boundary, not remote transport.
+
+The parent reports the unchanged retirement regression suite passes after restoring the existing recovery scope branches. Both startup fixtures also pass, including late selection refusal and completed retry with zero queries; retained execution evidence is `docs/reviews/remote-startup-selection-2026-10-11.log`. Final repository-gate execution remains parent-owned. These receipts, rather than static review alone, establish runtime compatibility.
+
+The retained actual-provider Engine Build/cold-host evidence in `docs/reviews/r2-engine-build-provider-2026-10-11.json` exercised the same composition before this public constructor existed. It supports the initial remote Build path; the network-free constructor/control fixtures qualify the new entry point separately. Do not describe that prior provider run as executing the new public constructor. Broader remote updates, backfill, related/computed groups, export, destructive maintenance and restore remain unsupported. CLI/HTTP remote configuration is a separate review scope.

@@ -42,6 +42,7 @@ impl Engine {
         &self,
         correction: &DependencyCorrection,
     ) -> Result<CorrectionDecision> {
+        self.require_local()?;
         let memory = self.request_memory(correction)?;
         let correction = correction.clone();
         self.admit_work(memory, move |engine| async move {

@@ -94,6 +94,7 @@ impl Engine {
         group: &str,
         options: &ComparisonOptions,
     ) -> Result<Comparison> {
+        self.require_local()?;
         let memory = self.request_memory(&(before, after, group, options))?;
         let (before, after, group, options) = (
             before.clone(),
@@ -187,6 +188,7 @@ impl Engine {
         group: &str,
         options: &ComparisonOptions,
     ) -> Result<SendableRecordBatchStream> {
+        self.require_local()?;
         let memory = self.request_memory(&(before, after, group, options))?;
         let (before, after, group, options) = (
             before.clone(),

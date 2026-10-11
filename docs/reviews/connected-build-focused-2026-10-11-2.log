@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.51s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test engine::write::build::tests::stale_candidate_append_refuses_before_native_manifest_effects ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test engine::write::build::tests::initial_candidate_recovers_committed_snapshot_without_producer_or_second_append ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 290 filtered out; finished in 0.39s
+

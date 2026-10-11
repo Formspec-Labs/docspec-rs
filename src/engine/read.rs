@@ -15,6 +15,9 @@ impl Engine {
         release: &ReleasePin,
         group: &str,
     ) -> Result<SendableRecordBatchStream> {
+        if group != "source" {
+            self.require_local()?;
+        }
         let memory = self.request_memory(&(release, group))?;
         let release = release.clone();
         let group = group.to_owned();
@@ -26,7 +29,7 @@ impl Engine {
             let pin = engine
                 .representation_pin(&view, &release.id, &group, canonical)
                 .await?;
-            read_pin(&pin, &engine.inner.lifecycle.budget).await
+            read_pin_with_objects(&engine.inner.objects, &pin, &engine.inner.lifecycle.budget).await
         })
         .await
     }
@@ -38,6 +41,7 @@ impl Engine {
     /// # Errors
     /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
     pub async fn read_evidence(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
+        self.require_local()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -60,21 +64,9 @@ impl Engine {
         let lock = self.lock(&release.dataset.dataset).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
-        let table = lifecycle
-            .catalog
-            .load_table(&crate::catalog::lifecycle_ident(&release.dataset.dataset))
-            .await
-            .map_err(|error| {
-                if error.kind() == iceberg::ErrorKind::TableNotFound {
-                    Error::refusal("no_release", "this host has no retained dataset")
-                } else {
-                    error.into()
-                }
-            })?;
-        let view = View {
-            revision: table.metadata().last_sequence_number(),
-            table,
-        };
+        let view = self
+            .existing_lifecycle_view(&release.dataset.dataset)
+            .await?;
         self.check_operation_available(&view, &release.id).await?;
         let rows = lifecycle.rows(&view).await?;
         // Completed readbacks are independently retained even if a later failure
@@ -149,7 +141,15 @@ pub async fn read_evidence(
 }
 
 pub(super) async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
-    let table = storage::open_pin(pin, budget).await?;
+    read_pin_with_objects(&storage::Objects::Local, pin, budget).await
+}
+
+pub(super) async fn read_pin_with_objects(
+    objects: &storage::Objects,
+    pin: &TablePin,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    let table = objects.open_pin(pin, budget).await?;
     let schema = storage::identity::public_schema(&table)?;
     let stream = storage::read_batches(&table, budget)
         .await?

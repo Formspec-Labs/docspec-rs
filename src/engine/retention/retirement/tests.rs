@@ -215,7 +215,7 @@ async fn legacy_processing_cannot_adopt_a_replacement_admission() {
     let records = lifecycle.records(&view).await.unwrap();
     let (processing_key, value) = records
         .iter()
-        .find(|(key, _)| key.ends_with("/processing"))
+        .find(|(key, _)| key.starts_with("phase/") && key.ends_with("/processing"))
         .unwrap();
     let mut legacy: PhaseResult = serde_json::from_value(value.clone()).unwrap();
     legacy.dependencies = None;
@@ -238,7 +238,7 @@ async fn legacy_processing_cannot_adopt_a_replacement_admission() {
         .unwrap();
     let admission_key = records
         .keys()
-        .find(|key| key.ends_with("/admission"))
+        .find(|key| key.starts_with("phase/") && key.ends_with("/admission"))
         .unwrap();
     let plan = engine
         .plan_phase_retirement(

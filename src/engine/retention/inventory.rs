@@ -1511,6 +1511,10 @@ impl Inventory {
             // Order and lag are catalog evidence. Availability promises come
             // from actual results/phases, not merely observing these identities.
             // Existing owner grants remain independent roots until retired.
+        } else if key.starts_with("release-attempt/") {
+            crate::engine::locations::release::validate_record(key, json, rows, None)?;
+        } else if key.starts_with("candidate-attempt/") {
+            crate::engine::write::build::validate_record(key, json, rows, None)?;
         } else if key.starts_with("source-attempt/") {
             // Pending transfer intent is metadata, never qualified payload evidence.
             crate::engine::locations::validate_source_attempt_record(key, json, rows)?;

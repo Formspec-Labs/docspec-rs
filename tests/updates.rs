@@ -233,7 +233,7 @@ async fn applied_updates_preserve_duplicates_null_keys_history_and_unchanged_fil
     let records = engine.inspect(&spec.dataset).await.unwrap();
     let phase = records
         .iter()
-        .filter(|(key, _)| key.ends_with("/processing"))
+        .filter(|(key, _)| key.starts_with("phase/") && key.ends_with("/processing"))
         .map(|(_, value)| serde_json::from_value::<PhaseResult>(value.clone()).unwrap())
         .find(|phase| phase.operation == mutation.operation)
         .unwrap();

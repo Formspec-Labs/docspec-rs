@@ -236,6 +236,7 @@ impl Engine {
     /// # Errors
     /// Refuses missing receipts, unavailable results, and capacity exhaustion.
     pub async fn read_receipts(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
+        self.require_local()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -258,6 +259,7 @@ impl Engine {
         &self,
         release: &ReleasePin,
     ) -> Result<SendableRecordBatchStream> {
+        self.require_local()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {

@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T04:50:50.569034+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 17860558848,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 17616896000,
+  "free_after_bytes": 17621561344,
+  "finished_utc": "2026-10-11T04:51:16.642453+00:00"
+}

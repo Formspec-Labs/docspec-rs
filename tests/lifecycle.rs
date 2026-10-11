@@ -606,7 +606,7 @@ async fn dependency_correction_fences_adoption_without_output_change() {
             .await
             .unwrap()
             .keys()
-            .any(|k| k.ends_with("/processing"))
+            .any(|k| k.starts_with("phase/") && k.ends_with("/processing"))
     );
 }
 
@@ -855,8 +855,16 @@ async fn oversized_output_refuses_then_resumes_from_admitted_input() {
         "oversized_batch"
     );
     let records = engine.inspect(&spec.dataset).await.unwrap();
-    assert!(records.keys().any(|key| key.ends_with("/admission")));
-    assert!(!records.keys().any(|key| key.ends_with("/processing")));
+    assert!(
+        records
+            .keys()
+            .any(|key| key.starts_with("phase/") && key.ends_with("/admission"))
+    );
+    assert!(
+        !records
+            .keys()
+            .any(|key| key.starts_with("phase/") && key.ends_with("/processing"))
+    );
     assert_eq!(
         engine.latest(&spec.dataset).await.unwrap_err().code(),
         "no_release"

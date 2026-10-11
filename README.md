@@ -94,8 +94,86 @@ the probe writes only to a fresh UUID child there and retains the result.
 cargo run --locked --features remote --example r2_candidate_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
 ```
 
-This adapter does not yet make the local engine, publication or maintenance
-remote-capable. See [current qualification](docs/STATUS.md).
+The Rust library can open a local execution host with the same explicitly resolved
+catalog and object configuration. Initial independent Build, recovery, selection and selected
+source-group streaming are qualified on the configured R2/Basin path. Remote
+Build supports a dataset's first selection and recovery of that same operation;
+a new Build after selection refuses before source or lifecycle mutation. Other remote
+mutations refuse before lifecycle effects; remote export, maintenance, computed
+and related groups remain unqualified. CLI and loopback HTTP startup accept the
+same explicit remote configuration. See [current qualification](docs/STATUS.md).
+
+```rust,ignore
+use docspec::{budget::Limits, engine::Engine, storage::remote::remote_storage};
+use std::collections::HashMap;
+
+let remote = remote_storage(
+    "s3://my-bucket/__r2_data_catalog/docspec/my-project",
+    HashMap::from([
+        ("uri".into(), "https://catalog.example/v1".into()),
+        ("warehouse".into(), "my-warehouse".into()),
+        ("s3.endpoint".into(), "https://account.r2.cloudflarestorage.com".into()),
+        ("s3.region".into(), "auto".into()),
+        ("s3.path-style-access".into(), "true".into()),
+    ]),
+    HashMap::from([
+        ("token".into(), "DOCSPEC_CATALOG_TOKEN".into()),
+        ("s3.access-key-id".into(), "DOCSPEC_S3_ACCESS_KEY_ID".into()),
+        ("s3.secret-access-key".into(), "DOCSPEC_S3_SECRET_ACCESS_KEY".into()),
+    ]),
+).await?;
+let engine = Engine::with_remote("workspaces/my-project", remote, Limits::default()).await?;
+// engine.run(&initial_build).await?; // RunSpec::base must be None.
+// Resolve engine.latest(&dataset), then stream engine.read_group(&release, "source").
+engine.shutdown().await?;
+```
+
+## Start CLI or loopback HTTP with remote storage
+
+Build with `--features remote`, then pass `--remote remote.json`. The JSON file
+contains the owned object prefix, explicit native properties and secret environment
+references. There is no ambient configuration discovery. For example:
+
+```json
+{
+  "owned_prefix": "s3://my-bucket/__r2_data_catalog/docspec/my-project",
+  "properties": {
+    "uri": "https://catalog.example/v1",
+    "warehouse": "my-warehouse",
+    "s3.endpoint": "https://account.r2.cloudflarestorage.com",
+    "s3.region": "auto",
+    "s3.path-style-access": "true"
+  },
+  "secret_env": {
+    "token": "DOCSPEC_CATALOG_TOKEN",
+    "s3.access-key-id": "DOCSPEC_S3_ACCESS_KEY_ID",
+    "s3.secret-access-key": "DOCSPEC_S3_SECRET_ACCESS_KEY"
+  }
+}
+```
+
+Keep secret values in the referenced environment variables. `--workspace` still
+names the local execution host, custody and scratch directory; retained objects
+use `owned_prefix`, which must fit the catalog's storage profile.
+
+```sh
+target/debug/docspec --workspace workspaces/my-project --remote remote.json run initial.json
+target/debug/docspec --workspace workspaces/my-project --remote remote.json latest my-dataset > release.json
+target/debug/docspec --workspace workspaces/my-project --remote remote.json read release.json source.arrow
+target/debug/docspec --workspace workspaces/my-project --remote remote.json serve
+```
+
+Remote `read` uses the configured Engine and its exact retained source pin. The
+local default keeps the independent reader. Remote startup supports a dataset's
+first independent Build and recovery of that same operation, inspect/latest/release
+and source streaming. Other Engine operations retain their existing refusal gates.
+Standalone local verification, input hashing, restore and independent evidence or
+receipt readers refuse `--remote` before effects. Hash a producer file without
+`--remote` when preparing its Build request.
+
+`serve` injects the same configured Engine into the existing HTTP routes and still
+requires a loopback bind. This adds backend startup configuration, not hosted
+network access, user authentication or broader operation qualification.
 
 ## Run locally
 

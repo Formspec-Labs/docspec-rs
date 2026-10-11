@@ -339,10 +339,7 @@ impl Lifecycle {
                 )),
             ],
         )?;
-        let guard = GuardedCatalog {
-            inner: self.catalog.clone(),
-            expected: view.table.clone(),
-        };
+        let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
         guard.load_table(view.table.identifier()).await?;
         // Prepare a bounded cache of the next immutable state. It becomes visible
         // only after the guarded native commit succeeds; failed commits cannot leak it.
@@ -405,7 +402,7 @@ impl Lifecycle {
             &self.budget,
         )
         .await?;
-        let table = storage::append(&view.table, &guard, files).await?;
+        let table = storage::append(&view.table, self.catalog.as_ref(), files).await?;
         #[cfg(test)]
         if self
             .lose_commit_response
@@ -559,17 +556,27 @@ fn strings(batch: &RecordBatch, column: usize) -> Result<&StringArray> {
 
 /// Stops native transaction refresh/retry from adopting another application's state.
 #[derive(Debug)]
-struct GuardedCatalog {
-    inner: Arc<dyn Catalog>,
+pub(crate) struct GuardedCatalog<'a> {
+    inner: &'a dyn Catalog,
     expected: Table,
 }
 
+impl<'a> GuardedCatalog<'a> {
+    pub(crate) fn new(inner: &'a dyn Catalog, expected: &Table) -> Self {
+        Self {
+            inner,
+            expected: expected.clone(),
+        }
+    }
+}
+
 #[async_trait]
-impl Catalog for GuardedCatalog {
+impl Catalog for GuardedCatalog<'_> {
     async fn load_table(&self, ident: &TableIdent) -> iceberg::Result<Table> {
         let current = self.inner.load_table(ident).await?;
         if ident != self.expected.identifier()
             || current.metadata_location() != self.expected.metadata_location()
+            || current.metadata() != self.expected.metadata()
         {
             return Err(iceberg::Error::new(
                 iceberg::ErrorKind::DataInvalid,

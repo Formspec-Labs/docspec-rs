@@ -47,6 +47,7 @@ mod rebuild;
 mod rebuild_completion;
 mod refresh;
 mod related_refresh;
+mod remote_cli;
 mod restore_catalog;
 mod retention_inspection;
 mod scalar_bindings;

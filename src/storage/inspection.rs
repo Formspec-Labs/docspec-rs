@@ -141,6 +141,7 @@ pub(crate) struct Inspection {
 }
 
 pub(crate) async fn inspect_table(
+    object_io: &Objects,
     pin: &TablePin,
     budget: &Budget,
     sample_files: usize,
@@ -150,22 +151,41 @@ pub(crate) async fn inspect_table(
 ) -> Result<(Inspection, BTreeMap<String, CheckedFile>)> {
     #[cfg(feature = "test-util")]
     eprintln!("DOCSPEC_TEST_INSPECT_TABLE");
-    check_available(pin.objects.clone(), budget).await?;
-    let table = open_pin(pin, budget).await?;
+    object_io
+        .check_available(pin.objects.clone(), budget)
+        .await?;
+    let table = object_io.open_pin(pin, budget).await?;
     super::defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let expected = schema::read_schema(&table)?;
-    let inventory = snapshot_files(&table, budget).await?;
+    // New material uses the same configured native inventory walk as pinning.
+    // Scope checks run before each manifest read, without another identity pass.
+    let inventory_memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    let inherited: BTreeMap<_, _> = pin
+        .objects
+        .iter()
+        .map(|object| (object.path.clone(), object.clone()))
+        .collect();
+    let remote_root = if object_io.is_remote() {
+        Some(object_io.pin_root(table.metadata().location())?)
+    } else {
+        None
+    };
+    let guard = remote_root.as_ref().map(|root| super::object_io::PinPaths {
+        objects: object_io,
+        root,
+        inherited: &inherited,
+    });
+    let inventory =
+        snapshot_files_guarded(&table, budget, guard.as_ref(), inventory_memory).await?;
     check_inventory_files(pin, &inventory)?;
     let schemas: BTreeSet<_> = table
         .metadata()
         .schemas_iter()
         .map(|schema| schema_identity(schema.as_struct()))
         .collect::<Result<_>>()?;
-    let objects: BTreeMap<_, _> = pin
-        .objects
-        .iter()
-        .map(|object| (object.path.clone(), object.clone()))
-        .collect();
+    // The guard walk has finished; move its retained identity map into the
+    // footer worker instead of cloning the same inventory a second time.
+    let objects = inherited;
     let rows = pin.rows;
     let metadata_limit = budget.limits.max_metadata_bytes;
     let footer_memory = budget.reserve(metadata_limit)?;
@@ -177,7 +197,7 @@ pub(crate) async fn inspect_table(
         let mut known_bytes = known.values().fold(0usize, |sum, file| sum.saturating_add(file.estimated_bytes()));
         let mut total = 0u64;
         let mut checked = 0usize;
-        let mut selected = BTreeSet::new();
+        let mut selected = Vec::new();
         for native in &inventory.data {
             if native.file_format() != DataFileFormat::Parquet {
                 return Err(Error::refusal("unsupported_format", "routine inspection requires Parquet"));
@@ -226,7 +246,7 @@ pub(crate) async fn inspect_table(
             }
             if known_bytes > metadata_limit { return Err(Error::refusal("metadata_capacity", "checked-file inventory exceeds metadata allowance")); }
             if sample_files > selected.len() {
-                selected.insert(native.file_path().to_owned());
+                selected.push(native.clone());
             }
         }
         if total != rows {
@@ -238,11 +258,37 @@ pub(crate) async fn inspect_table(
         return Ok((result, known));
     }
     let _memory = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
-    let mut tasks = schema::plan_files(&table).await?;
-    while let Some(task) = tasks.try_next().await? {
-        if !selected.contains(&task.data_file_path) {
-            continue;
-        }
+    // The guarded inventory already established current membership and refused
+    // native deletes. Build full-file native sample tasks from those descriptors
+    // instead of loading the same manifest list and manifests a second time.
+    let current = table.metadata().current_schema().clone();
+    let mut fields = current
+        .as_struct()
+        .fields()
+        .iter()
+        .map(|field| field.id)
+        .collect::<Vec<_>>();
+    fields.push(iceberg::metadata_columns::RESERVED_FIELD_ID_FILE);
+    let name_mapping = table
+        .metadata()
+        .properties()
+        .get(iceberg::spec::DEFAULT_SCHEMA_NAME_MAPPING)
+        .map(|raw| serde_json::from_str::<iceberg::spec::NameMapping>(raw).map(Arc::new))
+        .transpose()?;
+    let selected_count = selected.len();
+    for file in selected {
+        let task = iceberg::scan::FileScanTask::builder()
+            .with_file_size_in_bytes(file.file_size_in_bytes())
+            .with_start(0)
+            .with_length(file.file_size_in_bytes())
+            .with_record_count(Some(file.record_count()))
+            .with_data_file_path(file.file_path().to_owned())
+            .with_data_file_format(file.file_format())
+            .with_schema(current.clone())
+            .with_project_field_ids(fields.clone())
+            .with_name_mapping(name_mapping.clone())
+            .with_case_sensitive(true)
+            .build();
         let mut stream = table
             .reader_builder()
             .with_data_file_concurrency_limit(1)
@@ -270,7 +316,7 @@ pub(crate) async fn inspect_table(
             result.sampled_bytes += batch.get_array_memory_size();
         }
         // Dropping this file's reader prevents a sample from draining its payload.
-        if result.sampled_files == selected.len() || result.sampled_bytes == sample_bytes {
+        if result.sampled_files == selected_count || result.sampled_bytes == sample_bytes {
             break;
         }
     }

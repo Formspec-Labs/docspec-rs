@@ -1,4 +1,4 @@
-//! Command-line entry point for the local execution host.
+//! Command-line startup for a local execution host with explicit storage configuration.
 
 use clap::{Parser, Subcommand};
 use docspec::{
@@ -28,16 +28,16 @@ use std::{
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "docspec",
-    about = "Local, recoverable Iceberg dataset processing"
-)]
+#[command(name = "docspec", about = "Recoverable Iceberg dataset processing")]
 struct Cli {
     #[arg(long, default_value = "workspaces/local", global = true)]
     workspace: PathBuf,
     /// Optional JSON resource limits; omitted values use the reference profile.
     #[arg(long, global = true)]
     limits: Option<PathBuf>,
+    /// Explicit remote JSON configuration; requires the remote feature.
+    #[arg(long, global = true)]
+    remote: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -53,7 +53,7 @@ enum Command {
         #[arg(long, value_enum, default_value = "build")]
         kind: PausedOperation,
     },
-    /// Initialize and validate the local catalog.
+    /// Initialize the execution host with the configured storage.
     Init,
     /// Hash a retained input before selecting it in a run specification.
     Hash { input: PathBuf },
@@ -277,14 +277,14 @@ enum Command {
         #[arg(long)]
         deep: bool,
     },
-    /// Stream a pinned result as Arrow IPC without the producer catalog.
+    /// Stream a pinned group as Arrow IPC; remote mode uses the configured host.
     Read {
         release: PathBuf,
         output: PathBuf,
         #[arg(long, default_value = "source")]
         group: String,
     },
-    /// Serve the local API; remote network binding is refused.
+    /// Serve the loopback API over the configured execution host.
     Serve {
         #[arg(long, default_value = "127.0.0.1:7391")]
         bind: SocketAddr,
@@ -316,6 +316,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    check_startup(&cli)?;
     let limits: Limits = cli.limits.map(read_json).transpose()?.unwrap_or_default();
     match cli.command {
         Command::Hash { input } => {
@@ -354,7 +355,9 @@ async fn main() -> anyhow::Result<()> {
         }
         command @ (Command::Read { .. }
         | Command::ReadEvidence { .. }
-        | Command::ReadReceipts { .. }) => {
+        | Command::ReadReceipts { .. })
+            if cli.remote.is_none() =>
+        {
             let (release, output, group, receipts) = match command {
                 Command::Read {
                     release,
@@ -367,26 +370,17 @@ async fn main() -> anyhow::Result<()> {
             };
             let release: ReleasePin = read_json(release)?;
             let budget = Budget::new(limits)?;
-            let mut stream = if let Some(group) = group {
+            let stream = if let Some(group) = group {
                 read_group(&release, &group, &budget).await?
             } else if receipts {
                 read_receipts(&release, &budget).await?
             } else {
                 read_evidence(&release, &budget).await?
             };
-            let file = std::fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(output)?;
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(BufWriter::new(file), &stream.schema())?;
-            while let Some(batch) = stream.try_next().await? {
-                writer.write(&batch)?;
-            }
-            writer.finish()?;
+            write_stream(output, stream).await?;
         }
         command => {
-            let engine = Engine::open(&cli.workspace, limits).await?;
+            let engine = open_engine(&cli.workspace, limits, cli.remote.as_deref()).await?;
             match command {
                 #[cfg(feature = "test-util")]
                 Command::PauseAfter { spec, phase, kind } => {
@@ -444,9 +438,16 @@ async fn main() -> anyhow::Result<()> {
                         Ok(_) => anyhow::bail!("requested phase did not interrupt"),
                     }
                 }
-                Command::Init => print_json(
-                    &serde_json::json!({"workspace": cli.workspace, "catalog": "iceberg-sql", "lifecycle": "iceberg"}),
-                )?,
+                Command::Init => {
+                    let catalog = if cli.remote.is_some() {
+                        "iceberg-rest"
+                    } else {
+                        "iceberg-sql"
+                    };
+                    print_json(
+                        &serde_json::json!({"workspace": cli.workspace, "catalog": catalog, "lifecycle": "iceberg"}),
+                    )?;
+                }
                 Command::Plan { spec } => {
                     print_json(&engine.plan(&read_json::<RunSpec>(spec)?).await?)?
                 }
@@ -844,11 +845,17 @@ async fn main() -> anyhow::Result<()> {
                 } => print_json(
                     &serde_json::json!({"eligibility": engine.invalidate(&Id::new(dataset)?, &reason, definition).await?}),
                 )?,
+                Command::Read {
+                    release,
+                    output,
+                    group,
+                } => {
+                    let release: ReleasePin = read_json(release)?;
+                    let stream = engine.read_group(&release, &group).await?;
+                    write_stream(output, stream).await?;
+                    engine.shutdown().await?;
+                }
                 Command::Serve { bind } => {
-                    anyhow::ensure!(
-                        bind.ip().is_loopback(),
-                        "hosted access is unqualified; bind to loopback"
-                    );
                     let listener = tokio::net::TcpListener::bind(bind).await?;
                     let result = axum::serve(listener, docspec::http::router(engine.clone()))
                         .with_graceful_shutdown(async {
@@ -863,6 +870,109 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// These commands bypass Engine and use local readers/restore directly. Refuse
+// before reading configuration, opening a host, contacting a catalog or writing.
+fn check_startup(cli: &Cli) -> docspec::Result<()> {
+    if cli.remote.is_some() {
+        #[cfg(not(feature = "remote"))]
+        return Err(docspec::Error::refusal(
+            "remote_feature",
+            "remote startup requires the remote feature",
+        ));
+        #[cfg(feature = "remote")]
+        if matches!(
+            &cli.command,
+            Command::Hash { .. }
+                | Command::Verify { .. }
+                | Command::VerifyInputs { .. }
+                | Command::RestoreLocal { .. }
+                | Command::ReadEvidence { .. }
+                | Command::ReadReceipts { .. }
+        ) || matches!(&cli.command, Command::Read { group, .. } if group != "source")
+        {
+            return Err(docspec::Error::refusal(
+                "remote_command_unavailable",
+                "this command uses unqualified independent local I/O; selected remote reads support the source group",
+            ));
+        }
+    }
+    if let Command::Serve { bind } = &cli.command
+        && !bind.ip().is_loopback()
+    {
+        return Err(docspec::Error::refusal(
+            "hosted_access_unqualified",
+            "hosted access is unqualified; bind to loopback",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "remote")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemoteConfig {
+    owned_prefix: String,
+    #[serde(default)]
+    properties: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    secret_env: std::collections::HashMap<String, String>,
+}
+
+#[cfg(feature = "remote")]
+fn read_remote_config(path: PathBuf) -> docspec::Result<RemoteConfig> {
+    // Configuration can contain sensitive property values. Never expose the
+    // parser's offending value/unknown key or its underlying error chain.
+    read_json(path).map_err(|_| {
+        docspec::Error::refusal(
+            "remote_config",
+            "remote startup configuration is unavailable, oversized or invalid",
+        )
+    })
+}
+
+async fn open_engine(
+    workspace: &std::path::Path,
+    limits: Limits,
+    remote: Option<&std::path::Path>,
+) -> anyhow::Result<Engine> {
+    if let Some(path) = remote {
+        #[cfg(feature = "remote")]
+        {
+            let config = read_remote_config(path.to_owned())?;
+            let remote = storage::remote::remote_storage(
+                &config.owned_prefix,
+                config.properties,
+                config.secret_env,
+            )
+            .await?;
+            return Ok(Engine::with_remote(workspace, remote, limits).await?);
+        }
+        #[cfg(not(feature = "remote"))]
+        {
+            let _ = path;
+            anyhow::bail!("remote_feature: remote startup requires the remote feature");
+        }
+    }
+    Ok(Engine::open(workspace, limits).await?)
+}
+
+async fn write_stream(
+    output: PathBuf,
+    mut stream: datafusion::physical_plan::SendableRecordBatchStream,
+) -> anyhow::Result<()> {
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(output)?;
+    let mut writer =
+        arrow::ipc::writer::StreamWriter::try_new(BufWriter::new(file), &stream.schema())?;
+    while let Some(batch) = stream.try_next().await? {
+        writer.write(&batch)?;
+    }
+    writer.finish()?;
     Ok(())
 }
 

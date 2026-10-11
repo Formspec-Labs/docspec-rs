@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.71s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIKg0dF/workspace/objects/owner-a/86d5a265ef2147059c48522c10ac749e/data/d59c3f3b-1009-42e4-ba60-291cfcec1109-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIKg0dF/workspace/objects/owner-b/54e2c9777a5f4ec3b4f394408ac15eb4/data/132fdfbb-7919-4cf7-957c-29c8493f981f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIKg0dF/workspace/objects/consumer/e29e8e5c31f34f81bf8935600bc203ac/data/0e25d546-1909-405d-8823-e7f4f8ac76e7-00000.parquet
+DOCSPEC_TEST_WORK readback
+test engine::retention::owners::phase_tests::retired_bound_generation_does_not_lend_scope_to_an_unknown_recomputation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 291 filtered out; finished in 1.33s
+

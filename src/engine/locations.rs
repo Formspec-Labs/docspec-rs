@@ -1,6 +1,7 @@
 //! Exact immutable destinations, separate from host custody and scratch paths.
 
 use super::*;
+pub(super) mod release;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Location {
@@ -325,7 +326,7 @@ pub(super) fn invalid() -> Error {
 pub(super) fn unsupported() -> Error {
     Error::refusal(
         "remote_build_unavailable",
-        "remote native Build processing and selection are not yet connected",
+        "this operation is not qualified for remote storage; use initial Build and selected source reads",
     )
 }
 

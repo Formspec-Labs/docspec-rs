@@ -81,6 +81,8 @@ pub(super) fn retained_key(key: &str) -> bool {
             "backfill/",
             "protection/",
             "source-attempt/",
+            "candidate-attempt/",
+            "release-attempt/",
         ]
         .iter()
         .any(|prefix| key.starts_with(prefix))

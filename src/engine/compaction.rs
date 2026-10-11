@@ -109,6 +109,7 @@ impl Engine {
         spec: &CompactionSpec,
         stop: Option<&str>,
     ) -> Result<CompactionResult> {
+        self.require_local()?;
         Id::new(&spec.group)?;
         if spec.target_file_bytes == 0
             || spec.files.iter().collect::<BTreeSet<_>>().len() != spec.files.len()

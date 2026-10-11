@@ -1,0 +1,21 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.37s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 7 tests
+DOCSPEC_TEST_INSPECT_TABLE
+test storage::remote::objects::tests::pinning::configured_inspection_refuses_manifest_scope_before_native_decode ... ok
+test storage::remote::objects::tests::pinning::populated_gzip_selected_metadata_preserves_absent_write_property_and_shared_identities ... ok
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://bucket/owned/candidate/data/one.parquet
+test storage::remote::objects::tests::pinning::configured_pin_open_and_availability_refuse_entire_scope_before_io ... ok
+DOCSPEC_TEST_INSPECT_TABLE
+test storage::remote::objects::tests::pinning::configured_inspection_preserves_evolved_nullable_and_default_field_ids ... ok
+DOCSPEC_TEST_INSPECT_FILE s3://bucket/owned/candidate/data/one.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+test storage::remote::objects::tests::pinning::populated_pin_binds_native_inventory_and_identities_to_configured_backend ... ok
+test storage::remote::objects::tests::pinning::configured_inspection_reuses_one_inventory_and_bounded_samples_then_streams_values ... ok
+test storage::remote::objects::tests::pinning::populated_pin_guards_manifest_list_and_manifest_before_native_read ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 1.21s
+

@@ -1,0 +1,17 @@
+{
+  "started_utc": "2026-10-11T05:30:23.286491+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--test",
+    "integration",
+    "remote_cli::"
+  ],
+  "free_before_bytes": 11842719744,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 10597076992,
+  "free_after_bytes": 10612211712,
+  "finished_utc": "2026-10-11T05:31:41.560201+00:00"
+}

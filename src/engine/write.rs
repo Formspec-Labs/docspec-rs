@@ -8,6 +8,7 @@ use arrow::{
 };
 use iceberg::{spec::Schema, table::Table};
 
+pub(super) mod build;
 mod verification;
 pub(super) use verification::verify_update;
 
@@ -65,6 +66,21 @@ pub(super) async fn open_captured_source(
         }
     }
     Ok(native)
+}
+
+fn check_build_fields(frame: &DataFrame) -> Result<()> {
+    if frame.schema().fields().iter().any(|f| {
+        f.name()
+            .to_ascii_lowercase()
+            .starts_with(storage::defaults::SUPPLIED_PREFIX)
+            || storage::identity::hidden(&f.name().to_ascii_lowercase())
+    }) {
+        return Err(Error::refusal(
+            "reserved_field",
+            "supplied-state columns require an evolved source schema",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) async fn build_query(context: &SessionContext, sql: &str) -> Result<DataFrame> {
@@ -179,17 +195,7 @@ impl Engine {
                 return Ok(prepared);
             }
         }
-        if dataframe.schema().fields().iter().any(|f| {
-            f.name()
-                .to_ascii_lowercase()
-                .starts_with(storage::defaults::SUPPLIED_PREFIX)
-                || storage::identity::hidden(&f.name().to_ascii_lowercase())
-        }) {
-            return Err(Error::refusal(
-                "reserved_field",
-                "supplied-state columns require an evolved source schema",
-            ));
-        }
+        check_build_fields(&dataframe)?;
         self.write_frame(&spec.dataset, directory, dataframe).await
     }
 

@@ -67,6 +67,7 @@ impl Engine {
     }
 
     async fn export_request(&self, spec: &ExportSpec, stop: Option<String>) -> Result<ExportPin> {
+        self.require_local()?;
         let memory = self.request_memory(&(spec, &stop))?;
         validate_request(spec)?;
         let spec = spec.clone();
@@ -95,6 +96,7 @@ impl Engine {
     }
 
     async fn lookup_export(&self, dataset: &Id, key: &str) -> Result<ExportPin> {
+        self.require_local()?;
         let memory = self.request_memory(&(dataset, key))?;
         let dataset = dataset.clone();
         let key = key.to_owned();

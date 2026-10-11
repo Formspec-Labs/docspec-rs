@@ -25,6 +25,8 @@ use tokio::sync::{Mutex, RwLock};
 mod admission;
 mod backfill;
 pub(crate) mod locations;
+#[cfg(all(test, feature = "remote"))]
+mod remote_startup_tests;
 #[doc(inline)]
 pub use backfill::{BackfillPlan, read_combined};
 mod changes;
@@ -57,6 +59,9 @@ mod verification;
 mod worker;
 mod write;
 
+#[cfg(all(test, feature = "test-util", feature = "remote"))]
+mod remote_build_provider_tests;
+
 /// Local execution host sharing catalog, admission, and resource accounting.
 ///
 /// Once admitted, catalog operations finish in owned tasks even if their caller
@@ -79,6 +84,10 @@ struct Inner {
     maintenance: Arc<RwLock<()>>,
     closing: AtomicBool,
     owned_catalog: bool,
+    #[cfg(test)]
+    release_decodes: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    initial_build_queries: std::sync::atomic::AtomicUsize,
     #[cfg(feature = "test-util")]
     scalar_reuse_pause: Mutex<Option<ScalarReusePause>>,
 }
@@ -229,6 +238,63 @@ impl Engine {
         )
     }
 
+    /// Opens a local execution host with explicitly configured remote storage.
+    ///
+    /// The host retains exclusive custody, bounded scratch and execution admission.
+    /// The supplied catalog owns lifecycle placement; the supplied object prefix
+    /// owns immutable admitted inputs, native candidates and releases. Only initial
+    /// independent Build (`RunSpec::base` is `None`), its recovery and selected source-group reads
+    /// are qualified remotely for the first selection of a dataset. A completed retry
+    /// returns its original result; another Build after selection refuses before
+    /// source or lifecycle mutation. Other mutations also refuse before effects.
+    /// CLI and HTTP configuration remain separate from this library constructor.
+    /// No ambient credentials are resolved here; use `remote_storage` at startup.
+    ///
+    /// # Errors
+    /// Refuses a live host owner, invalid limits, object-store registration failure,
+    /// or local host initialization failure. Catalog connectivity is checked on use.
+    #[cfg(feature = "remote")]
+    pub async fn with_remote(
+        root: impl AsRef<Path>,
+        remote: storage::remote::RemoteStorage,
+        limits: Limits,
+    ) -> Result<Self> {
+        let ownership = worker::Host::acquire(root.as_ref())?;
+        Self::compose(
+            std::fs::canonicalize(root)?,
+            remote.catalog,
+            storage::Objects::Remote(remote.objects),
+            limits,
+            ownership,
+            false,
+        )
+    }
+
+    fn require_local(&self) -> Result<()> {
+        if self.inner.retained.is_local() {
+            Ok(())
+        } else {
+            Err(locations::unsupported())
+        }
+    }
+
+    fn check_initial_selection(&self, authority: &Authority) -> Result<()> {
+        if authority.selected.is_some() {
+            self.require_local()
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_request_backend(&self, request: &OperationRequest) -> Result<()> {
+        if matches!(request, OperationRequest::Build(build) if build.base.is_none() && build.relationship.as_ref().is_none_or(|relationship| matches!(relationship, SourceRelationship::Independent)))
+        {
+            Ok(())
+        } else {
+            self.require_local()
+        }
+    }
+
     fn compose(
         root: PathBuf,
         catalog: Arc<dyn Catalog>,
@@ -253,6 +319,10 @@ impl Engine {
                 maintenance: Arc::new(RwLock::new(())),
                 closing: AtomicBool::new(false),
                 owned_catalog,
+                #[cfg(test)]
+                release_decodes: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                initial_build_queries: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(feature = "test-util")]
                 scalar_reuse_pause: Mutex::new(None),
             }),
@@ -347,6 +417,7 @@ impl Engine {
     }
 
     async fn plan_request_admitted(&self, spec: &OperationRequest) -> Result<RunPlan> {
+        self.check_request_backend(spec)?;
         validate_request(spec)?;
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
@@ -369,6 +440,7 @@ impl Engine {
         let key = format!("result/{}", spec.operation());
         let completed = lifecycle.get::<ReleasePin>(&view, &key).await?.is_some();
         if !completed {
+            self.check_initial_selection(&authority)?;
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
@@ -505,10 +577,38 @@ impl Engine {
         .await
     }
 
+    async fn read_view(&self, dataset: &Id) -> Result<View> {
+        if self.inner.retained.is_local() {
+            self.inner.lifecycle.open(dataset).await
+        } else {
+            self.existing_lifecycle_view(dataset).await
+        }
+    }
+
+    async fn existing_lifecycle_view(&self, dataset: &Id) -> Result<View> {
+        let table = self
+            .inner
+            .lifecycle
+            .catalog
+            .load_table(&crate::catalog::lifecycle_ident(dataset))
+            .await
+            .map_err(|error| {
+                if error.kind() == iceberg::ErrorKind::TableNotFound {
+                    Error::refusal("no_release", "this host has no retained dataset")
+                } else {
+                    error.into()
+                }
+            })?;
+        Ok(View {
+            revision: table.metadata().last_sequence_number(),
+            table,
+        })
+    }
+
     async fn inspect_admitted(&self, dataset: &Id) -> Result<BTreeMap<String, serde_json::Value>> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
+        let view = self.read_view(dataset).await?;
         self.inner.lifecycle.records(&view).await
     }
 
@@ -528,7 +628,7 @@ impl Engine {
     async fn latest_admitted(&self, dataset: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
+        let view = self.read_view(dataset).await?;
         let authority: Authority = self
             .inner
             .lifecycle
@@ -557,14 +657,14 @@ impl Engine {
     async fn release_admitted(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
+        let view = self.read_view(dataset).await?;
         self.resolve_release(&view, dataset, version).await
     }
 
     async fn available_release_admitted(&self, dataset: &Id, version: &Id) -> Result<ReleasePin> {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
+        let view = self.read_view(dataset).await?;
         self.check_operation_available(&view, version).await?;
         self.resolve_release(&view, dataset, version).await
     }
@@ -621,6 +721,7 @@ impl Engine {
         reason: &str,
         definition: Option<String>,
     ) -> Result<u64> {
+        self.require_local()?;
         if reason.trim().is_empty() {
             return Err(Error::refusal(
                 "missing_reason",
@@ -726,6 +827,7 @@ impl Engine {
         spec: &OperationRequest,
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
+        self.check_request_backend(spec)?;
         validate_request(spec)?;
         // Owned-host maintenance waits for this admitted worker. One check before
         // preparation and error reconciliation covers the complete operation.
@@ -768,9 +870,6 @@ impl Engine {
     ) -> futures::future::BoxFuture<'a, Result<PreparedSource>> {
         Box::pin(async move {
             let lifecycle = &self.inner.lifecycle;
-            if !self.inner.retained.is_local() && !matches!(spec, OperationRequest::Build(_)) {
-                return Err(locations::unsupported());
-            }
             if let Some(processing) = self.phase(spec, operation, "processing").await? {
                 let admission = if processing.dependencies.is_none() {
                     let admission = self.phase(spec, operation, "admission").await?.ok_or_else(|| {
@@ -935,55 +1034,69 @@ impl Engine {
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("processing");
-                // Native output/query/release composition is the next connected slice.
-                // No remote processing or public startup is advertised yet.
-                if !self.inner.retained.is_local() {
-                    return Err(locations::unsupported());
-                }
-                let directory = self.reserve_attempt(spec, operation, "processing").await?;
-                let (_capture_memory, update_source) = if admission::captures_source(spec) {
-                    let view = lifecycle.open(spec.dataset()).await?;
-                    let memory = self.admission_memory(&view, spec.operation()).await?;
-                    let source = self
-                        .admitted_dependencies(&view, spec.operation())
-                        .await?
-                        .and_then(|dependencies| dependencies.update_source);
-                    (Some(memory), source)
-                } else {
-                    (None, None)
-                };
-                let prepared = match spec {
-                    OperationRequest::Build(build) => {
-                        self.process_build(build, &directory, &admission).await?
-                    }
-                    OperationRequest::Update(update) => {
-                        self.process_update(update, &directory, &admission, update_source.as_ref())
-                            .await?
-                    }
-                    OperationRequest::Schema(schema) => {
-                        self.process_schema(schema, &directory, operation).await?
-                    }
-                    OperationRequest::Evidence(evidence) => {
-                        self.process_receipts(evidence, &directory, &admission)
-                            .await?
-                    }
-                    OperationRequest::Refresh(refresh) => {
-                        Box::pin(self.process_refresh(
-                            refresh,
-                            &directory,
-                            &admission,
-                            operation,
-                            update_source.as_ref(),
-                        ))
-                        .await?
-                    }
-                    OperationRequest::Backfill(_) => {
-                        return Err(Error::refusal(
-                            "invalid_operation",
-                            "use the backfill service",
-                        ));
-                    }
-                };
+                let (prepared, update_source, _capture_memory) =
+                    if let OperationRequest::Build(build) = spec
+                        && build.base.is_none()
+                    {
+                        (
+                            self.process_initial_build(build, operation, &admission)
+                                .await?,
+                            None,
+                            None,
+                        )
+                    } else {
+                        // Remaining processing shapes preserve their local location APIs.
+                        let directory = self.reserve_attempt(spec, operation, "processing").await?;
+                        let (_capture_memory, update_source) = if admission::captures_source(spec) {
+                            let view = lifecycle.open(spec.dataset()).await?;
+                            let memory = self.admission_memory(&view, spec.operation()).await?;
+                            let source = self
+                                .admitted_dependencies(&view, spec.operation())
+                                .await?
+                                .and_then(|dependencies| dependencies.update_source);
+                            (Some(memory), source)
+                        } else {
+                            (None, None)
+                        };
+                        let prepared = match spec {
+                            OperationRequest::Build(build) => {
+                                self.process_build(build, &directory, &admission).await?
+                            }
+                            OperationRequest::Update(update) => {
+                                self.process_update(
+                                    update,
+                                    &directory,
+                                    &admission,
+                                    update_source.as_ref(),
+                                )
+                                .await?
+                            }
+                            OperationRequest::Schema(schema) => {
+                                self.process_schema(schema, &directory, operation).await?
+                            }
+                            OperationRequest::Evidence(evidence) => {
+                                self.process_receipts(evidence, &directory, &admission)
+                                    .await?
+                            }
+                            OperationRequest::Refresh(refresh) => {
+                                Box::pin(self.process_refresh(
+                                    refresh,
+                                    &directory,
+                                    &admission,
+                                    operation,
+                                    update_source.as_ref(),
+                                ))
+                                .await?
+                            }
+                            OperationRequest::Backfill(_) => {
+                                return Err(Error::refusal(
+                                    "invalid_operation",
+                                    "use the backfill service",
+                                ));
+                            }
+                        };
+                        (prepared, update_source, _capture_memory)
+                    };
                 let mut outputs = prepared.table.objects.clone();
                 if let Some(changes) = &prepared.changes {
                     outputs.push(changes.base_manifest.clone());
@@ -1095,6 +1208,7 @@ impl Engine {
                 };
                 let mut authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
+                self.check_initial_selection(&authority)?;
                 if authority.definition.is_empty() {
                     authority.definition = spec.definition().to_owned();
                 }
@@ -1269,7 +1383,8 @@ impl Engine {
                 // Refresh selection checks the complete dependency graph below.
                 // Other selections check retained availability here, once.
                 if !matches!(spec, OperationRequest::Refresh(_)) {
-                    check_release_available(&release, &lifecycle.budget).await?;
+                    check_release_available(&self.inner.objects, &release, &lifecycle.budget)
+                        .await?;
                 }
                 stop_after(stop, "readback")?;
                 return self
@@ -1351,7 +1466,7 @@ impl Engine {
             } else {
                 None
             };
-            let mut checks = verification::Checks::new(VerificationLevel::Routine);
+            let mut checks = verification::Checks::routine(self.inner.objects.clone());
             if let Some(base) = &base {
                 checks.trust(base, &lifecycle.budget).await?;
             }
@@ -1653,8 +1768,13 @@ impl Engine {
                         "retained readback differs from the prepared result",
                     ));
                 }
-                check_release_available_with_checks(&release, &lifecycle.budget, &mut checks)
-                    .await?;
+                check_release_available_with_checks(
+                    &self.inner.objects,
+                    &release,
+                    &lifecycle.budget,
+                    &mut checks,
+                )
+                .await?;
                 Retained {
                     value: release,
                     protections: self
@@ -1664,42 +1784,9 @@ impl Engine {
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("readback");
-                let directory = self.reserve_attempt(spec, &operation, "release").await?;
-                let path = directory.join("release.json");
-                let serialized = serde_json::to_vec_pretty(&dataset)?;
-                if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
-                    return Err(Error::refusal(
-                        "metadata_capacity",
-                        "combined release exceeds metadata allowance",
-                    ));
-                }
-                storage::write_new(&path, &serialized)?;
-                let manifest = ObjectRef {
-                    owner: spec.dataset().clone(),
-                    path: path.to_string_lossy().into_owned(),
-                    digest: blake3::hash(&serialized).to_hex().to_string(),
-                    bytes: serialized.len() as u64,
-                };
-                // Decode the serialized release independently of the producing context.
-                let memory = Arc::new(
-                    lifecycle
-                        .budget
-                        .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
-                );
-                let decoded: DatasetPin = inputs::read_manifest(
-                    &self.inner.objects,
-                    &manifest,
-                    &lifecycle.budget,
-                    &mut 0,
-                    &memory,
-                )
-                .await?;
-                if decoded != dataset {
-                    return Err(Error::refusal(
-                        "release_mismatch",
-                        "serialized release differs from selected result",
-                    ));
-                }
+                let manifest = self
+                    .create_release(spec, &operation, &dataset, stop)
+                    .await?;
                 let release = ReleasePin {
                     id: spec.operation().clone(),
                     dataset,
@@ -1769,6 +1856,7 @@ impl Engine {
                 return Ok(completed);
             }
             let authority = self.check(&view, operation, spec.operation()).await?;
+            self.check_initial_selection(&authority)?;
             if authority
                 .selected
                 .as_ref()
@@ -2464,12 +2552,22 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
     objects
 }
 
-async fn check_release_available(release: &ReleasePin, budget: &Budget) -> Result<()> {
-    check_release_available_with_checks(release, budget, &mut verification::Checks::composition())
-        .await
+async fn check_release_available(
+    objects: &storage::Objects,
+    release: &ReleasePin,
+    budget: &Budget,
+) -> Result<()> {
+    check_release_available_with_checks(
+        objects,
+        release,
+        budget,
+        &mut verification::Checks::composition(),
+    )
+    .await
 }
 
 async fn check_release_available_with_checks(
+    objects: &storage::Objects,
     release: &ReleasePin,
     budget: &Budget,
     checks: &mut verification::Checks,
@@ -2477,7 +2575,9 @@ async fn check_release_available_with_checks(
     if release.dataset.related.is_some() {
         verification::check_available(release, budget).await
     } else {
-        storage::check_available(release_objects(release), budget).await?;
+        objects
+            .check_available(release_objects(release), budget)
+            .await?;
         schema::check_available(&release.dataset, budget).await?;
         backfill::verify_binding_dependencies(&release.dataset, budget, checks).await
     }

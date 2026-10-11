@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T05:20:54.224089+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "lifecycle::simultaneous_retries_reconcile_to_one_immutable_release",
+    "lifecycle::oversized_output_refuses_then_resumes_from_admitted_input",
+    "updates::applied_updates_preserve_duplicates_null_keys_history_and_unchanged_files",
+    "--nocapture"
+  ],
+  "free_before_bytes": 12513214464,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 12456235008,
+  "free_after_bytes": 12491501568,
+  "finished_utc": "2026-10-11T05:21:22.308244+00:00"
+}

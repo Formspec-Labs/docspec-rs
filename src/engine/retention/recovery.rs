@@ -23,10 +23,27 @@ pub(super) fn scope_key(operation: &Id, key: &str) -> bool {
                         && phase == "admission"
                 })
             })
+        || key
+            .strip_prefix(&format!("candidate-attempt/{operation}/"))
+            .is_some_and(|suffix| {
+                let mut parts = suffix.split('/');
+                matches!((parts.next(), parts.next(), parts.next(), parts.next(), parts.next()),
+                    (Some(operation_revision), Some(processing_revision), Some(input), Some("processing"), None)
+                    if operation_revision.parse::<i64>().is_ok_and(|n| n > 0)
+                        && processing_revision.parse::<i64>().is_ok_and(|n| n >= 0)
+                        && input.len() == 64 && input.bytes().all(|b| b.is_ascii_hexdigit()))
+            })
         || key == format!("prepared-changes/{operation}")
         || key
             .strip_prefix("protection/")
             .is_some_and(|id| Id::new(id).is_ok())
+        || key.strip_prefix(&format!("release-attempt/{operation}/")).is_some_and(|suffix| {
+            let mut parts = suffix.split('/');
+            matches!((parts.next(), parts.next(), parts.next(), parts.next()),
+                (Some(revision), Some(digest), Some("release"), None)
+                if revision.parse::<i64>().is_ok_and(|n| n > 0)
+                    && digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
 }
 
 fn prepared_generation(
@@ -220,6 +237,32 @@ pub(super) fn collect(
     for (key, revision, json) in rows.prefix(&format!("source-attempt/{operation}/")) {
         let _memory = rows.reserve_decoded(budget, &[key])?;
         crate::engine::locations::validate_source_attempt_record(key, json, rows)?;
+        if revision <= operation_revision || revision > view.revision {
+            return Err(invalid_retirement());
+        }
+        if !record_retired(rows, view, key, revision, budget)? {
+            records.push(RetainedGeneration {
+                key: key.into(),
+                revision,
+            });
+        }
+    }
+    for (key, revision, json) in rows.prefix(&format!("candidate-attempt/{operation}/")) {
+        let _memory = rows.reserve_decoded(budget, &[key])?;
+        crate::engine::write::build::validate_record(key, json, rows, Some(budget))?;
+        if revision <= operation_revision || revision > view.revision {
+            return Err(invalid_retirement());
+        }
+        if !record_retired(rows, view, key, revision, budget)? {
+            records.push(RetainedGeneration {
+                key: key.into(),
+                revision,
+            });
+        }
+    }
+    for (key, revision, json) in rows.prefix(&format!("release-attempt/{operation}/")) {
+        let _memory = rows.reserve_decoded(budget, &[key])?;
+        crate::engine::locations::release::validate_record(key, json, rows, Some(budget))?;
         if revision <= operation_revision || revision > view.revision {
             return Err(invalid_retirement());
         }

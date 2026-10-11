@@ -28,7 +28,8 @@ async fn recovered_processing_without_production_marker_does_not_mint_a_certific
     let (key, value) = retained
         .iter()
         .find(|(key, value)| {
-            key.ends_with("/processing")
+            key.starts_with("phase/")
+                && key.ends_with("/processing")
                 && serde_json::from_value::<PhaseResult>((*value).clone())
                     .is_ok_and(|phase| phase.operation == spec.operation)
         })

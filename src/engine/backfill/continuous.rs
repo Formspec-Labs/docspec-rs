@@ -232,6 +232,7 @@ impl Engine {
         spec: &ContinuousBackfillSpec,
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
+        self.require_local()?;
         validate_spec(spec)?;
         let memory = self.request_memory(&(spec, stop))?;
         let spec = spec.clone();
@@ -857,6 +858,7 @@ impl Engine {
         &self,
         spec: &ContinuousBackfillSpec,
     ) -> Result<ContinuousBackfillPlan> {
+        self.require_local()?;
         validate_spec(spec)?;
         let memory = self.request_memory(spec)?;
         let spec = spec.clone();

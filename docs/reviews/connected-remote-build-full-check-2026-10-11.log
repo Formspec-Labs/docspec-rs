@@ -1,0 +1,35 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: this `if` statement can be collapsed
+   --> src/storage/object_io.rs:142:9
+    |
+142 | /         if let Self::Remote(objects) = self {
+143 | |             if _resuming && objects.verify_if_present(expected, budget).await?.is_some() {
+144 | |                 return Ok(());
+145 | |             }
+146 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+142 ~         if let Self::Remote(objects) = self
+143 ~             && _resuming && objects.verify_if_present(expected, budget).await?.is_some() {
+144 |                 return Ok(());
+145 ~             }
+    |
+
+error: this lint expectation is unfulfilled
+   --> src/storage/inspection.rs:144:5
+    |
+144 |     clippy::too_many_arguments,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: One shared inspection owns backend, exact pin, sample limits and prior checks
+    = note: `-D unfulfilled-lint-expectations` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unfulfilled_lint_expectations)]`
+
+error: could not compile `docspec` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 2 previous errors

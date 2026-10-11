@@ -168,8 +168,12 @@ async fn reserved_remote_admission_resumes_same_destination_then_reuses_complete
     );
     std::fs::remove_file(&spec.input).unwrap();
     assert_eq!(
-        engine.run(&spec).await.unwrap_err().code(),
-        "remote_build_unavailable"
+        engine
+            .run_until(&spec, "admission")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
     );
     engine.shutdown().await.unwrap();
     let report = server.finish();
@@ -217,8 +221,12 @@ async fn transferred_remote_admission_recovers_without_original_source_or_second
         original.inputs.into_values().collect::<Vec<_>>()
     );
     assert_eq!(
-        engine.run(&spec).await.unwrap_err().code(),
-        "remote_build_unavailable"
+        engine
+            .run_until(&spec, "admission")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
     );
     engine.shutdown().await.unwrap();
     let report = server.finish();
@@ -253,8 +261,12 @@ async fn lost_remote_put_response_reconciles_exact_intent_and_completes_admissio
     );
     std::fs::remove_file(&spec.input).unwrap();
     assert_eq!(
-        engine.run(&spec).await.unwrap_err().code(),
-        "remote_build_unavailable"
+        engine
+            .run_until(&spec, "admission")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
     );
     engine.shutdown().await.unwrap();
     let report = server.finish();
