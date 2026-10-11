@@ -51,7 +51,7 @@ async fn retained_comments_join_physical_plans() -> Result<()> {
             pin.schema_id,
             pin.metadata.path
         );
-        let native = storage::open_pin(pin).await?;
+        let native = storage::open_pin(pin, &budget).await?;
         context.register_table(
             alias,
             query::occurrences(native, budget.clone(), Some(pin.rows))?,

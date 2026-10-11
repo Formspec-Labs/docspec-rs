@@ -27,8 +27,9 @@ fn assert_one_file(pin: &TablePin) {
 }
 
 async fn origins(pin: &TablePin, field: &str, value: Option<i64>) -> Vec<Location> {
-    let native = storage::open_pin(pin).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
+
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()
@@ -50,10 +51,11 @@ async fn origins(pin: &TablePin, field: &str, value: Option<i64>) -> Vec<Locatio
 }
 
 async fn joined_origins(release: &ReleasePin, label: &str) -> Vec<Location> {
-    let native = storage::open_pin(&release.dataset.groups["source"])
+    let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(&release.dataset.groups["source"], &budget)
         .await
         .unwrap();
-    let budget = Budget::new(limits()).unwrap();
+
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()

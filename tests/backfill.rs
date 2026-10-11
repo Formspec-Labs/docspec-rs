@@ -103,6 +103,7 @@ async fn combined(engine: &Engine, release: &ReleasePin) -> Vec<(scalar::Row, Op
 
 #[tokio::test]
 async fn combined_values_preserve_duplicate_null_empty_and_unicode_occurrences() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = TempDir::new().unwrap();
     let (engine, base, rows) = fixture(root.path(), false).await;
     let request = spec(&base, "lengths", "length", "text_length", "length(text)");
@@ -130,7 +131,7 @@ async fn combined_values_preserve_duplicate_null_empty_and_unicode_occurrences()
     assert!(done.completed);
     assert_eq!(done.files_pending, None);
     assert_eq!(done.files_completed, None);
-    let native = storage::open_pin(&release.dataset.groups["length"])
+    let native = storage::open_pin(&release.dataset.groups["length"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(
@@ -718,7 +719,7 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
     let mut limit = 0;
     let budget = docspec::budget::Budget::new(limits()).unwrap();
     for pin in b.dataset.groups.values() {
-        let native = storage::open_pin(pin).await.unwrap();
+        let native = storage::open_pin(pin, &budget).await.unwrap();
         // Measure the maintained reader's transient file column as well as values.
         let names = native
             .metadata()
@@ -745,7 +746,7 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
         }
     }
     // Include the source locator allowance too, so only the final joined batch fails.
-    let native = storage::open_pin(&b.dataset.groups["source"])
+    let native = storage::open_pin(&b.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let mut source = storage::read_occurrences(&native, &budget)
@@ -783,10 +784,11 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
         ))
         .await
         .unwrap();
-    let native = storage::open_pin(&valid.dataset.groups["length"])
+    let budget = docspec::budget::Budget::new(limits()).unwrap();
+    let native = storage::open_pin(&valid.dataset.groups["length"], &budget)
         .await
         .unwrap();
-    let budget = docspec::budget::Budget::new(limits()).unwrap();
+
     let stream = storage::read_batches(&native, &budget).await.unwrap();
     futures::pin_mut!(stream);
     let mut batches = Vec::new();
@@ -892,9 +894,10 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
                 .await
                 .unwrap();
             if kind != "null" {
-                let alternate_native = storage::open_pin(&alternate.dataset.groups["source"])
-                    .await
-                    .unwrap();
+                let alternate_native =
+                    storage::open_pin(&alternate.dataset.groups["source"], &budget)
+                        .await
+                        .unwrap();
                 assert_eq!(
                     alternate_native.metadata().current_schema(),
                     native.metadata().current_schema(),

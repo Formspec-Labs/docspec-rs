@@ -41,8 +41,9 @@ pub(super) fn update_request(
 }
 
 pub(super) async fn occurrences(pin: &TablePin) -> Vec<(String, i64, Option<i64>, Option<String>)> {
-    let native = storage::open_pin(pin).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
+
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()
@@ -654,7 +655,9 @@ async fn native_nested_decimal_time_and_null_values_survive_typed_rewrite() {
         .await
         .unwrap();
     let budget = Budget::new(limits()).unwrap();
-    let native = storage::open_pin(&result.replacement).await.unwrap();
+    let native = storage::open_pin(&result.replacement, &budget)
+        .await
+        .unwrap();
     let mut stream = storage::read_batches(&native, &budget)
         .await
         .unwrap()
@@ -705,15 +708,18 @@ async fn schema_defaults_and_supplied_state_remain_native_and_exact() {
         occurrences(&result.source).await,
         occurrences(&result.replacement).await
     );
-    let before = storage::open_pin(&result.source).await.unwrap();
-    let after = storage::open_pin(&result.replacement).await.unwrap();
+    let budget = Budget::new(limits()).unwrap();
+    let before = storage::open_pin(&result.source, &budget).await.unwrap();
+    let after = storage::open_pin(&result.replacement, &budget)
+        .await
+        .unwrap();
     for field in before.metadata().current_schema().as_struct().fields() {
         assert_eq!(
             after.metadata().current_schema().field_by_id(field.id),
             Some(field)
         );
     }
-    let budget = Budget::new(limits()).unwrap();
+
     let mut stream = storage::read_batches(&after, &budget)
         .await
         .unwrap()
@@ -784,7 +790,7 @@ async fn schema_defaults_and_supplied_state_remain_native_and_exact() {
         })
         .await
         .unwrap();
-    let native = storage::open_pin(&explicit.dataset.groups["source"])
+    let native = storage::open_pin(&explicit.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let category_id = native

@@ -251,10 +251,11 @@ fn number(batch: &RecordBatch, name: &str, row: usize) -> Option<i64> {
     (!array.is_null(row)).then(|| array.value(row))
 }
 async fn occurrences(release: &ReleasePin) -> Vec<(Location, Row)> {
-    let table = storage::open_pin(&release.dataset.groups["source"])
+    let budget = Budget::new(limits()).unwrap();
+    let table = storage::open_pin(&release.dataset.groups["source"], &budget)
         .await
         .unwrap();
-    let budget = Budget::new(limits()).unwrap();
+
     let mut stream = storage::read_occurrences(&table, &budget)
         .await
         .unwrap()
@@ -1115,3 +1116,6 @@ mod history_keys;
 
 #[path = "related_refresh/compaction.rs"]
 mod compaction;
+
+#[path = "related_refresh/cardinality.rs"]
+mod cardinality;

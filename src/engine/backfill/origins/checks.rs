@@ -626,7 +626,7 @@ mod tests {
             .unwrap()
             .table;
         let budget = &engine.inner.lifecycle.budget;
-        let native = storage::open_pin(&source).await.unwrap();
+        let native = storage::open_pin(&source, budget).await.unwrap();
         let definition = GroupDefinition {
             group: Id::new("derived").unwrap(),
             definition: "v1".into(),

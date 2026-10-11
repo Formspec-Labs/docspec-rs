@@ -144,11 +144,12 @@ fn update(
     }
 }
 async fn read(pin: &TablePin) -> Vec<Row> {
-    let native = storage::open_pin(pin).await.unwrap();
+    let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
     if pin.snapshot.is_none() {
         return vec![];
     }
-    let budget = Budget::new(limits()).unwrap();
+
     let stream = storage::read_batches(&native, &budget).await.unwrap();
     futures::pin_mut!(stream);
     let mut values = Vec::new();
@@ -802,10 +803,11 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
         deletions: None,
     };
     let result = engine.update(&spec).await.unwrap();
-    let old_table = storage::open_pin(&before.dataset.groups["source"])
+    let budget = Budget::new(limits()).unwrap();
+    let old_table = storage::open_pin(&before.dataset.groups["source"], &budget)
         .await
         .unwrap();
-    let native = storage::open_pin(&result.dataset.groups["source"])
+    let native = storage::open_pin(&result.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let original_fields = old_table.metadata().current_schema().as_struct().fields();
@@ -819,7 +821,7 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
             .collect::<Vec<_>>(),
         vec![("__docspec_origin_file", 6), ("__docspec_origin_row", 7)]
     );
-    let budget = Budget::new(limits()).unwrap();
+
     let stream = storage::read_batches(&native, &budget).await.unwrap();
     futures::pin_mut!(stream);
     let mut values = Vec::new();

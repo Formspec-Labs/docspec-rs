@@ -76,7 +76,7 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
     }
     let lifecycle = &engine.inner.lifecycle;
     let view = lifecycle.open(&id("source")).await.unwrap();
-    let native = storage::open_pin(&before.dataset.groups["source"])
+    let native = storage::open_pin(&before.dataset.groups["source"], &lifecycle.budget)
         .await
         .unwrap();
     let result = engine

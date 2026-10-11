@@ -1,9 +1,9 @@
 # Package audit: current delta
 
-**Keep the stack. The new omission is remote-package efficiency coverage; the
-largest remaining local opportunity is an already identified redundant join
-scan.** More package inventories will add less value than closing those concrete
-items and collecting the missing measurements during useful work.
+**Keep the stack. The main missing evidence is remote-package efficiency and
+actual I/O savings.** The implementation follow-up below closes the identified
+redundant join scan and metadata reread. More package inventories will add less
+value than collecting the missing measurements during useful work.
 
 This bounded static check compares the five user-attached package reports in
 `/tmp/codex-remote-attachments/01a116b5-a9a6-7363-acec-cc4bcb984f9a/78eed266-e922-415d-b761-a6d3b57061aa/`
@@ -87,3 +87,39 @@ These close the new feature-inventory and tiny provider-seam gaps. They do not
 measure representative transfer throughput, request amplification, buffering,
 multipart recovery or complete remote publication. The local measurement and
 implementation priorities above remain unchanged.
+
+## Implementation follow-up
+
+The preceding table records the review snapshot. Its duplicate-first cardinality
+and metadata-reread implementation items are now addressed:
+
+- Join checks first group the constrained input using DataFusion. Unique keys
+  skip the partner's payload scan; duplicates retain the existing matched-key
+  proof. The [targeted fixture](duplicate-first-cardinality-tests-2026-10-10.log)
+  observes zero partner executions and one constrained execution for the unique
+  many-to-one branch, versus one and two respectively for duplicate branches.
+  Exact full-join/self-join cases retain null rules, unmatched duplicates and
+  occurrence evidence. The [independent review](duplicate-first-cardinality-review-2026-10-10.md)
+  approves. These execution counts are not representative throughput, bytes or
+  peak-memory measurements; duplicates intentionally add constrained-side work.
+- [Pinned metadata](../../src/storage/pinned.rs) now passes one bounded FileIO
+  range read to hashing and native deserialization, replacing hash-then-reopen.
+  Pre/post size checks remain. Both local and injected I/O use the same code;
+  gzip uses maintained `flate2` and bounded Serde parsing without a decoded-byte
+  copy. `flate2` 1.1.10 was already transitive; its direct declaration adds no new
+  locked package/version. Caller budgets now govern opening work. The
+  [focused checks](pinned-metadata-tests-2026-10-10.log) cover local/memory I/O,
+  configured stored/decoded limits, gzip integrity and pin identity. This does
+  not yet qualify real-provider pinned release reads or the lifetime of all
+  returned metadata/cache allocations.
+
+Native scan metrics, representative remote requests/transfers/retries, update
+and history scaling, and measured native layout/spill choices remain open.
+Complete remote publication and maintenance remain in [STATUS](../STATUS.md);
+an injected metadata reader does not complete that delivery.
+
+Both changes pass the [final repository gate](join-metadata-full-check-2026-10-10-2.log).
+The [metadata review](pinned-metadata-review-2026-10-10.md) records an initial
+fixed-buffer admission regression caught by the earlier gate and the corrected
+small-budget/cancellation behavior. The correction shares the existing worker
+limiter and introduces no new executor or cache.

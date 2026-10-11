@@ -258,11 +258,11 @@ impl Engine {
                 ));
             }
         }
-        let left = storage::open_pin(&first).await?;
+        let left = storage::open_pin(&first, &self.inner.lifecycle.budget).await?;
         let right = if first == second {
             left.clone()
         } else {
-            storage::open_pin(&second).await?
+            storage::open_pin(&second, &self.inner.lifecycle.budget).await?
         };
         storage::identity::has_origins(left.metadata().current_schema())?;
         storage::identity::has_origins(right.metadata().current_schema())?;
@@ -307,12 +307,12 @@ impl Engine {
             let canonical_left = if canonical_first == &first {
                 left.clone()
             } else {
-                storage::open_pin(canonical_first).await?
+                storage::open_pin(canonical_first, &self.inner.lifecycle.budget).await?
             };
             let canonical_right = if canonical_second == &second {
                 right.clone()
             } else {
-                storage::open_pin(canonical_second).await?
+                storage::open_pin(canonical_second, &self.inner.lifecycle.budget).await?
             };
             retained_schema_boundary(canonical_left.metadata(), canonical_right.metadata())
         } else {

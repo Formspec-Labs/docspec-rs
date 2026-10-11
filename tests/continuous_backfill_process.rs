@@ -46,7 +46,7 @@ async fn assert_output(engine: &Engine, release: &ReleasePin, rows: Vec<scalar::
     assert_values(engine, release, rows).await;
 
     let budget = docspec::budget::Budget::new(limits()).unwrap();
-    let source = storage::open_pin(&release.dataset.groups["source"])
+    let source = storage::open_pin(&release.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let source_stream = storage::read_occurrences(&source, &budget).await.unwrap();

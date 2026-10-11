@@ -148,7 +148,7 @@ impl Engine {
                 let pin = self
                     .source_with_origins(dataset, source, &directory.join("source-origins"))
                     .await?;
-                native = storage::open_pin(&pin).await?;
+                native = storage::open_pin(&pin, &self.inner.lifecycle.budget).await?;
                 pin
             } else {
                 source.clone()
@@ -171,7 +171,7 @@ impl Engine {
         directory: &'a Path,
     ) -> futures::future::BoxFuture<'a, Result<TablePin>> {
         Box::pin(async move {
-            let native = storage::open_pin(source).await?;
+            let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
             let previous = native.metadata_ref();
             let directory = directory.to_owned();
             let view = self.inner.lifecycle.open(dataset).await?;
@@ -279,7 +279,7 @@ impl Engine {
             context.register_table(
                 "source",
                 crate::query::occurrences(
-                    storage::open_pin(&pin).await?,
+                    storage::open_pin(&pin, &engine.inner.lifecycle.budget).await?,
                     engine.inner.lifecycle.budget.clone(),
                     Some(pin.rows),
                 )?,
@@ -323,7 +323,7 @@ impl Engine {
                 .await?
                 .table
             };
-            let before_native = storage::open_pin(&before).await?;
+            let before_native = storage::open_pin(&before, &self.inner.lifecycle.budget).await?;
             let expected =
                 iceberg::arrow::schema_to_arrow_schema(before_native.metadata().current_schema())?;
             if !same_fields(&expected, replacement.schema().as_arrow())? {
@@ -428,7 +428,8 @@ impl Engine {
                     work_started("receipts");
                     let directory = self.reserve_attempt(request, operation, "receipts").await?;
                     let context = self.context();
-                    let native = storage::open_pin(&previous.table).await?;
+                    let native =
+                        storage::open_pin(&previous.table, &self.inner.lifecycle.budget).await?;
                     context.register_table(
                         "receipts",
                         crate::query::table(
@@ -442,7 +443,8 @@ impl Engine {
                         context.register_table(
                             "removed",
                             crate::query::occurrences(
-                                storage::open_pin(&changes.removed).await?,
+                                storage::open_pin(&changes.removed, &self.inner.lifecycle.budget)
+                                    .await?,
                                 self.inner.lifecycle.budget.clone(),
                                 Some(changes.removed.rows),
                             )?,
@@ -614,8 +616,8 @@ pub(super) fn verify<'a>(
         if let Some(previous) = &base.evidence
             && previous.table != evidence.table
         {
-            let before = storage::open_pin(&previous.table).await?;
-            let after = storage::open_pin(&evidence.table).await?;
+            let before = storage::open_pin(&previous.table, budget).await?;
+            let after = storage::open_pin(&evidence.table, budget).await?;
             if !storage::identity::preserves_schema(
                 before.metadata().current_schema(),
                 after.metadata().current_schema(),
@@ -711,7 +713,7 @@ pub(super) fn verify_result<'a>(
             ));
         }
         checks.table(&evidence.table, budget).await?;
-        let native = storage::open_pin(&evidence.table).await?;
+        let native = storage::open_pin(&evidence.table, budget).await?;
         check_schema(
             &iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?,
             true,
@@ -766,7 +768,7 @@ async fn verify_replacement(
     let (replacement, scope) = receipt_inputs(&context, spec.deletions.is_some()).await?;
     check_associations(scope.clone(), source, budget).await?;
     let expected = if let Some(previous) = &base.evidence {
-        let native = storage::open_pin(&previous.table).await?;
+        let native = storage::open_pin(&previous.table, budget).await?;
         let expected = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
         if !same_fields(&expected, replacement.schema().as_arrow())? {
             return Err(invalid(
@@ -820,7 +822,7 @@ async fn verify_inheritance(
     context.register_table(
         "previous",
         crate::query::table(
-            storage::open_pin(&previous.table).await?,
+            storage::open_pin(&previous.table, budget).await?,
             budget.clone(),
             Some(previous.table.rows),
         )?,
@@ -852,7 +854,7 @@ async fn verify_receipt_values(
     budget: &Budget,
     reason: &str,
 ) -> Result<()> {
-    let native = storage::open_pin(current).await?;
+    let native = storage::open_pin(current, budget).await?;
     if !same_fields(
         expected.schema().as_arrow(),
         &iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?,
@@ -894,7 +896,7 @@ async fn associate(
         datatypes::Field,
         record_batch::RecordBatch,
     };
-    let native = storage::open_pin(source).await?;
+    let native = storage::open_pin(source, budget).await?;
     let inventory = storage::snapshot_files(&native, budget).await?;
     storage::check_inventory_files(source, &inventory)?;
     let context = budget.context();

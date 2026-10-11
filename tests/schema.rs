@@ -56,7 +56,7 @@ fn payloads(release: &ReleasePin) -> BTreeMap<String, Vec<docspec::model::Object
 }
 async fn source_rows(release: &ReleasePin) -> Vec<scalar::Row> {
     let budget = docspec::budget::Budget::new(limits()).unwrap();
-    let table = storage::open_pin(&release.dataset.groups["source"])
+    let table = storage::open_pin(&release.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let mut stream = storage::read_batches(&table, &budget)
@@ -243,6 +243,7 @@ async fn invalid_edits_refuse_before_admission_and_empty_sources_evolve() {
 
 #[tokio::test]
 async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     use arrow::{
         array::ArrayRef,
         datatypes::{DataType, Field, Schema},
@@ -256,7 +257,7 @@ async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() 
     edit.fields.remove(0);
     let hidden = engine.evolve_schema(&edit).await.unwrap();
     assert_eq!(payloads(&hidden), payloads(&base));
-    let native = storage::open_pin(&hidden.dataset.groups["source"])
+    let native = storage::open_pin(&hidden.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(native.metadata().last_column_id(), 2);
@@ -342,7 +343,7 @@ async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() 
     actual.sort();
     expected.sort();
     assert_eq!(actual, expected);
-    let native = storage::open_pin(&updated.dataset.groups["source"])
+    let native = storage::open_pin(&updated.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     // Origin fields extend the high-water mark without reusing hidden field 2.

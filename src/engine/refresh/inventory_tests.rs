@@ -96,7 +96,7 @@ async fn cardinality_and_main_join_replay_without_manifest_and_share_self_join_a
     drop(budget.reserve(remaining).unwrap());
     assert!(budget.reserve(remaining + 1).is_err());
 
-    let native = storage::open_pin(&release.dataset.groups["source"])
+    let native = storage::open_pin(&release.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let manifest = native

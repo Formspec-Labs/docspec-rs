@@ -530,7 +530,7 @@ async fn joined_summary_retains_catalog_free_transitive_occurrence_evidence() {
     .unwrap();
     let budget = Budget::new(limits()).unwrap();
     // Resolve summary -> exact joined file/row -> exact original source tuple.
-    let native = storage::open_pin(&joined.dataset.groups["source"])
+    let native = storage::open_pin(&joined.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let mut stream = storage::read_occurrences(&native, &budget)

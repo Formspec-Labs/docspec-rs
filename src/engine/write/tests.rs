@@ -61,7 +61,7 @@ async fn captured_source_requires_logical_identity_count_and_public_schema() {
         .source_with_origins(&owner, &canonical, &root.path().join("origins"))
         .await
         .unwrap();
-    let accepted = open_captured_source(&canonical, &with_origins)
+    let accepted = open_captured_source(&canonical, &with_origins, &engine.inner.lifecycle.budget)
         .await
         .unwrap();
     assert!(storage::identity::has_origins(accepted.metadata().current_schema()).unwrap());
@@ -74,7 +74,7 @@ async fn captured_source_requires_logical_identity_count_and_public_schema() {
             invalid.logical_metadata.as_mut().unwrap().digest = "different-logical-source".into();
         }
         assert_eq!(
-            open_captured_source(&canonical, &invalid)
+            open_captured_source(&canonical, &invalid, &engine.inner.lifecycle.budget)
                 .await
                 .unwrap_err()
                 .code(),
@@ -95,7 +95,7 @@ async fn captured_source_requires_logical_identity_count_and_public_schema() {
         .unwrap();
     foreign.logical_metadata = Some(canonical.logical_metadata().clone());
     assert_eq!(
-        open_captured_source(&canonical, &foreign)
+        open_captured_source(&canonical, &foreign, &engine.inner.lifecycle.budget)
             .await
             .unwrap_err()
             .code(),
@@ -137,7 +137,7 @@ fn batch(schema: &Schema, rows: &[Row], evolved: bool) -> RecordBatch {
 }
 
 async fn rows(pin: &TablePin, budget: &Budget) -> Vec<Row> {
-    let native = storage::open_pin(pin).await.unwrap();
+    let native = storage::open_pin(pin, budget).await.unwrap();
     let mut stream = storage::read_batches(&native, budget)
         .await
         .unwrap()
@@ -383,7 +383,7 @@ async fn renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_f
     );
     assert!(result.table.objects.iter().any(|o| o.path == stable));
     for pin in [&result.table, &result.removed, &result.added] {
-        let native = storage::open_pin(pin).await.unwrap();
+        let native = storage::open_pin(pin, budget).await.unwrap();
         assert_eq!(
             native.metadata().current_schema(),
             table.metadata().current_schema()
@@ -829,7 +829,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     assert_eq!(all.table.rows, 0);
     assert!(rows(&all.table, budget).await.is_empty());
     for pin in [&all.table, &all.removed, &all.added] {
-        let table = storage::open_pin(pin).await.unwrap();
+        let table = storage::open_pin(pin, budget).await.unwrap();
         assert_eq!(
             table.metadata().current_schema(),
             source.metadata().current_schema()

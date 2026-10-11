@@ -4,6 +4,9 @@ pub(crate) mod defaults;
 pub(crate) mod identity;
 mod inspection;
 mod occurrences;
+mod pinned;
+#[doc(inline)]
+pub use pinned::{open_pin, open_pin_with_io};
 #[cfg(feature = "remote")]
 pub mod remote;
 pub(crate) mod removal;
@@ -36,7 +39,7 @@ use iceberg::{
     Catalog, CatalogBuilder,
     io::LocalFsStorageFactory,
     spec::{DataFile, DataFileFormat},
-    table::{StaticTable, Table},
+    table::Table,
 };
 use iceberg_catalog_sql::{SqlBindStyle, SqlCatalogBuilder};
 use parquet::{
@@ -709,31 +712,6 @@ pub(crate) fn check_inventory_files(pin: &TablePin, inventory: &SnapshotFiles) -
     Ok(())
 }
 
-/// Opens a native snapshot without the original catalog or producer callbacks.
-///
-/// # Errors
-/// Refuses corrupted metadata or incompatible snapshot/schema bindings.
-pub async fn open_pin(pin: &TablePin) -> Result<Table> {
-    verify_object(&pin.metadata)?;
-    let ident = iceberg::TableIdent::from_strs(["release", &pin.table])?;
-    let table = StaticTable::from_metadata_file(
-        &pin.metadata.path,
-        ident,
-        iceberg::io::FileIO::new_with_fs(),
-    )
-    .await?
-    .into_table();
-    if table.metadata().current_snapshot_id() != pin.snapshot
-        || table.metadata().current_schema_id() != pin.schema_id
-    {
-        return Err(Error::refusal(
-            "pin_mismatch",
-            "snapshot or schema differs from release pin",
-        ));
-    }
-    Ok(table)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,7 +967,7 @@ mod tests {
     }
 
     async fn values(pin: &TablePin, budget: &Budget) -> Vec<Option<i64>> {
-        let table = open_pin(pin).await.unwrap();
+        let table = open_pin(pin, budget).await.unwrap();
         let stream = read_batches(&table, budget).await.unwrap();
         futures::pin_mut!(stream);
         let mut values = Vec::new();

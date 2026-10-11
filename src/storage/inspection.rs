@@ -69,7 +69,7 @@ pub(crate) async fn inspect_table(
     #[cfg(feature = "test-util")]
     eprintln!("DOCSPEC_TEST_INSPECT_TABLE");
     check_available(pin.objects.clone(), budget).await?;
-    let table = open_pin(pin).await?;
+    let table = open_pin(pin, budget).await?;
     super::defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let expected = schema::read_schema(&table)?;
     let inventory = snapshot_files(&table, budget).await?;

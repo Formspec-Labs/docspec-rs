@@ -106,10 +106,10 @@ async fn new_native_heads_block_preview_execution_and_pending_resume_without_exp
 async fn provisional_native_head_detaches_while_selected_shared_data_remains_readable() {
     let (_root, engine, old, replacement, object) = reclaimable().await;
     let budget = &engine.inner.lifecycle.budget;
-    let old_table = storage::open_pin(&old.dataset.groups["source"])
+    let old_table = storage::open_pin(&old.dataset.groups["source"], budget)
         .await
         .unwrap();
-    let new_table = storage::open_pin(&replacement.dataset.groups["source"])
+    let new_table = storage::open_pin(&replacement.dataset.groups["source"], budget)
         .await
         .unwrap();
     let mut files = storage::snapshot_files(&old_table, budget)

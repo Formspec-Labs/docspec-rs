@@ -182,7 +182,7 @@ impl Engine {
                         context.register_table(
                             "matches",
                             crate::query::table(
-                                storage::open_pin(pin).await?,
+                                storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
                                 self.inner.lifecycle.budget.clone(),
                                 Some(pin.rows),
                             )?,
@@ -542,7 +542,7 @@ async fn register_join_inputs(
             let scan = match &captured {
                 Some((previous, scan)) if *previous == version => scan.clone(),
                 _ => {
-                    let native = storage::open_pin(pin).await?;
+                    let native = storage::open_pin(pin, budget).await?;
                     Arc::new(storage::OccurrenceScan::open(&native, budget).await?)
                 }
             };
@@ -550,7 +550,7 @@ async fn register_join_inputs(
             captured = Some((version, scan));
             provider
         } else {
-            let native = storage::open_pin(pin).await?;
+            let native = storage::open_pin(pin, budget).await?;
             crate::query::occurrences(native, budget.clone(), Some(pin.rows))?
         };
         context.register_table(alias, provider)?;
@@ -571,8 +571,13 @@ async fn join_plan(
     enforce_cardinality: bool,
 ) -> Result<DataFrame> {
     let (probes, main) = join_queries(context, spec, enforce_cardinality).await?;
-    for (_, sql) in probes {
-        if has_rows(context, &sql).await? {
+    for (side, sql) in probes {
+        // Unique matchable keys cannot fan out, regardless of the other input.
+        // Only duplicate keys need the existing matched-key proof, which keeps
+        // unmatched duplicates legal without scanning the other input normally.
+        if has_rows(context, &duplicate_keys_query(spec, side)).await?
+            && has_rows(context, &sql).await?
+        {
             return Err(Error::refusal(
                 "join_cardinality",
                 "matching source keys exceed the declared cardinality",
@@ -580,6 +585,41 @@ async fn join_plan(
         }
     }
     Ok(context.sql(&main).await?)
+}
+
+fn duplicate_keys_query(spec: &JoinTransform, side: JoinSide) -> String {
+    let (table, keys) = match side {
+        JoinSide::Left => (
+            "join_left",
+            spec.join
+                .keys
+                .iter()
+                .map(|key| quote(&key.left))
+                .collect::<Vec<_>>(),
+        ),
+        JoinSide::Right => (
+            "join_right",
+            spec.join
+                .keys
+                .iter()
+                .map(|key| quote(&key.right))
+                .collect::<Vec<_>>(),
+        ),
+    };
+    let filter = match spec.join.nulls {
+        NullMatching::Never => format!(
+            " WHERE {}",
+            keys.iter()
+                .map(|key| format!("{key} IS NOT NULL"))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        ),
+        NullMatching::Equal => String::new(),
+    };
+    format!(
+        "SELECT 1 FROM {table}{filter} GROUP BY {} HAVING COUNT(*) > 1 LIMIT 1",
+        keys.join(", ")
+    )
 }
 
 async fn join_queries(
@@ -766,7 +806,7 @@ pub(super) async fn verify_related_with_inputs(
     .await?;
     let expected_schema =
         iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
-    let native = storage::open_pin(source).await?;
+    let native = storage::open_pin(source, budget).await?;
     if !storage::identity::preserves_schema(&expected_schema, native.metadata().current_schema())? {
         return Err(Error::refusal(
             "invalid_related_result",
@@ -790,7 +830,7 @@ pub(super) async fn verify_related_with_inputs(
         equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
     }
     checks.table(&related.evidence, budget).await?;
-    let evidence = storage::open_pin(&related.evidence).await?;
+    let evidence = storage::open_pin(&related.evidence, budget).await?;
     let expected_evidence = evidence_frame(&context, &related.request.transform, "actual").await?;
     let evidence_columns = expected_evidence
         .schema()
@@ -924,4 +964,138 @@ pub(super) fn output_keys(transform: &RefreshTransform) -> Vec<String> {
 }
 pub(super) fn hidden_field(name: &str) -> bool {
     TUPLE.contains(&name) || name == aggregation::GLOBAL
+}
+
+#[cfg(test)]
+mod cardinality_scans {
+    use super::*;
+    use arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema, SchemaRef},
+        record_batch::RecordBatch,
+    };
+    use datafusion::{
+        catalog::streaming::StreamingTable,
+        execution::TaskContext,
+        physical_plan::{
+            SendableRecordBatchStream, stream::RecordBatchStreamAdapter, streaming::PartitionStream,
+        },
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct CountedPartition {
+        batch: RecordBatch,
+        executions: Arc<AtomicUsize>,
+    }
+
+    impl PartitionStream for CountedPartition {
+        fn schema(&self) -> &SchemaRef {
+            self.batch.schema_ref()
+        }
+
+        fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            Box::pin(RecordBatchStreamAdapter::new(
+                self.batch.schema(),
+                futures::stream::iter([Ok(self.batch.clone())]),
+            ))
+        }
+    }
+
+    fn register(context: &SessionContext, name: &str, values: Vec<i64>) -> Arc<AtomicUsize> {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Int64, false),
+            Field::new(storage::OCCURRENCE_FILE, DataType::Utf8, false),
+            Field::new(storage::OCCURRENCE_ROW, DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(values.clone())),
+                Arc::new(StringArray::from(vec![name; values.len()])),
+                Arc::new(Int64Array::from_iter_values(0..values.len() as i64)),
+            ],
+        )
+        .unwrap();
+        let partition = Arc::new(CountedPartition {
+            batch,
+            executions: executions.clone(),
+        });
+        context
+            .register_table(
+                name,
+                Arc::new(StreamingTable::try_new(schema, vec![partition]).unwrap()),
+            )
+            .unwrap();
+        executions
+    }
+
+    fn spec(cardinality: JoinCardinality) -> JoinTransform {
+        let dataset = Id::new("fixture").unwrap();
+        let version = VersionRef {
+            dataset: dataset.clone(),
+            version: Id::new("initial").unwrap(),
+            manifest: ObjectRef {
+                owner: dataset,
+                path: String::new(),
+                digest: String::new(),
+                bytes: 0,
+            },
+        };
+        JoinTransform {
+            left: version.clone(),
+            right: version,
+            join: JoinDefinition {
+                keys: vec![JoinKey {
+                    left: "key".into(),
+                    right: "key".into(),
+                }],
+                kind: JoinKind::Inner,
+                nulls: NullMatching::Equal,
+                cardinality,
+                fields: vec![],
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn unique_keys_skip_partner_execution_and_duplicates_run_matched_proof() {
+        for (cardinality, right_values, expected_left, expected_right, refuses) in [
+            (JoinCardinality::ManyToMany, vec![1, 2], 0, 0, false),
+            (JoinCardinality::ManyToOne, vec![1, 2], 0, 1, false),
+            (JoinCardinality::OneToOne, vec![1, 2], 1, 1, false),
+            (JoinCardinality::ManyToOne, vec![8, 8], 1, 2, false),
+            (JoinCardinality::ManyToOne, vec![1, 1], 1, 2, true),
+        ] {
+            let budget = Budget::new(Limits {
+                compute_threads: 2,
+                memory_bytes: 512 << 20,
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            })
+            .unwrap();
+            let context = budget.context();
+            let left = register(&context, "join_left", vec![1, 2]);
+            let right = register(&context, "join_right", right_values);
+            let result = join_plan(&context, &spec(cardinality), true).await;
+            if refuses {
+                assert_eq!(result.unwrap_err().code(), "join_cardinality");
+            } else {
+                assert!(result.is_ok());
+            }
+            // The returned main frame remains lazy: these counts cover proof execution only.
+            assert_eq!(
+                left.load(Ordering::SeqCst),
+                expected_left,
+                "{cardinality:?}"
+            );
+            assert_eq!(
+                right.load(Ordering::SeqCst),
+                expected_right,
+                "{cardinality:?}"
+            );
+        }
+    }
 }

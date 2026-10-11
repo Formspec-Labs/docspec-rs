@@ -794,6 +794,7 @@ async fn restore_point_recovers_unfinished_parent_and_protects_active_and_select
 
 #[tokio::test]
 async fn absent_target_refuses_same_type_source_field_id_remapping() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     for phase in ["files", "readback"] {
         let root = tempfile::tempdir().unwrap();
         let (engine, initial, _) = fixture(root.path(), false).await;
@@ -819,12 +820,14 @@ async fn absent_target_refuses_same_type_source_field_id_remapping() {
         source.base = Some(authored.id.clone());
         source.sql = "SELECT CAST(id AS VARCHAR) AS alternate, text FROM input".into();
         let reordered = engine.run(&source).await.unwrap();
-        let original_table = docspec::storage::open_pin(&authored.dataset.groups["source"])
-            .await
-            .unwrap();
-        let new_table = docspec::storage::open_pin(&reordered.dataset.groups["source"])
-            .await
-            .unwrap();
+        let original_table =
+            docspec::storage::open_pin(&authored.dataset.groups["source"], &pin_budget)
+                .await
+                .unwrap();
+        let new_table =
+            docspec::storage::open_pin(&reordered.dataset.groups["source"], &pin_budget)
+                .await
+                .unwrap();
         let original_text = original_table
             .metadata()
             .current_schema()

@@ -182,7 +182,7 @@ impl Engine {
                             .saturating_add(4096),
                     )?,
                 );
-                let table = storage::open_pin(&pin).await?;
+                let table = storage::open_pin(&pin, &self.inner.lifecycle.budget).await?;
                 storage::identity::has_origins(table.metadata().current_schema())?;
                 if storage::identity::public_schema(&table)? != expected_schema
                     || public_rules(table.metadata().current_schema()) != expected_rules

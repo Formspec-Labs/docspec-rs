@@ -100,7 +100,7 @@ async fn check_typed(engine: &Engine, release: &ReleasePin, input: &ReleasePin, 
     }
     assert_eq!(actual, expected);
     let budget = Budget::new(limits()).unwrap();
-    let native = storage::open_pin(&input.dataset.groups["source"])
+    let native = storage::open_pin(&input.dataset.groups["source"], &budget)
         .await
         .unwrap();
     let mut stream = storage::read_occurrences(&native, &budget)

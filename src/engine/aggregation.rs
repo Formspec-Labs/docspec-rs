@@ -77,7 +77,7 @@ pub(super) async fn register_input(
     context.register_table(
         "aggregate_input",
         crate::query::occurrences(
-            storage::open_pin(source).await?,
+            storage::open_pin(source, budget).await?,
             budget.clone(),
             Some(source.rows),
         )?,
@@ -209,7 +209,7 @@ impl Engine {
                 &aggregate.grouping.keys,
             )
             .await?;
-        let native = storage::open_pin(&affected).await?;
+        let native = storage::open_pin(&affected, &self.inner.lifecycle.budget).await?;
         let (discovery_files, discovery_bytes) = {
             let inventory = storage::snapshot_files(&native, budget).await?;
             (

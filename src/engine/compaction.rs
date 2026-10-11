@@ -414,7 +414,7 @@ impl Engine {
     ) -> Result<CompactionResult> {
         let spec = &capture.spec;
         let budget = &self.inner.lifecycle.budget;
-        let native = storage::open_pin(&capture.source).await?;
+        let native = storage::open_pin(&capture.source, &self.inner.lifecycle.budget).await?;
         let scan = capture_scan(&native, budget, spec.group == "source").await?;
         let chosen = if spec.files.is_empty() {
             scan.files()
@@ -578,8 +578,8 @@ fn comparable(batch: RecordBatch) -> Result<RecordBatch> {
 }
 
 async fn verify_equivalence(result: &CompactionResult, budget: &Budget) -> Result<()> {
-    let before = storage::open_pin(&result.source).await?;
-    let after = storage::open_pin(&result.replacement).await?;
+    let before = storage::open_pin(&result.source, budget).await?;
+    let after = storage::open_pin(&result.replacement, budget).await?;
     let source = result.spec.group == "source";
     let input = capture_scan(&before, budget, source).await?;
     let output = capture_scan(&after, budget, source).await?;

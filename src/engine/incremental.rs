@@ -61,7 +61,7 @@ impl Engine {
         // Resume keeps its admitted layout; older admissions use the canonical
         // source instead of resolving a newly selected representation.
         let captured = captured_source.unwrap_or(canonical);
-        let native = write::open_captured_source(canonical, captured).await?;
+        let native = write::open_captured_source(canonical, captured, budget).await?;
         let previous = refresh::load_inputs(&related.coverage, budget).await?;
         let current = refresh::load_inputs(coverage, budget).await?;
         if previous.releases.iter().all(|(dataset, old)| {
@@ -184,7 +184,7 @@ impl Engine {
                 )
                 .await?;
             discovery.files_scanned += scanned;
-            let native = storage::open_pin(&pin).await?;
+            let native = storage::open_pin(&pin, &self.inner.lifecycle.budget).await?;
             let files = storage::snapshot_files(&native, budget).await?;
             discovery.data_files_written += files.data.len() as u64;
             discovery.bytes_written += files
@@ -200,7 +200,7 @@ impl Engine {
                 context.register_table(
                     format!("{prefix}_{index}"),
                     crate::query::occurrences(
-                        storage::open_pin(pin).await?,
+                        storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
                         budget.clone(),
                         Some(pin.rows),
                     )?,
@@ -221,7 +221,7 @@ impl Engine {
         context.register_table(
             "affected",
             crate::query::table(
-                storage::open_pin(&keys.table).await?,
+                storage::open_pin(&keys.table, &self.inner.lifecycle.budget).await?,
                 budget.clone(),
                 Some(keys.table.rows),
             )?,
@@ -343,7 +343,7 @@ impl Engine {
         let budget = &self.inner.lifecycle.budget;
         let old = source(versions.0)?;
         let new = source(versions.1)?;
-        let old_native = storage::open_pin(old).await?;
+        let old_native = storage::open_pin(old, &self.inner.lifecycle.budget).await?;
         let schema = storage::occurrence_schema(&old_native)?;
         let indices = keys
             .iter()
@@ -393,7 +393,7 @@ impl Engine {
         {
             return Ok(discovered);
         }
-        let new_native = storage::open_pin(new).await?;
+        let new_native = storage::open_pin(new, &self.inner.lifecycle.budget).await?;
         let old_scan = storage::OccurrenceScan::open(&old_native, budget).await?;
         let new_scan = storage::OccurrenceScan::open(&new_native, budget).await?;
         let new_indices = keys
@@ -521,7 +521,7 @@ impl Engine {
             context.register_table(
                 alias,
                 crate::query::table(
-                    storage::open_pin(pin).await?,
+                    storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
                     self.inner.lifecycle.budget.clone(),
                     Some(pin.rows),
                 )?,
@@ -607,8 +607,8 @@ pub(super) async fn qualify(
     {
         let old = refresh::read_release(old, budget, &mut bytes, &memory).await?;
         let new = refresh::read_release(new, budget, &mut bytes, &memory).await?;
-        let old = storage::open_pin(source(&old)?).await?;
-        let new = storage::open_pin(source(&new)?).await?;
+        let old = storage::open_pin(source(&old)?, budget).await?;
+        let new = storage::open_pin(source(&new)?, budget).await?;
         if storage::identity::public_schema(&old)? != storage::identity::public_schema(&new)? {
             return Err(full_refresh());
         }

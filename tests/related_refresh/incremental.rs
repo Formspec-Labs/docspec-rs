@@ -107,7 +107,7 @@ fn row(a: Option<i64>, b: Option<i64>, value: &str) -> Row {
 }
 pub(super) async fn files(pin: &TablePin) -> BTreeSet<String> {
     let budget = Budget::new(limits()).unwrap();
-    let native = storage::open_pin(pin).await.unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()

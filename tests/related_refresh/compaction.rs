@@ -12,8 +12,9 @@ async fn unaffected_occurrences(
     summary: bool,
     affected_label: &str,
 ) -> Vec<Location> {
-    let native = storage::open_pin(pin).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
+
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()
@@ -41,6 +42,7 @@ async fn unaffected_occurrences(
 
 #[tokio::test]
 async fn edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     use docspec::{engine::verify_release_at, model::VerificationLevel};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -95,7 +97,7 @@ async fn edits_inside_compacted_related_files_preserve_untouched_occurrences_and
                 .await;
         assert_eq!(retained_after, retained);
         assert!(
-            !physical_files(&refreshed.dataset.groups["source"])
+            !physical_files(&refreshed.dataset.groups["source"], &pin_budget)
                 .await
                 .contains(&compacted.output_files[0])
         );
@@ -117,8 +119,8 @@ fn row(value: &str) -> Row {
     (Some(50), Some(50), Some(value.into()))
 }
 
-async fn physical_files(pin: &TablePin) -> BTreeSet<String> {
-    let native = storage::open_pin(pin).await.unwrap();
+async fn physical_files(pin: &TablePin, pin_budget: &docspec::budget::Budget) -> BTreeSet<String> {
+    let native = storage::open_pin(pin, pin_budget).await.unwrap();
     native
         .scan()
         .build()
@@ -187,6 +189,7 @@ async fn prepared(
     root: &Path,
     summary: bool,
 ) -> (Engine, ReleasePin, ReleasePin, ReleasePin, CompactionResult) {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let (engine, mut left, mut right) = fixture(root).await;
     let spec = if summary {
         aggregation::summary(&left, false)
@@ -221,7 +224,7 @@ async fn prepared(
             .await
             .unwrap();
     }
-    let original = physical_files(&initial.dataset.groups["source"]).await;
+    let original = physical_files(&initial.dataset.groups["source"], &pin_budget).await;
     assert!(
         original.len() > 1,
         "partial compaction needs multiple original files"
@@ -232,7 +235,7 @@ async fn prepared(
         .refresh(&next(&initial, &left, &right, "append"))
         .await
         .unwrap();
-    let all = physical_files(&base.dataset.groups["source"]).await;
+    let all = physical_files(&base.dataset.groups["source"], &pin_budget).await;
     assert!(original.is_subset(&all));
     assert!(
         all.len() > original.len(),
@@ -257,6 +260,7 @@ async fn prepared(
 
 #[tokio::test]
 async fn partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     for summary in [false, true] {
         let root = TempDir::new().unwrap();
         let (engine, mut left, mut right, mut base, compacted) =
@@ -300,7 +304,7 @@ async fn partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_cove
                 .await
                 .unwrap();
             check_related(&engine, &base, &left, &right).await;
-            let files = physical_files(&base.dataset.groups["source"]).await;
+            let files = physical_files(&base.dataset.groups["source"], &pin_budget).await;
             for (path, digest, modified) in &retained {
                 assert!(files.contains(path), "reuse the unaffected compacted file");
                 assert_eq!(storage::digest(Path::new(path)).unwrap(), *digest);
@@ -335,6 +339,7 @@ async fn partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_cove
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     for summary in [false, true] {
         for stop in ["admission", "processing"] {
             let root = TempDir::new().unwrap();
@@ -412,7 +417,7 @@ async fn admitted_related_refresh_resumes_exact_output_after_later_compaction_an
                     .tables
                     .contains(&NativeSnapshotRef::from(&captured.replacement))
             );
-            let files = physical_files(&refreshed.dataset.groups["source"]).await;
+            let files = physical_files(&refreshed.dataset.groups["source"], &pin_budget).await;
             assert!(
                 captured
                     .output_files

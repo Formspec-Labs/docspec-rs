@@ -148,7 +148,7 @@ impl Checks {
                     .map(|evidence| &evidence.table),
             )
         {
-            let table = storage::open_pin(pin).await?;
+            let table = storage::open_pin(pin, budget).await?;
             let schemas = Arc::new(
                 table
                     .metadata()

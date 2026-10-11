@@ -79,7 +79,7 @@ impl Engine {
         let lock = self.lock(request.dataset()).await;
         let view = lifecycle.open(request.dataset()).await?;
         self.check_not_abandoned(&view, request.operation()).await?;
-        let native = storage::open_pin(source).await?;
+        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         self.check_continuous_source_schema(
             &view,
             request.operation(),

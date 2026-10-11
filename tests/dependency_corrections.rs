@@ -72,8 +72,8 @@ fn language_edit(base: &ReleasePin, operation: &str, language: &str) -> SchemaSp
     }
 }
 
-async fn language_id(release: &ReleasePin) -> i32 {
-    storage::open_pin(&release.dataset.groups["source"])
+async fn language_id(release: &ReleasePin, pin_budget: &docspec::budget::Budget) -> i32 {
+    storage::open_pin(&release.dataset.groups["source"], pin_budget)
         .await
         .unwrap()
         .metadata()
@@ -119,6 +119,7 @@ async fn assert_language(engine: &Engine, release: &ReleasePin, expected: &str) 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn correction_committed_at_actual_file_reuse_blocks_changed_language_context() {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     for apply_correction in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let (engine, base, _) = fixture(root.path(), false).await;
@@ -126,7 +127,7 @@ async fn correction_committed_at_actual_file_reuse_blocks_changed_language_conte
             .evolve_schema(&language_edit(&base, "english-schema", "en"))
             .await
             .unwrap();
-        let old_language = language_id(&english).await;
+        let old_language = language_id(&english, &pin_budget).await;
         assert_language(&engine, &english, "en").await;
         let original = classifier(&english, "english-files");
         assert_eq!(
@@ -145,7 +146,7 @@ async fn correction_committed_at_actual_file_reuse_blocks_changed_language_conte
             .evolve_schema(&language_edit(&english, "french-schema", "fr"))
             .await
             .unwrap();
-        assert_ne!(language_id(&french).await, old_language);
+        assert_ne!(language_id(&french, &pin_budget).await, old_language);
         assert_eq!(payloads(&base, "source"), payloads(&english, "source"));
         assert_eq!(payloads(&english, "source"), payloads(&french, "source"));
         assert_language(&engine, &french, "fr").await;
@@ -231,13 +232,14 @@ async fn correction_committed_at_actual_file_reuse_blocks_changed_language_conte
 
 #[tokio::test]
 async fn inherited_sibling_selection_adds_cumulative_proof_without_rewriting_values() {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, base, _) = fixture(root.path(), false).await;
     let source = engine
         .evolve_schema(&language_edit(&base, "language-schema", "en"))
         .await
         .unwrap();
-    let language = language_id(&source).await;
+    let language = language_id(&source, &pin_budget).await;
     let original_request = classifier(&source, "classified");
     let original = engine.backfill(&original_request).await.unwrap();
     let original_group = original.dataset.computed["classification"].clone();
@@ -295,6 +297,7 @@ async fn inherited_sibling_selection_adds_cumulative_proof_without_rewriting_val
 
 #[tokio::test]
 async fn correction_after_readback_requires_new_operation_and_reuses_originals() {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, base, _) = fixture(root.path(), false).await;
     let source = engine
@@ -320,7 +323,7 @@ async fn correction_after_readback_requires_new_operation_and_reuses_originals()
         .correct_dependencies(&correction(
             &pending,
             "language-omission",
-            &[language_id(&source).await],
+            &[language_id(&source, &pin_budget).await],
         ))
         .await
         .unwrap();
@@ -367,6 +370,7 @@ async fn correction_after_readback_requires_new_operation_and_reuses_originals()
 
 #[tokio::test]
 async fn missing_original_field_is_unknown_and_new_deficient_execution_is_mismatch() {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, base, _) = fixture(root.path(), false).await;
     let historical = classifier(&base, "files-without-language");
@@ -382,7 +386,7 @@ async fn missing_original_field_is_unknown_and_new_deficient_execution_is_mismat
         .evolve_schema(&language_edit(&base, "language-schema", "en"))
         .await
         .unwrap();
-    let language = language_id(&source).await;
+    let language = language_id(&source, &pin_budget).await;
     engine
         .correct_dependencies(&correction(&historical, "language-omission", &[language]))
         .await

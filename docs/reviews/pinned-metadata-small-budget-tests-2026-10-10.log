@@ -1,0 +1,48 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.45s
+     Running unittests src/lib.rs (target/debug/deps/docspec-c8ec5067ef8717ed)
+
+running 15 tests
+test query::sequence::tests::next_child_waits_for_eof_and_only_one_child_is_active ... ok
+test query::sequence::tests::early_drop_does_not_open_later_child_and_releases_stream_admission ... ok
+test query::sequence::tests::admission_survives_eof_until_provider_and_stream_owners_drop ... ok
+test query::sequence::tests::later_child_error_propagates ... ok
+test query::tests::native_query_stream_keeps_admission_until_drop_and_enforces_batch_rows ... ok
+test query::selection_tests::projected_mapping_admission_is_owned_by_plan_and_stream ... ok
+test query::selection_tests::empty_projection_admits_cloned_schema_metadata_before_allocation ... ok
+test query::tests::pinned_native_position_column_is_unavailable ... ok
+test query::selection_tests::direct_table_scan_preserves_repeats_empty_rows_and_statistics ... ok
+test query::tests::query_reader_refuses_oversized_native_batches_and_releases_capacity ... ok
+test query::tests::native_statistics_preserve_filtered_offset_counts ... ok
+test query::selection_tests::captured_occurrence_selection_composes_synthetic_row_indices ... ok
+test query::selection_tests::captured_provider_composes_indices_and_keeps_sql_behavior ... ok
+test query::tests::query_provider_preserves_pins_filters_duplicates_and_empty_schema ... ok
+test query::tests::native_statistics_choose_the_smaller_build_in_both_directions ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 233 filtered out; finished in 1.84s
+
+    Finished `test` profile [unoptimized] target(s) in 0.21s
+     Running unittests src/lib.rs (target/debug/deps/docspec-c8ec5067ef8717ed)
+
+running 6 tests
+test budget::tests::unrepresentable_worker_limit_refuses_without_panicking ... ok
+test budget::tests::native_virtual_run_end_limit_refuses_oversized_batches ... ok
+test budget::tests::releasing_workspace_ownership_unlocks_inherited_descriptors ... ok
+test budget::tests::canceled_blocking_work_keeps_admission_without_stalling_the_executor ... ok
+test budget::tests::pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen ... ok
+test budget::tests::contexts_share_native_memory_and_spill_accounting ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 242 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized] target(s) in 0.19s
+     Running unittests src/lib.rs (target/debug/deps/docspec-c8ec5067ef8717ed)
+
+running 5 tests
+test storage::pinned::tests::rejects_changed_bytes_sizes_and_snapshot_schema_bindings ... ok
+test storage::pinned::tests::local_entry_point_uses_the_same_metadata_reader ... ok
+test storage::pinned::tests::stored_and_decoded_caps_apply_before_returning_a_table ... ok
+test storage::pinned::tests::injected_reader_preserves_plain_and_gzip_metadata_location_and_io ... ok
+test storage::pinned::tests::gzip_requires_complete_trailer_one_member_and_bounded_json ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 243 filtered out; finished in 0.00s
+

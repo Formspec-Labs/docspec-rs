@@ -28,6 +28,7 @@ fn budget() -> Budget {
 }
 
 async fn fixture() -> (TempDir, Engine, Table) {
+    let pin_budget = budget();
     let root = TempDir::new().unwrap();
     let input = root.path().join("input.parquet");
     let schema = Arc::new(Schema::new(vec![
@@ -69,7 +70,7 @@ async fn fixture() -> (TempDir, Engine, Table) {
         definition: "v1".into(),
     };
     let release = engine.run(&spec).await.unwrap();
-    let native = storage::open_pin(&release.dataset.groups["source"])
+    let native = storage::open_pin(&release.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     (root, engine, native)

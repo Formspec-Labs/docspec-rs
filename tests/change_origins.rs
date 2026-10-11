@@ -79,6 +79,7 @@ fn join(
 
 #[tokio::test]
 async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, left, rows) = fixture(root.path(), false).await;
     let input = scalar::input(&root.path().join("partners.parquet"), &rows);
@@ -109,7 +110,7 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
             .any(|row| row.0 == affected.0 && row.2 != Some(2)),
         "fixture must rewrite a file containing surviving joined rows"
     );
-    let native = storage::open_pin(source).await.unwrap();
+    let native = storage::open_pin(source, &pin_budget).await.unwrap();
     assert!(
         native
             .metadata()
@@ -143,7 +144,9 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
         .source
         .unwrap();
     assert_eq!((changes.removed.rows, changes.added.rows), (0, 0));
-    let empty = storage::open_pin(&changes.removed).await.unwrap();
+    let empty = storage::open_pin(&changes.removed, &pin_budget)
+        .await
+        .unwrap();
     assert_eq!(
         empty.metadata().current_schema(),
         native.metadata().current_schema()
@@ -241,8 +244,9 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
 }
 
 async fn occurrences(pin: &TablePin) -> Vec<Occurrence> {
-    let native = storage::open_pin(pin).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
+    let native = storage::open_pin(pin, &budget).await.unwrap();
+
     let mut stream = storage::read_occurrences(&native, &budget)
         .await
         .unwrap()

@@ -20,10 +20,11 @@ use parquet::arrow::ArrowWriter;
 use std::{collections::BTreeMap, fs::File, sync::Arc};
 
 async fn values(release: &ReleasePin, group: &str) -> BTreeMap<(String, i64), Vec<Option<i64>>> {
-    let native = storage::open_pin(&release.dataset.groups[group])
+    let budget = Budget::new(scalar::limits()).unwrap();
+    let native = storage::open_pin(&release.dataset.groups[group], &budget)
         .await
         .unwrap();
-    let budget = Budget::new(scalar::limits()).unwrap();
+
     let stream = storage::read_batches(&native, &budget).await.unwrap();
     futures::pin_mut!(stream);
     let mut result = BTreeMap::new();
@@ -104,10 +105,11 @@ async fn wide_unused_values_do_not_consume_the_scalar_batch_allowance() {
         ..scalar::limits()
     };
     // Establish that the full native read cannot fit this decoded-batch bound.
-    let native = storage::open_pin(&base.dataset.groups["source"])
+    let full_budget = Budget::new(scalar::limits()).unwrap();
+    let native = storage::open_pin(&base.dataset.groups["source"], &full_budget)
         .await
         .unwrap();
-    let full_budget = Budget::new(scalar::limits()).unwrap();
+
     let full = storage::read_occurrences(&native, &full_budget)
         .await
         .unwrap();
@@ -184,6 +186,7 @@ async fn all_absent_optional_and_default_dependencies_preserve_full_batch_admiss
 }
 
 async fn fallback_admission(add_dependencies: bool) {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, mut base) = wide_fixture(root.path()).await;
     if add_dependencies {
@@ -225,7 +228,7 @@ async fn fallback_admission(add_dependencies: bool) {
             .await
             .unwrap();
     }
-    let native = storage::open_pin(&base.dataset.groups["source"])
+    let native = storage::open_pin(&base.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     let snapshot = native.metadata().current_snapshot().unwrap();

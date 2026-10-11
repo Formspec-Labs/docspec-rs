@@ -69,8 +69,12 @@ fn edit(base: &ReleasePin, operation: &str) -> SchemaSpec {
     }
 }
 
-async fn unchanged_edit(base: &ReleasePin, operation: &str) -> SchemaSpec {
-    let native = storage::open_pin(&base.dataset.groups["source"])
+async fn unchanged_edit(
+    base: &ReleasePin,
+    operation: &str,
+    pin_budget: &docspec::budget::Budget,
+) -> SchemaSpec {
+    let native = storage::open_pin(&base.dataset.groups["source"], pin_budget)
         .await
         .unwrap();
     let mut request = edit(base, operation);
@@ -293,13 +297,14 @@ fn replacements(path: &Path, values: &[Values]) -> InputSpec {
 
 #[tokio::test]
 async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_history() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, base, original) = fixture(root.path(), false).await;
     let payloads_before = payloads(&base);
     let request = edit(&base, "added");
     let added = engine.evolve_schema(&request).await.unwrap();
     assert_eq!(payloads(&added), payloads_before);
-    let native = storage::open_pin(&added.dataset.groups["source"])
+    let native = storage::open_pin(&added.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(
@@ -336,7 +341,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
     );
     group.definition = added.dataset.definition.clone();
     let enriched = engine.backfill(&group).await.unwrap();
-    let mut policy = unchanged_edit(&enriched, "future-nine").await;
+    let mut policy = unchanged_edit(&enriched, "future-nine", &pin_budget).await;
     policy.write_defaults.insert(3, 9.into());
     policy.write_defaults.insert(5, "future".into());
     policy.write_defaults.insert(7, true.into());
@@ -494,12 +499,12 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
         }]
     );
     assert_eq!(
-        storage::open_pin(&rebuilt.dataset.groups["source"])
+        storage::open_pin(&rebuilt.dataset.groups["source"], &pin_budget)
             .await
             .unwrap()
             .metadata()
             .current_schema(),
-        storage::open_pin(&updated.dataset.groups["source"])
+        storage::open_pin(&updated.dataset.groups["source"], &pin_budget)
             .await
             .unwrap()
             .metadata()
@@ -513,7 +518,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
         engine.run(&unfenced).await.unwrap_err().code(),
         "dependent_groups"
     );
-    let mut cleared = unchanged_edit(&rebuilt, "cleared").await;
+    let mut cleared = unchanged_edit(&rebuilt, "cleared", &pin_budget).await;
     cleared.write_defaults = [3, 5, 7, 9].map(|id| (id, serde_json::Value::Null)).into();
     let cleared = engine.evolve_schema(&cleared).await.unwrap();
     assert_eq!(
@@ -562,6 +567,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
 
 #[tokio::test]
 async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_rules() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = tempfile::tempdir().unwrap();
     let (engine, base, _) = fixture(root.path(), true).await;
     let before = engine.inspect(&base.dataset.dataset).await.unwrap();
@@ -592,7 +598,7 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
     assert!(rows(&engine, &added).await.is_empty());
     let before = engine.inspect(&base.dataset.dataset).await.unwrap();
     for (operation, name) in [("marker-rename", "exposed"), ("marker-reorder", "flag")] {
-        let mut marker = unchanged_edit(&added, operation).await;
+        let mut marker = unchanged_edit(&added, operation, &pin_budget).await;
         marker.fields.retain(|f| f.id != 3);
         marker.fields.insert(
             0,
@@ -607,10 +613,10 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
         );
         assert_eq!(engine.inspect(&base.dataset.dataset).await.unwrap(), before);
     }
-    let mut renamed = unchanged_edit(&added, "renamed").await;
+    let mut renamed = unchanged_edit(&added, "renamed", &pin_budget).await;
     renamed.fields.iter_mut().find(|f| f.id == 3).unwrap().name = "score_new".into();
     let renamed = engine.evolve_schema(&renamed).await.unwrap();
-    let native = storage::open_pin(&renamed.dataset.groups["source"])
+    let native = storage::open_pin(&renamed.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(
@@ -629,7 +635,7 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
             .field_by_name("__docspec_supplied_3")
             .is_some()
     );
-    let mut dropped = unchanged_edit(&renamed, "dropped").await;
+    let mut dropped = unchanged_edit(&renamed, "dropped", &pin_budget).await;
     dropped.fields.retain(|f| f.id <= 2);
     let dropped = engine.evolve_schema(&dropped).await.unwrap();
     let incoming = input(
@@ -653,10 +659,10 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
     request.operation = id("rebuilt");
     request.base = Some(dropped.id.clone());
     let rebuilt = engine.run(&request).await.unwrap();
-    let native = storage::open_pin(&rebuilt.dataset.groups["source"])
+    let native = storage::open_pin(&rebuilt.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
-    let prior = storage::open_pin(&dropped.dataset.groups["source"])
+    let prior = storage::open_pin(&dropped.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(native.metadata().last_column_id(), 10);
@@ -726,14 +732,14 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
         verify_release(&forged, limits()).await.unwrap_err().code(),
         "invalid_schema"
     );
-    let mut readd = unchanged_edit(&reused, "readded").await;
+    let mut readd = unchanged_edit(&reused, "readded", &pin_budget).await;
     readd.additions = vec![ColumnAddition {
         name: "score_new".into(),
         data_type: ColumnType::Long,
         default: 5.into(),
     }];
     let readded = engine.evolve_schema(&readd).await.unwrap();
-    let native = storage::open_pin(&readded.dataset.groups["source"])
+    let native = storage::open_pin(&readded.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(

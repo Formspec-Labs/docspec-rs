@@ -1463,6 +1463,7 @@ impl Engine {
                         previous,
                         &base.dataset.groups["source"],
                         &table,
+                        &lifecycle.budget,
                     )
                     .await?;
                     let prepared = Box::pin(self.prepare_group(
@@ -2310,7 +2311,7 @@ pub async fn verify_table(pin: &TablePin, budget: &Budget) -> Result<()> {
     #[cfg(feature = "test-util")]
     eprintln!("DOCSPEC_TEST_DEEP_TABLE");
     storage::verify_objects(pin.objects.clone(), budget).await?;
-    let table = storage::open_pin(pin).await?;
+    let table = storage::open_pin(pin, budget).await?;
     storage::check_inventory(pin, &table, budget).await?;
     let mut rows = 0;
     if pin.snapshot.is_some() {

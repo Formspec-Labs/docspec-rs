@@ -442,7 +442,7 @@ impl Engine {
             .groups
             .get("source")
             .ok_or_else(invalid_group)?;
-        let table = storage::open_pin(source).await?;
+        let table = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let expressions = Expressions::compile(
             &self.context(),
             table.metadata().current_schema(),

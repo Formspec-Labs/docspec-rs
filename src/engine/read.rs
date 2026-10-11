@@ -149,7 +149,7 @@ pub async fn read_evidence(
 }
 
 pub(super) async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
-    let table = storage::open_pin(pin).await?;
+    let table = storage::open_pin(pin, budget).await?;
     let schema = storage::identity::public_schema(&table)?;
     let stream = storage::read_batches(&table, budget)
         .await?

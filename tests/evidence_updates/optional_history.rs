@@ -257,6 +257,7 @@ async fn terminal_recovery_retirement_releases_receipt_history_without_losing_re
 
 #[tokio::test]
 async fn equal_null_receipts_cannot_hide_a_changed_native_payload_type() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = TempDir::new().unwrap();
     let (engine, initial) = fixture(root.path()).await;
     let positions = locations(&engine, &initial).await;
@@ -288,7 +289,7 @@ async fn equal_null_receipts_cannot_hide_a_changed_native_payload_type() {
         .unwrap();
     verify_release(&typed, limits()).await.unwrap();
     let table = &typed.dataset.groups["source"];
-    let native = storage::open_pin(table).await.unwrap();
+    let native = storage::open_pin(table, &pin_budget).await.unwrap();
     let schema =
         iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema()).unwrap();
     assert_eq!(

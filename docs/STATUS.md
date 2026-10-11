@@ -19,6 +19,53 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Avoid redundant join and metadata reads
+
+Cardinality checks now first prove the constrained input's matchable keys unique
+with maintained DataFusion grouping. When unique, they skip the partner's payload
+scan. Duplicate keys retain the matched-key proof, preserving legal unmatched
+duplicates, composite/null keys and both roles of a self-join. The
+[focused checks](reviews/duplicate-first-cardinality-tests-2026-10-10.log) pass
+exact value/evidence cases and observe zero partner executions with one constrained
+execution for the unique many-to-one check. Duplicate branches execute the partner
+once and constrained input twice. The
+[independent review](reviews/duplicate-first-cardinality-review-2026-10-10.md)
+approves; these counts are not a representative throughput or memory result.
+
+Pinned metadata now uses one bounded FileIO range read for both its digest and
+native interpretation. Local and injected storage share the implementation;
+`max_metadata_bytes` caps stored bytes and decoded JSON separately. Maintained
+`flate2` handles gzip without a second decoded-byte buffer. Size checks surround
+the read; snapshot/schema identity remains exact. The API now accepts the
+operation's shared budget. Opening work retains temporary admission through
+worker cancellation, while returned tables remain subject to their callers'
+lifetime accounting. This is neither an atomic object-version fence nor a complete
+retained-table memory bound.
+
+The [focused metadata checks](reviews/pinned-metadata-tests-2026-10-10.log) pass
+plain/gzip decoding, configured limits, corrupted metadata and local/injected I/O.
+The [first gate](reviews/join-metadata-full-check-2026-10-10.log) caught an unused
+fixed copy-buffer allowance rejecting small reader budgets. Metadata workers now
+use their own byte reservations through the same shared worker limiter; copy/hash
+workers retain their existing allowance. The
+[small-budget checks](reviews/pinned-metadata-small-budget-tests-2026-10-10.log)
+pass after that correction. The
+[review](reviews/pinned-metadata-review-2026-10-10.md) records the scope and
+remaining resource limitations.
+
+The [final repository gate](reviews/join-metadata-full-check-2026-10-10-2.log)
+passes formatting, strict all-target/all-feature Clippy, library/integration,
+restore, worker-initialization and documentation checks. It includes the added
+small-budget cancellation case: both worker capacity and owned bytes remain
+reserved after caller abort and recover after actual worker exit. The existing
+external-data physical-plan probe remains explicitly ignored. The original failed
+gate and focused repair checks remain retained.
+
+This removes the metadata reread and supplies injected native I/O for the next
+remote slice. Remote admission, object ownership, bulk readers, publication and
+maintenance still require integration and provider qualification. No full-data
+benchmark or real-provider operation was repeated for this checkpoint.
+
 ## Live R2/Basin catalog foundation
 
 The optional `remote` feature uses maintained Iceberg REST and OpenDAL S3 adapters.
@@ -568,11 +615,13 @@ concurrency, row-group layout and the known selected-page memory limit are uncha
 
 The [package audit](dependency-efficiency-audit-2026-10-10.md) covers direct Rust
 and Python dependencies, enabled Rust features and material transitive APIs.
-The latest [utilization followthrough](reviews/dependency-utilization-followthrough-2026-10-10.md)
-confirms coverage of every direct Rust declaration and Python import, reusing
-feature evidence from the unchanged manifests. Scalar dependency selection is
-implemented above. Remaining priorities are duplicate-first cardinality proof
-and controlled native row-group/spill-compression experiments. Native Avro writer
+The [utilization followthrough](reviews/dependency-utilization-followthrough-2026-10-10.md)
+records the earlier direct-package coverage; the
+[current delta](reviews/package-audit-current-delta-2026-10-10.md) adds the optional
+REST/S3 stack and direct use of the already resolved gzip decoder. Scalar
+dependency selection, duplicate-first cardinality proof and single-read metadata
+opening are implemented above. Remaining priorities are actual scan/transfer
+measurements and controlled native row-group/spill-compression experiments. Native Avro writer
 codec configuration is an upstream opportunity only if metadata growth proves
 material. No replacement dependency or measured speedup is established. The audit
 covers material transitive integrations; it does not inspect every transitive
@@ -583,9 +632,9 @@ requested columns into Iceberg before decoding; the
 [reviewed design](reviews/native-column-selection-design-review.md) preserves
 stable field IDs, defaults, output order and occurrence identities.
 
-Further candidates reuse immutable metadata and captured inventories and avoid a
-large-input cardinality scan when the constrained side has unique keys. Native row-group layout needs
-separate reader-memory qualification. These are researched opportunities, not
+Captured inventories and pinned metadata now avoid the identified repeated work.
+Native row-group layout needs separate reader-memory qualification. The remaining
+experiments are researched opportunities, not
 implemented changes or measured speedups. Each has a bounded verification step;
 the audit does not justify additional concurrency, caches or blanket upgrades.
 The [independent follow-up](reviews/dependency-audit-followup-2026-10-10.md)

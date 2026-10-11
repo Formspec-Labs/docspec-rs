@@ -131,6 +131,23 @@ impl Budget {
         &self,
         operation: impl FnOnce() -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        // Hash/copy routines use one MiB buffers. Keep this reservation in the
+        // worker so cancellation cannot release it while I/O is still active.
+        let memory = self.reserve(1 << 20)?;
+        self.blocking_admitted(move || {
+            let _memory = memory;
+            operation()
+        })
+        .await
+    }
+
+    /// Runs blocking work whose memory admission is already owned by its closure.
+    ///
+    /// Unlike copy/hash workers, bounded metadata decoding has no fixed I/O buffer.
+    pub(crate) async fn blocking_admitted<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
         let permit = self
             .blocking_jobs
             .clone()
@@ -141,12 +158,8 @@ impl Budget {
                     "blocking I/O capacity exhausted; retry retained work",
                 )
             })?;
-        // Hash/copy routines use one MiB buffers. The worker owns both permits so
-        // canceling its caller cannot admit another job while I/O is still active.
-        let memory = self.reserve(1 << 20)?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let _memory = memory;
             operation()
         })
         .await?
@@ -375,5 +388,46 @@ mod tests {
         let permit = budget.blocking_jobs.clone().acquire_owned().await.unwrap();
         drop(permit);
         budget.blocking(|| Ok(())).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn canceled_small_worker_keeps_its_owned_bytes_and_worker_slot() {
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 128 << 10,
+            ..Limits::default()
+        })
+        .unwrap();
+        let memory = budget.reserve(budget.limits.memory_bytes / 2).unwrap();
+        let worker_budget = budget.clone();
+        let (started, received) = tokio::sync::oneshot::channel();
+        let (release, stalled) = std::sync::mpsc::channel();
+        let worker = tokio::spawn(async move {
+            worker_budget
+                .blocking_admitted(move || {
+                    let _memory = memory;
+                    started.send(()).unwrap();
+                    stalled.recv().unwrap();
+                    Ok(())
+                })
+                .await
+        });
+        received.await.unwrap();
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
+        assert_eq!(
+            budget
+                .blocking_admitted(|| Ok(()))
+                .await
+                .unwrap_err()
+                .code(),
+            "capacity"
+        );
+        release.send(()).unwrap();
+        let permit = budget.blocking_jobs.clone().acquire_owned().await.unwrap();
+        drop(permit);
+        let _memory = budget.reserve(budget.limits.memory_bytes / 2).unwrap();
+        budget.blocking_admitted(|| Ok(())).await.unwrap();
     }
 }

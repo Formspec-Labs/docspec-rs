@@ -278,6 +278,7 @@ fn cli_validates_once_then_reads_and_resumes_without_inspection() {
 
 #[tokio::test]
 async fn exact_readback_idempotency_and_independent_catalog_free_read() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let directory = TempDir::new().unwrap();
     let spec = fixture(directory.path());
     let root = directory.path().join("workspace");
@@ -299,7 +300,7 @@ async fn exact_readback_idempotency_and_independent_catalog_free_read() {
     )
     .unwrap();
     verify_release(&release, limits()).await.unwrap();
-    let table = storage::open_pin(&release.dataset.groups["source"])
+    let table = storage::open_pin(&release.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     let batches: Vec<_> = table
@@ -443,9 +444,6 @@ async fn native_readers_hold_shared_admission_until_stream_drop() {
         .await
         .unwrap();
     let release = engine.run(&spec).await.unwrap();
-    let table = storage::open_pin(&release.dataset.groups["source"])
-        .await
-        .unwrap();
     let budget = Budget::new(Limits {
         memory_bytes: 8 << 20,
         max_batch_bytes: 2 << 20,
@@ -453,6 +451,10 @@ async fn native_readers_hold_shared_admission_until_stream_drop() {
         ..limits()
     })
     .unwrap();
+    let table = storage::open_pin(&release.dataset.groups["source"], &budget)
+        .await
+        .unwrap();
+
     let first = storage::read_batches(&table, &budget).await.unwrap();
     assert_eq!(
         storage::read_batches(&table, &budget)
@@ -669,6 +671,7 @@ async fn simultaneous_retries_reconcile_to_one_immutable_release() {
 
 #[tokio::test]
 async fn empty_output_keeps_schema_and_readable_history() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let directory = TempDir::new().unwrap();
     let mut spec = fixture(directory.path());
     let engine = Engine::open(directory.path().join("workspace"), limits())
@@ -681,7 +684,7 @@ async fn empty_output_keeps_schema_and_readable_history() {
     assert_eq!(empty.dataset.groups["source"].rows, 0);
     verify_release(&empty, limits()).await.unwrap();
     verify_release(&old, limits()).await.unwrap();
-    let table = storage::open_pin(&empty.dataset.groups["source"])
+    let table = storage::open_pin(&empty.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert_eq!(

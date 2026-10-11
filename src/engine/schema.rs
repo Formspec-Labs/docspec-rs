@@ -20,7 +20,7 @@ impl Engine {
             .as_ref()
             .and_then(|s| s.groups.get("source"))
             .ok_or_else(invalid)?;
-        let native = storage::open_pin(source).await?;
+        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         if !storage::defaults::evolved(native.metadata()) {
             return Ok(None);
         }
@@ -73,7 +73,11 @@ impl Engine {
                     .selected
                     .as_ref()
                     .and_then(|s| s.groups.get("source"))
-                && storage::defaults::evolved(storage::open_pin(source).await?.metadata())
+                && storage::defaults::evolved(
+                    storage::open_pin(source, &self.inner.lifecycle.budget)
+                        .await?
+                        .metadata(),
+                )
             {
                 return Err(Error::refusal(
                     "schema_base_required",
@@ -88,7 +92,7 @@ impl Engine {
                 .await?;
         }
         let source = base.groups.get("source").ok_or_else(invalid)?;
-        let native = storage::open_pin(source).await?;
+        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let proposed = fields(native.metadata(), spec)?;
         storage::defaults::check_expansion(&proposed, &self.inner.lifecycle.budget.limits, false)?;
         storage::defaults::check_expansion(&proposed, &self.inner.lifecycle.budget.limits, true)?;
@@ -168,7 +172,7 @@ impl Engine {
             return Err(invalid());
         }
         let source = base.dataset.groups.get("source").ok_or_else(invalid)?;
-        let native = storage::open_pin(source).await?;
+        let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let previous = native.metadata_ref();
         let spec_owned = spec.clone();
         let directory = directory.to_owned();
@@ -234,11 +238,11 @@ pub(super) async fn verify_rebuild(
     after: &TablePin,
     budget: &Budget,
 ) -> Result<()> {
-    let before = storage::open_pin(before).await?;
+    let before = storage::open_pin(before, budget).await?;
     if !storage::defaults::evolved(before.metadata()) {
         return Ok(());
     }
-    let after = storage::open_pin(after).await?;
+    let after = storage::open_pin(after, budget).await?;
     if schema_identity(before.metadata(), budget)? != schema_identity(after.metadata(), budget)? {
         return Err(invalid());
     }
@@ -584,8 +588,8 @@ pub(super) async fn verify_transition(
     {
         return Err(invalid());
     }
-    let first = storage::open_pin(first).await?.metadata_ref();
-    let second = storage::open_pin(second).await?.metadata_ref();
+    let first = storage::open_pin(first, budget).await?.metadata_ref();
+    let second = storage::open_pin(second, budget).await?.metadata_ref();
     let limit = budget.limits.max_metadata_bytes;
     let spec = spec.clone();
     budget

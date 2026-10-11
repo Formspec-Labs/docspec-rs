@@ -453,6 +453,7 @@ mod tests {
     use tempfile::TempDir;
 
     async fn fixture() -> (TempDir, Engine, RunSpec, Table) {
+        let pin_budget = reader_budget();
         let root = TempDir::new().unwrap();
         let input = root.path().join("input.parquet");
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
@@ -494,7 +495,7 @@ mod tests {
             definition: "v1".into(),
         };
         let release = engine.run(&spec).await.unwrap();
-        let native = storage::open_pin(&release.dataset.groups["source"])
+        let native = storage::open_pin(&release.dataset.groups["source"], &pin_budget)
             .await
             .unwrap();
         (root, engine, spec, native)
@@ -566,6 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_provider_preserves_pins_filters_duplicates_and_empty_schema() {
+        let pin_budget = query_budget();
         let (_root, engine, mut spec, native) = fixture().await;
         let context = SessionContext::new();
         context
@@ -578,7 +580,7 @@ mod tests {
             .register_table(
                 "empty",
                 table(
-                    storage::open_pin(&empty.dataset.groups["source"])
+                    storage::open_pin(&empty.dataset.groups["source"], &pin_budget)
                         .await
                         .unwrap(),
                     query_budget(),
@@ -695,6 +697,7 @@ mod tests {
 
     #[tokio::test]
     async fn native_statistics_choose_the_smaller_build_in_both_directions() {
+        let pin_budget = query_budget();
         use datafusion::physical_plan::joins::HashJoinExec;
         fn joins(plan: &dyn ExecutionPlan, found: &mut Vec<(Precision<usize>, Precision<usize>)>) {
             if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
@@ -720,7 +723,7 @@ mod tests {
             .register_table(
                 "small",
                 table(
-                    storage::open_pin(&small).await.unwrap(),
+                    storage::open_pin(&small, &pin_budget).await.unwrap(),
                     query_budget(),
                     Some(small.rows),
                 )

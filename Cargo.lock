@@ -2040,6 +2040,7 @@ dependencies = [
  "blake3",
  "clap",
  "datafusion",
+ "flate2",
  "fs2",
  "futures",
  "iceberg",

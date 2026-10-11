@@ -281,6 +281,7 @@ async fn stable_source_ids_compare_renames_reorders_and_reused_display_names() {
 
 #[tokio::test]
 async fn coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources() {
+    let pin_budget = docspec::budget::Budget::new(scalar::limits()).unwrap();
     for same_dataset in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let (engine, before, original) = scalar::fixture(root.path(), false).await;
@@ -305,7 +306,7 @@ async fn coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources
         // Both ordinary builds auto-allocate the same numbers, with matching
         // types and values. Those numbers do not prove stable field meaning.
         for release in [&before, &after] {
-            let native = storage::open_pin(&release.dataset.groups["source"])
+            let native = storage::open_pin(&release.dataset.groups["source"], &pin_budget)
                 .await
                 .unwrap();
             assert_eq!(

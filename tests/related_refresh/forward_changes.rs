@@ -51,7 +51,8 @@ pub(super) async fn check_forward(
     after: &ReleasePin,
     names: &[&str],
 ) {
-    let native = storage::open_pin(&after.dataset.groups["source"])
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
+    let native = storage::open_pin(&after.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     let native_schema = native.metadata().current_schema();
@@ -136,6 +137,7 @@ async fn check_counts(engine: &Engine, summary: &ReleasePin, input: &ReleasePin)
 
 #[tokio::test]
 async fn join_and_summary_forward_chains_match_full_typed_changes_and_addresses() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = TempDir::new().unwrap();
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
@@ -190,7 +192,7 @@ async fn join_and_summary_forward_chains_match_full_typed_changes_and_addresses(
     let first_joined = joined.clone();
     let first_summary = summary.clone();
     // The join physically retains contributor columns that comparison must omit.
-    let native = storage::open_pin(&joined.dataset.groups["source"])
+    let native = storage::open_pin(&joined.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert!(

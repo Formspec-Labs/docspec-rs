@@ -40,16 +40,20 @@ pub(super) struct Applied {
 ///
 /// # Errors
 /// Refuses changed logical identity, row count, or public schema, and unreadable metadata.
-pub(super) async fn open_captured_source(canonical: &TablePin, source: &TablePin) -> Result<Table> {
+pub(super) async fn open_captured_source(
+    canonical: &TablePin,
+    source: &TablePin,
+    budget: &Budget,
+) -> Result<Table> {
     if source.logical_metadata() != canonical.logical_metadata() || source.rows != canonical.rows {
         return Err(Error::refusal(
             "invalid_admission_dependencies",
             "captured source differs from its logical base",
         ));
     }
-    let native = storage::open_pin(source).await?;
+    let native = storage::open_pin(source, budget).await?;
     if source.metadata != canonical.metadata {
-        let canonical = storage::open_pin(canonical).await?;
+        let canonical = storage::open_pin(canonical, budget).await?;
         if !storage::identity::preserves_schema(
             canonical.metadata().current_schema(),
             native.metadata().current_schema(),
@@ -131,7 +135,11 @@ impl Engine {
         validate_plan(dataframe.logical_plan())?;
         if let Some(base) = &spec.base {
             let release = self.release_admitted(&spec.dataset, base).await?;
-            let native = storage::open_pin(&release.dataset.groups["source"]).await?;
+            let native = storage::open_pin(
+                &release.dataset.groups["source"],
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
             if storage::defaults::evolved(native.metadata())
                 || storage::identity::has_origins(native.metadata().current_schema())?
             {
@@ -225,7 +233,12 @@ impl Engine {
         // Older admissions consume their canonical source; retries never resolve
         // a newer physical representation after the request has been retained.
         let captured_before = captured_source.unwrap_or(canonical_before);
-        let captured_native = open_captured_source(canonical_before, captured_before).await?;
+        let captured_native = open_captured_source(
+            canonical_before,
+            captured_before,
+            &self.inner.lifecycle.budget,
+        )
+        .await?;
         let before_with_origins;
         let (before, native) =
             if !storage::identity::has_origins(captured_native.metadata().current_schema())? {
@@ -239,7 +252,8 @@ impl Engine {
                         &directory.join("source-origins"),
                     )
                     .await?;
-                let native = storage::open_pin(&before_with_origins).await?;
+                let native =
+                    storage::open_pin(&before_with_origins, &self.inner.lifecycle.budget).await?;
                 (&before_with_origins, native)
             } else {
                 (captured_before, captured_native)
@@ -406,7 +420,7 @@ impl Engine {
             // empty change relations use its schema too, as endpoint verification
             // requires the added and removed schemas to match the result.
             applied.table = captured.clone();
-            let native = storage::open_pin(captured).await?;
+            let native = storage::open_pin(captured, &self.inner.lifecycle.budget).await?;
             let empty = self
                 .replacement_output(dataset, &directory.join("unchanged-changes"), &native)
                 .await?;
@@ -434,7 +448,7 @@ impl Engine {
                 replacement_bytes,
             } = request;
             let budget = &self.inner.lifecycle.budget;
-            let native = storage::open_pin(before).await?;
+            let native = storage::open_pin(before, budget).await?;
             let inventory = storage::snapshot_files(&native, budget).await?;
             storage::check_inventory_files(before, &inventory)?;
             let schema =

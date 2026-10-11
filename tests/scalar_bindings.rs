@@ -91,7 +91,7 @@ async fn forge_values(
     values: Vec<ArrayRef>,
 ) -> ReleasePin {
     let budget = Budget::new(limits()).unwrap();
-    let native = storage::open_pin(&release.dataset.groups["derived"])
+    let native = storage::open_pin(&release.dataset.groups["derived"], &budget)
         .await
         .unwrap();
     let batches = storage::read_batches(&native, &budget)

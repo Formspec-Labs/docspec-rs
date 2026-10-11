@@ -66,7 +66,9 @@ async fn fixture(engine: &Engine) -> Fixture {
         require_current_boundary: false,
     };
     let request = OperationRequest::Backfill(spec.clone());
-    let native = storage::open_pin(&source).await.unwrap();
+    let native = storage::open_pin(&source, &engine.inner.lifecycle.budget)
+        .await
+        .unwrap();
     let expressions = Arc::new(
         Expressions::compile(
             &engine.context(),

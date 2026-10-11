@@ -454,7 +454,7 @@ async fn verify_binding_history(
                 {
                     return Err(invalid_group());
                 }
-                let native = storage::open_pin(source).await?;
+                let native = storage::open_pin(source, history.budget).await?;
                 let expected = Expressions::compile(
                     &history.budget.context(),
                     native.metadata().current_schema(),
@@ -491,7 +491,8 @@ async fn verify_binding_history(
             let previous = parent.computed.get(name).ok_or_else(invalid_group)?;
             let before = parent.groups.get("source").ok_or_else(invalid_group)?;
             if previous.definition != binding.definition
-                || inherited_inputs(&owner.request, previous, before, source).await?
+                || inherited_inputs(&owner.request, previous, before, source, history.budget)
+                    .await?
                     != binding.input_fields
             {
                 return Err(invalid_group());
@@ -500,8 +501,8 @@ async fn verify_binding_history(
             if matches!(&owner.request, OperationRequest::Update(_))
                 || matches!(&owner.request, OperationRequest::Refresh(spec) if spec.mode == RefreshMode::Incremental)
             {
-                let before = storage::open_pin(before).await?;
-                let after = storage::open_pin(source).await?;
+                let before = storage::open_pin(before, history.budget).await?;
+                let after = storage::open_pin(source, history.budget).await?;
                 if !storage::identity::preserves_schema(
                     before.metadata().current_schema(),
                     after.metadata().current_schema(),
@@ -532,8 +533,8 @@ pub(super) async fn verify_group_data(
         return Err(invalid_group());
     }
     checks.table(group, budget).await?;
-    let source_native = storage::open_pin(source).await?;
-    let group_native = storage::open_pin(group).await?;
+    let source_native = storage::open_pin(source, budget).await?;
+    let group_native = storage::open_pin(group, budget).await?;
     let expressions = Expressions::compile(
         &budget.context(),
         source_native.metadata().current_schema(),

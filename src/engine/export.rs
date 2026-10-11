@@ -388,7 +388,7 @@ impl Engine {
             .ok_or_else(|| {
                 Error::refusal("missing_group", "export policy names an absent field group")
             })?;
-        let table = storage::open_pin(table_pin).await?;
+        let table = storage::open_pin(table_pin, &self.inner.lifecycle.budget).await?;
         let inventory = storage::snapshot_files(&table, budget).await?;
         // This maintained shared reader projects by native field ID and refuses
         // unqualified native delete files instead of globbing historical data.

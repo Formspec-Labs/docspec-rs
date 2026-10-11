@@ -694,6 +694,7 @@ async fn receipt_processing_survives_process_loss_without_original_input() {
 
 #[tokio::test]
 async fn one_receipt_on_many_origin_files_uses_a_fixed_reader_budget() {
+    let pin_budget = docspec::budget::Budget::new(limits()).unwrap();
     let root = TempDir::new().unwrap();
     // Small source files exercise reader fanout. Deterministic varying text keeps
     // compression from collapsing the fixture into one tiny native file.
@@ -797,7 +798,7 @@ async fn one_receipt_on_many_origin_files_uses_a_fixed_reader_budget() {
             .all(|path| appended_objects.iter().any(|object| &object.path == path)),
         "append must share the captured compacted files"
     );
-    let native = storage::open_pin(&appended.dataset.groups["source"])
+    let native = storage::open_pin(&appended.dataset.groups["source"], &pin_budget)
         .await
         .unwrap();
     assert!(

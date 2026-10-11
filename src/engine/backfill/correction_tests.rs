@@ -140,7 +140,7 @@ async fn fresh_readback_view_fences_target_proof_changes_but_allows_siblings() {
     }
 
     let source = &saved.dataset.groups["source"];
-    let native = storage::open_pin(source).await.unwrap();
+    let native = storage::open_pin(source, &lifecycle.budget).await.unwrap();
     let language_id = native
         .metadata()
         .current_schema()

@@ -197,7 +197,7 @@ async fn combined_dataset(
     dataset: &DatasetPin,
     budget: &Budget,
 ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-    let source = storage::open_pin(&dataset.groups["source"]).await?;
+    let source = storage::open_pin(&dataset.groups["source"], budget).await?;
     let context = budget.context();
     let mut columns = source
         .metadata()
@@ -219,7 +219,7 @@ async fn combined_dataset(
     let mut from = "source s".to_owned();
     for (index, (name, binding)) in dataset.computed.iter().enumerate() {
         let alias = format!("g{index}");
-        let native = storage::open_pin(&dataset.groups[name]).await?;
+        let native = storage::open_pin(&dataset.groups[name], budget).await?;
         context.register_table(
             &alias,
             crate::query::table(native, budget.clone(), Some(dataset.groups[name].rows))?,
@@ -315,7 +315,8 @@ impl Engine {
             self.check_operation_available(&view, &spec.base).await?;
         }
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
-        let native = storage::open_pin(&base.dataset.groups["source"]).await?;
+        let native =
+            storage::open_pin(&base.dataset.groups["source"], &self.inner.lifecycle.budget).await?;
         let expressions = Expressions::compile(
             &self.context(),
             native.metadata().current_schema(),
@@ -1103,6 +1104,7 @@ pub(super) async fn inherited_inputs(
     previous: &ComputedGroup,
     before: &TablePin,
     after: &TablePin,
+    budget: &Budget,
 ) -> Result<BTreeMap<String, i32>> {
     let rebuilt = match request {
         OperationRequest::Build(_) => true,
@@ -1112,8 +1114,8 @@ pub(super) async fn inherited_inputs(
     if !rebuilt {
         return Ok(previous.input_fields.clone());
     }
-    let before = storage::open_pin(before).await?;
-    let after = storage::open_pin(after).await?;
+    let before = storage::open_pin(before, budget).await?;
+    let after = storage::open_pin(after, budget).await?;
     previous
         .input_fields
         .iter()
@@ -1417,7 +1419,9 @@ mod tests {
             .await
             .unwrap();
         let source = prepared.table;
-        let native = storage::open_pin(&source).await.unwrap();
+        let native = storage::open_pin(&source, &engine.inner.lifecycle.budget)
+            .await
+            .unwrap();
         let fields = native.metadata().current_schema().as_struct().fields();
         let old_id = fields[0].id;
         let spec = BackfillSpec {
@@ -1563,7 +1567,9 @@ mod tests {
         assert_eq!(fresh.input_fields["old"], 30);
         assert_ne!(data(&fresh.table), data(&bound.table));
         for (pin, expected) in [(&bound.table, Some(2)), (&fresh.table, None)] {
-            let table = storage::open_pin(pin).await.unwrap();
+            let table = storage::open_pin(pin, &engine.inner.lifecycle.budget)
+                .await
+                .unwrap();
             let batches = storage::read_batches(&table, &engine.inner.lifecycle.budget)
                 .await
                 .unwrap()
