@@ -10,7 +10,7 @@ use docspec::{
     Engine,
     model::{
         ChangeDescriptor, ComparisonFallback, ComparisonIdentity, ComparisonOptions,
-        ComparisonPath, ReleasePin, RunSpec, UpdateSpec,
+        ComparisonPath, ReleasePin, RunSpec, SchemaField, SchemaSpec, UpdateSpec,
     },
     storage,
 };
@@ -119,6 +119,280 @@ fn difference<T: Ord + Clone>(before: &[T], after: &[T]) -> BTreeMap<T, i64> {
     }
     counts.retain(|_, count| *count != 0);
     counts
+}
+
+async fn schema_edit(engine: &Engine, base: &ReleasePin, fields: &[(i32, &str)]) -> ReleasePin {
+    engine
+        .evolve_schema(&SchemaSpec {
+            dataset: base.dataset.dataset.clone(),
+            operation: scalar::id("schema-edit"),
+            base: base.id.clone(),
+            definition: base.dataset.definition.clone(),
+            next_definition: "schema-next".into(),
+            fields: fields
+                .iter()
+                .map(|(id, name)| SchemaField {
+                    id: *id,
+                    name: (*name).into(),
+                })
+                .collect(),
+            additions: vec![],
+            write_defaults: BTreeMap::new(),
+        })
+        .await
+        .unwrap()
+}
+
+async fn assert_schema_difference(
+    engine: &Engine,
+    before: &ReleasePin,
+    after: &ReleasePin,
+    expected: &BTreeMap<Row, i64>,
+    field_ids: &[i32],
+    field_names: &[&str],
+) {
+    for identity in [ComparisonIdentity::Values, ComparisonIdentity::Occurrences] {
+        for force_full in [false, true] {
+            let options = ComparisonOptions {
+                identity,
+                force_full,
+            };
+            let counts = engine
+                .compare_with_options(before, after, "source", &options)
+                .await
+                .unwrap();
+            assert!(!counts.same_schema);
+            assert!(counts.descriptor.effects.schema_changed);
+            assert!(counts.descriptor.comparable_values);
+            assert_eq!(counts.descriptor.path, ComparisonPath::Full);
+            assert_eq!(
+                counts.descriptor.fallback,
+                Some(if force_full {
+                    ComparisonFallback::Forced
+                } else {
+                    ComparisonFallback::SchemaChanged
+                })
+            );
+            assert_eq!(counts.descriptor.field_ids, field_ids);
+            assert_eq!(
+                (counts.added_rows, counts.removed_rows),
+                (
+                    Some(expected.values().filter(|v| **v > 0).sum::<i64>() as u64),
+                    Some(-expected.values().filter(|v| **v < 0).sum::<i64>() as u64),
+                )
+            );
+            let mut stream = engine
+                .changes(before, after, "source", &options)
+                .await
+                .unwrap();
+            let descriptor: ChangeDescriptor =
+                serde_json::from_str(&stream.schema().metadata()["docspec.change"]).unwrap();
+            assert_eq!(descriptor, counts.descriptor);
+            let value_schema = stream.schema();
+            let arrow::datatypes::DataType::Struct(fields) =
+                value_schema.field_with_name("values").unwrap().data_type()
+            else {
+                panic!("change values must be typed fields");
+            };
+            assert_eq!(
+                fields
+                    .iter()
+                    .map(|field| field.name().as_str())
+                    .collect::<Vec<_>>(),
+                field_names
+            );
+            let id_index = field_ids.iter().position(|id| *id == 1).unwrap();
+            let text_index = field_ids.iter().position(|id| *id == 2).unwrap();
+            let mut actual = BTreeMap::new();
+            let mut emitted = [0_u64; 2];
+            while let Some(batch) = stream.try_next().await.unwrap() {
+                let sides = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                let values = batch
+                    .column(3)
+                    .as_any()
+                    .downcast_ref::<StructArray>()
+                    .unwrap();
+                let ids = values
+                    .column(id_index)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                let texts = values
+                    .column(text_index)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                for ((side, id), text) in sides.iter().zip(ids.iter()).zip(texts.iter()) {
+                    let weight = if side == Some("before") {
+                        emitted[1] += 1;
+                        -1
+                    } else {
+                        assert_eq!(side, Some("after"));
+                        emitted[0] += 1;
+                        1
+                    };
+                    *actual.entry((id, text.map(str::to_owned))).or_default() += weight;
+                }
+            }
+            actual.retain(|_, count| *count != 0);
+            assert_eq!(&actual, expected);
+            assert_eq!(
+                (Some(emitted[0]), Some(emitted[1])),
+                (counts.added_rows, counts.removed_rows)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn stable_source_ids_compare_renames_reorders_and_reused_display_names() {
+    for selected in [
+        [(1, "comment_id"), (2, "body \"text\"")],
+        [(2, "text"), (1, "id")],
+        [(2, "id"), (1, "text")],
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (engine, before, _) = scalar::fixture(root.path(), false).await;
+        let after = schema_edit(&engine, &before, &selected).await;
+        assert_schema_difference(
+            &engine,
+            &before,
+            &after,
+            &BTreeMap::new(),
+            &[1, 2],
+            &["id", "text"],
+        )
+        .await;
+        assert_schema_difference(
+            &engine,
+            &after,
+            &before,
+            &BTreeMap::new(),
+            &selected.map(|field| field.0),
+            &selected.map(|field| field.1),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources() {
+    for same_dataset in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (engine, before, original) = scalar::fixture(root.path(), false).await;
+        let input = scalar::input(&root.path().join("rebuild.parquet"), &original);
+        let after = engine
+            .run(&RunSpec {
+                dataset: if same_dataset {
+                    before.dataset.dataset.clone()
+                } else {
+                    scalar::id("unrelated")
+                },
+                operation: scalar::id("fresh-build"),
+                base: same_dataset.then(|| before.id.clone()),
+                relationship: None,
+                input: input.path,
+                expected_digest: input.digest,
+                sql: "SELECT id AS temperature_c, text AS description FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        // Both ordinary builds auto-allocate the same numbers, with matching
+        // types and values. Those numbers do not prove stable field meaning.
+        for release in [&before, &after] {
+            let native = storage::open_pin(&release.dataset.groups["source"])
+                .await
+                .unwrap();
+            assert_eq!(
+                native
+                    .metadata()
+                    .current_schema()
+                    .as_struct()
+                    .fields()
+                    .iter()
+                    .map(|field| field.id)
+                    .collect::<Vec<_>>(),
+                vec![1, 2]
+            );
+        }
+        for (first, second) in [(&before, &after), (&after, &before)] {
+            for identity in [ComparisonIdentity::Values, ComparisonIdentity::Occurrences] {
+                for force_full in [false, true] {
+                    let options = ComparisonOptions {
+                        identity,
+                        force_full,
+                    };
+                    let counts = engine
+                        .compare_with_options(first, second, "source", &options)
+                        .await
+                        .unwrap();
+                    assert!(!counts.descriptor.comparable_values);
+                    assert!(counts.descriptor.effects.schema_changed);
+                    assert_eq!((counts.added_rows, counts.removed_rows), (None, None));
+                    assert_eq!(counts.descriptor.path, ComparisonPath::Full);
+                    assert_eq!(
+                        counts.descriptor.fallback,
+                        Some(ComparisonFallback::SchemaChanged)
+                    );
+                    let error = match engine.changes(first, second, "source", &options).await {
+                        Ok(_) => panic!("unqualified field identity must refuse"),
+                        Err(error) => error,
+                    };
+                    assert_eq!(error.code(), "comparison_schema_changed");
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn stable_source_ids_compare_actual_changes_after_rename_and_reorder() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, before, original) = scalar::fixture(root.path(), false).await;
+    let replacements = vec![(Some(1), Some("changed".into())), (Some(0), None)];
+    let updated = engine
+        .update(&UpdateSpec {
+            dataset: before.dataset.dataset.clone(),
+            operation: scalar::id("value-update"),
+            definition: "v1".into(),
+            base: before.id.clone(),
+            keys: vec!["id".into()],
+            replacements: scalar::input(&root.path().join("replacements.parquet"), &replacements),
+            deletions: None,
+        })
+        .await
+        .unwrap();
+    // Names deliberately switch identities while root order also changes.
+    let after = schema_edit(&engine, &updated, &[(2, "id"), (1, "text")]).await;
+    let removed = original
+        .into_iter()
+        .filter(|row| matches!(row.0, Some(0 | 1)))
+        .collect::<Vec<_>>();
+    let expected = difference(&removed, &replacements);
+    assert_eq!(removed.len(), 3);
+    assert_schema_difference(
+        &engine,
+        &before,
+        &after,
+        &expected,
+        &[1, 2],
+        &["id", "text"],
+    )
+    .await;
+    assert_schema_difference(
+        &engine,
+        &after,
+        &before,
+        &difference(&replacements, &removed),
+        &[2, 1],
+        &["id", "text"],
+    )
+    .await;
 }
 
 #[tokio::test]

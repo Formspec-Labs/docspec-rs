@@ -102,7 +102,8 @@ unchanged requests and refusal handling. Without Dagster, those native tests are
 reported as skipped. Their HTTP peer is a protocol fixture; these tests do not
 qualify the Rust lifecycle, multi-host recovery, hosted authentication or R2/Basin.
 
-The optional real-host tests require an already built Rust executable and a tiny
+The optional real-host tests require an already built Rust executable with the
+`test-util` feature and a tiny
 Parquet fixture (at most 1 MiB). It adds no PyArrow runtime dependency:
 
 ```sh
@@ -126,9 +127,32 @@ filesystem evidence; it does not measure native input reads or CPU work.
 The first replacement-fixture worker exhausts its configured zero retries and
 reports `outcome: unknown`, then exits. A separate Python process loads the
 original request configuration and reconciles it. Their process IDs must differ.
-Passing this fixture qualifies replacement after a worker failed to learn native completion;
-it does not simulate a killed worker during Rust processing or a Rust host crash.
-The Rust host stays alive and owns the same workspace throughout.
+This response-loss fixture qualifies replacement after a worker failed to learn
+native completion. Its Rust host stays alive throughout.
+
+Separate worker-death cases use the native `test-util` pause before validation
+starts, after Rust durably retained processing. The real HTTP handler remains
+unfinished. The fixture checks native processing records and files, then sends
+SIGKILL to the Python worker while it still waits for the response. It deletes
+only a private copy of the input and starts a fresh worker with the unchanged
+configuration and request digest. One case releases the pause on the existing
+Rust host and waits for that exact operation to complete before replacement.
+Another sends SIGKILL to that host before releasing the pause and
+reopens the same workspace in a fresh host without pause configuration.
+
+The worker records entry and exit at the real HTTP submission boundary, before
+Dagster handles its outcome. Inspection and interruption must finish within
+30 seconds, below the worker's 60-second socket timeout; the waiting record
+must remain unchanged through SIGKILL.
+
+Recovery must preserve the exact processing records and every already retained
+file's hash, size and modification time. The native `DOCSPEC_TEST_WORK` trace
+must show processing, validation and readback exactly once across interruption,
+recovery and completed replay. The completed replay must preserve the full pin,
+lifecycle records and retained-file inventory. These are local acknowledged
+processing-boundary cases, not arbitrary-instruction crash or power-loss tests.
+The test hook is feature-gated and absent from ordinary production builds; it
+adds no Python lifecycle state or public HTTP route.
 
 The relay accepts at most two requests, with the same 1 MiB request and 32 MiB
 response ceilings used by the adapter. Each replacement worker has a 90-second
@@ -147,10 +171,14 @@ Rust's structured `stale_base` refusal; this proves route forwarding and native
 refusal handling, not successful receipt materialization. Native receipt
 processing remains covered by the Rust evidence-update tests.
 
-The retained [recovery run](../../docs/reviews/dagster-recovery-check.log) passes
+The retained [completion-response recovery run](../../docs/reviews/dagster-recovery-check.log) passes
 with Python 3.13 and Dagster 1.13.16 against the `ce3ad6b` Rust executable,
 including both native completion-response recovery cases without skips.
 The [independent review](../../docs/reviews/dagster-recovery-review.md) approves
-this scoped local qualification. Mid-operation worker loss, Rust host crashes,
-successful receipt materialization through Dagster and real-provider recovery
-remain separate qualification work.
+this scoped local qualification. The
+[worker-death and host-restart run](../../docs/reviews/dagster-inflight-tests-2026-10-10.log)
+passes the complete adapter suite, including both actual-kill cases. Its
+[independent review](../../docs/reviews/dagster-inflight-recovery-review-2026-10-10.md)
+approves the repaired timing and live-host completion checks.
+Successful receipt materialization through Dagster, other lifecycle routes and
+real-provider recovery remain separate qualification work.

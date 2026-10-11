@@ -1,0 +1,29 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 13.83s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 18.76s
+     Running unittests src/lib.rs (target/debug/deps/docspec-1f301305e1335978)
+
+running 1 test
+test engine::comparison::tests::field_alignment_refuses_changed_ids_types_nullability_and_membership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 239 filtered out; finished in 0.00s
+
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.22s
+     Running tests/integration.rs (target/debug/deps/integration-a60f7bb4ca922bc7)
+
+running 10 tests
+test comparison::unchanged_pins_skip_payloads_and_force_full_preserves_read_failures ... ok
+test comparison::returned_change_stream_holds_maintenance_admission_until_drop ... ok
+test comparison::schema_changes_are_explicit_in_counts_and_refused_for_streams ... ok
+test comparison::default_only_changes_report_schema_rules_without_inventing_value_changes ... ok
+test comparison::streaming_values_and_occurrences_match_independent_bags_in_both_directions ... ok
+test comparison::stable_source_ids_compare_actual_changes_after_rename_and_reorder ... ok
+test comparison::computed_groups_use_retained_addresses_and_report_added_definitions ... ok
+test comparison::forward::reversions_duplicates_nulls_and_compacted_updates_match_exact_full_endpoints ... ok
+test comparison::stable_source_ids_compare_renames_reorders_and_reused_display_names ... ok
+test comparison::forward::receipt_only_middle_hop_preserves_evidence_effects_and_corrupt_history_refuses ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 273 filtered out; finished in 7.45s
+

@@ -276,7 +276,62 @@ impl Engine {
         if after.dataset.computed.contains_key(group) {
             check_group_addresses(&right_schema)?;
         }
-        let comparable = left_schema == right_schema && same_kind;
+        // Native IDs are local to a table lineage; fresh builds reallocate them.
+        // Relax display names/order only across an exact retained schema boundary.
+        let retained_schema = if same_kind
+            && !computed
+            && group == "source"
+            && left_schema != right_schema
+            && before.dataset.dataset == after.dataset.dataset
+        {
+            let mut extra_metadata = 0usize;
+            for (canonical, selected) in [(canonical_first, &first), (canonical_second, &second)] {
+                if canonical != selected {
+                    if canonical.metadata.bytes > budget.limits.max_metadata_bytes as u64 {
+                        return Err(Error::refusal(
+                            "metadata_capacity",
+                            "canonical comparison metadata exceeds its allowance",
+                        ));
+                    }
+                    extra_metadata += 1;
+                }
+            }
+            // Canonical histories are temporary qualification inputs; reserve
+            // their native metadata before opening and release after this check.
+            let _canonical_memory = budget.reserve(
+                budget
+                    .limits
+                    .max_metadata_bytes
+                    .saturating_mul(extra_metadata),
+            )?;
+            let canonical_left = if canonical_first == &first {
+                left.clone()
+            } else {
+                storage::open_pin(canonical_first).await?
+            };
+            let canonical_right = if canonical_second == &second {
+                right.clone()
+            } else {
+                storage::open_pin(canonical_second).await?
+            };
+            retained_schema_boundary(canonical_left.metadata(), canonical_right.metadata())
+        } else {
+            false
+        };
+        // Computed groups have separate logical IDs; retain their strict rule.
+        let aligned = if same_kind && left_schema == right_schema {
+            Some(right_schema.fields().clone())
+        } else if retained_schema {
+            aligned_fields(
+                left.metadata().current_schema(),
+                right.metadata().current_schema(),
+                &left_schema,
+                &right_schema,
+            )?
+        } else {
+            None
+        };
+        let comparable = aligned.is_some();
         let mut before_keys = left
             .metadata()
             .current_schema()
@@ -302,23 +357,36 @@ impl Engine {
             && before_keys == after_keys
             && public_rules(left.metadata().current_schema())
                 == public_rules(right.metadata().current_schema());
+        let visible = |field: &Field| {
+            let occurrence = computed
+                && matches!(
+                    field.name().as_str(),
+                    storage::OCCURRENCE_FILE | storage::OCCURRENCE_ROW
+                );
+            let contributor = group == "source"
+                && before.dataset.related.is_some()
+                && after.dataset.related.is_some()
+                && refresh::hidden_field(field.name());
+            !(occurrence || contributor)
+        };
         let fields: Fields = left_schema
             .fields()
             .iter()
-            .filter(|field| {
-                let occurrence = computed
-                    && matches!(
-                        field.name().as_str(),
-                        storage::OCCURRENCE_FILE | storage::OCCURRENCE_ROW
-                    );
-                let contributor = group == "source"
-                    && before.dataset.related.is_some()
-                    && after.dataset.related.is_some()
-                    && refresh::hidden_field(field.name());
-                !(occurrence || contributor)
-            })
+            .filter(|field| visible(field))
             .cloned()
             .collect();
+        let after_fields: Fields = aligned
+            .as_ref()
+            .map(|aligned| {
+                left_schema
+                    .fields()
+                    .iter()
+                    .zip(aligned)
+                    .filter(|(field, _)| visible(field))
+                    .map(|(_, field)| field.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         let field_ids = fields
             .iter()
             .map(|field| {
@@ -334,7 +402,7 @@ impl Engine {
                     })
             })
             .collect::<Result<Vec<_>>>()?;
-        let unchanged = identical && !options.force_full;
+        let unchanged = identical && same_schema && !options.force_full;
         let mut descriptor = ChangeDescriptor {
             format: 1,
             before: before.version_ref(),
@@ -394,7 +462,10 @@ impl Engine {
         } else {
             let context = self.context();
             let mut frames = Vec::new();
-            for (table, pin, weight) in [(left, first, -1_i64), (right, second, 1_i64)] {
+            for (table, pin, selected, weight) in [
+                (left, first, &fields, -1_i64),
+                (right, second, &after_fields, 1_i64),
+            ] {
                 let provider = if located && !computed {
                     crate::query::occurrences(table, budget.clone(), Some(pin.rows))?
                 } else {
@@ -402,7 +473,7 @@ impl Engine {
                 };
                 frames.push(signed_frame(
                     context.read_table(provider)?,
-                    &fields,
+                    selected,
                     located,
                     weight,
                 )?);
@@ -487,6 +558,63 @@ impl Engine {
         });
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, batches)))
     }
+}
+
+fn retained_schema_boundary(
+    before: &iceberg::spec::TableMetadata,
+    after: &iceberg::spec::TableMetadata,
+) -> bool {
+    // Compare the complete native schema, including names, nested IDs and rules.
+    // A fresh auto-numbered build retains only its new schema; numeric ID reuse
+    // alone cannot establish this boundary. Schema-preserving replacements keep it.
+    after
+        .schemas_iter()
+        .any(|schema| schema == before.current_schema())
+        || before
+            .schemas_iter()
+            .any(|schema| schema == after.current_schema())
+}
+
+fn aligned_fields(
+    before: &iceberg::spec::Schema,
+    after: &iceberg::spec::Schema,
+    before_arrow: &Schema,
+    after_arrow: &Schema,
+) -> Result<Option<Fields>> {
+    let after_fields = after
+        .as_struct()
+        .fields()
+        .iter()
+        .filter(|field| !storage::identity::hidden(&field.name))
+        .map(|field| (field.id, field))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if before_arrow.fields().len() != after_fields.len() {
+        return Ok(None);
+    }
+    let mut aligned = Vec::with_capacity(before_arrow.fields().len());
+    for field in before_arrow.fields() {
+        let first = before.field_by_name(field.name()).ok_or_else(|| {
+            Error::refusal(
+                "invalid_comparison",
+                "visible field lacks a native identity",
+            )
+        })?;
+        let Some(second) = after_fields.get(&first.id) else {
+            return Ok(None);
+        };
+        let other = after_arrow.field_with_name(&second.name)?;
+        // Native types retain nested identities and null rules. Root names and
+        // order alone are presentation; defaults remain separately reported.
+        if first.field_type != second.field_type
+            || first.required != second.required
+            || field.data_type() != other.data_type()
+            || field.is_nullable() != other.is_nullable()
+        {
+            return Ok(None);
+        }
+        aligned.push(Arc::new(other.clone()));
+    }
+    Ok(Some(aligned.into()))
 }
 
 fn signed_frame(
@@ -656,6 +784,44 @@ mod tests {
     use crate::budget::{Budget, Limits};
     use arrow::array::StringArray;
     use datafusion::{datasource::MemTable, physical_plan::displayable};
+
+    #[test]
+    fn field_alignment_refuses_changed_ids_types_nullability_and_membership() {
+        use iceberg::spec::{NestedField, PrimitiveType, Type};
+
+        let schema = |id, required, kind| {
+            iceberg::spec::Schema::builder()
+                .with_fields([Arc::new(NestedField::new(
+                    id,
+                    "value",
+                    Type::Primitive(kind),
+                    required,
+                ))])
+                .build()
+                .unwrap()
+        };
+        let before = schema(1, false, PrimitiveType::Long);
+        let before_arrow = iceberg::arrow::schema_to_arrow_schema(&before).unwrap();
+        let empty = iceberg::spec::Schema::builder().build().unwrap();
+        for after in [
+            schema(2, false, PrimitiveType::Long),
+            schema(1, true, PrimitiveType::Long),
+            schema(1, false, PrimitiveType::String),
+            empty,
+        ] {
+            let after_arrow = iceberg::arrow::schema_to_arrow_schema(&after).unwrap();
+            assert!(
+                aligned_fields(&before, &after, &before_arrow, &after_arrow)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                aligned_fields(&after, &before, &after_arrow, &before_arrow)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
 
     #[tokio::test]
     async fn addressed_differences_cancel_occurrences_before_choosing_value_members() {

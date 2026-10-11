@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -33,6 +34,12 @@ class RustIntegrationTests(unittest.TestCase):
     def test_replacement_python_worker_reconciles_native_completed_response_loss(self):
         self._qualify("replacement")
 
+    def test_killed_python_worker_reconciles_unfinished_native_request(self):
+        self._qualify("workerkill")
+
+    def test_killed_python_worker_and_native_host_resume_retained_processing(self):
+        self._qualify("hostkill")
+
     def _qualify(self, mode):
         binary_name = os.environ.get("DOCSPEC_BINARY")
         input_name = os.environ.get("DOCSPEC_TEST_INPUT")
@@ -49,6 +56,13 @@ class RustIntegrationTests(unittest.TestCase):
             root = Path(directory)
             workspace = root / "workspace"
             log_path = root / "host.log"
+            interrupted = mode in ("workerkill", "hostkill")
+            if interrupted:
+                # Never remove or modify the shared integration source. Native
+                # recovery must succeed after this fixture-owned locator is gone.
+                private_source = root / "input.parquet"
+                shutil.copyfile(source, private_source)
+                source = private_source
             with (root / "hash.json").open("wb") as output, (root / "hash.log").open("wb") as errors:
                 hashed = subprocess.run([str(binary), "hash", str(source)], stdout=output, stderr=errors, timeout=30, check=False)
             self.assertEqual(hashed.returncode, 0, self._tail(root / "hash.log"))
@@ -71,11 +85,17 @@ class RustIntegrationTests(unittest.TestCase):
                 reservation.bind(("127.0.0.1", 0))
                 port = reservation.getsockname()[1]
             with log_path.open("wb") as log:
-                host = subprocess.Popen(
-                    [str(binary), "--workspace", str(workspace), "--limits", str(limits), "serve", "--bind", f"127.0.0.1:{port}"],
-                    stdout=log,
-                    stderr=log,
-                )
+                environment = os.environ.copy()
+                for name in ("DOCSPEC_TEST_PAUSE_BEFORE", "DOCSPEC_TEST_PAUSE_MARKER", "DOCSPEC_TEST_RESUME_MARKER"):
+                    environment.pop(name, None)
+                if interrupted:
+                    environment.update({
+                        "DOCSPEC_TEST_PAUSE_BEFORE": "validation",
+                        "DOCSPEC_TEST_PAUSE_MARKER": str(root / "native-paused"),
+                        "DOCSPEC_TEST_RESUME_MARKER": str(root / "native-resume"),
+                    })
+                host = self._host(binary, workspace, limits, port, log, environment)
+                hosts = [host]
                 try:
                     self._wait_ready(host, port, log_path)
                     request_json = json.dumps({
@@ -89,7 +109,11 @@ class RustIntegrationTests(unittest.TestCase):
                     config = {"ops": {"docspec_operation": {"config": {"route": "/run", "request_json": request_json}}}}
                     resource = DocSpecResource(base_url=f"http://127.0.0.1:{port}", uncertain_retries=0)
 
-                    if mode == "replay":
+                    if interrupted:
+                        host, baseline, first_summary, recovered = self._recover_interrupted(
+                            mode, root, binary, workspace, limits, port, log, log_path, host, hosts, config, source,
+                        )
+                    elif mode == "replay":
                         first = docspec_job.execute_in_process(run_config=config, resources={"docspec": resource}, raise_on_error=False)
                         self.assertTrue(first.success, self._tail(log_path))
                         baseline = self._state(port, workspace)
@@ -148,6 +172,7 @@ class RustIntegrationTests(unittest.TestCase):
                     self.assertEqual(refusal.exception.code, "stale_base")
                     self.assertEqual(self._state(port, workspace), baseline)
                 finally:
+                    host = hosts[-1]
                     if host.poll() is None:
                         host.send_signal(signal.SIGINT)
                         try:
@@ -157,6 +182,113 @@ class RustIntegrationTests(unittest.TestCase):
                             host.wait(timeout=10)
                             self.fail("Rust host did not finish graceful shutdown: " + self._tail(log_path))
                     self.assertEqual(host.returncode, 0, self._tail(log_path))
+
+    @staticmethod
+    def _host(binary, workspace, limits, port, log, environment):
+        return subprocess.Popen(
+            [str(binary), "--workspace", str(workspace), "--limits", str(limits), "serve", "--bind", f"127.0.0.1:{port}"],
+            stdout=log, stderr=log, env=environment,
+        )
+
+    def _recover_interrupted(self, mode, root, binary, workspace, limits, port, log, log_path, host, hosts, config, source):
+        config_path = root / "worker-config.json"
+        original_config = json.dumps(config)
+        config_path.write_text(original_config)
+        url = f"http://127.0.0.1:{port}"
+        report = root / "killed-report.json"
+        worker_log = root / "killed-worker.log"
+        with worker_log.open("wb") as output:
+            worker = subprocess.Popen(
+                [sys.executable, str(Path(__file__).with_name("native_worker.py")), str(config_path), url, str(report)],
+                stdout=output, stderr=output,
+            )
+            try:
+                deadline = time.monotonic() + 30
+                while not (root / "native-paused").is_file():
+                    self.assertIsNone(worker.poll(), self._tail(worker_log))
+                    self.assertIsNone(host.poll(), self._tail(log_path))
+                    if time.monotonic() >= deadline:
+                        self.fail("native validation pause was not reached; use a test-util Rust binary: " + self._tail(log_path))
+                    time.sleep(0.05)
+                self.assertIsNone(worker.poll(), self._tail(worker_log))
+                started = json.loads(report.read_text())
+                self.assertEqual(started.get("started"), True, "worker must still be awaiting the unfinished native response")
+                self.assertEqual(started.get("submission"), "waiting")
+                self.assertEqual(started["pid"], worker.pid)
+                paused_records = self._get(port, "/datasets/dagster_fixture")
+                processing = {
+                    key: value for key, value in paused_records.items()
+                    if isinstance(value, dict) and value.get("phase") == "processing"
+                }
+                self.assertTrue(processing, "processing must have durable phase evidence before worker death")
+                self.assertNotIn("result/stable_build", paused_records)
+                self.assertNotIn("DOCSPEC_TEST_WORK validation", self._tail(log_path))
+                paused_files = self._retained_files(workspace)
+                self.assertTrue(paused_files)
+                self.assertIsNone(worker.poll(), self._tail(worker_log))
+                # Include inspection/hashing in the interruption deadline. The
+                # worker socket timeout is 60 seconds, so this cannot qualify a
+                # worker that already timed out while Dagster finalized its job.
+                self.assertLess(time.monotonic(), deadline)
+                self.assertLess(time.monotonic() - started["submitted_at"], 30)
+                self.assertEqual(json.loads(report.read_text()), started)
+                worker.kill()
+                worker.wait(timeout=10)
+                self.assertEqual(worker.returncode, -signal.SIGKILL)
+                self.assertEqual(json.loads(report.read_text()), started)
+                source.unlink()
+                if mode == "hostkill":
+                    # Keep the resume marker absent until the actual native
+                    # process is dead; validation cannot race host termination.
+                    self.assertFalse((root / "native-resume").exists())
+                    host.kill()
+                    host.wait(timeout=10)
+                    self.assertEqual(host.returncode, -signal.SIGKILL)
+            finally:
+                if worker.poll() is None:
+                    worker.kill()
+                    worker.wait(timeout=10)
+                # Let outer graceful cleanup drain a live native request even
+                # when an assertion fails while it is paused.
+                (root / "native-resume").touch()
+
+        if mode == "hostkill":
+            environment = os.environ.copy()
+            for name in ("DOCSPEC_TEST_PAUSE_BEFORE", "DOCSPEC_TEST_PAUSE_MARKER", "DOCSPEC_TEST_RESUME_MARKER"):
+                environment.pop(name, None)
+            host = self._host(binary, workspace, limits, port, log, environment)
+            hosts.append(host)
+            self._wait_ready(host, port, log_path)
+        else:
+            # Caller loss leaves the owned Rust task running. Let its exact
+            # operation finish before qualifying replacement reconciliation;
+            # hostkill separately proves cold recovery from unfinished work.
+            deadline = time.monotonic() + 30
+            while "result/stable_build" not in self._get(port, "/datasets/dagster_fixture"):
+                self.assertIsNone(host.poll(), self._tail(log_path))
+                self.assertLess(time.monotonic(), deadline, "surviving native operation did not complete")
+                time.sleep(0.05)
+        replacement = self._worker(root, config_path, url, "replacement")
+        self.assertTrue(replacement["success"], self._tail(log_path))
+        self.assertNotEqual(started["pid"], replacement["pid"])
+        self.assertEqual(replacement["request_sha256"], started["request_sha256"])
+        self.assertEqual(replacement["route"], started["route"])
+        self.assertEqual(config_path.read_text(), original_config)
+        baseline = self._state(port, workspace)
+        for key, value in processing.items():
+            self.assertEqual(baseline[1][key], value, "completed processing evidence must remain exact")
+        for path, identity in paused_files.items():
+            self.assertEqual(baseline[2].get(path), identity, "durable files must survive without rewrites")
+        replay = self._worker(root, config_path, url, "replay")
+        self.assertTrue(replay["success"], self._tail(log_path))
+        self.assertEqual(replay["summary"], replacement["summary"])
+        self.assertEqual(self._state(port, workspace), baseline)
+        self.assertLessEqual(log_path.stat().st_size, 1 << 20)
+        work = [line.removeprefix("DOCSPEC_TEST_WORK ") for line in log_path.read_text().splitlines()
+                if line.startswith("DOCSPEC_TEST_WORK ")]
+        for phase in ("processing", "validation", "readback"):
+            self.assertEqual(work.count(phase), 1, f"{phase} must execute exactly once across recovery and replay: {work}")
+        return host, baseline, replacement["summary"], replay["summary"]
 
     def _state(self, port, workspace):
         return (self._get(port, "/datasets/dagster_fixture/latest"),

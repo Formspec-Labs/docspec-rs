@@ -2269,6 +2269,34 @@ fn stop_after(stop: Option<&str>, phase: &str) -> Result<()> {
 // records that deliberately preserve the first successful completion on retry.
 #[cfg(feature = "test-util")]
 fn work_started(phase: &str) {
+    // A subprocess fixture can stop the real HTTP operation between durable
+    // phases without returning an injected error or replacing its worker.
+    if std::env::var("DOCSPEC_TEST_PAUSE_BEFORE").as_deref() == Ok(phase) {
+        let marker =
+            std::env::var_os("DOCSPEC_TEST_PAUSE_MARKER").expect("test pause needs a marker path");
+        let resume =
+            std::env::var_os("DOCSPEC_TEST_RESUME_MARKER").expect("test pause needs a resume path");
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(marker)
+        {
+            Ok(_) => {
+                let started = std::time::Instant::now();
+                while !Path::new(&resume).exists() {
+                    assert!(
+                        started.elapsed() < std::time::Duration::from_secs(60),
+                        "test pause was not released within 60 seconds"
+                    );
+                    // Deliberately holds this test worker; the other HTTP
+                    // runtime threads remain available to inspect its state.
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => panic!("cannot create test pause marker: {error}"),
+        }
+    }
     eprintln!("DOCSPEC_TEST_WORK {phase}");
 }
 
