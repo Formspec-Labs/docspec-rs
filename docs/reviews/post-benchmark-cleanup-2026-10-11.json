@@ -1,0 +1,81 @@
+{
+  "scope": "Inactive rebuildable Cargo files and temporary benchmark Python environment/cache only",
+  "started_at": "2026-10-11T18:31:18.682839+00:00",
+  "state": "complete",
+  "source_commit": "9e02a4f889b507246171749f27d680ccbeb614cb",
+  "preserved_executables": {
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec": {
+      "device": 16777233,
+      "inode": 778902959,
+      "bytes": 164532064,
+      "mtime_ns": 1791735763071261213
+    },
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec": {
+      "device": 16777233,
+      "inode": 778813766,
+      "bytes": 304543296,
+      "mtime_ns": 1791732203338351862
+    }
+  },
+  "preserved": "All source, lockfiles, inputs, native results, logs, reports, measurement records and unrelated work",
+  "measurement": "Per-path logical and allocated bytes; hard-linked/shared contents may remain elsewhere. Volume free-space change includes unrelated activity.",
+  "targets": [
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/deps",
+      "regular_files": 1134,
+      "logical_bytes": 1348774356,
+      "allocated_bytes": 1351172096,
+      "symlinks": 0,
+      "lsof_exit": 1,
+      "open_holders": 0,
+      "state": "removed"
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/build",
+      "regular_files": 496,
+      "logical_bytes": 81928994,
+      "allocated_bytes": 83206144,
+      "symlinks": 0,
+      "lsof_exit": 1,
+      "open_holders": 0,
+      "state": "removed"
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/.fingerprint",
+      "regular_files": 1826,
+      "logical_bytes": 369324,
+      "allocated_bytes": 7487488,
+      "symlinks": 0,
+      "lsof_exit": 1,
+      "open_holders": 0,
+      "state": "removed"
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/env",
+      "regular_files": 4125,
+      "logical_bytes": 256687593,
+      "allocated_bytes": 268713984,
+      "symlinks": 3,
+      "lsof_exit": 1,
+      "open_holders": 0,
+      "state": "removed"
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/__pycache__",
+      "regular_files": 8,
+      "logical_bytes": 75073,
+      "allocated_bytes": 94208,
+      "symlinks": 0,
+      "lsof_exit": 1,
+      "open_holders": 0,
+      "state": "removed"
+    }
+  ],
+  "free_before_bytes": 10346012672,
+  "finished_at": "2026-10-11T18:31:21.219384+00:00",
+  "free_after_bytes": 11605291008,
+  "removed_logical_bytes": 1687835340,
+  "removed_allocated_bytes": 1710673920,
+  "preserved_executable_metadata_unchanged": true,
+  "observed_free_space_change_bytes": 1259278336
+}

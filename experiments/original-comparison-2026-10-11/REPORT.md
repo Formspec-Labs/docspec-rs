@@ -148,3 +148,10 @@ The primary inputs/native workspaces are retained under this experiment's ignore
 The archive retains their bounded command/selection/check/measurement evidence,
 not duplicate dataset payloads. A fresh collection needs a new output directory;
 the runners refuse to overwrite existing series. No production code changed.
+
+Post-benchmark cleanup removed the temporary Python environment and inactive
+compiler caches. Both benchmarked current executables, prepared inputs, native
+results and measurement evidence remain. Recreate the Python environment with
+the locked offline command in [setup.json](setup.json) before rerunning. The
+[cleanup receipt](../../docs/reviews/post-benchmark-cleanup-2026-10-11.json) records
+exact paths, open-file checks and measured storage changes.
