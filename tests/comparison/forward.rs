@@ -440,3 +440,147 @@ async fn receipt_only_middle_hop_preserves_evidence_effects_and_corrupt_history_
         );
     }
 }
+
+#[tokio::test]
+async fn foreign_certificates_do_not_inherit_another_workspaces_local_authority() {
+    let producer_root = tempfile::tempdir().unwrap();
+    let consumer_root = tempfile::tempdir().unwrap();
+    let (producer, before, original) = scalar::fixture(producer_root.path(), false).await;
+    let replacements = vec![
+        (Some(0), None),
+        (Some(0), None),
+        (None, Some(String::new())),
+    ];
+    let after = update(
+        &producer,
+        producer_root.path(),
+        &before,
+        "replacement",
+        &replacements,
+    )
+    .await;
+    let mut expected = original
+        .iter()
+        .filter(|row| row.0.is_some() && row.0 != Some(0))
+        .cloned()
+        .collect::<Vec<_>>();
+    expected.extend(replacements.clone());
+    // Establish that this is genuinely eligible producer-local acceleration,
+    // with exact values and occurrence addresses checked against Rust bags.
+    check(
+        &producer,
+        &before,
+        &after,
+        &expected,
+        ComparisonPath::ForwardChanges,
+        None,
+    )
+    .await;
+    let certified = producer
+        .change_certificate(&after.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    let portable: docspec::model::CertifiedChanges =
+        serde_json::from_slice(&serde_json::to_vec(&certified).unwrap()).unwrap();
+    assert_eq!(portable, certified);
+    // Explicit independent verification is an audit, not catalog admission.
+    docspec::engine::verify_applied_changes(&before, &after, &portable.changes, scalar::limits())
+        .await
+        .unwrap();
+
+    // The other host has real results and a real local certificate using the
+    // same dataset/operation names and values, but different immutable objects.
+    let (consumer, local_before, local_original) =
+        scalar::fixture(consumer_root.path(), false).await;
+    assert_eq!(local_original, original);
+    let local_after = update(
+        &consumer,
+        consumer_root.path(),
+        &local_before,
+        "replacement",
+        &replacements,
+    )
+    .await;
+    let local_certificate = consumer
+        .change_certificate(&local_after.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(local_after.id, after.id);
+    assert_eq!(local_after.dataset.dataset, after.dataset.dataset);
+    assert_ne!(local_before.manifest, before.manifest);
+    assert_ne!(local_after.manifest, after.manifest);
+    assert_ne!(
+        local_certificate.certificate.descriptor,
+        portable.certificate.descriptor
+    );
+    let retained = consumer
+        .inspect(&local_after.dataset.dataset)
+        .await
+        .unwrap();
+
+    // Both fast-path discovery and force-full comparison require this host's
+    // exact available endpoints before opening payloads or local certificates.
+    for identity in [ComparisonIdentity::Values, ComparisonIdentity::Occurrences] {
+        for force_full in [false, true] {
+            let options = ComparisonOptions {
+                identity,
+                force_full,
+            };
+            for first in [&before, &local_before] {
+                assert_eq!(
+                    consumer
+                        .compare_with_options(first, &after, "source", &options)
+                        .await
+                        .unwrap_err()
+                        .code(),
+                    "release_mismatch"
+                );
+                assert_eq!(
+                    consumer
+                        .changes(first, &after, "source", &options)
+                        .await
+                        .err()
+                        .expect("foreign endpoint stream must refuse")
+                        .code(),
+                    "release_mismatch"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        consumer
+            .change_certificate(&after.version_ref())
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_changes"
+    );
+    assert_eq!(
+        consumer
+            .inspect(&local_after.dataset.dataset)
+            .await
+            .unwrap(),
+        retained
+    );
+    assert_eq!(
+        consumer
+            .change_certificate(&local_after.version_ref())
+            .await
+            .unwrap()
+            .unwrap(),
+        local_certificate
+    );
+    // Refusing foreign authority must not disable the consumer's actual local
+    // fast path or alter its exact nullable/duplicate output.
+    check(
+        &consumer,
+        &local_before,
+        &local_after,
+        &expected,
+        ComparisonPath::ForwardChanges,
+        None,
+    )
+    .await;
+}
