@@ -1,0 +1,13 @@
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/maintenance/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/4d8bf36693af483fa3c5db0aeca3d90e/data/9ee66445-16cd-4d3c-8960-ca77d6dfbe8a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-materialization
+{"code":"invalid_owner_protection","phase":"maintenance_failed"}
+
+thread 'engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts' (52514650) panicked at src/engine/remote_build_provider_tests/maintenance.rs:303:9:
+isolated maintenance qualification failed; retain recorded references
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

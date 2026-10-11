@@ -145,4 +145,29 @@ Previously produced format2 images lacking lifecycle Authority proof safely
 refuse the strengthened image validator; they cannot receive this new safety
 assurance retroactively. No provider run or build performed by reviewer.
 
+## Exact remote export ownership closure
+
+Static APPROVE of `0e53b7373e9b5edae33f4fba4219a84879bc2bf50c2e89181c55ff8d5454de51`.
+Root's actual provider run stopped at `invalid_owner_protection` before deletion:
+the generic owner guard accepted only one retained prefix, whereas remote export
+correctly retains both host staging and remote destination prefixes. That was a
+real supported-route omission, not permission to accept arbitrary extra paths.
+
+The repair keeps the original single-prefix path unchanged. A dual-prefix remote
+export instead resolves `completed_stage` using the reservation's exact export
+operation. That existing admitted typed proof validates operation/native revision,
+attempt/protection co-commit, host and retained prefixes, staged identity and
+validation ordering, and remote materialization/validation co-completion. The
+owner guard additionally requires the exact attempt, complete ObjectRef equality
+and ordered two-path reservation equality. A sibling URI under the same prefix
+or altered protection fails; Local cannot use this exception. No payload read,
+new ownership record or broad prefix relaxation is introduced.
+
+The fixture uses actual transfer/completion, closes its transport before metadata
+ownership lookup, then checks the same identity after explicit export retirement;
+unknown sibling and added protection path remain refusals. The removal.rs cfg
+cleanup only consumes an otherwise unused plan in nonremote builds and removes
+unreachable wildcard arms when Local is the sole enum variant. Remote mismatch
+arms and effects remain unchanged. Runtime and provider rerun remain root-owned.
+
 Root runtime closure: `remote-maintenance-epoch-regression-2026-10-11.log` passes saved target-intent/fence reconciliation and an actual pending source upload followed by deletion and old-attempt refusal with no further object I/O. `remote-maintenance-focused-checks-2026-10-11.log` completes the affected integration cases, maintained plain/gzip reader checks, restore, worker and doc targets. `remote-maintenance-final-gate-2026-10-11.log` passes formatting, strict all-target/all-feature Clippy and the local/mock remote startup/admission fixtures. Previously passing full library/integration cases were not repeated. Provider qualification is recorded separately.

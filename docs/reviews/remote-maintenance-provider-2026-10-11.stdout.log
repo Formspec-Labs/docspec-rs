@@ -1,0 +1,12 @@
+
+running 1 test
+test engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts ... {"dataset":"docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69","generation":"d141f808-cd28-4bcb-8c75-17164ba64f69","host_directory":"/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWrrq7o","phase":"maintenance_start","prefix":"s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/maintenance"}
+FAILED
+
+failures:
+
+failures:
+    engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 353 filtered out; finished in 145.81s
+

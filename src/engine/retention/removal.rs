@@ -356,6 +356,8 @@ impl Engine {
     }
 
     fn check_removal_actor(&self, actor: &RemovalActor, plan: &RemovalPlan) -> Result<()> {
+        #[cfg(not(feature = "remote"))]
+        let _ = plan;
         match (&self.inner.objects, actor) {
             (storage::Objects::Local, RemovalActor::Local) => Ok(()),
             #[cfg(feature = "remote")]
@@ -371,6 +373,7 @@ impl Engine {
                 let generation = self.remote_maintenance()?;
                 authority.check(generation, &[])
             }
+            #[cfg(feature = "remote")]
             _ => Err(Error::refusal(
                 "remote_removal_authority",
                 "remote object deletion requires exact temporary authority",
@@ -417,6 +420,7 @@ impl Engine {
                     .remove(reader, object, &self.inner.lifecycle.budget)
                     .await
             }
+            #[cfg(feature = "remote")]
             _ => Err(invalid()),
         }
     }

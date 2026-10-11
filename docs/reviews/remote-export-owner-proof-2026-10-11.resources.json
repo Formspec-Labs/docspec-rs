@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T15:35:40.765182+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "remote_export_owner_proof_accepts_exact_dual_path_completion_after_retirement",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 4060418048,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 96801,
+  "min_free_bytes": 3644903424,
+  "last_observed_utc": "2026-10-11T15:36:06.855737+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 4056530944,
+  "finished_utc": "2026-10-11T15:36:08.860207+00:00"
+}

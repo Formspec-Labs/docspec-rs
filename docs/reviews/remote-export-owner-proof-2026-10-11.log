@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.17s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpYwo2S0/host/objects/data/e73b5c95d1f340b58bbf58dac627703f/data/e6fd8a12-ca33-4f52-a215-124f73d604c2-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+test engine::export::remote::stage_removal_tests::remote_export_owner_proof_accepts_exact_dual_path_completion_after_retirement ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 354 filtered out; finished in 1.10s
+

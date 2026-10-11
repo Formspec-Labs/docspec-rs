@@ -593,3 +593,86 @@ async fn stage_cleanup_waits_for_configured_reader_and_its_admitted_stream() {
     configured.shutdown().await.unwrap();
     read.finish();
 }
+
+#[tokio::test]
+async fn remote_export_owner_proof_accepts_exact_dual_path_completion_after_retirement() {
+    let fixture = fixture().await;
+    remote_completion(&fixture).await;
+    let Fixture {
+        root: _root,
+        engine,
+        spec,
+        writer,
+        ..
+    } = fixture;
+    let view = engine.inner.lifecycle.open(&spec.dataset).await.unwrap();
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    let completed = completed_stage(&rows, &spec.operation, Some(&engine.inner.lifecycle.budget))
+        .unwrap()
+        .unwrap();
+    let object = completed.remote;
+    let report = writer.finish();
+    assert_eq!(report.methods("PUT"), 1);
+    // Creation and ownership resolve entirely from retained native metadata.
+    // The closed transport makes an accidental payload recheck fail this test.
+    assert_eq!(
+        engine
+            .qualified_object(&spec.dataset, &object.path, &object.digest)
+            .await
+            .unwrap(),
+        object
+    );
+    let retirement = engine
+        .plan_export_retirement(
+            &spec.dataset,
+            &id("end-export"),
+            &spec.operation,
+            "end unused recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_export(&retirement).await.unwrap();
+    assert_eq!(
+        engine
+            .qualified_object(&spec.dataset, &object.path, &object.digest)
+            .await
+            .unwrap(),
+        object
+    );
+    let unknown = object.path.replace("export.parquet", "uncreated.parquet");
+    assert_eq!(
+        engine
+            .qualified_object(&spec.dataset, &unknown, &object.digest)
+            .await
+            .unwrap_err()
+            .code(),
+        "unqualified_owner_reference"
+    );
+    let view = engine.inner.lifecycle.open(&spec.dataset).await.unwrap();
+    let mut protection: Protection = engine
+        .inner
+        .lifecycle
+        .get(&view, "protection/closed-stage")
+        .await
+        .unwrap()
+        .unwrap();
+    protection.paths.push("s3://bucket/owned/another/".into());
+    engine
+        .inner
+        .lifecycle
+        .commit(
+            &view,
+            vec![record("protection/closed-stage", &protection).unwrap()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        engine
+            .qualified_object(&spec.dataset, &object.path, &object.digest)
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_export"
+    );
+    engine.shutdown().await.unwrap();
+}

@@ -1,0 +1,31 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+warning: unreachable pattern
+   --> src/engine/retention/removal.rs:420:13
+    |
+406 |             (_, RemovalActor::Local) => {
+    |             ------------------------ matches all the relevant values
+...
+420 |             _ => Err(invalid()),
+    |             ^ no value can reach this
+    |
+    = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable pattern
+   --> src/engine/retention/removal.rs:374:13
+    |
+360 |             (storage::Objects::Local, RemovalActor::Local) => Ok(()),
+    |             ---------------------------------------------- matches all the relevant values
+...
+374 |             _ => Err(Error::refusal(
+    |             ^ no value can reach this
+
+warning: unused variable: `plan`
+   --> src/engine/retention/removal.rs:358:57
+    |
+358 |     fn check_removal_actor(&self, actor: &RemovalActor, plan: &RemovalPlan) -> Result<()> {
+    |                                                         ^^^^ help: if this is intentional, prefix it with an underscore: `_plan`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docspec` (lib) generated 3 warnings (run `cargo fix --lib -p docspec` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized] target(s) in 9.38s

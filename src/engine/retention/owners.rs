@@ -757,9 +757,34 @@ impl Engine {
         let (_, _, reservation) = rows
             .get_record::<Protection>(&format!("protection/{attempt}"))?
             .ok_or_else(invalid)?;
-        if reservation.id != attempt
-            || reservation.consumer != *owner
-            || reservation.paths != [prefix.child(attempt.as_str())?.protection_prefix()?]
+        if reservation.id != attempt || reservation.consumer != *owner {
+            return Err(invalid());
+        }
+        let retained_prefix = prefix.child(attempt.as_str())?.protection_prefix()?;
+        if reservation.paths.len() == 1 && reservation.paths[0] == retained_prefix {
+            return Ok(());
+        }
+        // Remote exports protect both their host stage and exact remote target.
+        // Require the existing typed transfer proof, not merely an extra matching
+        // prefix: another file beneath the same reservation is not an export.
+        if self.inner.retained.is_local() {
+            return Err(invalid());
+        }
+        let operation = Id::new(
+            reservation
+                .purpose
+                .strip_suffix("/export")
+                .ok_or_else(invalid)?,
+        )?;
+        let completed = crate::engine::export::remote::completed_stage(
+            rows,
+            &operation,
+            Some(&self.inner.lifecycle.budget),
+        )?
+        .ok_or_else(invalid)?;
+        if completed.attempt != attempt
+            || completed.remote != *object
+            || reservation.paths != [completed.host_prefix, retained_prefix]
         {
             return Err(invalid());
         }

@@ -8,6 +8,25 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Setup {
+    dataset: Id,
+    prefix: String,
+    generation: uuid::Uuid,
+    source: ReleasePin,
+    current: crate::export::ExportPin,
+    unused_request: ExportSpec,
+    unused_object: ObjectRef,
+}
+
+fn checked<T>(phase: &str, result: Result<T>) -> Result<T> {
+    if let Err(error) = &result {
+        eprintln!("{}", json!({"phase":phase,"code":error.code()}));
+    }
+    result
+}
+
 fn limits() -> Limits {
     Limits {
         compute_threads: 1,
@@ -319,133 +338,251 @@ async fn qualify() -> Result<()> {
         "s3://{}/__r2_data_catalog/docspec-qualification/{name}/maintenance",
         env("DOCSPEC_S3_BUCKET")?
     );
-    let raw = connect(&prefix).await?;
-    let physical_root =
-        iceberg::NamespaceIdent::new(format!("docspec_generation_{}", generation.simple()));
-    if raw.catalog.namespace_exists(&physical_root).await? {
+    let (directory, selected, current, unused, obsolete) =
+        if let Some(resume) = std::env::var_os("DOCSPEC_MAINTENANCE_RESUME_DIR") {
+            let directory = std::fs::canonicalize(resume)?;
+            let file = std::fs::File::open(directory.join("setup.json"))?;
+            let mut bytes = Vec::new();
+            file.take(16385).read_to_end(&mut bytes)?;
+            if bytes.len() > 16384 {
+                return Err(Error::refusal("provider_scope", "setup exceeds bound"));
+            }
+            let saved: Setup = serde_json::from_slice(&bytes)?;
+            if saved.dataset != dataset
+                || saved.prefix != prefix
+                || saved.generation != generation
+                || saved.source.dataset.dataset != dataset
+                || saved.current.dataset != dataset
+                || saved.current.source != saved.source.version_ref()
+                || saved.current.id != Id::new("current")?
+                || saved.unused_request.dataset != dataset
+                || saved.unused_request.operation != Id::new("unused")?
+                || saved.unused_request.source != saved.source.version_ref()
+                || saved.unused_request.channel != Id::new("unused")?
+                || saved.unused_request.expected.is_some()
+                || saved.unused_request.policy != saved.current.policy
+                || saved.unused_object.owner != dataset
+                || !saved
+                    .unused_object
+                    .path
+                    .starts_with(&format!("{prefix}/{dataset}/"))
+                || saved.unused_object.path == saved.current.object.path
+            {
+                return Err(Error::refusal(
+                    "provider_scope",
+                    "setup differs from explicit qualification scope",
+                ));
+            }
+            // Resume only retained setup; no input open, Build or export call.
+            println!(
+                "{}",
+                json!({"phase":"maintenance_resume","dataset":dataset,
+                "generation":generation,"host_directory":directory})
+            );
+            (
+                directory,
+                saved.source,
+                saved.current,
+                saved.unused_request,
+                saved.unused_object,
+            )
+        } else {
+            let raw = connect(&prefix).await?;
+            let physical_root =
+                iceberg::NamespaceIdent::new(format!("docspec_generation_{}", generation.simple()));
+            if raw.catalog.namespace_exists(&physical_root).await? {
+                return Err(Error::refusal(
+                    "provider_scope",
+                    "generation already exists",
+                ));
+            }
+            let directory = tempfile::tempdir()?.keep();
+            println!(
+                "{}",
+                json!({"phase":"maintenance_start", "dataset":dataset, "prefix":prefix,
+        "generation":generation, "host_directory":directory})
+            );
+            let source = directory.join("input.parquet");
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("text", DataType::Utf8, true),
+                Field::new("counter", DataType::Int64, false),
+                Field::new("private_canary", DataType::Utf8, false),
+            ]));
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(StringArray::from(vec![
+                        Some("same"),
+                        Some("same"),
+                        None,
+                        Some(""),
+                    ])),
+                    Arc::new(Int64Array::from(vec![1_i64, 1, 2, 2])),
+                    Arc::new(StringArray::from(vec!["synthetic-private-canary"; 4])),
+                ],
+            )?;
+            let mut writer = ArrowWriter::try_new(std::fs::File::create(&source)?, schema, None)?;
+            writer.write(&batch)?;
+            writer.close()?;
+            let data = Engine::with_remote(
+                directory.join("data"),
+                configured(&prefix, generation, false).await?,
+                limits(),
+            )
+            .await?;
+            let selected = data
+                .run(&RunSpec {
+                    dataset: dataset.clone(),
+                    operation: Id::new("initial")?,
+                    base: None,
+                    relationship: None,
+                    input: source.to_string_lossy().into_owned(),
+                    expected_digest: storage::digest(&source)?.0,
+                    sql: "SELECT * FROM input".into(),
+                    definition: "maintenance-v1".into(),
+                })
+                .await?;
+            let spec = ExportSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("current")?,
+                source: selected.version_ref(),
+                channel: Id::new("public")?,
+                expected: None,
+                policy: ExportPolicy {
+                    group: "source".into(),
+                    rows: ExportRows::All,
+                    columns: vec!["counter".into(), "text".into()],
+                },
+            };
+            let current = data.export(&spec).await?;
+            let unused = ExportSpec {
+                operation: Id::new("unused")?,
+                channel: Id::new("unused")?,
+                ..spec
+            };
+            assert_eq!(
+                data.export_until(&unused, "transfer")
+                    .await
+                    .err()
+                    .unwrap()
+                    .code(),
+                "injected_failure"
+            );
+            let view = data.existing_lifecycle_view(&dataset).await?;
+            let material: crate::engine::export::ExportMaterialized = data
+                .inner
+                .lifecycle
+                .get(&view, "export-materialized/unused")
+                .await?
+                .ok_or_else(|| {
+                    Error::refusal("provider_evidence", "unused transferred export missing")
+                })?;
+            let obsolete = material.object;
+            assert_ne!(obsolete.path, current.object.path);
+            receipt(
+                &directory,
+                "setup.json",
+                &json!({"dataset":dataset,"prefix":prefix,"generation":generation,
+        "source":selected,"current":current,"unused_request":unused,"unused_object":obsolete}),
+            )?;
+            std::fs::remove_file(&source)?;
+            data.shutdown().await?;
+            drop(data);
+            (directory, selected, current, unused, obsolete)
+        };
+    let engine = checked(
+        "maintenance_open",
+        Engine::with_remote(
+            directory.join("maintenance"),
+            configured(&prefix, generation, true).await?,
+            limits(),
+        )
+        .await,
+    )?;
+    checked("maintenance_selected_source", engine.latest(&dataset).await)
+        .map(|live| assert_eq!(live, selected))?;
+    checked(
+        "maintenance_selected_export",
+        engine.latest_export(&dataset, &Id::new("public")?).await,
+    )
+    .map(|live| assert_eq!(live, current))?;
+    let view = checked(
+        "maintenance_retirement_view",
+        engine.existing_lifecycle_view(&dataset).await,
+    )?;
+    let material: crate::engine::export::ExportMaterialized = checked(
+        "maintenance_unused_lookup",
+        engine
+            .inner
+            .lifecycle
+            .get(&view, "export-materialized/unused")
+            .await,
+    )?
+    .ok_or_else(|| Error::refusal("provider_evidence", "retained unused export missing"))?;
+    if material.object != obsolete
+        || material.rows != current.rows
+        || material.fields != current.fields
+    {
         return Err(Error::refusal(
             "provider_scope",
-            "generation already exists",
+            "saved unused export differs from retained completion",
         ));
     }
-    let directory = tempfile::tempdir()?.keep();
-    println!(
-        "{}",
-        json!({"phase":"maintenance_start", "dataset":dataset, "prefix":prefix,
-        "generation":generation, "host_directory":directory})
-    );
-    let source = directory.join("input.parquet");
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("text", DataType::Utf8, true),
-        Field::new("counter", DataType::Int64, false),
-        Field::new("private_canary", DataType::Utf8, false),
-    ]));
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![
-            Arc::new(StringArray::from(vec![
-                Some("same"),
-                Some("same"),
-                None,
-                Some(""),
-            ])),
-            Arc::new(Int64Array::from(vec![1_i64, 1, 2, 2])),
-            Arc::new(StringArray::from(vec!["synthetic-private-canary"; 4])),
-        ],
+    let saved_retirement: Option<Retirement> = checked(
+        "maintenance_retirement_lookup",
+        engine
+            .inner
+            .lifecycle
+            .get(&view, "retirement/end_unused")
+            .await,
     )?;
-    let mut writer = ArrowWriter::try_new(std::fs::File::create(&source)?, schema, None)?;
-    writer.write(&batch)?;
-    writer.close()?;
-    let data = Engine::with_remote(
-        directory.join("data"),
-        configured(&prefix, generation, false).await?,
-        limits(),
-    )
-    .await?;
-    let selected = data
-        .run(&RunSpec {
-            dataset: dataset.clone(),
-            operation: Id::new("initial")?,
-            base: None,
-            relationship: None,
-            input: source.to_string_lossy().into_owned(),
-            expected_digest: storage::digest(&source)?.0,
-            sql: "SELECT * FROM input".into(),
-            definition: "maintenance-v1".into(),
-        })
-        .await?;
-    let spec = ExportSpec {
-        dataset: dataset.clone(),
-        operation: Id::new("current")?,
-        source: selected.version_ref(),
-        channel: Id::new("public")?,
-        expected: None,
-        policy: ExportPolicy {
-            group: "source".into(),
-            rows: ExportRows::All,
-            columns: vec!["counter".into(), "text".into()],
-        },
+    let retirement = if let Some(saved) = saved_retirement {
+        if saved.plan.dataset != dataset
+            || saved.plan.retirement != Id::new("end_unused")?
+            || saved.plan.scope
+                != (RetirementScope::ExportRecovery {
+                    operation: unused.operation.clone(),
+                })
+        {
+            return Err(Error::refusal("provider_scope", "saved retirement differs"));
+        }
+        saved.plan
+    } else {
+        checked(
+            "maintenance_retirement_plan",
+            engine
+                .plan_export_retirement(
+                    &dataset,
+                    &Id::new("end_unused")?,
+                    &unused.operation,
+                    "unselected export ended",
+                )
+                .await,
+        )?
     };
-    let current = data.export(&spec).await?;
-    let unused = ExportSpec {
-        operation: Id::new("unused")?,
-        channel: Id::new("unused")?,
-        ..spec
-    };
-    assert_eq!(
-        data.export_until(&unused, "transfer")
-            .await
-            .err()
-            .unwrap()
-            .code(),
-        "injected_failure"
-    );
-    let view = data.existing_lifecycle_view(&dataset).await?;
-    let material: crate::engine::export::ExportMaterialized = data
-        .inner
-        .lifecycle
-        .get(&view, "export-materialized/unused")
-        .await?
-        .ok_or_else(|| Error::refusal("provider_evidence", "unused transferred export missing"))?;
-    let obsolete = material.object;
-    assert_ne!(obsolete.path, current.object.path);
-    receipt(
-        &directory,
-        "setup.json",
-        &json!({"dataset":dataset,"prefix":prefix,"generation":generation,
-        "source":selected,"current":current,"unused_request":unused,"unused_object":obsolete}),
+    checked(
+        "maintenance_retirement_execute",
+        engine.retire_export(&retirement).await,
     )?;
-    std::fs::remove_file(&source)?;
-    data.shutdown().await?;
-    drop(data);
-    let engine = Engine::with_remote(
-        directory.join("maintenance"),
-        configured(&prefix, generation, true).await?,
-        limits(),
-    )
-    .await?;
-    let retirement = engine
-        .plan_export_retirement(
-            &dataset,
-            &Id::new("end_unused")?,
-            &unused.operation,
-            "unselected export ended",
-        )
-        .await?;
-    engine.retire_export(&retirement).await?;
-    let point = engine
-        .create_restore_point(&dataset, &Id::new("portable")?)
-        .await?;
+    let point = checked(
+        "maintenance_point_capture",
+        engine
+            .create_restore_point(&dataset, &Id::new("portable")?)
+            .await,
+    )?;
     let budget = &engine.inner.lifecycle.budget;
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
-    let closure: crate::restore::remote::RemoteRestorePoint = inputs::read_manifest(
-        &engine.inner.objects,
-        &point.manifest,
-        budget,
-        &mut 0,
-        &memory,
-    )
-    .await?;
+    let closure: crate::restore::remote::RemoteRestorePoint = checked(
+        "maintenance_point_decode",
+        inputs::read_manifest(
+            &engine.inner.objects,
+            &point.manifest,
+            budget,
+            &mut 0,
+            &memory,
+        )
+        .await,
+    )?;
     drop(memory);
     assert!(closure.objects.contains(&current.object));
     assert!(!closure.objects.contains(&obsolete));
@@ -457,18 +594,21 @@ async fn qualify() -> Result<()> {
         .clone();
     assert!(closure.objects.contains(&source_object));
     let removal = Id::new("one_unused_file")?;
-    let preview = engine
-        .plan_removal(
-            &dataset,
-            &removal,
-            &[
-                obsolete.clone(),
-                current.object.clone(),
-                source_object.clone(),
-            ],
-            "exact unused file",
-        )
-        .await?;
+    let preview = checked(
+        "maintenance_removal_preview",
+        engine
+            .plan_removal(
+                &dataset,
+                &removal,
+                &[
+                    obsolete.clone(),
+                    current.object.clone(),
+                    source_object.clone(),
+                ],
+                "exact unused file",
+            )
+            .await,
+    )?;
     for object in [&current.object, &source_object] {
         assert!(
             preview
@@ -491,7 +631,10 @@ async fn qualify() -> Result<()> {
             .blocker
             .is_none()
     );
-    let reader = engine.read_export(&current).await?;
+    let reader = checked(
+        "maintenance_reader_open",
+        engine.read_export(&current).await,
+    )?;
     let other = engine.clone();
     let plan = preview.clone();
     let mut preparation = tokio::spawn(async move { other.prepare_remote_removal(&plan).await });
@@ -523,7 +666,10 @@ async fn qualify() -> Result<()> {
         json!({"phase":"removal_reserved","point":point,"intent":saved.intent,"current":current,"source":selected})
     );
     let deletion_expires = now()?.saturating_add(120);
-    let (actor, _) = authority(&prefix, generation, exact.clone(), deletion_expires).await?;
+    let (actor, _) = checked(
+        "maintenance_delete_authority",
+        authority(&prefix, generation, exact.clone(), deletion_expires).await,
+    )?;
     assert_eq!(
         engine
             .resume_removal_remote_until(&dataset, &removal, actor, "removal-unlink")
@@ -541,10 +687,16 @@ async fn qualify() -> Result<()> {
         limits(),
     )
     .await?;
-    let (actor, _) = authority(&prefix, generation, exact.clone(), deletion_expires).await?;
-    let complete = engine
-        .resume_removal_remote(&dataset, &removal, actor)
-        .await?;
+    let (actor, _) = checked(
+        "maintenance_delete_authority",
+        authority(&prefix, generation, exact.clone(), deletion_expires).await,
+    )?;
+    let complete = checked(
+        "maintenance_delete_resume",
+        engine
+            .resume_removal_remote(&dataset, &removal, actor)
+            .await,
+    )?;
     assert!(complete.complete);
     assert_eq!(complete.reconciled_absent_bytes, obsolete.bytes);
     assert_eq!(complete.confirmed_unlinked_bytes, 0);
@@ -626,7 +778,10 @@ async fn qualify() -> Result<()> {
         limits(),
     )
     .await?;
-    let restored = retry.restore_remote(&point, target.clone(), false).await?;
+    let restored = checked(
+        "maintenance_restore_resume",
+        retry.restore_remote(&point, target.clone(), false).await,
+    )?;
     assert_eq!(restored.generation, target_generation);
     std::fs::write(
         directory.join("forward-old"),
