@@ -1,0 +1,6 @@
+
+thread 'engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts' (52612894) panicked at src/engine/remote_build_provider_tests/maintenance.rs:764:5:
+assertion `left == right` failed
+  left: "iceberg"
+ right: "injected_failure"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

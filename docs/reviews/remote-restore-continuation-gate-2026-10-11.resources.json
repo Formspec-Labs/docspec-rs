@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-11T15:48:37.734297+00:00",
+  "command": [
+    "sh",
+    "/tmp/docspec-owner-proof-gate.sh"
+  ],
+  "free_before_bytes": 3137781760,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 28911,
+  "min_free_bytes": 3136331776,
+  "last_observed_utc": "2026-10-11T15:48:55.806226+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 3135877120,
+  "finished_utc": "2026-10-11T15:48:57.816626+00:00"
+}

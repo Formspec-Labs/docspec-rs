@@ -1,0 +1,12 @@
+
+running 1 test
+test engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts ... {"control_directory":"/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWrrq7o/old-restore-0310e83d60ea457da2d2abb1000d79f0","phase":"maintenance_restore_only","point":{"dataset":"docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69","id":"portable","manifest":{"bytes":40927,"digest":"ad1750893a7c14d333716c362e0a5f2bd4c00792c7071c8bc16a159198a02377","owner":"docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69","path":"s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/maintenance/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/restore_2aeb02bbda26441aa23e2e0f2f170e4d/point.json"}},"source_generation":"d141f808-cd28-4bcb-8c75-17164ba64f69","target_generation":"f1994a3b-321f-43a6-8ce3-5e102c5b5189"}
+FAILED
+
+failures:
+
+failures:
+    engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 355 filtered out; finished in 16.28s
+

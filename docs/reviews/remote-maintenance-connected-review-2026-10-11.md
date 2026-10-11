@@ -170,4 +170,20 @@ cleanup only consumes an otherwise unused plan in nonremote builds and removes
 unreachable wildcard arms when Local is the sole enum variant. Remote mismatch
 arms and effects remain unchanged. Runtime and provider rerun remain root-owned.
 
+## Missing configured generation reconciliation
+
+Static APPROVE of `455b59b149a2b772ac2a2613e2544df969bdc1a1fd8b58383d11f4a939a5c37f`.
+Actual provider root LIST403 was not authoritative absence, while exact target
+namespace HEAD404 confirmed the fresh generation did not exist. The fallback is
+limited to LIST of the explicitly configured generation root: typed native
+NamespaceNotFound remains absent without another request; otherwise exact native
+namespace_exists must confirm absence. Existing root preserves the original LIST
+error, HEAD failure propagates, and child-list errors never use the fallback.
+Successful LIST adds no HEAD and retains existing child shape checks. It never
+lists other generations or treats generic auth/transport errors as absence.
+The maintained REST/Axum fixture covers those distinct paths and exact request
+scope. Root reports focused pass in remote-missing-generation-root-2026-10-11.log;
+reviewer did not execute it or the provider continuation. Any unnecessary_unwrap
+lint correction should preserve this same root-only branch and short-circuit.
+
 Root runtime closure: `remote-maintenance-epoch-regression-2026-10-11.log` passes saved target-intent/fence reconciliation and an actual pending source upload followed by deletion and old-attempt refusal with no further object I/O. `remote-maintenance-focused-checks-2026-10-11.log` completes the affected integration cases, maintained plain/gzip reader checks, restore, worker and doc targets. `remote-maintenance-final-gate-2026-10-11.log` passes formatting, strict all-target/all-feature Clippy and the local/mock remote startup/admission fixtures. Previously passing full library/integration cases were not repeated. Provider qualification is recorded separately.

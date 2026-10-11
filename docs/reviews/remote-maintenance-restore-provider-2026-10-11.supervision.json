@@ -1,0 +1,21 @@
+{
+  "started_utc": "2026-10-11T15:49:38.864211+00:00",
+  "qualification_id": "docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-f22faff8f24325f2",
+    "--exact",
+    "engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "deadline_seconds": 900,
+  "free_before_bytes": 3131691008,
+  "executable_sha256": "8644fec79b27bf96ec719b0e3168ed0b9104c5ea8a2347e5f9f1f8c6099d74e5",
+  "protocol_sha256": "b3c0ae333e50c85eca6a52d9bf389a74b861115f7814d20c259c076ac5000620",
+  "exit_code": 101,
+  "finished_utc": "2026-10-11T15:49:57.132710+00:00",
+  "elapsed_seconds": 18.268518916971516,
+  "min_free_bytes": 3131113472,
+  "free_after_bytes": 3131068416
+}

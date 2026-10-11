@@ -1,0 +1,4 @@
+{"generation": "source_generation", "property_keys": ["location", "namespace_id"], "tables": [["docspec_generation_d141f808cd284bcb8c7517164ba64f69", "d_docspec_rs_qualification_d141f808_cd28_4bcb_8c75_17164ba64f69_d4315b591870", "lifecycle"], ["docspec_generation_d141f808cd284bcb8c7517164ba64f69", "d_docspec_rs_qualification_d141f808_cd28_4bcb_8c75_17164ba64f69_d4315b591870", "data_4d8bf36693af483fa3c5db0aeca3d90e"]]}
+{"generation": "target_generation", "property_keys": ["docspec.restore.intent", "namespace_id", "location"], "tables": []}
+{"property": "namespace_id", "source": "01a12b94-2276-7dd3-b26f-23fc5fe6e171", "target": "01a12ba8-0988-7f22-8aad-d7f675ded9b7"}
+{"property": "location", "source": "s3://spicy-regs/__r2_data_catalog/01a12b94-2276-7dd3-b26f-23fc5fe6e171", "target": "s3://spicy-regs/__r2_data_catalog/01a12b94-2276-7dd3-b26f-23fc5fe6e171/"}

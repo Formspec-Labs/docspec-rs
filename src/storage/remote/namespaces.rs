@@ -105,12 +105,17 @@ impl Scope {
         // generations and then filter them, or silently drop unknown children.
         let namespaces = match catalog.list_namespaces(parent.as_ref()).await {
             Ok(namespaces) => namespaces,
-            Err(error)
-                if self.root.is_some()
-                    && parent == self.root
-                    && error.kind() == iceberg::ErrorKind::NamespaceNotFound =>
-            {
-                Vec::new()
+            Err(error) if self.root.is_some() && parent == self.root => {
+                // Some catalogs deny LIST for a missing parent. Only an exact
+                // namespace existence check may turn that error into absence.
+                let root = self.root.as_ref().expect("configured root was checked");
+                if error.kind() == iceberg::ErrorKind::NamespaceNotFound
+                    || !catalog.namespace_exists(root).await?
+                {
+                    Vec::new()
+                } else {
+                    return Err(error);
+                }
             }
             Err(error) => return Err(error),
         };
@@ -191,6 +196,127 @@ mod tests {
         );
         assert!(scope.physical(&scope.root.clone().unwrap()).is_err());
         assert!(Scope::from_property(Some("not-a-uuid".into())).is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_root_listing_requires_exact_namespace_absence() {
+        use axum::{Json, Router, extract::Request, http::StatusCode, response::IntoResponse};
+        use std::{sync::Mutex, time::Duration};
+
+        // Exercise the real REST decoder and scoped adapter. A HEAD error is
+        // never absence; a successful LIST must not introduce another request.
+        for (list_status, head_status, child, succeeds, expected_heads) in [
+            (403, 404, false, true, 1),
+            (403, 200, false, false, 1),
+            (403, 403, false, false, 1),
+            (200, 403, false, true, 0),
+            (404, 403, false, true, 0),
+            (403, 404, true, false, 0),
+        ] {
+            let generation = "00000000-0000-4000-8000-000000000001";
+            let root = "docspec_generation_00000000000040008000000000000001";
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let observed = requests.clone();
+            let router = Router::new().fallback(move |request: Request| {
+                let observed = observed.clone();
+                async move {
+                    let method = request.method().as_str().to_owned();
+                    let uri = request.uri().clone();
+                    observed.lock().unwrap().push((method.clone(), uri.clone()));
+                    let (status, body) = match (method.as_str(), uri.path()) {
+                        ("GET", "/v1/config") => (
+                            200,
+                            serde_json::json!({
+                                "defaults": {}, "overrides": {}
+                            }),
+                        ),
+                        ("GET", "/v1/namespaces") if list_status == 200 => {
+                            (200, serde_json::json!({"namespaces": [[root, "d_owner"]]}))
+                        }
+                        ("GET", "/v1/namespaces") => (
+                            list_status,
+                            serde_json::json!({
+                                "error": {"message": "fixture listing denied", "type":
+                                    "NamespaceActionForbidden", "code": list_status}
+                            }),
+                        ),
+                        ("HEAD", _) if uri.path() == format!("/v1/namespaces/{root}") => {
+                            (head_status, serde_json::Value::Null)
+                        }
+                        _ => (500, serde_json::Value::Null),
+                    };
+                    (StatusCode::from_u16(status).unwrap(), Json(body)).into_response()
+                }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+            let catalog = super::super::remote_catalog(
+                HashMap::from([
+                    ("uri".into(), format!("http://{address}")),
+                    ("warehouse".into(), "fixture".into()),
+                    ("docspec.namespace-generation".into(), generation.into()),
+                ]),
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+            let parent = child.then(|| NamespaceIdent::new("d_owner".into()));
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                catalog.list_namespaces(parent.as_ref()),
+            )
+            .await
+            .unwrap();
+            server.abort();
+            let _ = server.await;
+            let requests = requests.lock().unwrap();
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|(method, _)| method == "HEAD")
+                    .count(),
+                expected_heads,
+                "{list_status}/{head_status}, child={child}: {requests:?}"
+            );
+            let lists: Vec<_> = requests
+                .iter()
+                .filter(|(method, uri)| method == "GET" && uri.path() == "/v1/namespaces")
+                .collect();
+            assert_eq!(lists.len(), 1);
+            let expected_parent = if child {
+                format!("{root}\u{1f}d_owner")
+            } else {
+                root.into()
+            };
+            let query: HashMap<String, String> =
+                reqwest_rest::Url::parse(&format!("http://{address}{}", lists[0].1))
+                    .unwrap()
+                    .query_pairs()
+                    .into_owned()
+                    .collect();
+            assert_eq!(query.get("parent"), Some(&expected_parent));
+            if succeeds {
+                let namespaces = result.unwrap();
+                assert_eq!(
+                    namespaces,
+                    if list_status == 200 {
+                        vec![NamespaceIdent::new("d_owner".into())]
+                    } else {
+                        Vec::new()
+                    }
+                );
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.kind(), iceberg::ErrorKind::Unexpected);
+                // Existing roots and child requests preserve the original LIST
+                // error; failed HEAD returns its own error, without an empty view.
+                assert_eq!(
+                    error.to_string().contains("fixture listing denied"),
+                    head_status == 200 || child
+                );
+            }
+        }
     }
 
     #[tokio::test]

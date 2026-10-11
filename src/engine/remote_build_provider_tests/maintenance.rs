@@ -20,9 +20,53 @@ struct Setup {
     unused_object: ObjectRef,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestoreHandoff {
+    point: crate::restore::RestorePointRef,
+    prefix: String,
+    removal: RemovalStatus,
+    source_generation: uuid::Uuid,
+    target_generation: uuid::Uuid,
+}
+
+fn read_handoff<T: serde::de::DeserializeOwned>(directory: &Path, name: &str) -> Result<T> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(directory.join(name))?
+        .take(1 << 20)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() == 1 << 20 {
+        return Err(Error::refusal("provider_scope", "handoff exceeds bound"));
+    }
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
 fn checked<T>(phase: &str, result: Result<T>) -> Result<T> {
     if let Err(error) = &result {
-        eprintln!("{}", json!({"phase":phase,"code":error.code()}));
+        let mut native = None;
+        let mut retryable = None;
+        let mut status = None;
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+        for _ in 0..8 {
+            let Some(current) = cause else {
+                break;
+            };
+            if let Some(error) = current.downcast_ref::<iceberg::Error>() {
+                native = Some(error.kind().into_static());
+                retryable = Some(error.retryable());
+            }
+            if let Some(error) = current.downcast_ref::<reqwest_rest::Error>() {
+                status = error.status().map(|status| status.as_u16());
+            }
+            cause = current.source();
+        }
+        // Literal phase context and stable kind/status only: no upstream message,
+        // URL, response body, headers or arbitrary error context enters receipts.
+        eprintln!(
+            "{}",
+            json!({"phase":phase,"code":error.code(),
+            "native_kind":native,"retryable":retryable,"http_status":status})
+        );
     }
     result
 }
@@ -286,7 +330,16 @@ async fn old_actor_child() -> Result<()> {
     remote.catalog = catalog.clone();
     let engine = Engine::with_remote(directory.join("old-actor"), remote, limits()).await?;
     catalog.arm();
-    let outcome = engine.fence_operations(&dataset, 0).await;
+    let epoch = request
+        .get("epoch")
+        .map(|value| {
+            value
+                .as_u64()
+                .ok_or_else(|| Error::refusal("provider_scope", "child epoch differs"))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let outcome = engine.fence_operations(&dataset, epoch).await;
     if outcome.is_ok() {
         return Err(Error::refusal(
             "provider_evidence",
@@ -338,6 +391,9 @@ async fn qualify() -> Result<()> {
         "s3://{}/__r2_data_catalog/docspec-qualification/{name}/maintenance",
         env("DOCSPEC_S3_BUCKET")?
     );
+    if let Some(resume) = std::env::var_os("DOCSPEC_MAINTENANCE_RESTORE_DIR") {
+        return restore_saved(std::fs::canonicalize(resume)?, dataset, prefix, generation).await;
+    }
     let (directory, selected, current, unused, obsolete) =
         if let Some(resume) = std::env::var_os("DOCSPEC_MAINTENANCE_RESUME_DIR") {
             let directory = std::fs::canonicalize(resume)?;
@@ -720,15 +776,162 @@ async fn qualify() -> Result<()> {
     while now()? <= deletion_expires.saturating_add(2) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    receipt(
+    let handoff = RestoreHandoff {
+        point,
+        prefix,
+        removal: complete,
+        source_generation: generation,
+        target_generation: uuid::Uuid::new_v4(),
+    };
+    receipt(&directory, "restore.json", &serde_json::to_value(&handoff)?)?;
+    finish_restore(&directory, &directory, engine, handoff, selected, current).await
+}
+
+async fn restore_saved(
+    directory: std::path::PathBuf,
+    dataset: Id,
+    prefix: String,
+    generation: uuid::Uuid,
+) -> Result<()> {
+    let setup: Setup = read_handoff(&directory, "setup.json")?;
+    let saved: RestoreHandoff = read_handoff(&directory, "restore.json")?;
+    if setup.dataset != dataset
+        || setup.prefix != prefix
+        || setup.generation != generation
+        || setup.source.dataset.dataset != dataset
+        || setup.current.dataset != dataset
+        || setup.current.source != setup.source.version_ref()
+        || saved.prefix != prefix
+        || saved.source_generation != generation
+        || saved.target_generation == generation
+        || saved.target_generation.is_nil()
+        || saved.point.dataset != dataset
+        || saved.point.id != Id::new("portable")?
+        || saved.point.manifest.owner != dataset
+        || !saved
+            .point
+            .manifest
+            .path
+            .starts_with(&format!("{prefix}/{dataset}/restore_"))
+        || !saved.removal.complete
+        || saved.removal.intent.plan.dataset != dataset
+        || saved.removal.intent.plan.removal != Id::new("one_unused_file")?
+        || saved.removal.intent.objects.len() != 1
+        || saved
+            .removal
+            .intent
+            .objects
+            .first()
+            .and_then(|index| saved.removal.intent.plan.inspection.objects.get(*index))
+            .map(|entry| &entry.object)
+            != Some(&setup.unused_object)
+    {
+        return Err(Error::refusal(
+            "provider_scope",
+            "restore handoff differs from exact completed scope",
+        ));
+    }
+    let control = directory.join(format!("old-restore-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir(&control)?;
+    println!(
+        "{}",
+        json!({"phase":"maintenance_restore_only","source_generation":generation,
+        "target_generation":saved.target_generation,"point":saved.point,"control_directory":control})
+    );
+    let engine = checked(
+        "maintenance_restore_source",
+        Engine::with_remote(
+            control.join("source-host"),
+            configured(&prefix, generation, true).await?,
+            limits(),
+        )
+        .await,
+    )?;
+    let view = checked(
+        "maintenance_restore_source_view",
+        engine.existing_lifecycle_view(&dataset).await,
+    )?;
+    let point: Option<crate::restore::RestorePointRef> = checked(
+        "maintenance_restore_point_lookup",
+        engine
+            .inner
+            .lifecycle
+            .get(&view, "restore-point/portable")
+            .await,
+    )?;
+    if point.as_ref() != Some(&saved.point) {
+        return Err(Error::refusal("provider_scope", "live exact point differs"));
+    }
+    assert_eq!(
+        checked(
+            "maintenance_restore_source_pin",
+            engine.latest(&dataset).await
+        )?,
+        setup.source
+    );
+    assert_eq!(
+        checked(
+            "maintenance_restore_export_pin",
+            engine.latest_export(&dataset, &Id::new("public")?).await
+        )?,
+        setup.current
+    );
+    assert_eq!(
+        checked(
+            "maintenance_restore_removal_ack",
+            engine
+                .inspect_removal(&dataset, &Id::new("one_unused_file")?)
+                .await
+        )?,
+        saved.removal
+    );
+    // No Build/export, source-input open, retirement, capture, DELETE or mint.
+    finish_restore(
         &directory,
+        &control,
+        engine,
+        saved,
+        setup.source,
+        setup.current,
+    )
+    .await
+}
+
+async fn finish_restore(
+    directory: &Path,
+    control: &Path,
+    engine: Engine,
+    handoff: RestoreHandoff,
+    selected: ReleasePin,
+    current: crate::export::ExportPin,
+) -> Result<()> {
+    let RestoreHandoff {
+        point,
+        prefix,
+        source_generation: generation,
+        target_generation,
+        ..
+    } = handoff;
+    let dataset = point.dataset.clone();
+    let view = checked(
+        "maintenance_old_actor_epoch_view",
+        engine.existing_lifecycle_view(&dataset).await,
+    )?;
+    let authority: Authority = checked(
+        "maintenance_old_actor_epoch",
+        engine.inner.lifecycle.get(&view, "authority").await,
+    )?
+    .ok_or_else(|| Error::refusal("provider_evidence", "source authority missing"))?;
+    let old_epoch = authority.epoch;
+    receipt(
+        control,
         "old.request",
-        &json!({"dataset":dataset,"generation":generation,"prefix":prefix}),
+        &json!({"dataset":dataset,"generation":generation,"prefix":prefix,"epoch":old_epoch}),
     )?;
     let log = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(directory.join("old.log"))?;
+        .open(control.join("old.log"))?;
     let mut old = OldChild(
         Command::new(std::env::current_exe()?)
             .args([
@@ -738,13 +941,13 @@ async fn qualify() -> Result<()> {
                 "--nocapture",
                 "--test-threads=1",
             ])
-            .env("DOCSPEC_MAINTENANCE_CHILD_DIR", &directory)
+            .env("DOCSPEC_MAINTENANCE_CHILD_DIR", control)
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log))
             .spawn()?,
     );
     let start = Instant::now();
-    while !directory.join("old.metadata").is_file() {
+    while !control.join("old.metadata").is_file() {
         if start.elapsed() > Duration::from_secs(60) {
             return Err(Error::refusal(
                 "provider_deadline",
@@ -753,23 +956,25 @@ async fn qualify() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let target_generation = uuid::Uuid::new_v4();
-    let target = configured(&prefix, target_generation, true).await?;
-    receipt(
-        &directory,
-        "restore.json",
-        &json!({"point":point,"source_generation":generation,
-        "target_generation":target_generation,"prefix":prefix,"removal":complete}),
+    let target = checked(
+        "maintenance_restore_target",
+        configured(&prefix, target_generation, true).await,
     )?;
-    assert_eq!(
-        engine
-            .restore_remote_until(&point, target.clone(), false, "restore-remote-detached")
-            .await
-            .err()
-            .unwrap()
-            .code(),
-        "injected_failure"
-    );
+    match engine
+        .restore_remote_until(&point, target.clone(), false, "restore-remote-detached")
+        .await
+    {
+        Err(error) if error.code() == "injected_failure" => {}
+        Err(error) => {
+            return checked("maintenance_restore_detach", Err(error));
+        }
+        Ok(_) => {
+            return Err(Error::refusal(
+                "provider_evidence",
+                "restore detach stop was not reached",
+            ));
+        }
+    }
     engine.shutdown().await?;
     drop(engine);
     let retry = Engine::with_remote(
@@ -784,7 +989,7 @@ async fn qualify() -> Result<()> {
     )?;
     assert_eq!(restored.generation, target_generation);
     std::fs::write(
-        directory.join("forward-old"),
+        control.join("forward-old"),
         b"forward unchanged native commit",
     )?;
     let start = Instant::now();
@@ -801,9 +1006,9 @@ async fn qualify() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(std::fs::read(directory.join("old.native"))?, b"refused");
+    assert_eq!(std::fs::read(control.join("old.native"))?, b"refused");
     let child: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(directory.join("old.result"))?)?;
+        serde_json::from_slice(&std::fs::read(control.join("old.result"))?)?;
     assert_ne!(
         child["pid"].as_u64().unwrap(),
         u64::from(std::process::id())

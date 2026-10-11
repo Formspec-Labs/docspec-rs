@@ -1,0 +1,6 @@
+{"code":"invalid_restore_point","http_status":null,"native_kind":null,"phase":"maintenance_restore_detach","retryable":null}
+{"code":"invalid_restore_point","phase":"maintenance_failed"}
+
+thread 'engine::remote_build_provider_tests::maintenance::exact_remote_removal_and_detached_restore_reconcile_from_fresh_hosts' (52819522) panicked at src/engine/remote_build_provider_tests/maintenance.rs:375:9:
+isolated maintenance qualification failed; retain recorded references
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
