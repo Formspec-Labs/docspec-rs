@@ -984,6 +984,19 @@ and [continuation receipts](reviews/cargo-grouping-test-continuation-resources-2
 record logical/allocated bytes separately from volume free-space changes.
 Common dependencies, retained data and evidence remain intact.
 
+After the shared-candidate gate passed, user-requested cleanup removed inactive
+DocSpec package artifacts through maintained Cargo commands. Cargo reported
+**9.1 GiB** of dev artifacts and **173.5 MiB** of release artifacts; measured
+whole-volume free space increased by **9,206,673,408 bytes** during that cleanup.
+The [receipt](reviews/inactive-package-cleanup-2026-10-10.json) records exact
+profile scopes, empty open-handle checks, previews and unchanged source/lockfile
+and worker-ownership hashes. Dependency builds, retained workspaces and experiment
+evidence stayed intact. The provider example was subsequently rebuilt as needed.
+A separate [generated-cache cleanup](reviews/generated-cache-cleanup-2026-10-10.json)
+removed **121,307,136 allocated bytes** of inactive Python, pytest and Vite caches
+after an independent content/path review and fresh open-handle checks. Each
+receipt distinguishes removed-file accounting from shared-volume observations.
+
 ## Scoped scalar dependency correction
 
 The local engine now records omitted source-field requirements for one exact

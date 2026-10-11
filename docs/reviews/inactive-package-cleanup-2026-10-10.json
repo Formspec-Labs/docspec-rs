@@ -1,0 +1,61 @@
+{
+  "started_utc": "2026-10-11T02:07:03.964825+00:00",
+  "state": "completed",
+  "target": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target",
+  "scope": "Only Cargo-generated DocSpec dev and release artifacts; dependency builds, source, datasets, retained qualification workspaces and evidence remain. Full repository gate completed before cleanup.",
+  "free_before_bytes": 1543974912,
+  "protected_sha256": {
+    "Cargo.toml": "e64f92a7209ddd1a732bd6392f9417447afe3ba3fdc5a1020528147a4c814262",
+    "Cargo.lock": "d1409a8065272834be57e999dad54f725ca9aad2fdb1265f66d6d95fb9ca78dc",
+    "AGENTS.md": "7de9fd6e5228b89f003983941464ccc4133eac1a8039b33e3747a4b537f11851",
+    "src/engine/worker.rs": "4b898c1871fc980b54f821cec96fd89eb85a294063378041b70b4ec94e5c1b72"
+  },
+  "profiles": [
+    {
+      "profile": "dev",
+      "directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug",
+      "lsof_exit": 1,
+      "lsof_output_empty": true,
+      "preview_sha256": "7ffc14d369eec36390e7f28377ea7e03754a8f00086488cd74f7012e37650f03",
+      "command": [
+        "cargo",
+        "clean",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target",
+        "-p",
+        "docspec",
+        "--profile",
+        "dev"
+      ],
+      "exit_code": 0,
+      "output": "     Removed 776 files, 9.1GiB total\n"
+    },
+    {
+      "profile": "release",
+      "directory": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release",
+      "lsof_exit": 1,
+      "lsof_output_empty": true,
+      "preview_sha256": "d2d171d94141a733203bb6eccc1011d3ed7d6f8f532bb756a6e3dd48d914a297",
+      "command": [
+        "cargo",
+        "clean",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target",
+        "-p",
+        "docspec",
+        "--profile",
+        "release"
+      ],
+      "exit_code": 0,
+      "output": "     Removed 2 files, 173.5MiB total\n"
+    }
+  ],
+  "finished_utc": "2026-10-11T02:07:10.655813+00:00",
+  "free_after_bytes": 10750648320,
+  "observed_free_space_change_bytes": 9206673408,
+  "protected_unchanged": true
+}
