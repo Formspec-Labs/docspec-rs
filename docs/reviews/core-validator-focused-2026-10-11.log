@@ -1,0 +1,66 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.99s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 5 tests
+test engine::validation::tests::prior_readback_cannot_hide_missing_required_input_from_the_current_checker ... FAILED
+test engine::validation::tests::inherited_files_skip_inspection_only_with_the_exact_current_base_acknowledgment ... ok
+test engine::validation::tests::new_routine_validator_reuses_exact_processing_and_retires_only_old_checks ... ok
+test engine::validation::tests::related_readback_requalifies_current_check_without_rewriting_values_or_contributors ... FAILED
+test engine::validation::tests::older_readback_rechecks_once_after_phase_retirement_and_completed_result_stays_exact ... ok
+
+failures:
+
+---- engine::validation::tests::prior_readback_cannot_hide_missing_required_input_from_the_current_checker stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpS5LEjA/workspace/objects/data/cd1885a08572418b82a7c98064c1fa2d/data/ccc376b8-59ca-45c2-aba7-01fa0f0b1216-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+
+thread 'engine::validation::tests::prior_readback_cannot_hide_missing_required_input_from_the_current_checker' (50422173) panicked at src/engine/validation/tests.rs:384:5:
+assertion `left == right` failed
+  left: "unavailable_phase"
+ right: "io"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::validation::tests::related_readback_requalifies_current_check_without_rewriting_values_or_contributors stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/data/10c5a865807c43b487b0165b71776463/data/ceb4fbb1-1beb-434f-b6c2-972e4dc8ca6a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/summary/28c49abb0ccc45efb2022b4235e4e30e/data/5fea1c49-bd9a-4dd7-a9d0-40745f762ab5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/summary/c653bda3e2a84734864827125d2eb0f8/data/262a3b2b-1649-4dd8-9552-3506fbb6d247-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/data/10c5a865807c43b487b0165b71776463/data/ceb4fbb1-1beb-434f-b6c2-972e4dc8ca6a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/summary/28c49abb0ccc45efb2022b4235e4e30e/data/5fea1c49-bd9a-4dd7-a9d0-40745f762ab5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp6QYzUO/workspace/objects/summary/c653bda3e2a84734864827125d2eb0f8/data/262a3b2b-1649-4dd8-9552-3506fbb6d247-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::validation::tests::related_readback_requalifies_current_check_without_rewriting_values_or_contributors' (50422174) panicked at src/engine/validation/tests.rs:466:5:
+assertion `left == right` failed
+  left: 0
+ right: 3
+
+
+failures:
+    engine::validation::tests::prior_readback_cannot_hide_missing_required_input_from_the_current_checker
+    engine::validation::tests::related_readback_requalifies_current_check_without_rewriting_values_or_contributors
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 332 filtered out; finished in 2.13s
+
+error: test failed, to rerun pass `--lib`

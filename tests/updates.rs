@@ -1010,7 +1010,10 @@ async fn killed_update_workers_resume_retained_handoffs_and_exact_changes() {
         }
         if let Some(readback) = before.get("readback/changed") {
             assert_eq!(after["readback/changed"], *readback);
-            assert_eq!(readback, &serde_json::to_value(&release).unwrap());
+            assert_eq!(
+                serde_json::from_value::<docspec::model::ReleasePin>(readback.clone()).unwrap(),
+                release
+            );
         }
         assert_eq!(engine.update(&request).await.unwrap(), release);
     }

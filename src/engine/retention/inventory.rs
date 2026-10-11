@@ -1502,7 +1502,10 @@ impl Inventory {
         } else if key.starts_with("backfill-readback/") {
             let completed: ReadbackCompletion = decode(json)?;
             self.release_pin(&completed.release, origin)?;
-        } else if key.starts_with("result/") || key.starts_with("readback/") {
+        } else if key.starts_with("readback/") {
+            let completed: crate::engine::validation::ValidatedReadback = decode(json)?;
+            self.release_pin(&completed.release, origin)?;
+        } else if key.starts_with("result/") {
             self.release_pin(&decode(json)?, origin)?;
         } else if key == "authority" {
             let authority: Authority = decode(json)?;
@@ -1892,6 +1895,7 @@ fn normalize_legacy_state_fields<T: 'static>(
         normalize_legacy_dataset(original)?;
     } else if TypeId::of::<T>() == TypeId::of::<ReleasePin>()
         || TypeId::of::<T>() == TypeId::of::<ReadbackCompletion>()
+        || TypeId::of::<T>() == TypeId::of::<crate::engine::validation::ValidatedReadback>()
     {
         if let Some(dataset) = original.get_mut("dataset") {
             normalize_legacy_dataset(dataset)?;
@@ -2575,6 +2579,31 @@ mod scalar_readback_fields_tests {
         }
         known["scalar_validator"] = serde_json::json!(17);
         assert!(serde_json::from_value::<Strict<ReadbackCompletion>>(known).is_err());
+        // Generic readback has its own private check identity. Public results and
+        // scalar readbacks must not silently accept this dependency-bearing field.
+        type Generic = crate::engine::validation::ValidatedReadback;
+        let decoded: Strict<Generic> = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(decoded.0.release, release);
+        let mut generic = legacy.clone();
+        generic["validator"] = serde_json::json!(crate::engine::validation::VALIDATOR);
+        let decoded: Strict<Generic> = serde_json::from_value(generic.clone()).unwrap();
+        assert_eq!(decoded.0.release, release);
+        assert!(serde_json::from_value::<Strict<ReleasePin>>(generic.clone()).is_err());
+        assert!(serde_json::from_value::<Strict<ReadbackCompletion>>(generic.clone()).is_err());
+        for top_level in [true, false] {
+            let mut unknown = generic.clone();
+            if top_level {
+                unknown["unqualified_dependency"] = serde_json::json!("/hidden.parquet");
+            } else {
+                unknown["dataset"]["unqualified_dependency"] = serde_json::json!("/hidden.parquet");
+            }
+            assert!(serde_json::from_value::<Strict<Generic>>(unknown).is_err());
+        }
+        generic["validator"] = serde_json::json!(17);
+        assert!(serde_json::from_value::<Strict<Generic>>(generic).is_err());
+        let mut generic_legacy = legacy.clone();
+        generic_legacy["dataset"]["changes"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Strict<Generic>>(generic_legacy).is_ok());
         let mut legacy_changes = legacy;
         legacy_changes["dataset"]["changes"] = serde_json::Value::Null;
         let completed: Strict<ReadbackCompletion> = serde_json::from_value(legacy_changes).unwrap();

@@ -55,7 +55,9 @@ mod refresh;
 pub(crate) mod retention;
 use retention::owners::ReferenceProtections;
 mod schema;
+mod validation;
 mod verification;
+use validation::ValidatedReadback;
 mod worker;
 mod write;
 
@@ -88,6 +90,8 @@ struct Inner {
     release_decodes: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     initial_build_queries: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    routine_checks: std::sync::atomic::AtomicUsize,
     #[cfg(feature = "test-util")]
     scalar_reuse_pause: Mutex<Option<ScalarReusePause>>,
 }
@@ -178,6 +182,8 @@ pub enum PlanPhaseReason {
     NoRetainedCompletion,
     /// The exact retained completion's recovery promise was explicitly retired.
     RecoveryRetired,
+    /// Retained readback predates the current built-in routine checker.
+    ValidatorChanged,
 }
 
 /// A bounded explanation of reuse and work remaining before selection.
@@ -201,6 +207,8 @@ pub struct RunPlan {
 }
 
 const PHASES: [&str; 4] = ["admission", "processing", "validation", "readback"];
+// Bump for material computation/interpretation changes; routine-only checker
+// changes use validation::VALIDATOR so qualified value work stays reusable.
 const PROCESSOR: &str = "docspec.dataset.v10";
 // Format 12 makes explicitly based Builds preserve exact native schema history.
 pub(crate) const FORMAT: u32 = 12;
@@ -367,6 +375,8 @@ impl Engine {
                 release_decodes: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 initial_build_queries: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                routine_checks: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(feature = "test-util")]
                 scalar_reuse_pause: Mutex::new(None),
             }),
@@ -500,11 +510,17 @@ impl Engine {
         let readback = lifecycle
             .rows(&view)
             .await?
-            .get_record::<ReleasePin>(&readback_key)?
-            .map(|(revision, _, _)| RetainedGeneration {
-                key: readback_key,
-                revision,
+            .get_record::<ValidatedReadback>(&readback_key)?
+            .map(|(revision, _, completed)| {
+                (
+                    RetainedGeneration {
+                        key: readback_key,
+                        revision,
+                    },
+                    completed.current(),
+                )
             });
+        let current_readback = readback.as_ref().is_some_and(|(_, current)| *current);
         // A readback preserves expensive work but still needs guarded selection.
         // A retained result completes this operation independently of today's head.
         if completed || readback.is_some() {
@@ -512,20 +528,30 @@ impl Engine {
                 dataset: spec.dataset().clone(),
                 operation: spec.operation().clone(),
                 completed,
-                reusable_phases: if readback.is_some() {
+                reusable_phases: if readback.is_some() && (completed || current_readback) {
                     vec!["readback".into()]
                 } else {
                     Vec::new()
                 },
                 reusable_phase_origins: readback
-                    .map(|origin| BTreeMap::from([("readback".into(), origin)]))
+                    .filter(|(_, current)| completed || *current)
+                    .map(|(origin, _)| BTreeMap::from([("readback".into(), origin)]))
                     .unwrap_or_default(),
                 required_phases: if completed {
                     Vec::new()
-                } else {
+                } else if current_readback {
                     vec!["selection".into()]
+                } else {
+                    vec!["validation".into(), "readback".into(), "selection".into()]
                 },
-                required_phase_reasons: BTreeMap::new(),
+                required_phase_reasons: if !completed && !current_readback {
+                    ["validation", "readback"]
+                        .into_iter()
+                        .map(|phase| (phase.into(), PlanPhaseReason::ValidatorChanged))
+                        .collect()
+                } else {
+                    BTreeMap::new()
+                },
                 limits: lifecycle.budget.limits.clone(),
             });
         }
@@ -1471,10 +1497,12 @@ impl Engine {
             // Readback is an independent retained promise. Earlier phase retirement
             // must not force its already qualified values through preparation again.
             let retained_view = lifecycle.open(spec.dataset()).await?;
-            if let Some(release) = lifecycle
-                .get::<ReleasePin>(&retained_view, &format!("readback/{}", spec.operation()))
+            if let Some(completed) = lifecycle
+                .get::<ValidatedReadback>(&retained_view, &format!("readback/{}", spec.operation()))
                 .await?
             {
+                let current_validator = completed.current();
+                let release = completed.release;
                 let protections = self
                     .retained_protections(&retained_view, &format!("readback/{}", spec.operation()))
                     .await?;
@@ -1493,24 +1521,30 @@ impl Engine {
                         "retained readback differs from its admitted operation",
                     ));
                 }
-                // Refresh selection checks the complete dependency graph below.
-                // Other selections check retained availability here, once.
-                if !matches!(spec, OperationRequest::Refresh(_)) {
-                    check_release_available(&self.inner.objects, &release, &lifecycle.budget)
-                        .await?;
-                }
-                stop_after(stop, "readback")?;
-                return self
-                    .select_prepared(
+                let retained = if current_validator {
+                    Retained {
+                        value: release,
+                        protections,
+                    }
+                } else {
+                    self.revalidate_readback(
                         spec,
                         &operation,
                         Retained {
                             value: release,
                             protections,
                         },
-                        stop,
                     )
-                    .await;
+                    .await?
+                };
+                // Refresh selection checks the complete dependency graph below.
+                // Other selections check retained availability here, once.
+                if current_validator && !matches!(spec, OperationRequest::Refresh(_)) {
+                    check_release_available(&self.inner.objects, &retained, &lifecycle.budget)
+                        .await?;
+                }
+                stop_after(stop, "readback")?;
+                return self.select_prepared(spec, &operation, retained, stop).await;
             }
 
             let PreparedSource {
@@ -1580,9 +1614,6 @@ impl Engine {
                 None
             };
             let mut checks = verification::Checks::routine(self.inner.objects.clone());
-            if let Some(base) = &base {
-                checks.trust(base, &lifecycle.budget).await?;
-            }
             let validation_dependencies =
                 processing.dependencies.clone().map(|mut dependencies| {
                     if let Some(related) = &related {
@@ -1610,6 +1641,13 @@ impl Engine {
                 crate::progress::phase(spec.dataset(), spec.operation(), "validation", async {
                     #[cfg(feature = "test-util")]
                     work_started("validation");
+                    #[cfg(test)]
+                    self.inner
+                        .routine_checks
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if let Some(base) = &base {
+                        self.trust_current_readback(base, &mut checks).await?;
+                    }
                     checks.table(&table, &lifecycle.budget).await?;
                     verify_changes(
                         spec,
@@ -1883,10 +1921,12 @@ impl Engine {
             // while the same expensive materialized values remain reusable.
             let readback_key = format!("readback/{}", spec.operation());
             let readback_view = lifecycle.open(spec.dataset()).await?;
-            let release = if let Some(release) = lifecycle
-                .get::<ReleasePin>(&readback_view, &readback_key)
+            let release = if let Some(completed) = lifecycle
+                .get::<ValidatedReadback>(&readback_view, &readback_key)
                 .await?
             {
+                completed.require_current()?;
+                let release = completed.release;
                 if release.dataset != dataset {
                     return Err(Error::refusal(
                         "corrupt_phase",
@@ -1940,11 +1980,13 @@ impl Engine {
                     self.check_completion(&view, &operation, spec.operation())
                         .await?;
                     Ok(
-                        if let Some(completed) =
-                            lifecycle.get::<ReleasePin>(&view, &readback_key).await?
+                        if let Some(completed) = lifecycle
+                            .get::<ValidatedReadback>(&view, &readback_key)
+                            .await?
                         {
+                            completed.require_current()?;
                             Retained {
-                                value: completed,
+                                value: completed.release,
                                 protections: self
                                     .retained_protections(&view, &readback_key)
                                     .await?,
@@ -1954,7 +1996,7 @@ impl Engine {
                                 spec.dataset(),
                                 &view,
                                 &readback_key,
-                                &release,
+                                &ValidatedReadback::stamp(&release),
                                 readback_protections.as_ref(),
                             )?;
                             lifecycle.commit(&view, records).await?;
@@ -2208,6 +2250,21 @@ fn captured_manifest<'a>(
 }
 
 fn phase_key(
+    spec: &OperationRequest,
+    request: &str,
+    eligibility: u64,
+    phase: &str,
+    base_manifest: Option<&ObjectRef>,
+    schema_key: Option<&String>,
+) -> Result<String> {
+    let key = material_phase_key(spec, request, eligibility, phase, base_manifest, schema_key)?;
+    if phase == "validation" {
+        return validation::phase_key(&key);
+    }
+    Ok(key)
+}
+
+fn material_phase_key(
     spec: &OperationRequest,
     request: &str,
     eligibility: u64,
@@ -2793,7 +2850,10 @@ async fn verify_local_release(
     if checks.deep() {
         storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
     } else if checks.inspects_tables() {
-        storage::check_available(decoded.inputs.values().cloned().collect(), budget).await?;
+        checks
+            .objects()
+            .check_available(decoded.inputs.values().cloned().collect(), budget)
+            .await?;
     }
     let source = decoded
         .groups

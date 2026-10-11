@@ -934,7 +934,10 @@ async fn relocated_build_retry_keeps_the_original_readback_request() {
         .to_string_lossy()
         .into_owned();
     let resumed = engine.run(&spec).await.unwrap();
-    assert_eq!(serde_json::to_value(resumed).unwrap(), original);
+    assert_eq!(
+        resumed,
+        serde_json::from_value::<docspec::model::ReleasePin>(original).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -1016,8 +1019,11 @@ fn killed_readback_plan_names_pending_selection_and_resume_executes_no_payload_w
         "pending selection must reuse readback without admission, SQL, validation or serialization work"
     );
     assert_eq!(
-        serde_json::to_value(&release).unwrap(),
-        before[format!("readback/{}", spec.operation)]
+        release,
+        serde_json::from_value::<docspec::model::ReleasePin>(
+            before[format!("readback/{}", spec.operation)].clone()
+        )
+        .unwrap()
     );
     let (after, work): (serde_json::Value, _) =
         support::run_cli(directory.path(), &["inspect", spec.dataset.as_str()]);

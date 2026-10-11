@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T13:19:50.967678+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "engine::validation::tests::"
+  ],
+  "free_before_bytes": 8013746176,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 48243,
+  "min_free_bytes": 7921627136,
+  "last_observed_utc": "2026-10-11T13:20:19.045237+00:00",
+  "exit_code": 101,
+  "free_after_bytes": 7995006976,
+  "finished_utc": "2026-10-11T13:20:21.057548+00:00"
+}

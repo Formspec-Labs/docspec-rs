@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.84s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 6 tests
+test engine::validation::tests::prior_readback_cannot_hide_missing_required_input_from_the_current_checker ... ok
+test engine::validation::tests::inherited_files_skip_inspection_only_with_the_exact_current_base_acknowledgment ... ok
+test engine::validation::tests::current_readback_survives_upstream_retirement_without_revalidation_or_revival ... ok
+test engine::validation::tests::new_routine_validator_reuses_exact_processing_and_retires_only_old_checks ... ok
+test engine::validation::tests::related_readback_requalifies_current_check_without_rewriting_values_or_contributors ... ok
+test engine::validation::tests::older_readback_rechecks_once_after_phase_retirement_and_completed_result_stays_exact ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 332 filtered out; finished in 1.72s
+
