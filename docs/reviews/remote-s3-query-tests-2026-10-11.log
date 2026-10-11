@@ -1,0 +1,98 @@
+     Locking 2 packages to latest Rust 1.94 compatible versions
+      Adding h2 v0.4.19
+      Adding wasm-streams v0.4.2
+   Compiling tokio-util v0.7.19
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling chrono v0.4.45
+   Compiling rustls-native-certs v0.8.4
+   Compiling quick-xml v0.39.4
+   Compiling chacha20 v0.10.2
+   Compiling h2 v0.4.19
+   Compiling tokio-stream v0.1.19
+   Compiling sqlx-core v0.8.6
+   Compiling chrono-tz v0.10.4
+   Compiling rand v0.10.3
+   Compiling uuid v1.27.0
+   Compiling tempfile v3.27.0
+   Compiling apache-avro v0.21.0
+   Compiling moka v0.12.16
+   Compiling sqlx-sqlite v0.8.6
+   Compiling hyper v1.12.0
+   Compiling hyper-util v0.1.21
+   Compiling sqlx v0.8.6
+   Compiling arrow-array v58.4.0
+   Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling reqwest v0.12.28
+   Compiling reqwest v0.13.5
+   Compiling arrow-select v58.4.0
+   Compiling arrow-arith v58.4.0
+   Compiling arrow-ord v58.4.0
+   Compiling arrow-ipc v58.4.0
+   Compiling arrow-string v58.4.0
+   Compiling object_store v0.13.2
+   Compiling arrow-cast v58.4.0
+   Compiling arrow-row v58.4.0
+   Compiling opendal-core v0.57.0
+   Compiling arrow-json v58.4.0
+   Compiling arrow-csv v58.4.0
+   Compiling parquet v58.4.0
+   Compiling arrow v58.4.0
+   Compiling opendal-layer-retry v0.57.0
+   Compiling opendal-service-s3 v0.57.0
+   Compiling opendal-layer-logging v0.57.0
+   Compiling opendal-layer-timeout v0.57.0
+   Compiling opendal-layer-concurrent-limit v0.57.0
+   Compiling opendal v0.57.0
+   Compiling datafusion-common v53.1.0
+   Compiling iceberg v0.10.1
+   Compiling datafusion-expr-common v53.1.0
+   Compiling datafusion-physical-expr-common v53.1.0
+   Compiling datafusion-functions-aggregate-common v53.1.0
+   Compiling datafusion-functions-window-common v53.1.0
+   Compiling datafusion-expr v53.1.0
+   Compiling datafusion-physical-expr v53.1.0
+   Compiling datafusion-execution v53.1.0
+   Compiling datafusion-functions v53.1.0
+   Compiling iceberg-catalog-rest v0.10.1
+   Compiling iceberg-catalog-sql v0.10.1
+   Compiling iceberg-storage-opendal v0.10.1
+   Compiling datafusion-functions-aggregate v53.1.0
+   Compiling datafusion-optimizer v53.1.0
+   Compiling datafusion-functions-window v53.1.0
+   Compiling datafusion-physical-plan v53.1.0
+   Compiling datafusion-physical-expr-adapter v53.1.0
+   Compiling datafusion-functions-nested v53.1.0
+   Compiling datafusion-sql v53.1.0
+   Compiling datafusion-session v53.1.0
+   Compiling datafusion-datasource v53.1.0
+   Compiling datafusion-pruning v53.1.0
+   Compiling datafusion-catalog v53.1.0
+   Compiling datafusion-datasource-csv v53.1.0
+   Compiling datafusion-datasource-json v53.1.0
+   Compiling datafusion-datasource-arrow v53.1.0
+   Compiling datafusion-datasource-parquet v53.1.0
+   Compiling datafusion-physical-optimizer v53.1.0
+   Compiling datafusion-catalog-listing v53.1.0
+   Compiling datafusion-functions-table v53.1.0
+   Compiling datafusion v53.1.0
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 1m 22s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+
+thread 'engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet' (44701777) panicked at src/engine/remote_query_tests.rs:101:14:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet ... FAILED
+
+failures:
+
+failures:
+    engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.21s
+
+error: test failed, to rerun pass `--lib`

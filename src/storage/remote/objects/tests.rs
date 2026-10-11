@@ -11,7 +11,7 @@ use std::{
 };
 
 mod pinning;
-mod writes;
+pub(crate) mod writes;
 
 fn properties() -> HashMap<String, String> {
     HashMap::from([
@@ -261,7 +261,7 @@ impl ReadFixture {
         Self::serve(payload, sizes, None, None)
     }
 
-    fn inventory(contents: HashMap<String, Vec<u8>>) -> Self {
+    pub(crate) fn inventory(contents: HashMap<String, Vec<u8>>) -> Self {
         Self::serve(Vec::new(), [0; 2], Some(contents), None)
     }
 
@@ -338,7 +338,7 @@ impl ReadFixture {
                     name.eq_ignore_ascii_case("range")
                         .then(|| value.trim().to_owned())
                 });
-                requests.push((method.clone(), range));
+                requests.push((method.clone(), range.clone()));
                 let bytes = if let Some(contents) = &contents {
                     let Some(bytes) = contents.get(&uri) else {
                         write!(socket, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
@@ -358,7 +358,7 @@ impl ReadFixture {
                     heads += 1;
                     write!(
                         socket,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n"
                     )
                     .unwrap();
                 } else {
@@ -366,6 +366,42 @@ impl ReadFixture {
                     if let Some((reached, held)) = hold.take() {
                         reached.send(()).unwrap();
                         held.recv_timeout(Duration::from_secs(5)).unwrap();
+                    }
+                    if contents.is_some() {
+                        let (start, end) = match range.as_deref() {
+                            None => (0, bytes.len()),
+                            Some(value) => {
+                                let (start, end) = value
+                                    .strip_prefix("bytes=")
+                                    .unwrap()
+                                    .split_once('-')
+                                    .unwrap();
+                                if start.is_empty() {
+                                    (
+                                        bytes.len().saturating_sub(end.parse::<usize>().unwrap()),
+                                        bytes.len(),
+                                    )
+                                } else {
+                                    (
+                                        start.parse::<usize>().unwrap(),
+                                        if end.is_empty() {
+                                            bytes.len()
+                                        } else {
+                                            (end.parse::<usize>().unwrap() + 1).min(bytes.len())
+                                        },
+                                    )
+                                }
+                            }
+                        };
+                        let selected = &bytes[start..end];
+                        let size = selected.len();
+                        if range.is_some() {
+                            write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes {start}-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n", end.saturating_sub(1), bytes.len()).unwrap();
+                        } else {
+                            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n").unwrap();
+                        }
+                        socket.write_all(selected).unwrap();
+                        continue;
                     }
                     let size = bytes.len();
                     let range_size = if contents.is_some() {
@@ -385,6 +421,10 @@ impl ReadFixture {
             server,
             paths,
         }
+    }
+
+    pub(crate) fn observed_paths(&self) -> Vec<(String, String)> {
+        self.paths.lock().unwrap().clone()
     }
 
     pub(crate) fn objects(&self) -> RemoteObjects {

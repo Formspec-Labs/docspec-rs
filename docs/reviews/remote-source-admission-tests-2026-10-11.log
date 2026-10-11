@@ -1,0 +1,29 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 17.69s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 7 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test engine::locations::remote_tests::readable_in_scope_remote_input_has_no_ownership_without_creation_evidence ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test engine::locations::remote_tests::saved_remote_intent_does_not_turn_auth_failure_into_absence ... ok
+DOCSPEC_TEST_WORK admission
+test engine::locations::remote_tests::present_remote_destination_with_wrong_digest_never_triggers_upload ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+test engine::locations::remote_tests::transferred_remote_admission_recovers_without_original_source_or_second_put ... ok
+test engine::locations::remote_tests::reserved_remote_admission_resumes_same_destination_then_reuses_completed_phase ... ok
+DOCSPEC_TEST_WORK processing
+test engine::locations::remote_tests::lost_remote_put_response_reconciles_exact_intent_and_completes_admission ... ok
+test engine::locations::remote_tests::pending_remote_intent_does_not_poison_another_operation_with_same_material_request ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 281 filtered out; finished in 0.32s
+

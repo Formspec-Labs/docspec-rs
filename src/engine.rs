@@ -24,6 +24,7 @@ use tokio::sync::{Mutex, RwLock};
 
 mod admission;
 mod backfill;
+pub(crate) mod locations;
 #[doc(inline)]
 pub use backfill::{BackfillPlan, read_combined};
 mod changes;
@@ -70,6 +71,7 @@ pub struct Engine {
 #[derive(Debug)]
 struct Inner {
     root: PathBuf,
+    retained: locations::Location,
     lifecycle: Lifecycle,
     objects: storage::Objects,
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
@@ -235,12 +237,15 @@ impl Engine {
         ownership: Arc<worker::Host>,
         owned_catalog: bool,
     ) -> Result<Self> {
+        let retained = locations::Location::root(&objects, &root);
         let scratch = root.join("scratch");
         std::fs::create_dir_all(&scratch)?;
         let budget = Budget::in_workspace(limits, &scratch)?;
+        objects.register_query_store(budget.runtime_env())?;
         Ok(Self {
             inner: Arc::new(Inner {
                 root,
+                retained,
                 lifecycle: Lifecycle::new(catalog, budget),
                 objects,
                 locks: Mutex::new(BTreeMap::new()),
@@ -763,6 +768,9 @@ impl Engine {
     ) -> futures::future::BoxFuture<'a, Result<PreparedSource>> {
         Box::pin(async move {
             let lifecycle = &self.inner.lifecycle;
+            if !self.inner.retained.is_local() && !matches!(spec, OperationRequest::Build(_)) {
+                return Err(locations::unsupported());
+            }
             if let Some(processing) = self.phase(spec, operation, "processing").await? {
                 let admission = if processing.dependencies.is_none() {
                     let admission = self.phase(spec, operation, "admission").await?.ok_or_else(|| {
@@ -819,18 +827,24 @@ impl Engine {
                     .await?
                     .unwrap_or_default();
                 let inputs = spec.inputs();
-                let size = inputs
-                    .iter()
-                    .try_fold(0u64, |sum, (name, input)| -> Result<u64> {
-                        // Reused managed inputs consume no new input-copy space;
-                        // retain the existing estimate for output/intermediate work.
-                        let bytes = if let Some(object) = captured.inputs.get(name) {
-                            object.bytes.saturating_mul(2)
-                        } else {
-                            std::fs::metadata(&input.path)?.len().saturating_mul(3)
-                        };
-                        Ok(sum.saturating_add(bytes))
-                    })?;
+                let size = if self.inner.retained.is_local() {
+                    inputs
+                        .iter()
+                        .try_fold(0u64, |sum, (name, input)| -> Result<u64> {
+                            // Reused managed inputs consume no new input-copy space;
+                            // retain the existing estimate for output/intermediate work.
+                            let bytes = if let Some(object) = captured.inputs.get(name) {
+                                object.bytes.saturating_mul(2)
+                            } else {
+                                std::fs::metadata(&input.path)?.len().saturating_mul(3)
+                            };
+                            Ok(sum.saturating_add(bytes))
+                        })?
+                } else {
+                    0
+                };
+                // Remote retained bytes consume no host copy/output capacity.
+                // Scratch remains host-local and is checked before any transfer.
                 let available = fs2::available_space(&self.inner.root)?;
                 if available < size.saturating_add(lifecycle.budget.limits.scratch_bytes) {
                     return Err(Error::refusal(
@@ -838,10 +852,25 @@ impl Engine {
                         "input, output and declared scratch do not fit available disk",
                     ));
                 }
-                let directory = if captured.inputs.len() == inputs.len() {
+                let remote = !self.inner.retained.is_local();
+                if remote && !matches!(spec, OperationRequest::Build(_)) {
+                    return Err(locations::unsupported());
+                }
+                let pending = if remote && captured.inputs.len() != inputs.len() {
+                    Some(
+                        self.reserve_source_attempt(spec, operation, &view, &captured.inputs)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
+                if pending.is_some() {
+                    stop_after(stop, "source-reservation")?;
+                }
+                let directory = if captured.inputs.len() == inputs.len() || remote {
                     None
                 } else {
-                    Some(self.reserve_attempt(spec, operation, "admission").await?)
+                    Some(self.reserve_location(spec, operation, "admission").await?)
                 };
                 let mut outputs = Vec::new();
                 for (name, input) in inputs {
@@ -849,19 +878,39 @@ impl Engine {
                         outputs.push(retained.clone());
                         continue;
                     }
-                    let owner = spec.dataset().clone();
-                    let source = PathBuf::from(input.path);
-                    let destination = directory
-                        .as_ref()
-                        .expect("unretained input reserved a copy directory")
-                        .join(format!("{name}.parquet"));
-                    let retained = lifecycle
-                        .budget
-                        .blocking(move || {
-                            storage::copy_verified(&owner, &source, &destination, &input.digest)
-                        })
-                        .await?;
-                    outputs.push(retained);
+                    let source = PathBuf::from(&input.path);
+                    let expected = if let Some((pending, _)) = &pending {
+                        pending
+                            .inputs
+                            .get(&name)
+                            .cloned()
+                            .ok_or_else(locations::invalid)?
+                    } else {
+                        ObjectRef {
+                            owner: spec.dataset().clone(),
+                            path: directory
+                                .as_ref()
+                                .expect("input has reserved directory")
+                                .child(&format!("{name}.parquet"))?
+                                .as_string()?,
+                            bytes: 0, // Local copy_verified derives the retained length.
+                            digest: input.digest,
+                        }
+                    };
+                    outputs.push(
+                        self.inner
+                            .objects
+                            .admit_source(
+                                &expected,
+                                source,
+                                &lifecycle.budget,
+                                pending.as_ref().is_some_and(|(_, resuming)| *resuming),
+                            )
+                            .await?,
+                    );
+                }
+                if remote {
+                    stop_after(stop, "source-transfer")?;
                 }
                 let phase = PhaseResult {
                     operation: spec.operation().clone(),
@@ -886,6 +935,11 @@ impl Engine {
             } else {
                 #[cfg(feature = "test-util")]
                 work_started("processing");
+                // Native output/query/release composition is the next connected slice.
+                // No remote processing or public startup is advertised yet.
+                if !self.inner.retained.is_local() {
+                    return Err(locations::unsupported());
+                }
                 let directory = self.reserve_attempt(spec, operation, "processing").await?;
                 let (_capture_memory, update_source) = if admission::captures_source(spec) {
                     let view = lifecycle.open(spec.dataset()).await?;
@@ -1845,33 +1899,11 @@ impl Engine {
         operation: &Operation,
         purpose: &str,
     ) -> Result<PathBuf> {
-        let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
-        let directory = self
-            .inner
-            .root
-            .join("objects")
-            .join(spec.dataset().as_str())
-            .join(id.as_str());
-        let reservation = Protection {
-            id: id.clone(),
-            consumer: spec.dataset().clone(),
-            purpose: format!("{}/{}", spec.operation(), purpose),
-            paths: vec![format!("{}/", directory.display())],
-            retired: false,
-        };
-        let lock = self.lock(spec.dataset()).await;
-        let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(spec.dataset()).await?;
-        self.check(&view, operation, spec.operation()).await?;
-        self.inner
-            .lifecycle
-            .commit(
-                &view,
-                vec![record(format!("protection/{id}"), reservation)?],
-            )
-            .await?;
-        std::fs::create_dir_all(&directory)?;
-        Ok(directory)
+        // Existing non-Build paths retain their local API and refuse URIs before effects.
+        self.inner.retained.local_path()?;
+        self.reserve_location(spec, operation, purpose)
+            .await?
+            .into_local()
     }
 
     async fn complete(
@@ -2503,3 +2535,6 @@ async fn verify_local_release(
     evidence::verify(decoded, budget, checks).await?;
     Ok(())
 }
+
+#[cfg(all(test, feature = "remote"))]
+mod remote_query_tests;

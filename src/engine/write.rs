@@ -67,6 +67,16 @@ pub(super) async fn open_captured_source(
     Ok(native)
 }
 
+pub(super) async fn build_query(context: &SessionContext, sql: &str) -> Result<DataFrame> {
+    let options = datafusion::execution::context::SQLOptions::new()
+        .with_allow_ddl(false)
+        .with_allow_dml(false)
+        .with_allow_statements(false);
+    let dataframe = context.sql_with_options(sql, options).await?;
+    validate_plan(dataframe.logical_plan())?;
+    Ok(dataframe)
+}
+
 impl Engine {
     pub(super) async fn pin_output(
         &self,
@@ -143,8 +153,7 @@ impl Engine {
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
             .await?;
-        let dataframe = context.sql(&spec.sql).await?;
-        validate_plan(dataframe.logical_plan())?;
+        let dataframe = build_query(&context, &spec.sql).await?;
         if let Some(base) = &spec.base {
             let release = self.release_admitted(&spec.dataset, base).await?;
             let native = storage::open_pin(

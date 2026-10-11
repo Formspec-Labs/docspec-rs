@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T04:26:19.636067+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "storage::remote::objects::tests::",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 7789944832,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 7754334208,
+  "free_after_bytes": 7786987520,
+  "finished_utc": "2026-10-11T04:26:23.659497+00:00"
+}

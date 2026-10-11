@@ -314,3 +314,139 @@ async fn populated_pin_guards_manifest_list_and_manifest_before_native_read() {
 }
 
 // Rust guideline compliant 2026-02-21
+
+#[tokio::test]
+async fn populated_gzip_selected_metadata_preserves_absent_write_property_and_shared_identities() {
+    use std::io::Write;
+    let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
+    let metadata = metadata
+        .into_builder(None)
+        .remove_properties(&["write.metadata.compression-codec".into()])
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+    assert!(
+        !metadata
+            .properties()
+            .contains_key("write.metadata.compression-codec")
+    );
+    assert_eq!(
+        metadata.metadata_compression_codec().unwrap(),
+        iceberg::compression::CompressionCodec::None
+    );
+    let plain_location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = format!(
+        "{}.gz.metadata.json",
+        plain_location.strip_suffix(".metadata.json").unwrap()
+    );
+    let parsed: iceberg::MetadataLocation = location.parse().unwrap();
+    assert_eq!(parsed.to_string(), location);
+    assert_ne!(
+        parsed.compression_codec(),
+        metadata.metadata_compression_codec().unwrap()
+    );
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serde_json::to_vec(&metadata).unwrap())
+        .unwrap();
+    let bytes = encoder.finish().unwrap();
+    assert!(bytes.starts_with(&[0x1f, 0x8b]));
+    contents.insert(location.clone(), bytes.clone());
+    let fixture = ReadFixture::inventory(contents);
+    let objects = fixture.objects();
+    let table = candidate_table(metadata.clone(), &location, &objects);
+    let binding = Objects::Remote(objects.clone()).bind_table(&table).unwrap();
+    let owner = Id::new("original-owner").unwrap();
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        ..Limits::default()
+    })
+    .unwrap();
+    let pin = pin_bound(&owner, &binding, 3, &budget, &[]).await.unwrap();
+    assert_eq!(
+        pin.metadata,
+        ObjectRef {
+            owner: owner.clone(),
+            path: location.clone(),
+            bytes: bytes.len() as u64,
+            digest: blake3::hash(&bytes).to_hex().to_string(),
+        }
+    );
+    assert_eq!(pin.snapshot, Some(1));
+    assert_eq!(pin.schema_id, metadata.current_schema_id());
+    assert_eq!(pin.rows, 3);
+    assert!(pin.objects.iter().any(|object| object.path == DATA));
+    let initial = fixture.paths.lock().unwrap().clone();
+    assert_eq!(
+        initial
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == &location)
+            .count(),
+        1
+    );
+    assert_eq!(
+        initial
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == DATA)
+            .count(),
+        1
+    );
+    // Known compressed identity remains owned by the original producer. Native
+    // manifests decode once; inherited metadata and payload receive no GET/hash.
+    let reused = pin_bound(
+        &Id::new("consumer").unwrap(),
+        &binding,
+        3,
+        &budget,
+        &pin.objects,
+    )
+    .await
+    .unwrap();
+    assert_eq!(reused.metadata, pin.metadata);
+    assert_eq!(reused.objects, pin.objects);
+    let after_reuse = fixture.paths.lock().unwrap().clone();
+    assert_eq!(
+        after_reuse
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == &location)
+            .count(),
+        1
+    );
+    assert_eq!(
+        after_reuse
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == DATA)
+            .count(),
+        1
+    );
+    // Independent pinned open consumes its one bounded compressed metadata read,
+    // preserving URI/property meaning without reopening data or producer catalog.
+    let reopened = crate::storage::open_pin_with_io(&reused, objects.file_io(), &budget)
+        .await
+        .unwrap();
+    assert_eq!(reopened.metadata(), &metadata);
+    assert_eq!(reopened.metadata_location(), Some(location.as_str()));
+    assert!(
+        !reopened
+            .metadata()
+            .properties()
+            .contains_key("write.metadata.compression-codec")
+    );
+    let final_paths = fixture.paths.lock().unwrap().clone();
+    fixture.finish();
+    assert_eq!(
+        final_paths
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == &location)
+            .count(),
+        2
+    );
+    assert_eq!(
+        final_paths
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == DATA)
+            .count(),
+        1
+    );
+}

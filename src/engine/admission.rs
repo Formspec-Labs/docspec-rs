@@ -257,15 +257,31 @@ impl Engine {
             memory.merge(charge);
             releases.push(release);
         }
-        let managed = self.inner.root.join("objects");
+        let managed = self.inner.retained.local_path().ok();
         for (name, input) in spec.inputs() {
             // Resolve filesystem aliases once to recognize managed files. A
             // missing external locator can still reuse an existing completed
             // phase; only the path that actually needs copying must open it.
             let path =
                 std::fs::canonicalize(&input.path).unwrap_or_else(|_| PathBuf::from(&input.path));
-            if let Ok(relative) = path.strip_prefix(&managed) {
-                let owner = relative
+            let managed_path = if let Some(managed) = managed {
+                path.strip_prefix(managed).ok().map(|relative| {
+                    (
+                        relative.to_string_lossy().into_owned(),
+                        path.to_string_lossy().into_owned(),
+                    )
+                })
+            } else if input.path.starts_with("s3://") {
+                self.inner.objects.validate_retained_path(&input.path)?;
+                self.inner
+                    .retained
+                    .relative(&input.path)
+                    .map(|relative| (relative.to_owned(), input.path.clone()))
+            } else {
+                None
+            };
+            if let Some((relative, locator)) = managed_path {
+                let owner = Path::new(&relative)
                     .components()
                     .next()
                     .and_then(|part| {
@@ -277,7 +293,7 @@ impl Engine {
                     })
                     .ok_or_else(inputs::invalid_relationship)?;
                 let object = self
-                    .qualified_object(&Id::new(owner)?, &path.to_string_lossy(), &input.digest)
+                    .qualified_object(&Id::new(owner)?, &locator, &input.digest)
                     .await?;
                 memory.merge(
                     budget.reserve(

@@ -30,7 +30,7 @@ path = "tests/restore.rs"
 
 [features]
 test-util = []
-remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest"]
+remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store"]
 
 [dependencies]
 anyhow = "1"
@@ -47,6 +47,8 @@ iceberg = "=0.10.1"
 iceberg-catalog-sql = "=0.10.1"
 iceberg-catalog-rest = { version = "=0.10.1", optional = true }
 iceberg-storage-opendal = { version = "=0.10.1", optional = true, default-features = false, features = ["opendal-s3"] }
+# Match DataFusion's locked object_store and enable its maintained S3 reader.
+object_store = { version = "=0.13.2", optional = true, default-features = false, features = ["aws"] }
 opendal = { version = "=0.57.0", optional = true, default-features = false, features = ["services-s3", "layers-timeout"] }
 # Enable HTTPS on the REST adapter's reqwest 0.12 client; S3 uses a separate version.
 reqwest-rest = { package = "reqwest", version = "=0.12.28", optional = true, default-features = false, features = ["rustls-tls"] }

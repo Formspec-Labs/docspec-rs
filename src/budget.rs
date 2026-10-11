@@ -97,6 +97,10 @@ impl Budget {
         })
     }
 
+    pub(crate) fn runtime_env(&self) -> &RuntimeEnv {
+        &self.runtime
+    }
+
     pub(crate) fn context(&self) -> SessionContext {
         // DataFusion 53.1 can promote a filtered row estimate through OFFSET to
         // exact zero, then fold COUNT to an incorrect constant. Retain join cost

@@ -5,7 +5,7 @@ pub(crate) mod identity;
 mod inspection;
 mod object_io;
 mod occurrences;
-pub(crate) use object_io::{Objects, PinTable};
+pub(crate) use object_io::{Objects, PinTable, valid_object_locator};
 mod pinned;
 #[doc(inline)]
 pub use pinned::{open_pin, open_pin_with_io};

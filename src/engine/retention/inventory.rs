@@ -1511,6 +1511,9 @@ impl Inventory {
             // Order and lag are catalog evidence. Availability promises come
             // from actual results/phases, not merely observing these identities.
             // Existing owner grants remain independent roots until retired.
+        } else if key.starts_with("source-attempt/") {
+            // Pending transfer intent is metadata, never qualified payload evidence.
+            crate::engine::locations::validate_source_attempt_record(key, json, rows)?;
         } else if key.starts_with("protection/") {
             let protection: Protection = decode(json)?;
             if !protection.retired {
@@ -1836,12 +1839,7 @@ fn reference_bytes(object: &ObjectRef) -> usize {
 }
 
 pub(super) fn validate_object(object: &ObjectRef) -> Result<()> {
-    let normalized: PathBuf = Path::new(&object.path).components().collect();
-    if !Path::new(&object.path).is_absolute()
-        || normalized.to_str() != Some(object.path.as_str())
-        || Path::new(&object.path)
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
+    if !storage::valid_object_locator(&object.path)
         || object.digest.len() != 64
         || !object.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
     {

@@ -15,6 +15,76 @@ pub(crate) enum Objects {
 }
 
 impl Objects {
+    pub(crate) fn register_query_store(
+        &self,
+        _runtime: &datafusion::execution::runtime_env::RuntimeEnv,
+    ) -> Result<()> {
+        match self {
+            Self::Local => Ok(()),
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => objects.register_query_store(_runtime),
+        }
+    }
+
+    pub(crate) fn retained_prefix(&self) -> Option<String> {
+        match self {
+            Self::Local => None,
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => Some(objects.owned_location()),
+        }
+    }
+
+    pub(crate) fn validate_retained_path(&self, path: &str) -> Result<()> {
+        self.validate_path(path)
+    }
+
+    pub(crate) async fn admit_source(
+        &self,
+        expected: &ObjectRef,
+        source: PathBuf,
+        budget: &crate::budget::Budget,
+        _resuming: bool,
+    ) -> Result<ObjectRef> {
+        match self {
+            Self::Local => {
+                let expected = expected.clone();
+                budget
+                    .blocking(move || {
+                        super::copy_verified(
+                            &expected.owner,
+                            &source,
+                            Path::new(&expected.path),
+                            &expected.digest,
+                        )
+                    })
+                    .await
+            }
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => {
+                if _resuming
+                    && let Some(retained) = objects.verify_if_present(expected, budget).await?
+                {
+                    return Ok(retained);
+                }
+                // One create-only attempt uses the original protected URI. A
+                // competing/unacknowledged writer may duplicate unfinished effort,
+                // but conditional completion cannot overwrite immutable bytes.
+                match objects.upload_file(expected, source, budget).await {
+                    Ok(retained) => objects.verify(&retained, budget).await,
+                    Err(error)
+                        if matches!(error.code(), "remote_conflict" | "remote_unconfirmed") =>
+                    {
+                        match objects.verify_if_present(expected, budget).await? {
+                            Some(retained) => Ok(retained),
+                            None => Err(error),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+        }
+    }
+
     // Explicitly compose owned native I/O; consume no arbitrary Table credentials.
     // Remote runtime lifetime begins here, on the currently driven runtime.
     pub(crate) fn bind_table(&self, table: &Table) -> Result<PinTable> {
@@ -207,12 +277,14 @@ impl PinTable {
         objects.validate_table_location(metadata.location())?;
         objects.validate_path(metadata_location)?;
         let prefix = format!("{}/metadata/", metadata.location());
+        // A catalog may compress selected metadata independently of the table's
+        // policy for future writes. Canonical URI syntax binds the location;
+        // native/pinned readers decode the retained bytes by gzip magic.
         let parsed = metadata_location.parse::<iceberg::MetadataLocation>()?;
         if !metadata_location
             .strip_prefix(&prefix)
             .is_some_and(|filename| !filename.is_empty() && !filename.contains('/'))
             || parsed.to_string() != metadata_location
-            || parsed.compression_codec() != metadata.metadata_compression_codec()?
         {
             return Err(Error::refusal(
                 "metadata_location",
@@ -260,3 +332,26 @@ impl PinPaths<'_> {
 }
 
 // Rust guideline compliant 2026-02-21
+
+// Syntax alone does not grant ownership or transport scope. Callers separately
+// check the configured Objects and exact lifecycle reservation/owner bindings.
+pub(crate) fn valid_object_locator(path: &str) -> bool {
+    let normalized: PathBuf = Path::new(path).components().collect();
+    if Path::new(path).is_absolute()
+        && normalized.to_str() == Some(path)
+        && !Path::new(path)
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return true;
+    }
+    #[cfg(feature = "remote")]
+    {
+        super::remote::RemoteObjects::validate_uri(path).is_ok()
+    }
+    #[cfg(not(feature = "remote"))]
+    {
+        let _ = path;
+        false
+    }
+}

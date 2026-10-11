@@ -15,6 +15,14 @@ fn keys(operation: &Id) -> [String; 4] {
 
 pub(super) fn scope_key(operation: &Id, key: &str) -> bool {
     keys(operation).iter().any(|candidate| candidate == key)
+        || key
+            .strip_prefix(&format!("source-attempt/{operation}/"))
+            .is_some_and(|suffix| {
+                suffix.split_once('/').is_some_and(|(revision, phase)| {
+                    revision.parse::<i64>().is_ok_and(|revision| revision > 0)
+                        && phase == "admission"
+                })
+            })
         || key == format!("prepared-changes/{operation}")
         || key
             .strip_prefix("protection/")
@@ -208,6 +216,19 @@ pub(super) fn collect(
         && !record_retired(rows, view, &prepared.key, prepared.revision, budget)?
     {
         records.push(prepared);
+    }
+    for (key, revision, json) in rows.prefix(&format!("source-attempt/{operation}/")) {
+        let _memory = rows.reserve_decoded(budget, &[key])?;
+        crate::engine::locations::validate_source_attempt_record(key, json, rows)?;
+        if revision <= operation_revision || revision > view.revision {
+            return Err(invalid_retirement());
+        }
+        if !record_retired(rows, view, key, revision, budget)? {
+            records.push(RetainedGeneration {
+                key: key.into(),
+                revision,
+            });
+        }
     }
     // Charge spare vector capacity and per-entry allocation overhead as well as keys.
     let mut bytes = records

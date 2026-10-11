@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T04:17:53.111512+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/examples/r2_candidate_probe",
+    "--allow-synthetic-writes",
+    "docspec-rs-qualification-2e868a21-b2ab-45b1-b8ed-6c979b92c9f3",
+    "--append-tiny"
+  ],
+  "qualification": "docspec-rs-qualification-2e868a21-b2ab-45b1-b8ed-6c979b92c9f3",
+  "base_commit": "ff190bfa11b609f12a4b7c11be0d797db93c21c1",
+  "example_source_sha256": "727c1e773e6ffb7a160ae66d9d8c87d3feea3968f8ef5bac0c341d90b32201f1",
+  "executable_sha256": "71e7aae17c194e1e7e149c331fa721f0d13851b2f35787a20fb90d8ec77fc506",
+  "scope": "Fresh isolated synthetic native append; all provider objects retained; no production mutation or cleanup",
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T04:18:00.092023+00:00",
+  "passed": true,
+  "stdout": "docs/reviews/r2-native-append-provider-2026-10-11.jsonl",
+  "stderr": "docs/reviews/r2-native-append-provider-2026-10-11.stderr.log"
+}

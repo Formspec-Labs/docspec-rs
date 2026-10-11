@@ -738,11 +738,10 @@ impl Engine {
         {
             return Err(invalid());
         }
-        let prefix = self.inner.root.join("objects").join(owner.as_str());
-        let relative = Path::new(&object.path)
-            .strip_prefix(&prefix)
-            .map_err(|_| invalid())?;
-        let mut components = relative.components();
+        self.inner.objects.validate_retained_path(&object.path)?;
+        let prefix = self.inner.retained.child(owner.as_str())?;
+        let relative = prefix.relative(&object.path).ok_or_else(invalid)?;
+        let mut components = Path::new(relative).components();
         let Some(Component::Normal(attempt)) = components.next() else {
             return Err(invalid());
         };
@@ -760,7 +759,7 @@ impl Engine {
             .ok_or_else(invalid)?;
         if reservation.id != attempt
             || reservation.consumer != *owner
-            || reservation.paths != [format!("{}/", prefix.join(attempt.as_str()).display())]
+            || reservation.paths != [prefix.child(attempt.as_str())?.protection_prefix()?]
         {
             return Err(invalid());
         }

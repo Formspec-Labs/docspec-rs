@@ -80,6 +80,7 @@ pub(super) fn retained_key(key: &str) -> bool {
             "request-dependencies/",
             "backfill/",
             "protection/",
+            "source-attempt/",
         ]
         .iter()
         .any(|prefix| key.starts_with(prefix))

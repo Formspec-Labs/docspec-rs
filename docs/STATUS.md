@@ -19,6 +19,66 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Recoverable remote admission and direct S3 queries
+
+The shared Build admission service now saves exact remote input destinations and
+protection before transfer. Resume resolves the saved operation generation before
+opening the producer file. Matching retained bytes are reused; only definite
+absence permits another conditional upload at the same destination. Lost write
+responses reconcile that destination. Completed admission uses availability checks
+without another upload or payload read. Pending records remain distinct from
+qualified creation evidence and are included in operation recovery metadata.
+
+The [Engine admission tests](reviews/remote-source-admission-tests-2026-10-11.log)
+pass reservation/transfer interruption, source removal, lost responses, authorization
+failure, wrong identity and independent-operation recovery. The
+[review](reviews/remote-source-admission-review-2026-10-11.md) closes the original
+permanent-retry-refusal and disconnected-test findings. These are actual Engine
+calls using localhost S3 and the maintained local catalog. Concurrent unfinished
+attempts may duplicate transfer effort; conditional creation prevents overwrite.
+No distributed lease or second authority was added.
+
+Remote composition now registers the maintained S3 reader in the existing shared
+DataFusion runtime, using the same explicit credentials and configured resource
+limits. Queries stream remote Parquet without staging a local payload copy.
+The [query fixture](reviews/remote-s3-query-tests-2026-10-11-2.log) passes column
+selection, filtering, duplicates and nulls. Build SQL uses maintained query-only
+options to reject COPY, DDL and session mutation before execution. The original
+[test failure](reviews/remote-s3-query-tests-2026-10-11.log) is retained: the fixture
+assumed Utf8 rather than DataFusion's Utf8View; its small oracle now uses Arrow's
+cast. The existing locked object_store package gains its AWS feature; this also
+adds the feature's required lockfile dependencies.
+
+A [fresh R2/Basin append](reviews/r2-native-append-provider-2026-10-11.json) passes
+maintained native writing, catalog commit, scoped file inventory and exact fresh
+catalog-free readback of duplicate/null rows. Its
+[raw result](reviews/r2-native-append-provider-2026-10-11.jsonl) retains the exact
+references. The selected object closure is **6,958 bytes**, plus **775 bytes** of
+initial candidate metadata; all synthetic objects remain retained. This measures
+visible referenced bytes, not bucket-wide storage or a performance workload.
+The [probe review](reviews/native-append-probe-review-2026-10-11.md) approves after
+adding explicit integer-null and decoded-row collection checks.
+
+Basin returned gzip metadata without setting the table's future-write compression
+property. A [bounded metadata inspection](reviews/r2-native-append-codec-2026-10-11.json)
+identified that real compatibility issue. Selected pins now follow the maintained
+reader's compression behavior while preserving canonical URI, scope and ownership
+checks. The [populated gzip fixture and storage tests](reviews/remote-object-backend-tests-2026-10-11.log)
+and [independent review](reviews/selected-gzip-review-2026-10-11.md) pass without
+repeating inherited payload reads.
+
+The [complete repository gate](reviews/remote-admission-query-full-check-2026-10-11.log)
+passes. A final startup-only endpoint normalization then passes the
+[focused remote suite](reviews/remote-query-final-tests-2026-10-11.log); the
+[query review](reviews/remote-s3-query-review-2026-10-11.md) covers that supplement.
+[Strict all-feature lint](reviews/remote-query-final-clippy-2026-10-11.log) and
+[local-feature lint](reviews/remote-query-local-feature-2026-10-11.log) also pass.
+Public constructors still select local storage, and remote native Build processing
+deliberately refuses. Exact candidate/append recovery, release completion, guarded remote
+selection and fresh-host Engine readback remain the next connected work. Remote
+maintenance, multi-host qualification and the wider requirements table remain
+open. The accepted full local Comments benchmark was not rerun.
+
 ## Shared native pins and bounded metadata reads
 
 The engine now owns one private object backend for native pin creation, direct
@@ -2520,7 +2580,7 @@ or compatibility layer for legacy DocSpec.
 | Requirement | Implemented locally | Required work remaining |
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs | Broader durability failures; complete occurrence/value identity and evidence semantics |
-| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP | Nested/combined-group disclosure and row filtering; R2 uploads and independent remote readback; transfer reuse and provider qualification |
+| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP; internal protected remote source admission and shared S3 query prerequisites with scoped native provider append evidence | Nested/combined-group disclosure and row filtering; complete remote native processing/publication and release readback; candidate/append recovery, release-transfer reuse and provider qualification |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption; one retained local continuous scalar intent with exact source captures and bounded intake fencing | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; broader continuous-cutover process/race/resource qualification |
 | R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, retained source rename/reorder alignment, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers; shared qualified history discovery for local R5 consumers under existing maintenance and processing protection | Broader type/schema-mapping comparison, portable trust and remaining scaling/failure qualification |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |

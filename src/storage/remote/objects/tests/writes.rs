@@ -165,25 +165,60 @@ async fn canceled_http_caller_keeps_owned_capacity_until_worker_finishes() {
     assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
 }
 
+#[tokio::test]
+async fn source_admission_transfers_once_and_qualifies_exact_remote_bytes() {
+    let bytes = b"retained admitted source bytes".to_vec();
+    let expected = object(&bytes);
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), &bytes).unwrap();
+    let mut fixture = WriteFixture::new(Behavior::HoldPutResponse);
+    // Permit the fixture acknowledgment immediately; retain its ordinary narrow
+    // native write/read boundary instead of adding another service harness.
+    fixture.release.take().unwrap().send(()).unwrap();
+    let objects = crate::storage::Objects::Remote(fixture.objects());
+    let budget = Budget::new(Limits::default()).unwrap();
+    let admitted = tokio::time::timeout(
+        DEADLINE,
+        objects.admit_source(&expected, source.path().to_owned(), &budget, false),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(admitted, expected);
+    let report = fixture.finish();
+    assert_eq!(report.methods("PUT"), 1);
+    assert_eq!(
+        report.methods("GET"),
+        1,
+        "new transferred bytes are qualified once"
+    );
+    assert_eq!(report.methods("HEAD"), 2);
+    assert_eq!(report.methods("POST"), 0);
+    assert_eq!(report.methods("DELETE"), 0);
+    assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+}
+
 #[derive(Clone, Copy)]
-enum Behavior {
+pub(crate) enum Behavior {
     AbortMultipart,
     LosePutResponse,
     LoseCompleteResponse,
     HoldPutResponse,
     RejectPut,
+    HeadDenied,
 }
 
 #[derive(Default)]
-struct WriteReport {
+pub(crate) struct WriteReport {
     // Retain only method/range from requests, never signing or other headers.
-    requests: Vec<(String, Option<String>)>,
-    published: Option<Vec<u8>>,
+    pub(crate) requests: Vec<(String, Option<String>)>,
+    pub(crate) paths: Vec<String>,
+    pub(crate) published: Option<Vec<u8>>,
     parts: BTreeMap<u64, Vec<u8>>,
 }
 
 impl WriteReport {
-    fn methods(&self, method: &str) -> usize {
+    pub(crate) fn methods(&self, method: &str) -> usize {
         self.requests
             .iter()
             .filter(|(observed, _)| observed == method)
@@ -194,12 +229,15 @@ impl WriteReport {
 // This fixture implements only the native writer's S3 interactions under test.
 // Blocking accept wakes through a loopback connection on finish; signal waits and
 // socket I/O have deadlines, and Drop releases a held response on test failure.
-struct WriteFixture {
+type PutCheck = Arc<dyn Fn(&str) + Send + Sync>;
+
+pub(crate) struct WriteFixture {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
     server: Option<thread::JoinHandle<WriteReport>>,
-    started: Option<tokio::sync::oneshot::Receiver<()>>,
-    release: Option<mpsc::Sender<()>>,
+    pub(crate) started: Option<tokio::sync::oneshot::Receiver<()>>,
+    pub(crate) release: Option<mpsc::Sender<()>>,
+    put_check: Arc<std::sync::Mutex<Option<PutCheck>>>,
 }
 
 impl WriteFixture {
@@ -207,13 +245,15 @@ impl WriteFixture {
         Self::for_path(behavior, "/bucket/owned/file.bin".into())
     }
 
-    fn for_path(behavior: Behavior, expected_path: String) -> Self {
+    pub(crate) fn for_path(behavior: Behavior, expected_path: String) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let server_stop = stop.clone();
         let (started, observed) = tokio::sync::oneshot::channel();
         let (release, wait_release) = mpsc::channel();
+        let put_check = Arc::new(std::sync::Mutex::new(None::<PutCheck>));
+        let server_check = put_check.clone();
         let server = thread::spawn(move || {
             let mut report = WriteReport::default();
             let mut started = Some(started);
@@ -233,7 +273,12 @@ impl WriteFixture {
                     .target
                     .split_once('?')
                     .unwrap_or((&request.target, ""));
-                assert_eq!(path, expected_path);
+                report.paths.push(path.to_owned());
+                if expected_path.ends_with('/') {
+                    assert!(path.starts_with(&expected_path));
+                } else {
+                    assert_eq!(path, expected_path);
+                }
                 let upload = query_value(query, "uploadId");
                 match request.method.as_str() {
                     "POST"
@@ -286,6 +331,9 @@ impl WriteFixture {
                         // Commit in the fixture, then close without any HTTP response.
                     }
                     "PUT" => {
+                        if let Some(check) = server_check.lock().unwrap().clone() {
+                            check(path);
+                        }
                         assert!(matches!(
                             behavior,
                             Behavior::LosePutResponse
@@ -312,6 +360,24 @@ impl WriteFixture {
                         // LosePutResponse closes after storing bytes without a response.
                     }
                     "HEAD" => {
+                        if matches!(behavior, Behavior::HeadDenied) {
+                            respond(
+                                &mut socket,
+                                "403 Forbidden",
+                                "",
+                                b"<Error><Code>AccessDenied</Code></Error>",
+                            );
+                            continue;
+                        }
+                        if report.published.is_none() {
+                            respond(
+                                &mut socket,
+                                "404 Not Found",
+                                "",
+                                b"<Error><Code>NoSuchKey</Code></Error>",
+                            );
+                            continue;
+                        }
                         let size = report.published.as_ref().unwrap().len();
                         write!(
                             socket,
@@ -339,10 +405,15 @@ impl WriteFixture {
             server: Some(server),
             started: Some(observed),
             release: Some(release),
+            put_check,
         }
     }
 
-    fn objects(&self) -> RemoteObjects {
+    pub(crate) fn check_put(&self, check: PutCheck) {
+        *self.put_check.lock().unwrap() = Some(check);
+    }
+
+    pub(crate) fn objects(&self) -> RemoteObjects {
         let mut config = properties();
         config.insert("s3.endpoint".into(), format!("http://{}", self.address));
         RemoteObjects::from_resolved(&config, "s3://bucket/owned/").unwrap()
@@ -356,7 +427,7 @@ impl WriteFixture {
         let _ = TcpStream::connect_timeout(&self.address, DEADLINE);
     }
 
-    fn finish(mut self) -> WriteReport {
+    pub(crate) fn finish(mut self) -> WriteReport {
         self.shutdown();
         self.server.take().unwrap().join().unwrap()
     }

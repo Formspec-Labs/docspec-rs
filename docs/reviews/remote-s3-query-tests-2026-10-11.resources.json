@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T04:21:22.767593+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--all-features",
+    "--lib",
+    "engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 8476348416,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 7112876032,
+  "free_after_bytes": 7478628352,
+  "finished_utc": "2026-10-11T04:22:49.071895+00:00"
+}

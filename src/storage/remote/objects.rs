@@ -8,6 +8,7 @@ use crate::{Error, Result, budget::Budget, model::ObjectRef};
 use futures::TryStreamExt;
 use iceberg::io::{FileIO, FileIOBuilder};
 use iceberg_storage_opendal::OpenDalStorageFactory;
+use object_store::{ClientOptions, ObjectStore, RetryConfig, aws::AmazonS3Builder};
 use opendal::{Operator, layers::TimeoutLayer, services::S3};
 use std::{collections::HashMap, fmt, fs::File, io::Read, path::PathBuf, sync::Arc};
 
@@ -27,6 +28,7 @@ const UPLOAD_ADMISSION: usize = 4 * CHUNK + (4 << 20);
 pub struct RemoteObjects {
     operator: Operator,
     file_io: FileIO,
+    query_store: Arc<dyn ObjectStore>,
     scope: Scope,
 }
 
@@ -100,11 +102,78 @@ impl RemoteObjects {
         }))
         .with_props(properties.iter().filter(|(key, _)| key.starts_with("s3.")))
         .build();
+        // Build the maintained query client from the same explicit resolution.
+        // Never use from_env: both required credential fields select its static
+        // provider, preventing metadata/config discovery and ambient credentials.
+        let endpoint = required("s3.endpoint")?;
+        let virtual_hosted = properties
+            .get("s3.path-style-access")
+            .is_none_or(|value| value == "false");
+        // OpenDAL accepts the service endpoint and adds the virtual bucket host.
+        // AmazonS3Builder expects that host already present in virtual mode.
+        // Preserve OpenDAL's scheme-less host and global AWS endpoint semantics.
+        let query_endpoint = if endpoint.starts_with("http") {
+            endpoint.to_owned()
+        } else {
+            format!("https://{endpoint}")
+        };
+        let query_endpoint = query_endpoint.replace(&format!("//{}.", scope.bucket), "//");
+        // Match native canonicalization before selecting the regional endpoint.
+        let query_endpoint = reqwest_rest::Url::parse(&query_endpoint)
+            .map_err(|_| config())?
+            .to_string();
+        let query_endpoint = query_endpoint.trim_end_matches('/');
+        let query_endpoint = if query_endpoint == "https://s3.amazonaws.com" {
+            format!("https://s3.{}.amazonaws.com", required("s3.region")?)
+        } else {
+            query_endpoint.to_owned()
+        };
+        let query_endpoint = if virtual_hosted {
+            query_endpoint.replacen("://", &format!("://{}.", scope.bucket), 1)
+        } else {
+            query_endpoint
+        };
+        let mut query = AmazonS3Builder::new()
+            .with_bucket_name(&scope.bucket)
+            .with_endpoint(query_endpoint)
+            .with_region(required("s3.region")?)
+            .with_access_key_id(required("s3.access-key-id")?)
+            .with_secret_access_key(required("s3.secret-access-key")?)
+            .with_virtual_hosted_style_request(virtual_hosted)
+            // Explicit HTTP endpoints support existing localhost transport fixtures.
+            .with_client_options(
+                ClientOptions::new()
+                    .with_allow_http(endpoint.starts_with("http://"))
+                    .with_timeout(super::REQUEST_TIMEOUT)
+                    .with_connect_timeout(super::CONNECT_TIMEOUT),
+            )
+            .with_retry(RetryConfig {
+                max_retries: 0,
+                retry_timeout: super::REQUEST_TIMEOUT,
+                ..RetryConfig::default()
+            });
+        if let Some(token) = properties.get("s3.session-token") {
+            query = query.with_token(token);
+        }
+        let query_store = Arc::new(query.build().map_err(|_| config())?);
         Ok(Self {
             operator,
             file_io,
+            query_store,
             scope,
         })
+    }
+
+    pub(in crate::storage) fn register_query_store(
+        &self,
+        runtime: &datafusion::execution::runtime_env::RuntimeEnv,
+    ) -> Result<()> {
+        let url = datafusion::execution::object_store::ObjectStoreUrl::parse(format!(
+            "s3://{}/",
+            self.scope.bucket
+        ))?;
+        runtime.register_object_store(url.as_ref(), self.query_store.clone());
+        Ok(())
     }
 
     /// Returns native I/O for independently opening immutable table pins.
@@ -309,6 +378,56 @@ impl RemoteObjects {
             .await
     }
 
+    // Absence is authoritative only at the first native stat. Transport/auth
+    // failures and disappearance during readback never permit another write.
+    pub(in crate::storage) async fn verify_if_present(
+        &self,
+        expected: &ObjectRef,
+        budget: &Budget,
+    ) -> Result<Option<ObjectRef>> {
+        let key = self.scope.key(&expected.path)?;
+        let memory = budget.reserve(READ_ADMISSION)?;
+        let objects = self.clone();
+        let expected = expected.clone();
+        let handle = tokio::runtime::Handle::current();
+        budget
+            .blocking_admitted(move || {
+                let _memory = memory;
+                handle.block_on(async {
+                    let metadata = match objects.operator.stat(&key).await {
+                        Ok(metadata) => metadata,
+                        Err(error) if error.kind() == opendal::ErrorKind::NotFound => {
+                            return Ok(None);
+                        }
+                        Err(_) => return Err(read_error()),
+                    };
+                    if !metadata.is_file() {
+                        return Err(mismatch());
+                    }
+                    let (digest, _) = objects
+                        .identity_after_stat(&key, Some(expected.bytes), metadata.content_length())
+                        .await?;
+                    if digest != expected.digest {
+                        return Err(mismatch());
+                    }
+                    Ok(Some(expected))
+                })
+            })
+            .await
+    }
+
+    pub(in crate::storage) fn validate_uri(path: &str) -> Result<()> {
+        split_s3(path).map(|_| ())
+    }
+
+    pub(in crate::storage) fn owned_location(&self) -> String {
+        format!(
+            "s3://{}/{}",
+            self.scope.bucket,
+            self.scope.prefix.trim_end_matches('/')
+        )
+    }
+
     pub(in crate::storage) fn validate_path(&self, path: &str) -> Result<()> {
         self.scope.key(path).map(|_| ())
     }
@@ -408,6 +527,15 @@ impl RemoteObjects {
             .await
             .map_err(|_| read_error())?
             .content_length();
+        self.identity_after_stat(key, expected_bytes, bytes).await
+    }
+
+    async fn identity_after_stat(
+        &self,
+        key: &str,
+        expected_bytes: Option<u64>,
+        bytes: u64,
+    ) -> Result<(String, u64)> {
         if expected_bytes.is_some_and(|expected| expected != bytes) {
             return Err(mismatch());
         }

@@ -2,11 +2,15 @@
 //!
 //! Requires a fresh synthetic namespace and retains its metadata and registration.
 //! This probes registration, schema preservation, fresh catalog loading and an
-//! independent catalog-free native metadata read; it does not append data or
-//! qualify a remote dataset flow. If the catalog rewrites metadata, one bounded
+//! independent catalog-free native metadata read. Optional `--append-tiny` adds
+//! one native data append and exact value readback; neither qualifies an Engine flow. If the catalog rewrites metadata, one bounded
 //! read binds the returned object's identity before the independent native open.
 // Rust guideline compliant 2026-02-21
 
+use arrow::{
+    array::{Array, Int64Array, StringArray},
+    record_batch::RecordBatch,
+};
 use docspec::{
     Error, Result,
     budget::{Budget, Limits},
@@ -16,15 +20,28 @@ use docspec::{
         remote::{RemoteStorage, remote_storage},
     },
 };
+use futures::TryStreamExt;
 use iceberg::{
     MetadataLocation, NamespaceIdent, TableIdent,
     spec::{
-        FormatVersion, NestedField, PartitionSpec, PrimitiveType, Schema, SortOrder, TableMetadata,
-        TableMetadataBuilder, Type,
+        DataFileFormat, FormatVersion, NestedField, PartitionSpec, PrimitiveType, Schema,
+        SortOrder, TableMetadata, TableMetadataBuilder, Type,
+    },
+    table::Table,
+    transaction::{ApplyTransactionAction, Transaction},
+    writer::{
+        base_writer::data_file_writer::DataFileWriterBuilder,
+        file_writer::location_generator::{DefaultFileNameGenerator, DefaultLocationGenerator},
+        file_writer::{ParquetWriterBuilder, rolling_writer::RollingFileWriterBuilder},
+        partitioning::unpartitioned_writer::UnpartitionedWriter,
     },
 };
+use parquet::file::properties::WriterProperties;
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
 
 #[tokio::main]
 async fn main() {
@@ -126,10 +143,11 @@ fn candidate(root: &str) -> Result<TableMetadata> {
 
 async fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 2 || args[0] != "--allow-synthetic-writes" {
+    let append = args.get(2).is_some_and(|flag| flag == "--append-tiny");
+    if !(args.len() == 2 || (args.len() == 3 && append)) || args[0] != "--allow-synthetic-writes" {
         return Err(Error::refusal(
             "probe_opt_in",
-            "supply --allow-synthetic-writes and a fresh qualification UUID",
+            "supply --allow-synthetic-writes, a fresh qualification UUID, and optional --append-tiny",
         ));
     }
     let suffix = args[1]
@@ -328,9 +346,342 @@ async fn run() -> Result<()> {
     }
     println!(
         "{}",
-        json!({"event": "complete", "passed": true, "pin": pin,
+        json!({"event": if append { "registration_complete" } else { "complete" }, "passed": true, "pin": pin,
         "fresh_catalog_readback": true, "catalog_free_native_readback": true,
         "scope": "metadata registration and preservation only; no payload or remote engine qualification"})
+    );
+    if append {
+        append_tiny(&remote, &registered, &owner, &root, &budget).await?;
+    }
+    Ok(())
+}
+
+fn scoped(root: &str, path: &str) -> Result<()> {
+    if !path.strip_prefix(&format!("{root}/")).is_some_and(|tail| {
+        !tail.is_empty()
+            && !tail.contains('%')
+            && !tail.contains('?')
+            && !tail.contains('#')
+            && !tail.contains('\\')
+            && tail
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != "..")
+    }) {
+        return Err(Error::refusal(
+            "probe_metadata_scope",
+            "native append reference escapes its retained qualification prefix",
+        ));
+    }
+    Ok(())
+}
+
+async fn exact_object(
+    remote: &RemoteStorage,
+    owner: &Id,
+    root: &str,
+    path: &str,
+    budget: &Budget,
+) -> Result<ObjectRef> {
+    scoped(root, path)?;
+    let input = provider(
+        "append_object_input",
+        remote.objects.file_io().new_input(path),
+    )?;
+    let size = provider("append_object_size", input.metadata().await)?.size;
+    // This fixture writes three rows; refuse unexpected object growth before reading.
+    if size > 64 << 10 {
+        return Err(Error::refusal(
+            "probe_object_capacity",
+            "tiny append object exceeds 64 KiB fixture allowance",
+        ));
+    }
+    let _memory = budget.reserve(size as usize)?;
+    let reader = provider("append_object_reader", input.reader().await)?;
+    let bytes = provider("append_object_read", reader.read(0..size).await)?;
+    if bytes.len() as u64 != size
+        || provider("append_object_size_after", input.metadata().await)?.size != size
+    {
+        return Err(Error::refusal(
+            "probe_metadata_changed",
+            "append object changed during bounded identity capture",
+        ));
+    }
+    Ok(object(owner, path.into(), &bytes))
+}
+
+async fn append_tiny(
+    remote: &RemoteStorage,
+    registered: &Table,
+    owner: &Id,
+    root: &str,
+    budget: &Budget,
+) -> Result<()> {
+    if registered.metadata().location() != root
+        || registered.metadata().current_snapshot_id().is_some()
+    {
+        return Err(Error::refusal(
+            "probe_append_base",
+            "tiny append requires the fresh exact empty registered candidate",
+        ));
+    }
+    scoped(root, registered.metadata_location_result()?)?;
+    // Native writers and manifest producers retain this exact table location.
+    // A trusted REST catalog chooses its own new metadata filename; record and
+    // check its actual placement after acknowledgement before reading that object.
+    for key in [
+        "write.data.path",
+        "write.folder-storage.path",
+        "write.metadata.path",
+    ] {
+        if let Some(path) = registered.metadata().properties().get(key) {
+            scoped(root, path)?;
+        }
+    }
+    let _memory = budget.reserve(4 << 20)?;
+    let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
+        registered.metadata().current_schema(),
+    )?);
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from(vec![Some("same"), None, Some("same")])),
+            Arc::new(Int64Array::from(vec![1_i64, 2, 1])),
+        ],
+    )?;
+    let data_root = format!("{root}/data");
+    scoped(root, &data_root)?;
+    let parquet = ParquetWriterBuilder::new(
+        WriterProperties::builder().build(),
+        registered.metadata().current_schema().clone(),
+    );
+    let rolling = RollingFileWriterBuilder::new(
+        parquet,
+        4096,
+        remote.objects.file_io(),
+        DefaultLocationGenerator::with_data_location(data_root.clone()),
+        DefaultFileNameGenerator::new(
+            uuid::Uuid::new_v4().to_string(),
+            None,
+            DataFileFormat::Parquet,
+        ),
+    );
+    let mut writer = UnpartitionedWriter::new(DataFileWriterBuilder::new(rolling));
+    println!(
+        "{}",
+        json!({"event": "native_append_start", "table": registered.identifier().to_string(),
+        "before_metadata": registered.metadata_location_result()?, "table_location": root,
+        "data_location": data_root, "rows": 3, "includes_duplicate_and_null": true,
+        "scope": "trusted catalog placement probe; all resulting objects retained"})
+    );
+    provider("append_write_batch", writer.write(batch).await)?;
+    let files = provider("append_close_writer", writer.close().await)?;
+    let mut expected_files = BTreeMap::new();
+    for file in &files {
+        scoped(root, file.file_path())?;
+        expected_files.insert(file.file_path().to_owned(), file.record_count());
+    }
+    if expected_files.values().sum::<u64>() != 3 {
+        return Err(Error::refusal(
+            "probe_append_rows",
+            "native writer count differs from tiny fixture",
+        ));
+    }
+    println!(
+        "{}",
+        json!({"event": "native_append_commit_start", "before_metadata": registered.metadata_location_result()?, "data_files": expected_files})
+    );
+    let tx = Transaction::new(registered);
+    let appended = provider(
+        "append_apply",
+        tx.fast_append().add_data_files(files).apply(tx),
+    )?;
+    let appended = provider(
+        "append_commit",
+        appended.commit(remote.catalog.as_ref()).await,
+    )?;
+    let after = appended.metadata_location_result()?.to_owned();
+    println!(
+        "{}",
+        json!({"event": "native_append_acknowledged", "before_metadata": registered.metadata_location_result()?,
+        "after_metadata": after, "table_location": appended.metadata().location(), "snapshot": appended.metadata().current_snapshot_id()})
+    );
+    scoped(root, &after)?;
+    if appended.metadata().location() != root
+        || appended.metadata().current_schema() != registered.metadata().current_schema()
+        || appended.metadata().uuid() != registered.metadata().uuid()
+        || after == registered.metadata_location_result()?
+    {
+        return Err(Error::refusal(
+            "probe_append_identity",
+            "native append changed table identity/schema or failed to advance metadata",
+        ));
+    }
+    // Never reuse a catalog-returned native FileIO configuration for independent
+    // reads. The probe's configured object connection owns all decoded references.
+    let native = Table::builder()
+        .identifier(registered.identifier().clone())
+        .metadata(appended.metadata_ref())
+        .metadata_location(&after)
+        .file_io(remote.objects.file_io())
+        .runtime(iceberg::Runtime::try_current()?)
+        .readonly(true)
+        .build()?;
+    let mut paths = BTreeSet::from([after.clone()]);
+    let snapshot = native
+        .metadata()
+        .current_snapshot()
+        .ok_or_else(|| Error::refusal("probe_append_snapshot", "append returned no snapshot"))?;
+    scoped(root, snapshot.manifest_list())?;
+    paths.insert(snapshot.manifest_list().to_owned());
+    let list_input = remote
+        .objects
+        .file_io()
+        .new_input(snapshot.manifest_list())?;
+    if list_input.metadata().await?.size > 64 << 10 {
+        return Err(Error::refusal(
+            "probe_object_capacity",
+            "tiny manifest list exceeds fixture allowance",
+        ));
+    }
+    let list = provider(
+        "append_manifest_list",
+        native.manifest_list_reader(snapshot).load().await,
+    )?;
+    for manifest in list.entries() {
+        scoped(root, &manifest.manifest_path)?;
+        if manifest.manifest_length > 64 << 10 {
+            return Err(Error::refusal(
+                "probe_object_capacity",
+                "tiny manifest exceeds fixture allowance",
+            ));
+        }
+        let input = remote
+            .objects
+            .file_io()
+            .new_input(&manifest.manifest_path)?;
+        if input.metadata().await?.size > 64 << 10 {
+            return Err(Error::refusal(
+                "probe_object_capacity",
+                "tiny manifest object exceeds fixture allowance",
+            ));
+        }
+        paths.insert(manifest.manifest_path.clone());
+    }
+    // Native file planning validates the maintained manifest interpretation;
+    // compare its exact live file paths/counts with the writer's returned files.
+    let scan = provider("append_scan_build", native.scan().build())?;
+    let tasks = provider("append_plan_files", scan.plan_files().await)?;
+    futures::pin_mut!(tasks);
+    let mut observed_files = BTreeMap::new();
+    while let Some(task) = provider("append_file_task", tasks.try_next().await)? {
+        scoped(root, &task.data_file_path)?;
+        paths.insert(task.data_file_path.clone());
+        let rows = task.record_count.ok_or_else(|| {
+            Error::refusal("probe_append_inventory", "native task has no row count")
+        })?;
+        if observed_files.insert(task.data_file_path, rows).is_some() {
+            return Err(Error::refusal(
+                "probe_append_inventory",
+                "native task repeats a live file",
+            ));
+        }
+    }
+    if observed_files != expected_files {
+        return Err(Error::refusal(
+            "probe_append_inventory",
+            "native live files differ from completed writer files",
+        ));
+    }
+    let mut objects = Vec::new();
+    for path in paths {
+        objects.push(exact_object(remote, owner, root, &path, budget).await?);
+    }
+    let metadata = objects
+        .iter()
+        .find(|object| object.path == after)
+        .cloned()
+        .ok_or_else(|| Error::refusal("probe_append_inventory", "metadata absent from closure"))?;
+    let pin = TablePin {
+        table: registered.identifier().to_string(),
+        metadata,
+        snapshot: native.metadata().current_snapshot_id(),
+        schema_id: native.metadata().current_schema_id(),
+        objects,
+        rows: 3,
+        logical_metadata: None,
+    };
+    println!("{}", json!({"event": "native_append_closure", "pin": pin}));
+    let fresh = connect(root).await?;
+    let loaded = provider(
+        "append_fresh_load",
+        fresh.catalog.load_table(registered.identifier()).await,
+    )?;
+    if loaded.metadata() != appended.metadata() || loaded.metadata_location_result()? != after {
+        return Err(Error::refusal(
+            "probe_fresh_load",
+            "fresh catalog differs from acknowledged append",
+        ));
+    }
+    let opened = open_pin_with_io(&pin, fresh.objects.file_io(), budget).await?;
+    if opened.metadata() != appended.metadata() {
+        return Err(Error::refusal(
+            "probe_native_readback",
+            "catalog-free read differs from acknowledged append",
+        ));
+    }
+    let scan = provider("append_value_scan", opened.scan().build())?;
+    let batches = provider("append_value_reader", scan.to_arrow().await)?;
+    futures::pin_mut!(batches);
+    let mut values = Vec::new();
+    while let Some(batch) = provider("append_value_batch", batches.try_next().await)? {
+        if batch.num_rows() > 3 - values.len() {
+            return Err(Error::refusal(
+                "probe_append_values",
+                "native readback exceeds the three-row fixture",
+            ));
+        }
+        let text = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| Error::refusal("probe_value_type", "native text type differs"))?;
+        let counter = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .ok_or_else(|| Error::refusal("probe_value_type", "native counter type differs"))?;
+        for row in 0..batch.num_rows() {
+            if counter.is_null(row) {
+                return Err(Error::refusal(
+                    "probe_append_values",
+                    "native readback has a null required counter",
+                ));
+            }
+            values.push((
+                (!text.is_null(row)).then(|| text.value(row).to_owned()),
+                counter.value(row),
+            ));
+        }
+    }
+    values.sort();
+    let mut expected = vec![
+        (Some("same".to_owned()), 1),
+        (None, 2),
+        (Some("same".to_owned()), 1),
+    ];
+    expected.sort();
+    if values != expected {
+        return Err(Error::refusal(
+            "probe_append_values",
+            "fresh native values differ from duplicate/null fixture",
+        ));
+    }
+    println!(
+        "{}",
+        json!({"event": "complete", "passed": true, "pin": pin,
+        "before_metadata": registered.metadata_location_result()?, "after_metadata": after,
+        "fresh_catalog_readback": true, "catalog_free_native_readback": true, "exact_values": true,
+        "scope": "one tiny maintained native append and server placement; no remote Engine or recovery qualification"})
     );
     Ok(())
 }

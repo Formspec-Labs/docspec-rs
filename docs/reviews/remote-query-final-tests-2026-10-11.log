@@ -1,0 +1,58 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.29s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 36 tests
+test storage::remote::objects::tests::conditional_conflict_and_uncertain_outcome_have_distinct_refusals ... ok
+test engine::locations::tests::remote_location_never_becomes_a_host_path_or_crosses_an_attempt_prefix ... ok
+test engine::inputs::tests::canceled_remote_manifest_read_keeps_worker_and_admission_through_decode ... ok
+test engine::locations::remote_tests::readable_in_scope_remote_input_has_no_ownership_without_creation_evidence ... ok
+DOCSPEC_TEST_WORK admission
+test storage::remote::objects::tests::incorrect_or_oversized_metadata_refuses_before_provider_io ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test storage::remote::objects::tests::empty_metadata_and_changed_availability_use_no_payload_read ... ok
+DOCSPEC_TEST_WORK processing
+test engine::locations::remote_tests::lost_remote_put_response_reconciles_exact_intent_and_completes_admission ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test engine::locations::remote_tests::present_remote_destination_with_wrong_digest_never_triggers_upload ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test storage::remote::objects::tests::changed_source_identity_refuses_before_publication ... ok
+test storage::remote::objects::tests::scope_rejects_aliases_and_cross_prefix_destinations ... ok
+test engine::locations::remote_tests::saved_remote_intent_does_not_turn_auth_failure_into_absence ... ok
+test engine::locations::remote_tests::pending_remote_intent_does_not_poison_another_operation_with_same_material_request ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test engine::locations::remote_tests::transferred_remote_admission_recovers_without_original_source_or_second_put ... ok
+test storage::remote::objects::tests::configuration_errors_and_debug_never_disclose_secret_values ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test engine::locations::remote_tests::reserved_remote_admission_resumes_same_destination_then_reuses_completed_phase ... ok
+test engine::remote_query_tests::composed_remote_context_queries_projected_filtered_parquet ... ok
+test storage::remote::objects::tests::metadata_reader_hashes_one_get_and_availability_reads_only_metadata ... ok
+test storage::remote::objects::tests::metadata_spare_capacity_is_admitted_before_provider_io ... ok
+test storage::remote::objects::tests::empty_readback_uses_only_stats_and_scope_refusal_performs_no_io ... ok
+test storage::remote::objects::tests::pinning::populated_gzip_selected_metadata_preserves_absent_write_property_and_shared_identities ... ok
+test storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity ... ok
+test storage::remote::objects::tests::writes::accepted_put_with_lost_response_reconciles_without_another_write ... ok
+test storage::remote::tests::missing_required_configuration_is_refused_before_connecting ... ok
+test storage::remote::objects::tests::writes::canceled_http_caller_keeps_owned_capacity_until_worker_finishes ... ok
+test storage::remote::objects::tests::writes::canceled_remote_candidate_keeps_original_admission_until_put_finishes ... ok
+test storage::remote::objects::tests::writes::remote_candidate_keeps_created_metadata_when_catalog_registration_fails ... ok
+test storage::remote::objects::tests::writes::remote_candidate_refuses_mismatched_location_and_compression_without_effects ... ok
+test storage::remote::objects::tests::writes::source_admission_transfers_once_and_qualifies_exact_remote_bytes ... ok
+test storage::remote::objects::tests::writes::bad_digest_after_part_upload_aborts_only_its_unpublished_upload ... ok
+test storage::remote::tests::debug_redacts_dummy_secrets_without_network_requests ... ok
+test storage::remote::objects::tests::writes::accepted_complete_with_lost_response_reconciles_without_reupload ... ok
+test storage::remote::objects::tests::pinning::populated_pin_binds_native_inventory_and_identities_to_configured_backend ... ok
+test storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change ... ok
+test storage::remote::objects::tests::writes::remote_candidate_creation_sends_one_conditional_put_before_registration ... ok
+test storage::remote::objects::tests::metadata_reader_refuses_changed_bytes_lengths_and_scope ... ok
+test storage::remote::objects::tests::pinning::populated_pin_guards_manifest_list_and_manifest_before_native_read ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 254 filtered out; finished in 2.68s
+

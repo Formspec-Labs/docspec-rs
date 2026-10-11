@@ -1,0 +1,18 @@
+{
+  "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-2e868a21-b2ab-45b1-b8ed-6c979b92c9f3/candidate-probe/metadata/00001-01a1292e-8728-70e1-a87a-bb8cc9327d25.gz.metadata.json",
+  "bytes": 701,
+  "sha256": "56ecb477a7dcf9985eb363a63e523d568eddef95e8649ed706b1b016e7377b12",
+  "table_uuid": "01a1292e-794d-70e3-b5eb-d0611d671624",
+  "table_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-2e868a21-b2ab-45b1-b8ed-6c979b92c9f3/candidate-probe",
+  "compression": "gzip",
+  "properties": {
+    "write.metadata.compression-codec": null,
+    "write.data.path": null,
+    "write.folder-storage.path": null,
+    "write.metadata.path": null,
+    "commit.retry.num-retries": "0",
+    "write.metadata.delete-after-commit.enabled": "false",
+    "gc.enabled": "false"
+  },
+  "scope": "Read-only inspection of retained synthetic metadata to resolve filename versus table-property compression semantics"
+}
