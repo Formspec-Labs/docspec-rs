@@ -273,6 +273,23 @@ reusable. Retirement changes recovery promises: it preserves files, attempt
 protections, issued readbacks and selected releases. It does not delete objects
 or establish reclaimable space.
 
+To end a generation seal's standalone availability, capture its exact generation
+and apply that plan. This preserves its identity and family membership:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-generation-retirement regulations end-g1 g1 "generation no longer offered for new capture" > generation-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-generation generation-retirement.json
+```
+
+HTTP uses `POST /retention/generations/plan` with `family`, `retirement`,
+`generation` and `reason`; `/retention/generations/retire` accepts the plan.
+These call `Engine::plan_generation_retirement` and `Engine::retire_generation`.
+New capture and resealing return `generation_retired`. Previously admitted
+consumers may finish, and their retained coverage still protects required member
+bytes. Unused owner grants require separate retirement; exact removal remains a
+separate operation. This local maintenance service does not delete seal records
+or change their immutable member identities.
+
 To end unused owner grants, save their exact `owner-protection/` keys from
 `inspect` as a JSON array in `grant-keys.json`, then capture a plan in the owning
 dataset:

@@ -694,3 +694,133 @@ async fn cli_and_http_use_the_same_generation_guards() {
     );
     assert!(!workspace.join("catalog.sqlite").exists());
 }
+
+#[tokio::test]
+async fn generation_retirement_matches_cli_http_and_keeps_the_exact_seal() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use docspec::model::{RetentionPlan, Retirement, RetirementScope};
+    use tower::ServiceExt;
+
+    let root = TempDir::new().unwrap();
+    let workspace = root.path().join("workspace");
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let initial = source(&engine, root.path(), "comments", "initial").await;
+    let release = engine
+        .run(&rebuild(&initial, "coupled", Some(coupled("family", "g1"))))
+        .await
+        .unwrap();
+    let sealed = seal("family", "g1", &[&release]);
+    engine.seal_generation(&sealed).await.unwrap();
+    let before = engine.inspect(&sealed.family).await.unwrap();
+    let expected = engine
+        .plan_generation_retirement(
+            &sealed.family,
+            &id("end-g1"),
+            &sealed.generation,
+            "end standalone availability",
+        )
+        .await
+        .unwrap();
+    let app = docspec::http::router(engine.clone());
+    let post = |path: &str, value: serde_json::Value| {
+        Request::post(path)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&value).unwrap()))
+            .unwrap()
+    };
+    let response = app.clone().oneshot(post("/retention/generations/plan", serde_json::json!({
+        "family": "family", "retirement": "end-g1", "generation": "g1", "reason": "end standalone availability"
+    }))).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let http_plan: RetentionPlan =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert_eq!(http_plan, expected);
+    assert_eq!(
+        http_plan.scope,
+        RetirementScope::GenerationSeal {
+            generation: id("g1")
+        }
+    );
+    assert_eq!(engine.inspect(&sealed.family).await.unwrap(), before);
+    let limits_path = root.path().join("limits.json");
+    let plan_path = root.path().join("retirement.json");
+    std::fs::write(&limits_path, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    std::fs::write(&plan_path, serde_json::to_vec(&http_plan).unwrap()).unwrap();
+    drop(app);
+    drop(engine);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--limits")
+        .arg(&limits_path)
+        .args([
+            "plan-generation-retirement",
+            "family",
+            "end-g1",
+            "g1",
+            "end standalone availability",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<RetentionPlan>(&output.stdout).unwrap(),
+        http_plan
+    );
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let app = docspec::http::router(engine.clone());
+    let response = app
+        .clone()
+        .oneshot(post(
+            "/retention/generations/retire",
+            serde_json::to_value(&http_plan).unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let retired: Retirement =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert_eq!(
+        engine.inspect(&sealed.family).await.unwrap()["generation/g1"],
+        before["generation/g1"]
+    );
+    let response = app
+        .clone()
+        .oneshot(post(
+            "/inputs/capture",
+            serde_json::to_value(&sealed.members).unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let error: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert_eq!(error["code"], "generation_retired");
+    drop(app);
+    drop(engine);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--limits")
+        .arg(&limits_path)
+        .arg("retire-generation")
+        .arg(&plan_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Retirement>(&output.stdout).unwrap(),
+        retired
+    );
+}

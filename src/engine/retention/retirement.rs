@@ -46,6 +46,7 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
         RetirementScope::PhaseRecovery => completion_key(key),
         RetirementScope::OptionalChanges => named_key(key, "change-certificate/"),
         RetirementScope::RestorePoints => key.starts_with("restore-point/"),
+        RetirementScope::GenerationSeal { generation } => key == format!("generation/{generation}"),
         RetirementScope::OwnerGrants => super::grants::grant_key(key),
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
@@ -67,6 +68,7 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
 
 pub(super) fn retained_key(key: &str) -> bool {
     completion_key(key)
+        || named_key(key, "generation/")
         || named_key(key, "change-certificate/")
         || key.starts_with("restore-point/")
         || key.starts_with("result/")
@@ -181,6 +183,7 @@ pub(super) fn validate_markers(
     super::recovery::validate_saved(rows, view, receipt, engine)?;
     super::compaction_recovery::validate_saved(rows, view, receipt, engine)?;
     super::grants::validate_saved(rows, view, receipt, engine)?;
+    super::seals::validate_plan(rows, view, &receipt.plan, &engine.inner.lifecycle.budget)?;
     if receipt.plan.scope == RetirementScope::OptionalChanges {
         for generation in &receipt.plan.records {
             validate_optional(rows, view, generation, &engine.inner.lifecycle.budget)?;
@@ -597,6 +600,9 @@ impl Engine {
                     "compaction recovery records changed; capture a fresh plan",
                 ));
             }
+        }
+        if matches!(plan.scope, RetirementScope::GenerationSeal { .. }) {
+            super::seals::validate_plan(&rows, &view, plan, &lifecycle.budget)?;
         }
         let mut records = Vec::with_capacity(plan.records.len() + 1);
         for phase in &plan.records {

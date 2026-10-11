@@ -1,0 +1,71 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.75s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 9 tests
+test engine::retention::grants::tests::oversized_grant_plan_refuses_before_metadata_mutation ... ok
+test engine::retention::grants::tests::orphan_grant_planning_does_not_create_a_consumer_lifecycle ... ok
+test engine::retention::grants::tests::corrupt_binding_revision_cannot_authorize_retirement ... ok
+test engine::retention::grants::tests::lost_reply_and_concurrent_retry_preserve_reacquired_and_unrelated_grants ... ok
+test engine::retention::grants::tests::a_new_claim_blocks_stale_execution_until_every_exact_claim_retires ... ok
+test engine::retention::grants::tests::sealed_generation_binding_blocks_retirement_of_its_exact_owner_grants ... ok
+test engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object ... ok
+test engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end ... ok
+test engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end ... FAILED
+
+failures:
+
+---- engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/owner/9aca91deb46c44e8978a35c256412fd0/data/ec3d9af3-a664-47b6-bbd5-5cb608413034-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/comments/f42c2251fdd74c3facf76b841d5f14dc/data/0bacedd0-7102-431c-bd93-44f698267db5-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/dockets/20509c5acc534bdea75ec8b2ec80c69b/data/8095c0b6-fa6a-4dcf-b4b6-6a276b651a59-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/consumer/8340bb4c0ba44772914716fc6b989152/data/a68bdde7-b68b-4e8f-b896-65bf464dd3e4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/consumer/0f5a34234a80410a87e6b32e3994cec5/data/57000231-605f-4ad8-9b7e-5b7992d1a8f0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/comments/66b91177b225458c94fc3c8e616b7577/data/c37f2907-de2f-4818-b033-5d43f82c6866-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpNRVukP/workspace/objects/dockets/41c603c6c54c442b87f46c00451b3281/data/b478fab4-d9bd-4139-8867-357374870265-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end' (46263234) panicked at src/engine/retention/grants/tests.rs:924:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "related_source", message: "use refresh to preserve related input coverage and contributors", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 294 filtered out; finished in 8.28s
+
+error: test failed, to rerun pass `--lib`

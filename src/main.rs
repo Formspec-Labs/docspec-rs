@@ -130,6 +130,15 @@ enum Command {
     },
     /// Retire saved restore points; preserve their files until separate removal.
     RetireRestorePoints { plan: PathBuf },
+    /// Capture one producer seal for standalone availability retirement.
+    PlanGenerationRetirement {
+        family: String,
+        retirement: String,
+        generation: String,
+        reason: String,
+    },
+    /// Retire a seal's standalone promise; preserve admitted consumer evidence.
+    RetireGeneration { plan: PathBuf },
     /// Capture exact owner grants that no live consumer binding needs.
     PlanGrantRetirement {
         owner: String,
@@ -555,6 +564,26 @@ async fn main() -> anyhow::Result<()> {
                 Command::RetireRestorePoints { plan } => print_json(
                     &engine
                         .retire_restore_points(&read_json::<RetentionPlan>(plan)?)
+                        .await?,
+                )?,
+                Command::PlanGenerationRetirement {
+                    family,
+                    retirement,
+                    generation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_generation_retirement(
+                            &Id::new(family)?,
+                            &Id::new(retirement)?,
+                            &Id::new(generation)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireGeneration { plan } => print_json(
+                    &engine
+                        .retire_generation(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::PlanGrantRetirement {

@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.01s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 9 tests
+test input_generations::invalid_seals_and_rebound_input_keys_refuse ... ok
+test input_generations::offline_relationship_checks_need_only_captured_manifests_and_detect_tampering ... ok
+test input_generations::omitted_relationship_inherits_and_explicit_transitions_require_the_selected_base ... ok
+test input_generations::independent_release_verification_rejects_rewritten_producer_relationships ... ok
+test input_generations::stable_family_membership_and_exact_retry_survive_restart_and_invalidation ... ok
+test input_generations::updates_and_backfills_inherit_but_resealing_requires_exact_new_members ... ok
+test input_generations::independent_and_coupled_inputs_follow_the_entire_consumed_member_map ... ok
+test input_generations::cli_and_http_use_the_same_generation_guards ... ok
+test input_generations::generation_retirement_matches_cli_http_and_keeps_the_exact_seal ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 7.40s
+

@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-11T05:44:30.342494+00:00",
+  "command": [
+    "./scripts/check"
+  ],
+  "free_before_bytes": 8984076288,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 6927630336,
+  "free_after_bytes": 7288004608,
+  "finished_utc": "2026-10-11T05:53:27.756911+00:00"
+}

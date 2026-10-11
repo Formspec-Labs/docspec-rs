@@ -1,0 +1,14 @@
+{
+  "consumer_repository": "/Users/mikewolfd/Work/spicy-stack/spicy-regs",
+  "consumer_commit": "d4e6f7233a56669eaed31dd6149f13d9fbeda53b",
+  "consumer_dirty_paths": [],
+  "consumer_sources_sha256": {
+    "src/spicy_regs/mcp_server.py": "65ba040adaae3acce48235ef9db11542b0f36f94505ff4ffd7c93b0eff37b856",
+    "src/spicy_regs/local_data.py": "b9f78633e4cbdffdef54623bbe85159182d7772fa17ec321834b231442c8bb47",
+    "pyproject.toml": "d165e28cec30363bdaae0ef2ed14d66ca3a91d8770439d1812e19f8f2a53e9b1",
+    "uv.lock": "7977adb5ee3d1bef12e6f957f4b1319dc4144574ce3bfa15cbc280145aad17ae"
+  },
+  "python": "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+  "python_version": "Python 3.12.13",
+  "scope": "Explicit local unmanaged Parquet through real in-process MCP HTTP; separate DocSpec evidence assertions. No provider requests or application release/evidence adapter."
+}

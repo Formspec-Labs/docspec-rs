@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T05:42:42.158483+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "exports::mcp::actual_spicy_regs_mcp_reads_immutable_exports_across_updates",
+    "--",
+    "--ignored",
+    "--exact",
+    "--nocapture"
+  ],
+  "free_before_bytes": 9706151936,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 9660022784,
+  "free_after_bytes": 9685671936,
+  "finished_utc": "2026-10-11T05:43:04.222842+00:00"
+}

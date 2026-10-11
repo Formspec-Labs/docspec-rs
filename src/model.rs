@@ -554,9 +554,19 @@ pub struct RetainedGeneration {
 pub enum RetirementScope {
     PhaseRecovery,
     OptionalChanges,
-    ResultAvailability { operation: OperationId },
-    OperationRecovery { operation: OperationId },
-    CompactionRecovery { operation: OperationId },
+    ResultAvailability {
+        operation: OperationId,
+    },
+    OperationRecovery {
+        operation: OperationId,
+    },
+    CompactionRecovery {
+        operation: OperationId,
+    },
+    /// Standalone availability of one immutable producer generation seal.
+    GenerationSeal {
+        generation: Id,
+    },
     OwnerGrants,
     RestorePoints,
 }

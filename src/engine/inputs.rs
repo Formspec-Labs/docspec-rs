@@ -7,12 +7,12 @@ use tokio::sync::OwnedMutexGuard;
 impl Engine {
     /// Seals exact accepted producer versions once, without reading their payloads.
     ///
-    /// An identical retry reconciles the original seal, even after later source
-    /// invalidation. New seals require currently eligible, accepted members whose
-    /// declarations all name this family and generation. Cleanup remains disabled.
+    /// An identical retry reconciles the original available seal, even after later
+    /// source invalidation. Explicitly retired seals refuse resealing. New seals
+    /// require eligible, accepted members declaring this family and generation.
     ///
     /// # Errors
-    /// Refuses conflicting reseals, missing history, stale eligibility, mismatched
+    /// Refuses retired seals, conflicting reseals, missing history, stale eligibility, mismatched
     /// producer declarations, invalid identities, or exhausted metadata capacity.
     pub async fn seal_generation(&self, seal: &GenerationSeal) -> Result<GenerationSeal> {
         self.require_local()?;
@@ -144,6 +144,8 @@ impl Engine {
                 "a sealed generation cannot change its exact members",
             ));
         }
+        self.check_generation_available(view, &seal.generation)
+            .await?;
         self.check_reference_binding(view, &key).await?;
         Ok(Some(previous))
     }
@@ -155,7 +157,7 @@ impl Engine {
     /// fresh guard at selection; this operation alone does not advance output.
     ///
     /// # Errors
-    /// Refuses unknown or invalidated versions, unsealed or mixed generations,
+    /// Refuses unknown or invalidated versions, retired, unsealed or mixed generations,
     /// rebound identities, missing manifests, and exhausted metadata capacity.
     pub async fn capture_inputs(&self, inputs: &BTreeMap<Id, VersionRef>) -> Result<InputCoverage> {
         self.require_local()?;
@@ -217,6 +219,9 @@ impl Engine {
                 && !generations.contains_key(family)
             {
                 let view = lifecycle.open(family).await?;
+                if require_available {
+                    self.check_generation_available(&view, generation).await?;
+                }
                 let seal: GenerationSeal = lifecycle
                     .get(&view, &format!("generation/{generation}"))
                     .await?
@@ -372,7 +377,7 @@ pub(super) fn check_relationships(
     Ok(())
 }
 
-fn validate_seal(seal: &GenerationSeal) -> Result<()> {
+pub(super) fn validate_seal(seal: &GenerationSeal) -> Result<()> {
     validate_members(&seal.members)
 }
 

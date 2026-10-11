@@ -78,6 +78,11 @@ pub fn router(engine: Engine) -> Router {
             "/retention/restore-points/retire",
             post(retire_restore_points),
         )
+        .route(
+            "/retention/generations/plan",
+            post(plan_generation_retirement),
+        )
+        .route("/retention/generations/retire", post(retire_generation))
         .route("/retention/grants/plan", post(plan_grant_retirement))
         .route("/retention/grants/retire", post(retire_grants))
         .route(
@@ -351,6 +356,38 @@ async fn retire_restore_points(
     Ok(Json(engine.retire_restore_points(&plan).await?))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationRetirementRequest {
+    family: Id,
+    retirement: Id,
+    generation: Id,
+    reason: String,
+}
+
+async fn plan_generation_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<GenerationRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_generation_retirement(
+                &request.family,
+                &request.retirement,
+                &request.generation,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+
+async fn retire_generation(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_generation(&plan).await?))
+}
+
 async fn plan_grant_retirement(
     State(engine): State<Engine>,
     Json(request): Json<KeyRetirementRequest>,
@@ -483,6 +520,7 @@ impl IntoResponse for HttpError {
             | "operation_abandoned"
             | "abandonment_conflict"
             | "generation_conflict"
+            | "generation_retired"
             | "phase_generation_conflict"
             | "phase_retired"
             | "changes_retired"

@@ -1,0 +1,21 @@
+{
+  "started_utc": "2026-10-11T05:58:28.644713+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "qualification_roots::",
+    "phase_retirement::retained_readback_selects_after_upstream_retirement_without_source",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 5772623872,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 1,
+  "min_free_bytes": 5772611584,
+  "free_after_bytes": 5771227136,
+  "finished_utc": "2026-10-11T05:58:30.655272+00:00"
+}

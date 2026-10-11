@@ -16,6 +16,7 @@ pub(super) mod owners;
 mod recovery;
 pub(crate) mod removal;
 pub(in crate::engine) mod retirement;
+mod seals;
 
 impl Engine {
     /// Requires a qualified outcome for every accepted source operation.

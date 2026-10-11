@@ -1,0 +1,53 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.26s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpasmJNG/workspace/objects/comments/c789085a643648f8a805c2a17688b0df/data/a67f8993-f59b-494b-8982-aa435d855a43-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpasmJNG/workspace/objects/comments/5d703f10ceb34feaa08286a78a31de50/data/data/6e058200-f8fa-4763-92dc-2b42c23deb1c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+[10/11/26 01:41:09] INFO     StreamableHTTP       streamable_http_manager.py:162
+                             session manager                                    
+                             started                                            
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     StreamableHTTP       streamable_http_manager.py:166
+                             session manager                                    
+                             shutting down                                      
+Traceback (most recent call last):
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/tests/qualification/spicy_regs_mcp.py", line 48, in <module>
+    assert reply["publication"]["qualification_comments"]["status"] == "local_unversioned", reply
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'qualification_comments'
+
+thread 'exports::mcp::actual_spicy_regs_mcp_reads_immutable_exports_across_updates' (46294122) panicked at tests/exports/mcp.rs:60:9:
+assertion `left != right` failed: MCP helper exited before reply
+  left: 0
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test exports::mcp::actual_spicy_regs_mcp_reads_immutable_exports_across_updates ... FAILED
+
+failures:
+
+failures:
+    exports::mcp::actual_spicy_regs_mcp_reads_immutable_exports_across_updates
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 298 filtered out; finished in 3.12s
+
+error: test failed, to rerun pass `--test integration`

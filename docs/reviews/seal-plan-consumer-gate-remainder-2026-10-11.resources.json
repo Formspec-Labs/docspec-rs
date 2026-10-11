@@ -1,0 +1,13 @@
+{
+  "started_utc": "2026-10-11T05:59:35.826958+00:00",
+  "command": [
+    "sh",
+    "/tmp/docspec-remaining-gate.sh"
+  ],
+  "free_before_bytes": 5956075520,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 5941100544,
+  "free_after_bytes": 5942206464,
+  "finished_utc": "2026-10-11T05:59:59.891978+00:00"
+}

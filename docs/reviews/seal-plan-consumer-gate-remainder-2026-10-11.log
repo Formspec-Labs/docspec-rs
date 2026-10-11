@@ -1,0 +1,43 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 6.65s
+    Finished `test` profile [unoptimized] target(s) in 0.84s
+     Running tests/restore.rs (target/debug/deps/restore-7c2717f0e8955e3c)
+
+running 13 tests
+test delayed_writer_child ... ok
+DOCSPEC_TEST_WORK admission
+test corruption_and_foreign_workspace_refuse_before_catalog_selection ... ok
+DOCSPEC_TEST_WORK processing
+test explicit_retirement_ends_restore_admission_and_preserves_creation_evidence ... ok
+test live_engine_and_held_stream_keep_the_storage_fence ... ok
+test catalog_loss_requires_explicit_artifact_import ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpGWa3Uk/workspace/objects/comments/8299f28f44bd42fe9242771af9d4c5d9/data/916bc4ac-0ba3-4d95-8c0c-70e8cd178916-00000.parquet
+DOCSPEC_TEST_WORK readback
+test explicitly_retired_shared_preparation_refuses_same_point_retry ... ok
+test interrupted_shared_capture_protects_reuse_after_older_point_retires ... ok
+test restores_exact_catalog_and_missing_originals_from_retained_copies ... ok
+test independent_delayed_writer_must_finish_before_restore_can_select ... ok
+test scalar_origins_restore_after_file_prepared_and_validation_retirement ... ok
+test completed_capture_reconciles_manifest_and_commit_response_without_recopying ... ok
+test repeated_points_reuse_source_backups_and_do_not_clone_backup_trees ... ok
+test failed_capture_retries_reuse_one_reservation_and_bounded_partial_files ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.76s
+
+     Running tests/worker_initialization.rs (target/debug/deps/worker_initialization-a70c79d078d6412c)
+
+running 2 tests
+test forced_shutdown_before_initialization_poll_quarantines_host_until_process_exit ... ok
+test canceled_open_finishes_owned_initialization_before_releasing_host ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+    Finished `test` profile [unoptimized] target(s) in 0.49s
+   Doc-tests docspec
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

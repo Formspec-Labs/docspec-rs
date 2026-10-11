@@ -1001,3 +1001,6 @@ async fn cli_compaction_and_offline_restore_share_the_application_paths() {
         .unwrap();
     assert_eq!(engine.latest(&spec.dataset).await.unwrap(), release);
 }
+
+#[path = "exports/mcp.rs"]
+mod mcp;

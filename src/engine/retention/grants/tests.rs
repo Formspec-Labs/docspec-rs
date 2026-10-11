@@ -599,3 +599,404 @@ async fn retiring_last_consumer_and_owner_promises_releases_the_foreign_object()
     }
     assert_eq!(consumed.dataset.dataset, consumer);
 }
+
+async fn end_member_promises(engine: &Engine, release: &ReleasePin, name: &str) {
+    let dataset = &release.dataset.dataset;
+    let records = engine.inspect(dataset).await.unwrap();
+    let phases = records
+        .iter()
+        .filter(|(key, value)| {
+            (key.starts_with("phase/") && value["operation"] == release.id.as_str())
+                || key.as_str() == format!("groups/{}", release.id)
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    // Material completions can be reused by another operation; end each exact
+    // creator generation once, after the replacement no longer consumes it.
+    if !phases.is_empty() {
+        let plan = engine
+            .plan_phase_retirement(
+                dataset,
+                &id(&format!("{name}-phases")),
+                &phases,
+                "end old recovery",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&plan).await.unwrap();
+    }
+    if records.contains_key(&format!("change-certificate/{}", release.id)) {
+        let plan = engine
+            .plan_change_retirement(
+                dataset,
+                &id(&format!("{name}-changes")),
+                std::slice::from_ref(&release.id),
+                "end optional old changes",
+            )
+            .await
+            .unwrap();
+        engine.retire_changes(&plan).await.unwrap();
+    }
+    let plan = engine
+        .plan_availability_retirement(
+            dataset,
+            &id(&format!("{name}-result")),
+            &release.id,
+            "end old availability",
+        )
+        .await
+        .unwrap();
+    engine.retire_availability(&plan).await.unwrap();
+    let plan = engine
+        .plan_operation_retirement(
+            dataset,
+            &id(&format!("{name}-operation")),
+            &release.id,
+            "end old operation recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&plan).await.unwrap();
+}
+
+async fn end_consumer_grants(engine: &Engine, owners: &[Id], consumer: &Id, name: &str) {
+    for owner in owners {
+        let records = engine.inspect(owner).await.unwrap();
+        let keys = records
+            .iter()
+            .filter(|(key, value)| {
+                key.starts_with("owner-protection/") && value["consumer"] == consumer.as_str()
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        if !keys.is_empty() {
+            let plan = engine
+                .plan_grant_retirement(
+                    owner,
+                    &id(&format!("{name}-{owner}")),
+                    &keys,
+                    "consumer promises ended",
+                )
+                .await
+                .unwrap();
+            engine.retire_grants(&plan).await.unwrap();
+        }
+    }
+}
+
+async fn assert_selected_source_values(engine: &Engine, release: &ReleasePin, expected: &[i64]) {
+    let selected = engine.latest(&release.dataset.dataset).await.unwrap();
+    assert_eq!(&selected, release);
+    let mut stream = engine.read_group(&selected, "source").await.unwrap();
+    let mut values = Vec::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let array = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        values.extend(array.values().iter().copied());
+    }
+    values.sort_unstable();
+    assert_eq!(values, expected);
+}
+
+async fn exercise_seal_retirement(retain_consumer: bool) {
+    let (root, engine, _) = fixture().await;
+    let workspace = root.path().join("workspace");
+    let input = root.path().join("input.parquet");
+    let family = id("family");
+    let generation = id("g1");
+    let mut old = Vec::new();
+    for dataset in ["comments", "dockets"] {
+        old.push(
+            engine
+                .run(&RunSpec {
+                    dataset: id(dataset),
+                    operation: id("g1-source"),
+                    base: None,
+                    relationship: Some(SourceRelationship::Coupled {
+                        family: family.clone(),
+                        generation: generation.clone(),
+                    }),
+                    input: input.to_string_lossy().into_owned(),
+                    expected_digest: storage::digest(&input).unwrap().0,
+                    sql: "SELECT * FROM input".into(),
+                    definition: "v1".into(),
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    let seal = GenerationSeal {
+        family: family.clone(),
+        generation: generation.clone(),
+        members: old
+            .iter()
+            .map(|release| (release.dataset.dataset.clone(), release.version_ref()))
+            .collect(),
+    };
+    engine.seal_generation(&seal).await.unwrap();
+    let candidate = old[0].dataset.groups["source"]
+        .objects
+        .iter()
+        .find(|object| object.path.ends_with(".parquet"))
+        .unwrap()
+        .clone();
+    let owners = old
+        .iter()
+        .map(|release| release.dataset.dataset.clone())
+        .collect::<Vec<_>>();
+    let consumer_request = RefreshSpec {
+        dataset: id("consumer"),
+        operation: id("g1-consumer"),
+        base: None,
+        definition: "v1".into(),
+        policy: RefreshPolicy::Captured,
+        mode: RefreshMode::Full,
+        relationship: None,
+        transform: RefreshTransform::Join(JoinTransform {
+            left: old[0].version_ref(),
+            right: old[1].version_ref(),
+            join: JoinDefinition {
+                keys: vec![JoinKey {
+                    left: "id".into(),
+                    right: "id".into(),
+                }],
+                kind: JoinKind::Inner,
+                nulls: NullMatching::Equal,
+                cardinality: JoinCardinality::ManyToMany,
+                fields: vec![JoinField {
+                    side: JoinSide::Left,
+                    field: "id".into(),
+                    name: "id".into(),
+                }],
+            },
+        }),
+    };
+    if retain_consumer {
+        assert_eq!(
+            engine
+                .refresh_until(&consumer_request, "admission")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+    }
+    let plan = engine
+        .plan_generation_retirement(
+            &family,
+            &id("end-g1"),
+            &generation,
+            "end standalone seal availability",
+        )
+        .await
+        .unwrap();
+    let before = engine.inspect(&family).await.unwrap();
+    let mut wrong = plan.clone();
+    wrong.scope = RetirementScope::PhaseRecovery;
+    assert_eq!(
+        engine.retire_generation(&wrong).await.unwrap_err().code(),
+        "invalid_retirement"
+    );
+    wrong = plan.clone();
+    wrong.records[0].revision += 1;
+    assert_eq!(
+        engine.retire_generation(&wrong).await.unwrap_err().code(),
+        "invalid_retirement"
+    );
+    assert_eq!(engine.inspect(&family).await.unwrap(), before);
+    engine
+        .inner
+        .lifecycle
+        .lose_commit_response
+        .store(true, std::sync::atomic::Ordering::Release);
+    let retired = engine.retire_generation(&plan).await.unwrap();
+    assert_eq!(engine.retire_generation(&plan).await.unwrap(), retired);
+    assert_eq!(
+        engine.inspect(&family).await.unwrap()["generation/g1"],
+        before["generation/g1"]
+    );
+    assert_eq!(
+        engine.seal_generation(&seal).await.unwrap_err().code(),
+        "generation_retired"
+    );
+    assert_eq!(
+        engine
+            .capture_inputs(&seal.members)
+            .await
+            .unwrap_err()
+            .code(),
+        "generation_retired"
+    );
+    // Work admitted under its own exact owner protection keeps its promise.
+    let consumer = if retain_consumer {
+        Some(engine.refresh(&consumer_request).await.unwrap())
+    } else {
+        None
+    };
+    // Coupled sources require an explicit based relationship change. The
+    // bridge honestly retains its parent; only a later independent full rebuild
+    // stops consuming that old source. Different input bytes avoid material reuse.
+    let replacement_input = root.path().join("replacement.parquet");
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![3, 4]))]).unwrap();
+    let mut writer = ArrowWriter::try_new(
+        std::fs::File::create(&replacement_input).unwrap(),
+        schema,
+        None,
+    )
+    .unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let replacement_digest = storage::digest(&replacement_input).unwrap().0;
+    let mut current = Vec::new();
+    for release in &old {
+        let bridge_spec = RunSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("independent-bridge"),
+            base: Some(release.id.clone()),
+            relationship: Some(SourceRelationship::Independent),
+            input: input.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&input).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        };
+        let bridge = engine.run(&bridge_spec).await.unwrap();
+        assert_eq!(
+            bridge.dataset.parent_manifest.as_ref(),
+            Some(&release.manifest)
+        );
+        assert!(
+            engine
+                .inspect_retention(std::slice::from_ref(&candidate))
+                .await
+                .unwrap()
+                .objects[0]
+                .blocker
+                .is_some(),
+            "the based bridge retains its required parent"
+        );
+        let replacement = engine
+            .run(&RunSpec {
+                operation: id("independent-source"),
+                base: None,
+                relationship: None,
+                input: replacement_input.to_string_lossy().into_owned(),
+                expected_digest: replacement_digest.clone(),
+                ..bridge_spec
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            replacement.dataset.relationship,
+            SourceRelationship::Independent
+        );
+        assert!(replacement.dataset.parent_manifest.is_none());
+        assert!(
+            !replacement.dataset.groups["source"]
+                .objects
+                .contains(&candidate)
+        );
+        current.push(replacement);
+        end_member_promises(&engine, release, release.dataset.dataset.as_str()).await;
+        end_member_promises(
+            &engine,
+            &bridge,
+            &format!("{}-bridge", release.dataset.dataset),
+        )
+        .await;
+    }
+    end_consumer_grants(&engine, &owners, &family, "family-grants").await;
+    if let Some(consumer) = &consumer {
+        let inspection = engine
+            .inspect_retention(std::slice::from_ref(&candidate))
+            .await
+            .unwrap();
+        assert!(
+            inspection.objects[0].blocker.is_some(),
+            "independent consumer retains the whole exact input"
+        );
+        let mut stream = engine.read_group(consumer, "source").await.unwrap();
+        let mut rows = 0;
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 2);
+        drop(stream);
+        // A selected related result retains required contributor input bytes.
+        // Ending the standalone family seal cannot end this consumer promise.
+        let blocked = engine
+            .plan_removal(
+                &candidate.owner,
+                &id("held-by-consumer"),
+                std::slice::from_ref(&candidate),
+                "inspect protection remaining after family retirement",
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.inspection.unmatched_bytes, 0);
+        assert_eq!(blocked.inspection.protected_bytes, candidate.bytes);
+        assert!(blocked.inspection.objects[0].blocker.is_some());
+        assert!(Path::new(&candidate.path).exists());
+        let retained_consumer = consumer.clone();
+        drop(engine);
+        let cold = Engine::open(&workspace, limits()).await.unwrap();
+        assert_eq!(cold.retire_generation(&plan).await.unwrap(), retired);
+        assert_selected_source_values(&cold, &retained_consumer, &[1, 2]).await;
+        for release in &current {
+            assert_selected_source_values(&cold, release, &[3, 4]).await;
+        }
+        assert!(
+            cold.inspect_retention(std::slice::from_ref(&candidate))
+                .await
+                .unwrap()
+                .objects[0]
+                .blocker
+                .is_some()
+        );
+        assert!(Path::new(&candidate.path).exists());
+        return;
+    }
+    let inspection = engine
+        .inspect_retention(std::slice::from_ref(&candidate))
+        .await
+        .unwrap();
+    assert!(
+        inspection.objects[0].blocker.is_none(),
+        "every promise for the exclusive old payload ended: {:?}",
+        inspection.objects[0].blocker
+    );
+    let removal = engine
+        .plan_removal(
+            &candidate.owner,
+            &id("remove-g1"),
+            std::slice::from_ref(&candidate),
+            "reclaim exclusive retired member payload",
+        )
+        .await
+        .unwrap();
+    let removed = engine.remove_objects(&removal).await.unwrap();
+    assert!(removed.complete);
+    assert!(!Path::new(&candidate.path).exists());
+    drop(engine);
+    let cold = Engine::open(&workspace, limits()).await.unwrap();
+    assert_eq!(cold.retire_generation(&plan).await.unwrap(), retired);
+    assert_eq!(cold.remove_objects(&removal).await.unwrap(), removed);
+    for release in &current {
+        assert_selected_source_values(&cold, release, &[3, 4]).await;
+    }
+}
+
+#[tokio::test]
+async fn retired_seal_reclaims_exclusive_member_after_all_other_promises_end() {
+    exercise_seal_retirement(false).await;
+}
+
+#[tokio::test]
+async fn retired_seal_preserves_selected_consumer_and_cold_readback() {
+    exercise_seal_retirement(true).await;
+}

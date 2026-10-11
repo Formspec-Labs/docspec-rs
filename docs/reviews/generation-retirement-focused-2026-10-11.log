@@ -1,0 +1,81 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.49s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 9 tests
+test engine::retention::grants::tests::orphan_grant_planning_does_not_create_a_consumer_lifecycle ... ok
+test engine::retention::grants::tests::oversized_grant_plan_refuses_before_metadata_mutation ... ok
+test engine::retention::grants::tests::corrupt_binding_revision_cannot_authorize_retirement ... ok
+test engine::retention::grants::tests::a_new_claim_blocks_stale_execution_until_every_exact_claim_retires ... ok
+test engine::retention::grants::tests::lost_reply_and_concurrent_retry_preserve_reacquired_and_unrelated_grants ... ok
+test engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end ... FAILED
+test engine::retention::grants::tests::sealed_generation_binding_blocks_retirement_of_its_exact_owner_grants ... ok
+test engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end ... FAILED
+test engine::retention::grants::tests::retiring_last_consumer_and_owner_promises_releases_the_foreign_object ... ok
+
+failures:
+
+---- engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpW1PSU1/workspace/objects/owner/f5ea514b94364afc998af527867e9b8c/data/472e6b76-5630-4243-9ce3-9aac9470fe88-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpW1PSU1/workspace/objects/comments/4607c10a52b74ffeb81041698a329333/data/00d97676-c6c8-41b1-9530-138d2ade1589-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpW1PSU1/workspace/objects/dockets/fab4398bf3b245dcba98083fbc64137d/data/e7c1fc68-53a3-4701-b700-a7006b6bd899-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end' (46150994) panicked at src/engine/retention/grants/tests.rs:823:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "relationship_base", message: "provide the selected base to rebuild a coupled source or change its relationship", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp5D5zf1/workspace/objects/owner/8bc5320af78c49db98be63c2d529f85b/data/af592944-4d4a-45b0-9628-4a8d958796a2-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp5D5zf1/workspace/objects/comments/58e3cc0530db40f98a821700066f909b/data/dda4bdb4-2354-41ad-8d44-2b1455f0402c-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp5D5zf1/workspace/objects/dockets/924a545574ad4747b720ee1b8d3d5915/data/a1c23c1b-875e-4477-92b3-4dc78859a213-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp5D5zf1/workspace/objects/consumer/ebc687b1c378499f80d98c915db5f010/data/59ed8772-68d4-4813-bbea-d367770232cb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp5D5zf1/workspace/objects/consumer/4480290d5a7c499d97b5bbff58e70212/data/bd553302-a811-4cff-a1a8-048cb6a1a097-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end' (46150993) panicked at src/engine/retention/grants/tests.rs:823:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "relationship_base", message: "provide the selected base to rebuild a coupled source or change its relationship", source: None, backtrace: <disabled> }
+
+
+failures:
+    engine::retention::grants::tests::retired_seal_preserves_admitted_consumer_until_its_independent_promises_end
+    engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end
+
+test result: FAILED. 7 passed; 2 failed; 0 ignored; 0 measured; 294 filtered out; finished in 4.61s
+
+error: test failed, to rerun pass `--lib`

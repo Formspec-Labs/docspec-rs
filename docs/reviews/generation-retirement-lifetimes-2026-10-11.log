@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.30s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test engine::retention::grants::tests::retired_seal_reclaims_exclusive_member_after_all_other_promises_end ... ok
+test engine::retention::grants::tests::retired_seal_preserves_selected_consumer_and_cold_readback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 301 filtered out; finished in 7.47s
+
