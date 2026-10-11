@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T15:53:59.127785+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "engine::restore::remote::tests::",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 4896792576,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 47903,
+  "min_free_bytes": 4785938432,
+  "last_observed_utc": "2026-10-11T15:54:27.234459+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 4884422656,
+  "finished_utc": "2026-10-11T15:54:29.236849+00:00"
+}

@@ -1,0 +1,39 @@
+{
+  "new_generation_epoch": 2,
+  "old_native_commit": "provider_refused",
+  "phase": "maintenance_passed",
+  "point": {
+    "dataset": "docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69",
+    "id": "portable",
+    "manifest": {
+      "bytes": 40927,
+      "digest": "ad1750893a7c14d333716c362e0a5f2bd4c00792c7071c8bc16a159198a02377",
+      "owner": "docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69",
+      "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/maintenance/docspec-rs-qualification-d141f808-cd28-4bcb-8c75-17164ba64f69/restore_2aeb02bbda26441aa23e2e0f2f170e4d/point.json"
+    }
+  },
+  "restored": {
+    "generation": "f1994a3b-321f-43a6-8ce3-5e102c5b5189",
+    "point": "portable",
+    "retained_bytes": 319309,
+    "tables": 2
+  },
+  "rows": [
+    [
+      1,
+      "same"
+    ],
+    [
+      1,
+      "same"
+    ],
+    [
+      2,
+      null
+    ],
+    [
+      2,
+      ""
+    ]
+  ]
+}

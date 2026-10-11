@@ -394,3 +394,166 @@ async fn restored_pending_source_cannot_recreate_a_later_deleted_destination() {
     );
     assert!(report.published.is_none());
 }
+
+#[tokio::test]
+async fn portable_namespace_properties_preserve_location_custom_values_and_intent() {
+    // Maintained catalog namespace behavior only; this is not hosted restore.
+    let source_root = tempfile::tempdir().unwrap();
+    let target_root = tempfile::tempdir().unwrap();
+    let source = storage::local_catalog(source_root.path()).await.unwrap();
+    let target = storage::local_catalog(target_root.path()).await.unwrap();
+    let dataset = Id::new("portable-namespace").unwrap();
+    let namespace = crate::catalog::lifecycle_ident(&dataset)
+        .namespace()
+        .clone();
+    source
+        .create_namespace(
+            &namespace,
+            std::collections::HashMap::from([
+                ("namespace_id".into(), "source-registration".into()),
+                ("location".into(), "s3://bucket/namespace-directory".into()),
+                ("retained-custom".into(), "exact-value".into()),
+            ]),
+        )
+        .await
+        .unwrap();
+    let captured = source.get_namespace(&namespace).await.unwrap();
+    let image = CatalogImage {
+        format: remote::FORMAT,
+        generation: uuid::Uuid::new_v4(),
+        namespaces: BTreeMap::from([(
+            namespace.to_string(),
+            captured
+                .properties()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        )]),
+        tables: Vec::new(),
+    };
+    let reference = RestorePointRef {
+        dataset: dataset.clone(),
+        id: Id::new("portable").unwrap(),
+        manifest: ObjectRef {
+            owner: dataset.clone(),
+            path: format!(
+                "s3://bucket/owned/{dataset}/restore_00000000000040008000000000000001/point.json"
+            ),
+            bytes: 1,
+            digest: "a".repeat(64),
+        },
+    };
+    let generation = uuid::Uuid::new_v4();
+    assert!(
+        restore_intent(
+            &target,
+            &image,
+            &reference,
+            image.generation,
+            generation,
+            false,
+            true
+        )
+        .await
+        .unwrap()
+    );
+    let created = target.get_namespace(&namespace).await.unwrap();
+    assert!(!created.properties().contains_key("namespace_id"));
+    let exact_intent = created.properties()["docspec.restore.intent"].clone();
+    target
+        .update_namespace(
+            &namespace,
+            std::collections::HashMap::from([
+                ("namespace_id".into(), "target-registration".into()),
+                ("location".into(), "s3://bucket/namespace-directory/".into()),
+            ]),
+        )
+        .await
+        .unwrap();
+    let lifecycle = Lifecycle::new(target.clone(), Budget::new(Limits::default()).unwrap());
+    assert!(
+        restore_intent(
+            &target,
+            &image,
+            &reference,
+            image.generation,
+            generation,
+            false,
+            false
+        )
+        .await
+        .unwrap()
+    );
+    check_target(&lifecycle, &image, &reference).await.unwrap();
+    for (key, changed, original) in [
+        (
+            "location",
+            "s3://bucket/another-directory/",
+            "s3://bucket/namespace-directory/",
+        ),
+        ("retained-custom", "different-value", "exact-value"),
+        (
+            "docspec.restore.intent",
+            "different-intent",
+            exact_intent.as_str(),
+        ),
+    ] {
+        target
+            .update_namespace(
+                &namespace,
+                std::collections::HashMap::from([(key.into(), changed.into())]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            restore_intent(
+                &target,
+                &image,
+                &reference,
+                image.generation,
+                generation,
+                false,
+                false
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            "invalid_restore_point"
+        );
+        if key != "docspec.restore.intent" {
+            assert_eq!(
+                check_target(&lifecycle, &image, &reference)
+                    .await
+                    .unwrap_err()
+                    .code(),
+                "invalid_restore_point"
+            );
+        }
+        target
+            .update_namespace(
+                &namespace,
+                std::collections::HashMap::from([(key.into(), original.into())]),
+            )
+            .await
+            .unwrap();
+    }
+    assert!(
+        restore_intent(
+            &target,
+            &image,
+            &reference,
+            image.generation,
+            generation,
+            false,
+            false
+        )
+        .await
+        .unwrap()
+    );
+    check_target(&lifecycle, &image, &reference).await.unwrap();
+    assert!(target.list_tables(&namespace).await.unwrap().is_empty());
+    assert_eq!(
+        source.get_namespace(&namespace).await.unwrap().properties(),
+        captured.properties()
+    );
+}

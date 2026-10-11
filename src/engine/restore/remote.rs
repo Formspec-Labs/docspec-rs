@@ -472,7 +472,12 @@ impl Engine {
             if !target.catalog.namespace_exists(&namespace).await? {
                 target
                     .catalog
-                    .create_namespace(&namespace, properties.clone().into_iter().collect())
+                    .create_namespace(
+                        &namespace,
+                        portable_namespace_properties(properties)
+                            .into_iter()
+                            .collect(),
+                    )
                     .await?;
             }
         }
@@ -807,6 +812,26 @@ fn check_removals_finished(rows: &crate::catalog::SnapshotRows, budget: &Budget)
     Ok(())
 }
 
+// Namespace IDs belong to the catalog registration, not the portable image.
+// Basin also returns the same namespace directory with a trailing slash. Keep
+// every other property, including the exact restore intent, unchanged.
+fn portable_namespace_properties<'a>(
+    properties: impl IntoIterator<Item = (&'a String, &'a String)>,
+) -> BTreeMap<String, String> {
+    properties
+        .into_iter()
+        .filter(|(key, _)| key.as_str() != "namespace_id")
+        .map(|(key, value)| {
+            let value = if key == "location" {
+                value.strip_suffix('/').unwrap_or(value)
+            } else {
+                value.as_str()
+            };
+            (key.clone(), value.to_owned())
+        })
+        .collect()
+}
+
 async fn check_target(
     lifecycle: &Lifecycle,
     image: &CatalogImage,
@@ -818,14 +843,9 @@ async fn check_target(
             .namespaces
             .get(&namespace.to_string())
             .ok_or_else(|| restore::invalid("target generation is not fresh"))?;
-        let mut actual = catalog
-            .get_namespace(&namespace)
-            .await?
-            .properties()
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let mut expected = expected.clone();
+        let actual_namespace = catalog.get_namespace(&namespace).await?;
+        let mut actual = portable_namespace_properties(actual_namespace.properties());
+        let mut expected = portable_namespace_properties(expected);
         if &namespace == crate::catalog::lifecycle_ident(&reference.dataset).namespace() {
             actual.remove("docspec.restore.intent");
             expected.remove("docspec.restore.intent");
@@ -931,11 +951,12 @@ async fn restore_intent(
     let namespace = crate::catalog::lifecycle_ident(&reference.dataset)
         .namespace()
         .clone();
-    let mut expected = image
-        .namespaces
-        .get(&namespace.to_string())
-        .ok_or_else(|| restore::invalid("restore owner namespace is absent"))?
-        .clone();
+    let mut expected = portable_namespace_properties(
+        image
+            .namespaces
+            .get(&namespace.to_string())
+            .ok_or_else(|| restore::invalid("restore owner namespace is absent"))?,
+    );
     expected.insert(
         KEY.into(),
         serde_json::to_string(&(
@@ -959,9 +980,7 @@ async fn restore_intent(
         }
     }
     let actual = catalog.get_namespace(&namespace).await?;
-    if actual.properties().iter().collect::<BTreeMap<_, _>>()
-        != expected.iter().collect::<BTreeMap<_, _>>()
-    {
+    if portable_namespace_properties(actual.properties()) != expected {
         return Err(restore::invalid(
             "target namespace is bound to another restore",
         ));

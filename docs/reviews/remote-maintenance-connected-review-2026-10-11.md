@@ -186,4 +186,46 @@ scope. Root reports focused pass in remote-missing-generation-root-2026-10-11.lo
 reviewer did not execute it or the provider continuation. Any unnecessary_unwrap
 lint correction should preserve this same root-only branch and short-circuit.
 
+## Portable namespace registration properties
+
+Static APPROVE of `160cd35fba2b1390718e502840977d996561c729726c01d62428e6ab16d0ea37`.
+Provider evidence found a regenerated catalog `namespace_id` and one trailing
+slash on the same namespace `location`. The helper excludes only that catalog
+registration ID and strips one trailing slash only from `location`; all custom
+properties remain exact. Creation omits the read-only ID. Capture/image bytes are
+unchanged. The same helper serves target checking and intent creation/checking,
+and the exact serialized restore intent remains compared by `restore_intent`
+before `check_target` omits that owner-only bookkeeping property. No endpoint,
+owned-prefix, table identity or intent binding check is relaxed.
+
+The maintained namespace fixture accepts registration-ID/slash differences and
+refuses another location, changed custom value and changed intent, while keeping
+the source properties and empty target table set unchanged. Root reports all
+three focused restore tests passed; reviewer did not execute them. No actionable
+static blocker to the same-point provider continuation remains.
+
+## Accepted closeout documentation
+
+Reviewed current STATUS top/requirements, PLAN completion checklist and
+`remote-maintenance-closeout-2026-10-11.md` against the minimum-closeout audit and
+retained provider receipts. No concrete missing accepted gate or material
+scope overclaim found. The closeout reports the declared quiescent independent
+source profile, rather than universal remote processing or online failover.
+Receipt matches target generation `f1994a3b-321f-43a6-8ce3-5e102c5b5189`, old native
+commit refusal, epoch 2, 319,309 protected bytes and the literal duplicate/null/
+empty rows. Recovered deletion evidence matches 810 reconciled absent bytes,
+zero newly confirmed unlink bytes and actual exact-key/GET/PUT/expiry status
+checks. Final test elapsed 48.61 seconds and supervision 52.211479 seconds match
+reported bounded completion; no remote throughput/resource inference is made.
+
+The audit's remaining consumer, independent-process recovery and bounded
+measurement work is explicitly linked in STATUS. Its PLAN completion statement
+retains wider capacity, physical I/O, unsampled peaks, power loss, deployment and
+object-loss exclusions. Earlier checkpoint notes are identified as historical;
+they do not supersede the current scoped closeout. Passing retained expensive
+work was not needlessly repeated. This review reads retained evidence; it does
+not independently rerun any gate or provider effect.
+
 Root runtime closure: `remote-maintenance-epoch-regression-2026-10-11.log` passes saved target-intent/fence reconciliation and an actual pending source upload followed by deletion and old-attempt refusal with no further object I/O. `remote-maintenance-focused-checks-2026-10-11.log` completes the affected integration cases, maintained plain/gzip reader checks, restore, worker and doc targets. `remote-maintenance-final-gate-2026-10-11.log` passes formatting, strict all-target/all-feature Clippy and the local/mock remote startup/admission fixtures. Previously passing full library/integration cases were not repeated. Provider qualification is recorded separately.
+
+Actual provider closeout is retained in `remote-maintenance-closeout-2026-10-11.md` and `remote-maintenance-restore-provider-fixed-2026-10-11/receipt.json`. The final same-target restore continuation passed after all reviewed repairs.

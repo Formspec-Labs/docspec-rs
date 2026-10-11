@@ -43,6 +43,16 @@ fn read_handoff<T: serde::de::DeserializeOwned>(directory: &Path, name: &str) ->
 
 fn checked<T>(phase: &str, result: Result<T>) -> Result<T> {
     if let Err(error) = &result {
+        // Source-free engine refusals carry the literal local reason. Keep only
+        // its first line, excluding an optional Error Display backtrace.
+        let refusal = std::error::Error::source(error).is_none().then(|| {
+            error
+                .to_string()
+                .lines()
+                .next()
+                .unwrap_or(error.code())
+                .to_owned()
+        });
         let mut native = None;
         let mut retryable = None;
         let mut status = None;
@@ -65,7 +75,7 @@ fn checked<T>(phase: &str, result: Result<T>) -> Result<T> {
         eprintln!(
             "{}",
             json!({"phase":phase,"code":error.code(),
-            "native_kind":native,"retryable":retryable,"http_status":status})
+            "native_kind":native,"retryable":retryable,"http_status":status,"refusal":refusal})
         );
     }
     result

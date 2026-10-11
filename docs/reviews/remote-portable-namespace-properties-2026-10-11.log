@@ -1,0 +1,14 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 26.47s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 3 tests
+test engine::restore::remote::tests::portable_namespace_properties_preserve_location_custom_values_and_intent ... ok
+test engine::restore::remote::tests::saved_target_intent_survives_restart_and_refuses_retargeting_before_registration ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+test engine::restore::remote::tests::restored_pending_source_cannot_recreate_a_later_deleted_destination ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 354 filtered out; finished in 0.40s
+

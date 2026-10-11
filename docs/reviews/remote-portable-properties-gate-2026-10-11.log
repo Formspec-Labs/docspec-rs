@@ -1,0 +1,5 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 17.82s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 26.51s
+  Executable unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)

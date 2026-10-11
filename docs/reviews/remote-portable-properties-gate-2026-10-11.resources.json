@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-11T15:54:46.432121+00:00",
+  "command": [
+    "sh",
+    "/tmp/docspec-portable-properties-gate.sh"
+  ],
+  "free_before_bytes": 4854501376,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 49693,
+  "min_free_bytes": 4744007680,
+  "last_observed_utc": "2026-10-11T15:55:30.606238+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 4839895040,
+  "finished_utc": "2026-10-11T15:55:32.616515+00:00"
+}

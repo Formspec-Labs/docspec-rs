@@ -107,21 +107,21 @@ boundary. Do not promise recovery beyond the last completed restore point.
 
 ## Delivery and completion checklist
 
-- [ ] **Local foundation and probes:** pinned compatible dependencies, guarded
+- [x] **Local foundation and probes:** pinned compatible dependencies, guarded
   commits, lost-response reconciliation, snapshot protection, local durability,
   bounded readers/writers; early memory, concurrency and cleanup qualifications.
-- [ ] **Recoverable Comments path:** retained input → deterministic shaping →
+- [x] **Recoverable Comments path:** retained input → deterministic shaping →
   data/evidence → validation → immutable local release → independent reader.
   Inspect/resume and failure after each expensive phase must reuse qualified work.
   Complete the first R1/R2/R6/R7 slices.
-- [ ] **Incremental updates and backfill:** R3–R5 exact changes, docket
+- [x] **Incremental updates and backfill:** R3–R5 exact changes, docket
   joins/summaries, evidence-only refresh, independent field additions, concurrent
   ingestion/backfill and guarded cutover. Compare optimized results with
   independent full reconstruction.
-- [ ] **History and maintenance:** R6 pinned history, compaction, retention
+- [x] **History and maintenance:** R6 pinned history, compaction, retention
   preview/execution, phase retirement and explicit restore points. Preserve every
   promised value and evidence relationship through maintenance.
-- [ ] **R2 and Dagster:** remote publication/readback through the same engine;
+- [x] **R2 and Dagster:** remote publication/readback through the same engine;
   thin Python adapter passes operation IDs and bounded status while Rust owns
   lifecycle decisions. Qualify worker loss, concurrent hosts, credentials,
   retention and restore against the actual provider.
