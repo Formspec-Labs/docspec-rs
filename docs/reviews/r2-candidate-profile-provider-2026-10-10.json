@@ -1,0 +1,20 @@
+{
+  "owner": "docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3",
+  "root": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3/candidate-probe",
+  "namespace": "candidate_09879fc9_eb50_47b8_b4c1_903329db55b3",
+  "table": "candidate_09879fc9_eb50_47b8_b4c1_903329db55b3.candidate",
+  "started_utc": "2026-10-11T01:36:21.011963+00:00",
+  "protocol": "Fresh synthetic prefix inside diagnosed Basin storage profile. Create empty native V2 metadata with sparse IDs 7 and 42, register once, check native meaning, fresh catalog load, independent catalog-free pin open. No append, retries, cleanup or policy changes. Original out-of-profile failure is retained separately.",
+  "source_sha256": {
+    "Cargo.toml": "e64f92a7209ddd1a732bd6392f9417447afe3ba3fdc5a1020528147a4c814262",
+    "Cargo.lock": "d1409a8065272834be57e999dad54f725ca9aad2fdb1265f66d6d95fb9ca78dc",
+    "src/storage/remote.rs": "bed9495b373e57a870424e04773103ba7698aa4b3ba61a937b4246e1fa185206",
+    "src/storage/remote/objects.rs": "bea8ee23b57cb5fc67d80556a80f0afef72a45b598f8cd028eaeaa30bf334557",
+    "src/storage/pinned.rs": "8f662c89abd1a5e623e29fb397f72a94aadcbbd7da5c7807d4a40c6397ab53ee",
+    "examples/r2_candidate_probe.rs": "a0f8d458bf1035529721e7039d563fe8c58eaf977fb3932ebf70697d2ed549a9",
+    "target/debug/examples/r2_candidate_probe": "65fae9e747e21dac8c44364dedcb2169f51a40fbcb36887b8395508acef286dc"
+  },
+  "state": "completed",
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T01:36:24.830831+00:00"
+}

@@ -68,6 +68,10 @@ required-features = ["remote"]
 name = "r2_objects_probe"
 required-features = ["remote"]
 
+[[example]]
+name = "r2_candidate_probe"
+required-features = ["remote"]
+
 [dev-dependencies]
 bytes = "1"
 tempfile = "3"

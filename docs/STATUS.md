@@ -19,6 +19,55 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Basin candidate registration and remote write failures
+
+Basin now has actual-provider evidence for registering a DocSpec-prepared empty
+Iceberg table without changing its field identities. The
+[fresh scoped run](reviews/r2-candidate-profile-provider-2026-10-10.json) and
+[native readback](reviews/r2-candidate-profile-provider-2026-10-10.jsonl) preserve
+field IDs **7 and 42**, the table UUID, schema, field-ID high-water mark, properties,
+table location and exact metadata URI. A fresh catalog client and a catalog-free
+pinned reader recover the same native metadata. The metadata object is **775
+bytes**; it and its synthetic namespace remain retained. No data payload,
+multi-host execution, cleanup or complete remote Engine path is qualified here.
+
+The first [Rust attempt](reviews/r2-candidate-provider-2026-10-10.json) failed at
+registration after creating its **757-byte** metadata object. A bounded
+[read-only reconciliation](reviews/r2-candidate-reconciliation-2026-10-10.json)
+found the exact table absent and the object retained. One explicitly diagnosed
+registration replay reused that object without uploading it again: Basin returned
+[HTTP 400 `InvalidLocation`](reviews/r2-candidate-registration-diagnostic-2026-10-10.json),
+requiring metadata beneath `s3://spicy-regs/__r2_data_catalog`. The successful new
+run uses a fresh UUID child beneath that profile and keeps the writer confined to
+that child. The failure did not require replacing the catalog or weakening field
+identity. Both outcomes remain evidence. An earlier Python reconciliation failed
+to decode HTTP compression; its [invalid result](reviews/r2-candidate-reconciliation-invalid-2026-10-10.json)
+is explicitly excluded from the table-absence conclusion.
+
+The [remote-write fault suite](reviews/remote-write-fault-tests-2026-10-10.log)
+also passes against real localhost HTTP through OpenDAL. It transfers multipart
+bytes before refusing a wrong digest, then aborts only that unfinished upload.
+Accepted PUT and multipart completion followed by lost responses reconcile through
+readback without another write. Canceling a caller after the server receives its
+PUT keeps byte admission until the worker finishes. This proves those local
+transport boundaries, not R2 fault behavior, process death, durable resume or
+whole-process memory limits. Existing shared-budget tests separately cover worker
+slot retention.
+
+Independent reviews approve the [provider probe](reviews/r2-candidate-probe-review-2026-10-10.md)
+and [local failure cases](reviews/remote-write-fault-review-2026-10-10.md). The
+full [repository gate](reviews/remote-candidate-full-check-2026-10-10.log) passes:
+formatting, strict all-target/all-feature Clippy, library/integration, restore,
+worker-initialization and documentation checks. The existing external Comments
+plan probe remains ignored. A [free-space guard](reviews/remote-candidate-check-resources-2026-10-10.json)
+kept this check bounded; sampled whole-volume free space stayed above its stop
+threshold. This is not a benchmark or an attribution of workstation disk growth.
+The next integration reuses one bounded candidate serializer and admitted
+create-only writer across local and remote storage. It must retain existing
+namespace/attempt protection and avoid nested reservations, repeated hashes or a
+second selection authority. Remote native admission, release/evidence completion,
+transfer recovery and multi-host maintenance remain unfinished.
+
 ## Rust create-only R2 objects and streaming readback
 
 The optional remote composition now supplies a maintained conditional writer and
@@ -55,7 +104,8 @@ caller cancellation. Upload buffers/part inventory and read buffers have explici
 admission allowances; native HTTP allocation and aggregate RSS remain unqualified.
 The [independent review](reviews/conditional-remote-objects-review-2026-10-10.md)
 approves the corrected implementation. Multipart failure after transfer starts,
-lost close responses and actual remote-I/O cancellation still need qualification.
+lost close responses and active-I/O caller cancellation now have the local HTTP
+evidence above; real-provider faults and process recovery remain unqualified.
 The direct optional OpenDAL declaration uses the already locked **0.57.0** package;
 no new package/version was added by this checkpoint.
 

@@ -1,0 +1,20 @@
+{
+  "owner": "docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf",
+  "root": "s3://spicy-regs/docspec-qualification/docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf/candidate-probe",
+  "namespace": "candidate_018d3b88_2237_4d29_9c68_e5d1c3de6cdf",
+  "table": "candidate_018d3b88_2237_4d29_9c68_e5d1c3de6cdf.candidate",
+  "started_utc": "2026-10-11T01:32:07.381265+00:00",
+  "protocol": "Create one owned empty V2 Iceberg metadata object with sparse IDs 7 and 42, register once, check location/UUID/schema/properties, fresh catalog load, then independent catalog-free pinned metadata read. No data append, retries, cleanup, or policy changes. Provider failure is inconclusive unless separately diagnosed; out-of-prefix rewritten metadata remains a partial result.",
+  "source_sha256": {
+    "Cargo.toml": "e64f92a7209ddd1a732bd6392f9417447afe3ba3fdc5a1020528147a4c814262",
+    "Cargo.lock": "d1409a8065272834be57e999dad54f725ca9aad2fdb1265f66d6d95fb9ca78dc",
+    "src/storage/remote.rs": "bed9495b373e57a870424e04773103ba7698aa4b3ba61a937b4246e1fa185206",
+    "src/storage/remote/objects.rs": "bea8ee23b57cb5fc67d80556a80f0afef72a45b598f8cd028eaeaa30bf334557",
+    "src/storage/pinned.rs": "8f662c89abd1a5e623e29fb397f72a94aadcbbd7da5c7807d4a40c6397ab53ee",
+    "examples/r2_candidate_probe.rs": "b67dab5aac472230e4069331b9feda72772234cdc00a8acfb53126e7e9e41b84",
+    "target/debug/examples/r2_candidate_probe": "958673faa42ae72ad79af98e3eb1e7f5958536b0dec00c9b089e9786aa3bd437"
+  },
+  "state": "failed",
+  "exit_code": 1,
+  "finished_utc": "2026-10-11T01:32:08.720003+00:00"
+}

@@ -1,0 +1,48 @@
+{
+  "observed_utc": "2026-10-11T01:34:11.435463+00:00",
+  "scope": "Read-only reconciliation after failed register_table; no retransmission, payload read or deletion",
+  "namespace": "candidate_018d3b88_2237_4d29_9c68_e5d1c3de6cdf",
+  "catalog_config_http": 200,
+  "advertised_endpoints": [
+    "GET /v1/config",
+    "GET /v1/{prefix}/namespaces",
+    "HEAD /v1/{prefix}/namespaces/{namespace}",
+    "POST /v1/{prefix}/namespaces",
+    "GET /v1/{prefix}/namespaces/{namespace}",
+    "DELETE /v1/{prefix}/namespaces/{namespace}",
+    "POST /v1/{prefix}/namespaces/{namespace}/properties",
+    "GET /v1/{prefix}/namespaces/{namespace}/tables",
+    "POST /v1/{prefix}/namespaces/{namespace}/tables",
+    "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    "DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    "HEAD /v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    "GET /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials",
+    "POST /v1/{prefix}/tables/rename",
+    "POST /v1/{prefix}/namespaces/{namespace}/register",
+    "POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/metrics",
+    "POST /v1/{prefix}/transactions/commit",
+    "POST /v1/{prefix}/namespaces/{namespace}/views",
+    "GET /v1/{prefix}/namespaces/{namespace}/views",
+    "GET /v1/{prefix}/namespaces/{namespace}/views/{view}",
+    "POST /v1/{prefix}/namespaces/{namespace}/views/{view}",
+    "DELETE /v1/{prefix}/namespaces/{namespace}/views/{view}",
+    "HEAD /v1/{prefix}/namespaces/{namespace}/views/{view}",
+    "POST /v1/{prefix}/views/rename"
+  ],
+  "config_default_keys": [],
+  "config_override_keys": [
+    "prefix",
+    "s3.signer.uri"
+  ],
+  "table_get_http": 404,
+  "registered_metadata_location": null,
+  "objects": [
+    {
+      "key": "docspec-qualification/docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf/candidate-probe/metadata/00000-3ec74796-5dc5-4308-b885-131f2b5a1b67.metadata.json",
+      "bytes": 757
+    }
+  ],
+  "listing_truncated": false,
+  "http_content_decoded_before_json": true
+}

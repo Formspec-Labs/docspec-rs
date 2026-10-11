@@ -10,6 +10,8 @@ use std::{
     time::Duration,
 };
 
+mod writes;
+
 fn properties() -> HashMap<String, String> {
     HashMap::from([
         ("s3.endpoint".into(), "https://s3.invalid".into()),

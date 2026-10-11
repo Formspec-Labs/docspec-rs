@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T01:35:01.826560+00:00",
+  "namespace": "candidate_018d3b88_2237_4d29_9c68_e5d1c3de6cdf",
+  "expected_metadata": {
+    "bytes": 757,
+    "digest": "79d7a9a1c1d04beebcc7212fc6c68a646633ae41b547bf3bf54214b79f3d44cc",
+    "owner": "docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf",
+    "path": "s3://spicy-regs/docspec-qualification/docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf/candidate-probe/metadata/00000-3ec74796-5dc5-4308-b885-131f2b5a1b67.metadata.json"
+  },
+  "scope": "One explicit diagnostic replay of exact registration after GET404; necessary because Rust generic failure omitted HTTP cause. No reupload, automatic retry, cleanup or production changes.",
+  "state": "completed",
+  "absence_guard_http": 404,
+  "registration_http": 400,
+  "error": {
+    "type": "InvalidLocation",
+    "code": "400",
+    "message": "Provided location s3://spicy-regs/docspec-qualification/docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf/candidate-probe/metadata/00000-3ec74796-5dc5-4308-b885-131f2b5a1b67.metadata.json is not a valid sublocation of the storage profile s3://spicy-regs/__r2_data_catalog."
+  },
+  "finished_utc": "2026-10-11T01:35:02.433094+00:00"
+}

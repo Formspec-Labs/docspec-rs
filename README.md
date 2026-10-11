@@ -84,6 +84,15 @@ objects and possible unfinished multipart parts under its isolated prefix.
 cargo run --locked --features remote --example r2_objects_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
 ```
 
+The [candidate probe](examples/r2_candidate_probe.rs) checks registration of empty
+native metadata with preserved field IDs, followed by fresh catalog and
+catalog-free readback. Basin requires its metadata beneath `__r2_data_catalog`;
+the probe writes only to a fresh UUID child there and retains the result.
+
+```sh
+cargo run --locked --features remote --example r2_candidate_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
+```
+
 This adapter does not yet make the local engine, publication or maintenance
 remote-capable. See [current qualification](docs/STATUS.md).
 

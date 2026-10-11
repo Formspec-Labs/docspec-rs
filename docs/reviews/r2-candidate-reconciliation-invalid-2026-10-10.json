@@ -1,0 +1,19 @@
+{
+  "observed_utc": "2026-10-11T01:33:40.635998+00:00",
+  "scope": "Read-only reconciliation after failed register_table; no retransmission, payload read or deletion",
+  "namespace": "candidate_018d3b88_2237_4d29_9c68_e5d1c3de6cdf",
+  "catalog_config_http": 200,
+  "advertised_endpoints": null,
+  "config_default_keys": [],
+  "config_override_keys": [],
+  "table_get_http": 404,
+  "registered_metadata_location": null,
+  "objects": [
+    {
+      "key": "docspec-qualification/docspec-rs-qualification-018d3b88-2237-4d29-9c68-e5d1c3de6cdf/candidate-probe/metadata/00000-3ec74796-5dc5-4308-b885-131f2b5a1b67.metadata.json",
+      "bytes": 757
+    }
+  ],
+  "listing_truncated": false,
+  "invalid_reason": "Diagnostic did not decode compressed HTTP content before JSON parsing and substituted an empty config. Its table URL and absence conclusion are not reliable. Object listing remains independent."
+}

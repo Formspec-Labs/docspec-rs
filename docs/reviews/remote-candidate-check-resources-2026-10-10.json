@@ -1,0 +1,11 @@
+{
+  "started_utc": "2026-10-11T01:37:43.876920+00:00",
+  "scope": "Repository gate; sampled whole-volume free bytes guard, not a benchmark or disk attribution",
+  "free_bytes_start": 3719086080,
+  "stop_below_free_bytes": 1073741824,
+  "state": "passed",
+  "exit_code": 0,
+  "min_sampled_volume_free_bytes": 2180136960,
+  "free_bytes_end": 2216685568,
+  "finished_utc": "2026-10-11T01:45:55.391555+00:00"
+}
