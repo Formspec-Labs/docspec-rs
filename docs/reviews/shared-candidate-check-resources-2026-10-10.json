@@ -1,0 +1,13 @@
+{
+  "command": "./scripts/check",
+  "started_utc": "2026-10-11T01:56:31.191279+00:00",
+  "start_free_bytes": 2089836544,
+  "minimum_sampled_free_bytes": 1295228928,
+  "stop_below_free_bytes": 1073741824,
+  "state": "completed",
+  "measurement": "whole-volume free space, not benchmark or allocation attribution",
+  "pid": 43735,
+  "exit_code": 0,
+  "end_free_bytes": 1320558592,
+  "finished_utc": "2026-10-11T02:05:48.859421+00:00"
+}

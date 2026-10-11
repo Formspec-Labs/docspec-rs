@@ -1503,6 +1503,7 @@ mod tests {
         let evolved = storage::register_candidate(
             engine.inner.lifecycle.catalog.as_ref(),
             &identifier,
+            storage::CandidateWriter::Local,
             move || Ok(metadata),
             &engine.inner.lifecycle.budget,
         )

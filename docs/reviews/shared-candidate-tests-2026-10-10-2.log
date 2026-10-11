@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.10s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 8 tests
+test storage::remote::objects::tests::writes::canceled_http_caller_keeps_owned_capacity_until_worker_finishes ... ok
+test storage::remote::objects::tests::writes::remote_candidate_refuses_mismatched_location_and_compression_without_effects ... ok
+test storage::remote::objects::tests::writes::remote_candidate_keeps_created_metadata_when_catalog_registration_fails ... ok
+test storage::remote::objects::tests::writes::canceled_remote_candidate_keeps_original_admission_until_put_finishes ... ok
+test storage::remote::objects::tests::writes::accepted_put_with_lost_response_reconciles_without_another_write ... ok
+test storage::remote::objects::tests::writes::remote_candidate_creation_sends_one_conditional_put_before_registration ... ok
+test storage::remote::objects::tests::writes::bad_digest_after_part_upload_aborts_only_its_unpublished_upload ... ok
+test storage::remote::objects::tests::writes::accepted_complete_with_lost_response_reconciles_without_reupload ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 264 filtered out; finished in 0.80s
+

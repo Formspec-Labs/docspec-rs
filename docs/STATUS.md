@@ -19,6 +19,37 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Shared local and remote candidate creation
+
+Local and remote candidate creation now use the same bounded serializer and
+admitted worker. Remote creation uses the existing conditional OpenDAL writer,
+with no additional payload read, digest pass, nested reservation or automatic
+write retry. The caller retains the exact metadata URI before effects; mismatched
+locations and unsupported compression refuse before writing. Registration follows
+an acknowledged object write. A catalog error leaves the immutable object available
+for reconciliation, while cancellation during registration can still leave an
+unknown committed result.
+
+The [focused HTTP tests](reviews/shared-candidate-tests-2026-10-10-2.log) pass
+conditional creation, conflict, lost response, held-write cancellation, location
+and compression refusal, and successful creation followed by catalog failure.
+They check exact bytes and request sequences without implying process-crash or
+real-provider fault qualification. The first compile failure is retained in its
+[original log](reviews/shared-candidate-tests-2026-10-10.log). The
+[independent review](reviews/shared-candidate-review-2026-10-10.md) approves, and
+the [full repository gate](reviews/shared-candidate-full-check-2026-10-10.log)
+passes with its [free-space guard](reviews/shared-candidate-check-resources-2026-10-10.json).
+
+A [fresh actual-provider run](reviews/r2-shared-candidate-provider-2026-10-10.json)
+through the shared helper also passes. Its
+[readback](reviews/r2-shared-candidate-provider-2026-10-10.jsonl) preserves sparse
+field IDs, schema, UUID, properties and the exact metadata URI; fresh catalog and
+catalog-free readers agree. The synthetic metadata is **775 bytes**, remains
+retained, and contains no data payload. Remote Engine admission, native pinning,
+release/evidence completion, transfer recovery and multi-host maintenance remain
+unfinished. The next integration must share explicitly configured object I/O,
+preserve protection boundaries and stream each new remote object identity once.
+
 ## Basin candidate registration and remote write failures
 
 Basin now has actual-provider evidence for registering a DocSpec-prepared empty
@@ -62,11 +93,10 @@ worker-initialization and documentation checks. The existing external Comments
 plan probe remains ignored. A [free-space guard](reviews/remote-candidate-check-resources-2026-10-10.json)
 kept this check bounded; sampled whole-volume free space stayed above its stop
 threshold. This is not a benchmark or an attribution of workstation disk growth.
-The next integration reuses one bounded candidate serializer and admitted
-create-only writer across local and remote storage. It must retain existing
-namespace/attempt protection and avoid nested reservations, repeated hashes or a
-second selection authority. Remote native admission, release/evidence completion,
-transfer recovery and multi-host maintenance remain unfinished.
+The shared candidate integration above now reuses that bounded serializer and
+admitted create-only writer. Namespace/attempt protection remains the caller's
+responsibility. Remote native admission, release/evidence completion, transfer
+recovery and multi-host maintenance remain unfinished.
 
 ## Rust create-only R2 objects and streaming readback
 

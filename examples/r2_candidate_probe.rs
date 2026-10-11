@@ -155,7 +155,8 @@ async fn run() -> Result<()> {
     let namespace = NamespaceIdent::new(format!("candidate_{}", suffix.replace('-', "_")));
     let ident = TableIdent::new(namespace.clone(), "candidate".into());
     let expected = candidate(&root)?;
-    let path = MetadataLocation::new_with_metadata(&root, &expected).to_string();
+    let metadata_location = MetadataLocation::new_with_metadata(&root, &expected);
+    let path = metadata_location.to_string();
     let bytes = serde_json::to_vec(&expected)?;
     let expected_object = object(&owner, path.clone(), &bytes);
     let budget = Budget::new(Limits {
@@ -200,18 +201,23 @@ async fn run() -> Result<()> {
         "{}",
         json!({"event": "object_create_start", "namespace": namespace.to_string(), "expected": expected_object})
     );
-    remote
-        .objects
-        .create_bytes(&expected_object, bytes, &budget)
-        .await?;
     println!(
         "{}",
         json!({"event": "register_start", "table": ident.to_string(), "metadata": expected_object})
     );
-    let registered = provider(
-        "register_table",
-        remote.catalog.register_table(&ident, path.clone()).await,
-    )?;
+    let registered = remote
+        .register_candidate(&ident, metadata_location, expected.clone(), &budget)
+        .await
+        .map_err(|error| {
+            if let Some(provider_error) = std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<iceberg::Error>())
+            {
+                eprintln!("{}", json!({"phase": "register_candidate", "kind": provider_error.kind().to_string(), "retryable": provider_error.retryable()}));
+                Error::refusal("probe_provider", "provider operation failed; retain exact probe references")
+            } else {
+                error
+            }
+        })?;
     let metadata_path = provider(
         "registered_metadata_location",
         registered.metadata_location_result(),

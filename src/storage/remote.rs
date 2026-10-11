@@ -25,6 +25,47 @@ pub struct RemoteStorage {
     pub objects: RemoteObjects,
 }
 
+impl RemoteStorage {
+    /// Creates immutable native metadata and registers its exact catalog reference.
+    ///
+    /// The caller retains the exact native `metadata_location` before effects for
+    /// unknown-result reconciliation. Its canonical URI must be directly beneath
+    /// the metadata's table location in this object's owned scope.
+    /// The caller creates the namespace and protects the owned attempt location
+    /// and metadata dependencies before calling. The shared admitted worker owns
+    /// metadata through creation, including after caller cancellation. Keep the
+    /// runtime driving I/O until any detached worker finishes. Retain the
+    /// immutable object if catalog registration fails; this method neither retries
+    /// nor cleans up. Cancellation during creation does not start registration,
+    /// but cancellation or response loss during catalog registration may leave a
+    /// committed registration. The caller reconciles the retained identifier and
+    /// exact metadata URI after an unknown registration outcome.
+    /// The caller retains the returned metadata and registration
+    /// for its intended availability lifetime. No DocSpec lifecycle selection or
+    /// remote Engine operation is performed.
+    ///
+    /// # Errors
+    /// Refuses compressed metadata, mismatched native destinations, metadata
+    /// capacity, destinations outside this object's owned scope,
+    /// competing creation, unconfirmed remote writes and catalog registration failure.
+    pub async fn register_candidate(
+        &self,
+        identifier: &TableIdent,
+        metadata_location: iceberg::MetadataLocation,
+        metadata: iceberg::spec::TableMetadata,
+        budget: &crate::budget::Budget,
+    ) -> Result<Table> {
+        super::register_candidate(
+            self.catalog.as_ref(),
+            identifier,
+            super::CandidateWriter::Remote(self.objects.clone(), metadata_location),
+            move || Ok(metadata),
+            budget,
+        )
+        .await
+    }
+}
+
 impl fmt::Debug for RemoteStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RemoteStorage").finish_non_exhaustive()

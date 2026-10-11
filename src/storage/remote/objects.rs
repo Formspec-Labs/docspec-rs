@@ -146,7 +146,7 @@ impl RemoteObjects {
             )
         })?;
         let memory = budget.reserve(admission)?;
-        let operator = self.operator.clone();
+        let objects = self.clone();
         let expected = expected.clone();
         let handle = tokio::runtime::Handle::current();
         budget
@@ -157,12 +157,32 @@ impl RemoteObjects {
                 {
                     return Err(source_changed());
                 }
-                handle
-                    .block_on(async { operator.write_with(&key, bytes).if_not_exists(true).await })
-                    .map_err(write_error)?;
+                handle.block_on(objects.create_bytes_by_key(&key, bytes))?;
                 Ok(expected)
             })
             .await
+    }
+
+    // Caller has already admitted the owned vector and its worker lifetime.
+    // Candidate serialization and external expected-identity checks stay at their
+    // respective boundaries; this entry point scopes the candidate once.
+    pub(in crate::storage) async fn create_bytes_admitted(
+        &self,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        let key = self.scope.key(path)?;
+        self.create_bytes_by_key(&key, bytes).await
+    }
+
+    // Both callers validate their scope once before entering this shared core.
+    async fn create_bytes_by_key(&self, key: &str, bytes: Vec<u8>) -> Result<()> {
+        self.operator
+            .write_with(key, bytes)
+            .if_not_exists(true)
+            .await
+            .map_err(write_error)?;
+        Ok(())
     }
 
     /// Streams a retained local file into a create-only remote object.

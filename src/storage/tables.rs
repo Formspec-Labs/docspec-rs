@@ -78,9 +78,67 @@ pub(crate) fn replacement_metadata(
     Ok(builder.build()?.metadata)
 }
 
+/// Concrete create-new metadata I/O for the shared candidate worker.
+pub(crate) enum CandidateWriter {
+    Local,
+    #[cfg(feature = "remote")]
+    Remote(super::remote::RemoteObjects, MetadataLocation),
+}
+
+impl CandidateWriter {
+    fn metadata_path(&self, metadata: &TableMetadata) -> Result<String> {
+        if metadata.metadata_compression_codec()? != iceberg::compression::CompressionCodec::None {
+            return Err(Error::refusal(
+                "metadata_compression",
+                "candidate metadata requires uncompressed JSON",
+            ));
+        }
+        match self {
+            Self::Local => {
+                Ok(MetadataLocation::new_with_metadata(metadata.location(), metadata).to_string())
+            }
+            #[cfg(feature = "remote")]
+            Self::Remote(_, location) => {
+                let path = location.to_string();
+                let prefix = format!("{}/metadata/", metadata.location());
+                let filename = path.strip_prefix(&prefix);
+                let canonical = path
+                    .parse::<MetadataLocation>()
+                    .is_ok_and(|parsed| parsed == *location && parsed.to_string() == path);
+                if location.compression_codec() != iceberg::compression::CompressionCodec::None
+                    || filename.is_none_or(|name| name.is_empty() || name.contains('/'))
+                    || !canonical
+                {
+                    return Err(Error::refusal(
+                        "metadata_location",
+                        "candidate location must name canonical native metadata beneath its table location",
+                    ));
+                }
+                Ok(path)
+            }
+        }
+    }
+
+    fn create_bytes(
+        self,
+        path: &str,
+        bytes: Vec<u8>,
+        _handle: &tokio::runtime::Handle,
+    ) -> Result<()> {
+        match self {
+            Self::Local => super::write_new(Path::new(path), &bytes),
+            #[cfg(feature = "remote")]
+            Self::Remote(objects, _) => {
+                _handle.block_on(objects.create_bytes_admitted(path, bytes))
+            }
+        }
+    }
+}
+
 pub(crate) async fn register_candidate(
     catalog: &dyn Catalog,
     identifier: &TableIdent,
+    writer: CandidateWriter,
     prepare: impl FnOnce() -> Result<TableMetadata> + Send + 'static,
     budget: &Budget,
 ) -> Result<Table> {
@@ -88,15 +146,15 @@ pub(crate) async fn register_candidate(
         std::sync::Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?);
     let worker_reservation = reservation.clone();
     let limit = budget.limits.max_metadata_bytes;
+    let handle = tokio::runtime::Handle::current();
     let path = budget
         .blocking(move || {
             // The worker keeps admission if its caller is canceled during durable I/O.
             let _reservation = worker_reservation;
             let metadata = prepare()?;
-            let path =
-                MetadataLocation::new_with_metadata(metadata.location(), &metadata).to_string();
+            let path = writer.metadata_path(&metadata)?;
             let bytes = bounded_json(&metadata, limit)?;
-            super::write_new(Path::new(&path), &bytes)?;
+            writer.create_bytes(&path, bytes, &handle)?;
             Ok(path)
         })
         .await?;
@@ -230,6 +288,7 @@ mod cancellation_tests {
             register_candidate(
                 worker_catalog.as_ref(),
                 &worker_id,
+                CandidateWriter::Local,
                 move || {
                     entered.send(()).unwrap();
                     stalled.recv().unwrap();

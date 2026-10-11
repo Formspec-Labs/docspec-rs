@@ -1,0 +1,22 @@
+{
+  "owner": "docspec-rs-qualification-4a449fb0-cfc3-45ab-95bf-a62e7f940555",
+  "root": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-4a449fb0-cfc3-45ab-95bf-a62e7f940555/candidate-probe",
+  "namespace": "candidate_4a449fb0_cfc3_45ab_95bf_a62e7f940555",
+  "started_utc": "2026-10-11T02:08:11.630326+00:00",
+  "protocol": "Fresh isolated synthetic namespace and owned child inside Basin storage profile. Invoke the shared admitted candidate serializer and conditional writer; register empty native V2 metadata with sparse field IDs 7 and 42; check meaning, fresh catalog load, and independent catalog-free pin read. No append, automatic retry, cleanup, or policy changes. Objects and namespace remain retained.",
+  "build": "cargo build --locked --all-features --example r2_candidate_probe",
+  "source_sha256": {
+    "Cargo.toml": "e64f92a7209ddd1a732bd6392f9417447afe3ba3fdc5a1020528147a4c814262",
+    "Cargo.lock": "d1409a8065272834be57e999dad54f725ca9aad2fdb1265f66d6d95fb9ca78dc",
+    "src/storage.rs": "1b34b0591118ef396c63314e01a53b7ed11d200e41261ccb63d40f9d03a8864b",
+    "src/storage/tables.rs": "fe4320e80f5cc397739d978cb8aad837768940e4afe2471a85423450177e0ad0",
+    "src/storage/remote.rs": "f2d41a15a57b2211e02c0ee2d783227406b14747c38d1c5ba50ee4f4d4fd2be0",
+    "src/storage/remote/objects.rs": "3c8afd3f84cf36aa505c4555175adfef5d874696d875d45eefe37a57d1a09cdb",
+    "src/storage/pinned.rs": "8f662c89abd1a5e623e29fb397f72a94aadcbbd7da5c7807d4a40c6397ab53ee",
+    "examples/r2_candidate_probe.rs": "918ec7aff3666c1ef7b590b54d773a22c926d41b3e9720376f210c8ce7ef7314",
+    "target/debug/examples/r2_candidate_probe": "3480eb713bf11dfa7a88cd99a927e02465761b2f3204dd60859bb1b7a6dded4b"
+  },
+  "state": "completed",
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T02:08:14.601365+00:00"
+}

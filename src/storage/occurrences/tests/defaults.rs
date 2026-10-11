@@ -33,6 +33,7 @@ async fn register(
     storage::register_candidate(
         catalog,
         &iceberg::TableIdent::new(base.identifier().namespace().clone(), name.into()),
+        storage::CandidateWriter::Local,
         move || Ok(metadata),
         budget,
     )

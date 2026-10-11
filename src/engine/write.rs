@@ -111,6 +111,7 @@ impl Engine {
         storage::register_candidate(
             lifecycle.catalog.as_ref(),
             &identifier,
+            storage::CandidateWriter::Local,
             prepare,
             &lifecycle.budget,
         )

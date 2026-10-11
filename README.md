@@ -84,7 +84,8 @@ objects and possible unfinished multipart parts under its isolated prefix.
 cargo run --locked --features remote --example r2_objects_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
 ```
 
-The [candidate probe](examples/r2_candidate_probe.rs) checks registration of empty
+The [candidate probe](examples/r2_candidate_probe.rs) exercises the shared
+local/remote candidate serializer and conditional remote writer. It checks empty
 native metadata with preserved field IDs, followed by fresh catalog and
 catalog-free readback. Basin requires its metadata beneath `__r2_data_catalog`;
 the probe writes only to a fresh UUID child there and retains the result.

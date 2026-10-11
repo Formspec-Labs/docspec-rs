@@ -308,6 +308,7 @@ async fn fixture() -> (TempDir, Engine, Id, Table, TablePin, Vec<Row>, String) {
     let table = storage::register_candidate(
         engine.inner.lifecycle.catalog.as_ref(),
         &identifier,
+        storage::CandidateWriter::Local,
         move || Ok(metadata),
         budget,
     )
@@ -730,6 +731,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     let source = storage::register_candidate(
         engine.inner.lifecycle.catalog.as_ref(),
         &identifier,
+        storage::CandidateWriter::Local,
         move || Ok(metadata),
         budget,
     )
