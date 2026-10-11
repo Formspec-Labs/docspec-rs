@@ -51,6 +51,9 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
         }
+        RetirementScope::ExportRecovery { operation } => {
+            super::export_recovery::scope_key(operation, key)
+        }
         RetirementScope::CompactionRecovery { operation } => {
             super::compaction_recovery::scope_key(operation, key)
         }
@@ -76,6 +79,14 @@ pub(super) fn retained_key(key: &str) -> bool {
         || key.starts_with("backfill-readback/")
         || super::grants::grant_key(key)
         || super::compaction_recovery::recovery_key(key)
+        || key.starts_with("export-operation/")
+        || key.starts_with("export-attempt/")
+        || key.starts_with("export-staged/")
+        || key.starts_with("export-stage-validation/")
+        || key.starts_with("export-materialized/")
+        || key.starts_with("export-validation/")
+        || key.starts_with("export-host-file/")
+        || key.starts_with("export-host-closed/")
         || [
             "operation/",
             "request/",
@@ -179,6 +190,7 @@ pub(super) fn validate_markers(
             return Err(invalid_retirement());
         }
     }
+    super::export_recovery::validate_saved(rows, view, receipt, engine)?;
     super::availability::validate_pointer(rows, view, receipt, revision)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
     super::compaction_recovery::validate_saved(rows, view, receipt, engine)?;
@@ -538,11 +550,17 @@ impl Engine {
     }
 
     async fn retire_retained_admitted(&self, plan: &RetentionPlan) -> Result<Retirement> {
-        self.retirement_catalog()?;
+        if !matches!(plan.scope, RetirementScope::ExportRecovery { .. }) {
+            self.retirement_catalog()?;
+        }
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&plan.dataset).await;
         let _guard = lock.lock().await;
-        let view = lifecycle.open(&plan.dataset).await?;
+        let view = if matches!(plan.scope, RetirementScope::ExportRecovery { .. }) {
+            self.existing_lifecycle_view(&plan.dataset).await?
+        } else {
+            lifecycle.open(&plan.dataset).await?
+        };
         let rows = lifecycle.rows(&view).await?;
         let key = format!("retirement/{}", plan.retirement);
         if let Some((revision, _, previous)) = rows.get_record::<Retirement>(&key)? {
@@ -581,6 +599,15 @@ impl Engine {
                 return Err(Error::refusal(
                     "stale_retirement",
                     "result or readback generations changed; capture a fresh plan",
+                ));
+            }
+        }
+        if let RetirementScope::ExportRecovery { operation } = &plan.scope {
+            let current = self.check_export_retirement(&rows, &view, operation)?;
+            if current != plan.records {
+                return Err(Error::refusal(
+                    "stale_retirement",
+                    "export recovery records changed; capture a fresh plan",
                 ));
             }
         }

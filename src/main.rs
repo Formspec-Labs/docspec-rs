@@ -92,6 +92,32 @@ enum Command {
         #[arg(long)]
         reason: String,
     },
+    /// Preview a named created host file after export recovery retirement.
+    PlanExportFileRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Preview exact terminal export recovery retirement.
+    PlanExportRetirement {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        retirement: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// End the exact export recovery in a saved plan, preserving immutable pins.
+    RetireExport { plan: PathBuf },
     /// Execute only freshly eligible targets from a saved removal plan.
     RemoveObjects {
         #[arg(long)]
@@ -517,6 +543,43 @@ async fn main() -> anyhow::Result<()> {
                             &Id::new(operation)?,
                             &reason,
                         )
+                        .await?,
+                )?,
+                Command::PlanExportFileRemoval {
+                    dataset,
+                    removal,
+                    operation,
+                    file,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_export_file_removal(
+                            &Id::new(dataset)?,
+                            &Id::new(removal)?,
+                            &Id::new(operation)?,
+                            &Id::new(file)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::PlanExportRetirement {
+                    dataset,
+                    retirement,
+                    operation,
+                    reason,
+                } => print_json(
+                    &engine
+                        .plan_export_retirement(
+                            &Id::new(dataset)?,
+                            &Id::new(retirement)?,
+                            &Id::new(operation)?,
+                            &reason,
+                        )
+                        .await?,
+                )?,
+                Command::RetireExport { plan } => print_json(
+                    &engine
+                        .retire_export(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
                 Command::RemoveObjects { plan } => print_json(

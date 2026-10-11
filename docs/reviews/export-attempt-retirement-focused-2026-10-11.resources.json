@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T13:28:12.978943+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "export_retirement::"
+  ],
+  "free_before_bytes": 7011983360,
+  "stop_below_bytes": 1073741824,
+  "status": "interrupted",
+  "child_pid": 69734,
+  "min_free_bytes": 7011958784,
+  "last_observed_utc": "2026-10-11T13:28:21.007259+00:00",
+  "exit_code": null,
+  "reason": "Parent corrected wrong integration test filter; compiler had already reported moved prefix. Supervisor interrupted; owned child process group terminated."
+}

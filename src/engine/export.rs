@@ -3,6 +3,7 @@
 
 use super::*;
 
+pub(in crate::engine) mod host;
 pub(super) mod remote;
 use crate::export::{ExportField, ExportPin, ExportPolicy, ExportSpec, ExportValidation};
 use arrow::{
@@ -252,7 +253,7 @@ impl Engine {
             Some(value) => value,
             None => {
                 let value = if self.inner.retained.is_local() {
-                    self.materialize_export(&operation, None).await?
+                    self.materialize_export(&operation, None, stop).await?
                 } else {
                     self.remote_materialize_export(&operation, stop).await?
                 };
@@ -415,6 +416,9 @@ impl Engine {
     }
 
     async fn check_export_authority(&self, view: &View, operation: &ExportOperation) -> Result<()> {
+        let rows = self.inner.lifecycle.rows(view).await?;
+        self.check_export_recovery(&rows, view, &operation.request.operation)?;
+        drop(rows);
         self.guard_corrections(
             view,
             &operation.source.dataset,
@@ -478,6 +482,9 @@ impl Engine {
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
+        let rows = self.inner.lifecycle.rows(&view).await?;
+        self.check_export_recovery(&rows, &view, &operation.request.operation)?;
+        drop(rows);
         if let Some(saved) = self.inner.lifecycle.get::<T>(&view, key).await? {
             // Concurrent attempts retain the first completed immutable output.
             return Ok(saved);
@@ -502,6 +509,7 @@ impl Engine {
         &self,
         operation: &ExportOperation,
         staged_directory: Option<PathBuf>,
+        stop: Option<&str>,
     ) -> Result<ExportMaterialized> {
         let spec = &operation.request;
         let budget = &self.inner.lifecycle.budget;
@@ -562,7 +570,7 @@ impl Engine {
         });
         let initial_path = path.clone();
         let output_schema = schema.clone();
-        let mut writer = budget
+        let (output, properties, memory, native) = budget
             .blocking(move || {
                 let _memory = memory;
                 std::fs::create_dir_all(&directory)?;
@@ -572,9 +580,30 @@ impl Engine {
                     .set_statistics_enabled(EnabledStatistics::None)
                     .set_offset_index_disabled(true)
                     .build();
+                let native = if cfg!(unix) {
+                    output.file.sync_all()?;
+                    File::open(initial_path.parent().ok_or_else(invalid_export)?)?.sync_all()?;
+                    Some(host::native_identity(&output.file)?)
+                } else {
+                    None
+                };
+                Ok((output, properties, _memory, native))
+            })
+            .await?;
+        let custody = if let Some((device, inode)) = native {
+            Some(
+                self.retain_host_file(operation, &path, device, inode)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        stop_after(stop, "host-created")?;
+        let mut writer = budget
+            .blocking(move || {
                 Ok((
                     ArrowWriter::try_new(output, output_schema, Some(properties))?,
-                    _memory,
+                    memory,
                 ))
             })
             .await?;
@@ -597,6 +626,8 @@ impl Engine {
                     .ok_or_else(invalid_export)?;
                 let limits = budget.limits.clone();
                 let root = self.inner.root.clone();
+                #[cfg(feature = "test-util")]
+                let stop_payload = stop == Some("host-payload");
                 writer = budget
                     .blocking(move || {
                         let reserve = limits
@@ -609,6 +640,8 @@ impl Engine {
                             ));
                         }
                         writer.0.write(&batch)?;
+                        #[cfg(feature = "test-util")]
+                        if stop_payload { writer.0.flush()?; }
                         // Reader batch size does not determine physical row groups.
                         // Flush when estimated writer memory reaches the batch allowance.
                         if writer.0.memory_size() >= limits.max_batch_bytes {
@@ -629,6 +662,7 @@ impl Engine {
                         Ok(writer)
                     })
                     .await?;
+                stop_after(stop, "host-payload")?;
             }
         }
         if rows != table_pin.rows {
@@ -658,12 +692,24 @@ impl Engine {
                 output.inner().finish(&owner, &path)
             })
             .await?;
-        Ok(ExportMaterialized {
+        let materialized = ExportMaterialized {
             request_digest: operation.request_digest.clone(),
             object,
             rows,
             fields,
-        })
+        };
+        if let Some(custody) = custody {
+            self.retain_export_record(
+                operation,
+                &format!(
+                    "export-host-closed/{}/{}/{}",
+                    custody.operation, custody.operation_revision, custody.id
+                ),
+                &materialized,
+            )
+            .await?;
+        }
+        Ok(materialized)
     }
 }
 

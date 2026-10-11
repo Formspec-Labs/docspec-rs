@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0382]: borrow of moved value: `prefix`
+  --> src/engine/export/host.rs:79:51
+   |
+59 |     let prefix = format!("{}/", directory.display());
+   |         ------ move occurs because `prefix` has type `std::string::String`, which does not implement the `Copy` trait
+...
+69 |         || (remote.is_none() && protection.paths != [prefix])
+   |                                                      ------ value moved here
+...
+79 |         if saved != &protection || host_prefix != &prefix {
+   |                                                   ^^^^^^^ value borrowed here after move
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+69 |         || (remote.is_none() && protection.paths != [prefix.clone()])
+   |                                                            ++++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `docspec` (lib) due to 1 previous error

@@ -1344,6 +1344,34 @@ impl Inventory {
                 self.table(&result.source, origin)?;
             }
             self.table(&result.replacement, origin)?;
+        } else if key.starts_with("export-host-file/") || key.starts_with("export-host-closed/") {
+            let created_key = key.replacen("export-host-closed/", "export-host-file/", 1);
+            let (revision, _, file): (_, _, crate::engine::export::host::HostFile) = rows
+                .get_record(&created_key)?
+                .ok_or_else(|| invalid_inventory("host creation evidence missing"))?;
+            crate::engine::export::host::validate(&file, &created_key, revision, rows, None)?;
+            let completed =
+                crate::engine::export::remote::completed_stage(rows, &file.operation, None)?;
+            let ended = completed
+                .as_ref()
+                .is_some_and(|stage| stage.object.path == file.path);
+            if key.starts_with("export-host-closed/") {
+                let closed: crate::engine::export::ExportMaterialized = decode(json)?;
+                let (_, _, operation): (_, _, crate::engine::export::ExportOperation) = rows
+                    .get_record(&format!("export-operation/{}", file.operation))?
+                    .ok_or_else(|| invalid_inventory("host export operation missing"))?;
+                crate::engine::export::check_materialized(&closed, &operation)?;
+                if closed.object.path != file.path
+                    || rows.revision(key).is_none_or(|closed| closed <= revision)
+                {
+                    return Err(invalid_inventory("host closed file differs from creation"));
+                }
+                if !ended {
+                    self.object(&closed.object, origin)?;
+                }
+            } else if !ended {
+                self.path(&file.path, origin)?;
+            }
         } else if [
             "export-attempt/",
             "export-staged/",

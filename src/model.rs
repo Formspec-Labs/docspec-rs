@@ -563,6 +563,10 @@ pub enum RetirementScope {
     CompactionRecovery {
         operation: OperationId,
     },
+    /// Recovery of one export operation, separate from immutable pin availability.
+    ExportRecovery {
+        operation: OperationId,
+    },
     /// Standalone availability of one immutable producer generation seal.
     GenerationSeal {
         generation: Id,
@@ -647,6 +651,14 @@ pub enum RemovalScope {
         operation_revision: i64,
         stage_revision: i64,
         completion_revision: i64,
+        host_root: String,
+    },
+    /// One exactly created host child after terminal export recovery retirement.
+    ExportHostFile {
+        operation: Id,
+        operation_revision: i64,
+        file: Id,
+        creation_revision: i64,
         host_root: String,
     },
 }

@@ -380,7 +380,14 @@ async fn relocated_retry_preserves_original_request_and_readback() {
         .to_string_lossy()
         .into_owned();
     let resumed = engine.update(&request).await.unwrap();
-    assert_eq!(serde_json::to_value(resumed).unwrap(), original);
+    assert_eq!(
+        resumed,
+        serde_json::from_value::<ReleasePin>(original.clone()).unwrap()
+    );
+    assert_eq!(
+        engine.inspect(&request.dataset).await.unwrap()["readback/relocated"],
+        original
+    );
 }
 
 #[cfg(feature = "test-util")]

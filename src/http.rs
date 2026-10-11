@@ -61,6 +61,12 @@ pub fn router(engine: Engine) -> Router {
             "/retention/removal/export-stage/plan",
             post(plan_export_stage_removal),
         )
+        .route(
+            "/retention/removal/export-file/plan",
+            post(plan_export_file_removal),
+        )
+        .route("/retention/exports/plan", post(plan_export_retirement))
+        .route("/retention/exports/retire", post(retire_export))
         .route("/retention/removal/execute", post(remove_objects))
         .route(
             "/datasets/{dataset}/removals/{removal}",
@@ -223,6 +229,61 @@ struct ExportStageRemovalRequest {
     removal: Id,
     operation: Id,
     reason: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportFileRemovalRequest {
+    dataset: Id,
+    removal: Id,
+    operation: Id,
+    file: Id,
+    reason: String,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportRetirementRequest {
+    dataset: Id,
+    retirement: Id,
+    operation: Id,
+    reason: String,
+}
+async fn plan_export_file_removal(
+    State(engine): State<Engine>,
+    Json(request): Json<ExportFileRemovalRequest>,
+) -> Result<Json<RemovalPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_export_file_removal(
+                &request.dataset,
+                &request.removal,
+                &request.operation,
+                &request.file,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+async fn plan_export_retirement(
+    State(engine): State<Engine>,
+    Json(request): Json<ExportRetirementRequest>,
+) -> Result<Json<RetentionPlan>, HttpError> {
+    Ok(Json(
+        engine
+            .plan_export_retirement(
+                &request.dataset,
+                &request.retirement,
+                &request.operation,
+                &request.reason,
+            )
+            .await?,
+    ))
+}
+async fn retire_export(
+    State(engine): State<Engine>,
+    Json(plan): Json<RetentionPlan>,
+) -> Result<Json<Retirement>, HttpError> {
+    Ok(Json(engine.retire_export(&plan).await?))
 }
 
 async fn plan_export_stage_removal(

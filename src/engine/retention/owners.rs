@@ -990,6 +990,26 @@ async fn visit_creation(
             for object in &created.backups {
                 observe(object)?;
             }
+        } else if key.starts_with("export-host-closed/") {
+            let created_key = key.replacen("export-host-closed/", "export-host-file/", 1);
+            let (created_revision, _, file): (_, _, crate::engine::export::host::HostFile) =
+                rows.get_record(&created_key)?.ok_or_else(invalid)?;
+            crate::engine::export::host::validate(
+                &file,
+                &created_key,
+                created_revision,
+                rows,
+                None,
+            )?;
+            let output: crate::engine::export::ExportMaterialized = serde_json::from_str(json)?;
+            let (_, _, operation): (_, _, crate::engine::export::ExportOperation) = rows
+                .get_record(&format!("export-operation/{}", file.operation))?
+                .ok_or_else(invalid)?;
+            crate::engine::export::check_materialized(&output, &operation)?;
+            if output.object.path != file.path || revision <= created_revision {
+                return Err(invalid());
+            }
+            observe(&output.object)?;
         } else if let Some(suffix) = key.strip_prefix("export-staged/") {
             crate::engine::export::remote::validate_record(key, json, rows, None)?;
             let (operation, _) = suffix.split_once('/').ok_or_else(invalid)?;

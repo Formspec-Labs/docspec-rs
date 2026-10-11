@@ -47,11 +47,97 @@ pub(crate) async fn reconcile_absent_file(
     owned_worker(root, object, budget, reconcile_absence).await
 }
 
+/// Checks an explicitly created partial file once for a maintenance identity.
+///
+/// # Errors
+/// Refuses unsafe paths, changed original identity, capacity, or filesystem errors.
+pub(crate) async fn inspect_created_file(
+    root: &Path,
+    object: &ObjectRef,
+    device: u64,
+    inode: u64,
+    budget: &Budget,
+) -> Result<ObjectRef> {
+    owned_worker(root, object, budget, move |root, object| {
+        let path = checked_path(root, object)?;
+        let before = std::fs::symlink_metadata(path).map_err(|_| io_refusal())?;
+        check_regular(&before)?;
+        check_original(&before, device, inode)?;
+        let mut input = File::open(path).map_err(|_| io_refusal())?;
+        let opened = input.metadata().map_err(|_| io_refusal())?;
+        check_identity(&before, &opened)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = vec![0; 1 << 20];
+        let mut bytes = 0_u64;
+        loop {
+            let count = input.read(&mut buffer).map_err(|_| io_refusal())?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            bytes = bytes.checked_add(count as u64).ok_or_else(changed)?;
+        }
+        check_identity(&opened, &input.metadata().map_err(|_| io_refusal())?)?;
+        check_identity(
+            &opened,
+            &std::fs::symlink_metadata(path).map_err(|_| changed())?,
+        )?;
+        if bytes != opened.len() {
+            return Err(changed());
+        }
+        Ok(ObjectRef {
+            bytes,
+            digest: hasher.finalize().to_hex().to_string(),
+            ..object.clone()
+        })
+    })
+    .await
+}
+
+/// Removes only the original exactly recorded host file, including partial bytes.
+///
+/// # Errors
+/// Refuses unsafe paths, changed bytes or original identity, capacity, or filesystem errors.
+pub(crate) async fn remove_created_file(
+    root: &Path,
+    object: &ObjectRef,
+    device: u64,
+    inode: u64,
+    budget: &Budget,
+) -> Result<LocalRemovalOutcome> {
+    owned_worker(root, object, budget, move |root, object| {
+        remove_file_with_identity(
+            root,
+            object,
+            |path| std::fs::remove_file(path),
+            sync_parent,
+            Some((device, inode)),
+        )
+    })
+    .await
+}
+
+fn check_original(metadata: &Metadata, device: u64, inode: u64) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.dev() != device || metadata.ino() != inode {
+            return Err(changed());
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (metadata, device, inode);
+        Err(invalid_path())
+    }
+}
+
 async fn owned_worker<T: Send + 'static>(
     root: &Path,
     object: &ObjectRef,
     budget: &Budget,
-    effect: fn(&Path, &ObjectRef) -> Result<T>,
+    effect: impl FnOnce(&Path, &ObjectRef) -> Result<T> + Send + 'static,
 ) -> Result<T> {
     let bytes = std::mem::size_of::<ObjectRef>()
         .saturating_add(std::mem::size_of::<PathBuf>())
@@ -132,6 +218,16 @@ fn remove_file_with(
     unlink: impl FnOnce(&Path) -> std::io::Result<()>,
     synchronize: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<LocalRemovalOutcome> {
+    remove_file_with_identity(root, object, unlink, synchronize, None)
+}
+
+fn remove_file_with_identity(
+    root: &Path,
+    object: &ObjectRef,
+    unlink: impl FnOnce(&Path) -> std::io::Result<()>,
+    synchronize: impl FnOnce(&Path) -> Result<()>,
+    original: Option<(u64, u64)>,
+) -> Result<LocalRemovalOutcome> {
     let path = checked_path(root, object)?;
     let parent = path.parent().ok_or_else(invalid_path)?;
     let before = match std::fs::symlink_metadata(path) {
@@ -143,6 +239,9 @@ fn remove_file_with(
         Err(_) => return Err(io_refusal()),
     };
     check_regular(&before)?;
+    if let Some((device, inode)) = original {
+        check_original(&before, device, inode)?;
+    }
     if before.len() != object.bytes {
         return Err(changed());
     }

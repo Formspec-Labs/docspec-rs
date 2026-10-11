@@ -4,23 +4,30 @@
 use super::*;
 use crate::engine::export::remote::{CompletedStage, completed_stage};
 
+pub(super) struct HostStageProof {
+    pub object: ObjectRef,
+    pub retained_path: String,
+}
+
 impl Engine {
     pub(super) fn check_removal_scope(&self, scope: &RemovalScope) -> Result<()> {
         match scope {
             RemovalScope::Objects => self.removal_catalog(),
-            RemovalScope::ExportHostStage { host_root, .. } => {
+            RemovalScope::ExportHostStage { host_root, .. }
+            | RemovalScope::ExportHostFile { host_root, .. } => {
                 if !cfg!(unix) {
                     return Err(Error::refusal(
                         "removal_platform",
                         "local removal identity checks require Unix",
                     ));
                 }
-                if matches!(&self.inner.objects, storage::Objects::Local)
-                    || host_root != self.inner.root.to_string_lossy().as_ref()
+                if host_root != self.inner.root.to_string_lossy().as_ref()
+                    || (matches!(scope, RemovalScope::ExportHostStage { .. })
+                        && matches!(&self.inner.objects, storage::Objects::Local))
                 {
                     return Err(Error::refusal(
                         "export_host_unavailable",
-                        "completed export stage belongs to another configured exclusive host",
+                        "export file belongs to another configured exclusive host",
                     ));
                 }
                 Ok(())
@@ -59,7 +66,10 @@ impl Engine {
         rows: &SnapshotRows,
         view: &View,
         plan: &RemovalPlan,
-    ) -> Result<CompletedStage> {
+    ) -> Result<HostStageProof> {
+        if matches!(plan.scope, RemovalScope::ExportHostFile { .. }) {
+            return self.validate_export_file_plan(rows, view, plan);
+        }
         let RemovalScope::ExportHostStage {
             operation,
             operation_revision,
@@ -92,7 +102,10 @@ impl Engine {
         {
             return Err(invalid());
         }
-        Ok(stage)
+        Ok(HostStageProof {
+            object: stage.object,
+            retained_path: stage.remote.path,
+        })
     }
 
     pub(super) fn check_stage_grants(
@@ -222,7 +235,7 @@ impl Engine {
         let stage = self.validate_export_stage_plan(&rows, &view, plan)?;
         self.inner
             .objects
-            .validate_retained_path(&stage.remote.path)?;
+            .validate_retained_path(&stage.retained_path)?;
         let object = &plan.inspection.objects[0].object;
         self.check_stage_grants(&rows, &view, object)?;
         super::super::owners::available(&rows, &view, object)?;

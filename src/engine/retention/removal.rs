@@ -4,6 +4,7 @@ use super::*;
 use crate::catalog::{SnapshotRows, history_row_bytes};
 use iceberg::{NamespaceIdent, TableIdent};
 
+mod export_file;
 mod export_stage;
 #[cfg(test)]
 mod fault_tests;
@@ -647,7 +648,7 @@ impl Engine {
             let stage = self.validate_export_stage_plan(&rows, &view, &intent.plan)?;
             self.inner
                 .objects
-                .validate_retained_path(&stage.remote.path)?;
+                .validate_retained_path(&stage.retained_path)?;
             if !finished(&progress) {
                 self.check_stage_grants(&rows, &view, &stage.object)?;
             }
@@ -777,13 +778,22 @@ impl Engine {
                     continue;
                 }
                 let object = &intent.plan.inspection.objects[*index].object;
-                next.objects[position] = match storage::removal::remove_owned_file(
-                    &self.inner.root,
-                    object,
-                    &lifecycle.budget,
-                )
-                .await
-                {
+                let effect = if matches!(intent.plan.scope, RemovalScope::ExportHostFile { .. }) {
+                    let rows = lifecycle.rows(&view).await?;
+                    let file = self.export_file_creation(&rows, &intent.plan)?;
+                    storage::removal::remove_created_file(
+                        &self.inner.root,
+                        object,
+                        file.device,
+                        file.inode,
+                        &lifecycle.budget,
+                    )
+                    .await
+                } else {
+                    storage::removal::remove_owned_file(&self.inner.root, object, &lifecycle.budget)
+                        .await
+                };
+                next.objects[position] = match effect {
                     Ok(storage::removal::LocalRemovalOutcome::Deleted) => RemovalOutcome::Removed,
                     Ok(storage::removal::LocalRemovalOutcome::Absent) => RemovalOutcome::Absent,
                     Err(error) => failure(error),

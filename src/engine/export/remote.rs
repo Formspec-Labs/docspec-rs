@@ -54,7 +54,7 @@ impl Engine {
             Some(staged) => staged,
             None => {
                 let staged = self
-                    .materialize_export(operation, Some(PathBuf::from(&attempt.host_prefix)))
+                    .materialize_export(operation, Some(PathBuf::from(&attempt.host_prefix)), stop)
                     .await?;
                 self.retain_export_record(operation, &staged_key, &staged)
                     .await?
@@ -348,6 +348,47 @@ fn check_attempt(
         return Err(invalid_export());
     }
     Ok(())
+}
+
+/// Validates the exact saved attempt and exposes its original creation protection.
+pub(in crate::engine) fn attempt_protection(
+    rows: &SnapshotRows,
+    key: &str,
+    budget: Option<&Budget>,
+) -> Result<Option<(Protection, String, RetainedGeneration)>> {
+    let operation_id = key
+        .strip_prefix("export-attempt/")
+        .and_then(|suffix| suffix.split_once('/'))
+        .ok_or_else(invalid_export)?
+        .0;
+    let operation_key = format!("export-operation/{operation_id}");
+    let _memory = budget
+        .map(|budget| rows.reserve_decoded(budget, &[key, &operation_key]))
+        .transpose()?;
+    let Some((_, _, attempt)) = rows.get_record::<ExportAttempt>(key)? else {
+        return Ok(None);
+    };
+    let operation: ExportOperation = rows
+        .get_record(&operation_key)?
+        .ok_or_else(invalid_export)?
+        .2;
+    validate_operation_record(&operation)?;
+    check_attempt(key, &attempt, &operation, rows, budget)?;
+    let protection_key = format!("protection/{}", attempt.id);
+    let _protection_memory = budget
+        .map(|budget| rows.reserve_decoded(budget, &[&protection_key]))
+        .transpose()?;
+    let (revision, _, protection) = rows
+        .get_record(&protection_key)?
+        .ok_or_else(invalid_export)?;
+    Ok(Some((
+        protection,
+        attempt.host_prefix,
+        RetainedGeneration {
+            key: protection_key,
+            revision,
+        },
+    )))
 }
 
 fn check_staged(

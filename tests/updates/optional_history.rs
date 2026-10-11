@@ -100,7 +100,8 @@ async fn removed_optional_deltas_preserve_complete_state_and_independent_consume
             .all(|object| Path::new(&object.path).exists())
     );
 
-    // Ending the optional preparation still leaves processing's own promise.
+    // Ending optional preparation preserves the current processing and validation
+    // promises. Their exact changes are equal; inventory reports the first root.
     let prepared = engine
         .plan_phase_retirement(
             &spec.dataset,
@@ -118,15 +119,19 @@ async fn removed_optional_deltas_preserve_complete_state_and_independent_consume
             .iter()
             .all(|object| object.blocker.is_some())
     );
+    let retained = engine.inspect(&spec.dataset).await.unwrap();
     assert!(protected.objects.iter().any(|object| {
         object.blocker.as_ref().is_some_and(|blocker| {
-            blocker.key.starts_with("phase/") && blocker.key.ends_with("/processing")
+            blocker.key.starts_with("phase/")
+                && retained.get(&blocker.key).is_some_and(|value| {
+                    let phase: PhaseResult = serde_json::from_value(value.clone()).unwrap();
+                    phase.operation == spec.operation
+                        && matches!(phase.phase.as_str(), "processing" | "validation")
+                        && phase.changes.as_ref() == Some(changes)
+                })
         })
     }));
-    let phase_keys = engine
-        .inspect(&spec.dataset)
-        .await
-        .unwrap()
+    let phase_keys = retained
         .into_iter()
         .filter_map(|(key, value)| {
             if !key.starts_with("phase/") {

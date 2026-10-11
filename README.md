@@ -178,8 +178,10 @@ target/debug/docspec --workspace workspaces/my-project --remote remote.json serv
 
 Remote `read` uses the configured Engine and its exact retained source pin. The
 local default keeps the independent reader. Remote startup supports a dataset's
-first independent Build and recovery of that same operation, inspect/latest/release,
-source streaming and primitive source exports. Other Engine operations retain their existing refusal gates.
+first independent Build, source-only Update and recovery of those operations,
+inspect/latest/release, source streaming and primitive source exports. Updates use
+`plan-update update.json` and `update update.json`, with the same exact-base and
+complete-key replacement/deletion rules as local updates. Other Engine operations retain their existing refusal gates.
 Standalone local verification, input hashing, restore and independent evidence or
 receipt readers refuse `--remote` before effects. Hash a producer file without
 `--remote` when preparing its Build request.
@@ -404,6 +406,36 @@ reopening the workspace. Fresh operation-retirement planning returns
 `recovery_retired` (HTTP 409). Available completed results still support lookup
 and run/plan retries. Abandoned operations still refuse with `operation_abandoned`;
 retirement ends their recovery protections without changing their terminal state.
+
+To discard an unfinished export, or end recovery for an older completed export,
+use its exact retirement plan. Advance a currently selected export channel first.
+Completed immutable export pins retain their separate availability promise.
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-export-retirement --dataset comments --retirement end-export --operation old-export --reason "export recovery no longer needed" > export-retirement.json
+target/debug/docspec --workspace workspaces/comments retire-export export-retirement.json
+```
+
+`inspect` lists `export-host-file/<operation>/<revision>/<file>` creation records.
+For a named partial or losing file, take its final `<file>` ID and preview removal:
+
+```sh
+target/debug/docspec --workspace workspaces/comments plan-export-file-removal --dataset comments --removal remove-export-file --operation old-export --file FILE_ID --reason "retired export staging" > export-removal.json
+target/debug/docspec --workspace workspaces/comments remove-objects --plan export-removal.json
+```
+
+HTTP uses `/retention/exports/plan` with `dataset`, `retirement`, `operation` and
+`reason`, then `/retention/exports/retire` with that plan. Use
+`/retention/removal/export-file/plan` with `dataset`, `removal`, `operation`,
+`file` and `reason`, then the existing `/retention/removal/execute` route.
+
+Removal requires the original exclusive Unix host, recorded creation identity,
+and no remaining public pin or owner grant. Closed files reuse their saved hash;
+partial files need an initial bounded hash. Retired unfinished operation IDs
+refuse further work with `export_retired`; a new request needs a new ID. Existing
+winning remote-stage cleanup remains available after verified transfer. Unrecorded
+legacy files refuse cleanup. These commands do not sweep directories or delete
+remote objects.
 
 To end retry/recovery for a compaction, including an interrupted rewrite, capture
 and apply its exact recovery plan:
