@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T08:35:55.427583+00:00",
+  "command": [
+    "env",
+    "DOCSPEC_BINARY=/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec",
+    "DOCSPEC_TEST_INPUT=/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/docspec-dagster-native-jkndowib/comments.parquet",
+    "PYTHONPATH=adapters/dagster/src:adapters/dagster/tests",
+    "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "adapters/dagster/tests",
+    "-v"
+  ],
+  "free_before_bytes": 2850377728,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 2843623424,
+  "free_after_bytes": 2845507584,
+  "finished_utc": "2026-10-11T08:36:29.540804+00:00"
+}

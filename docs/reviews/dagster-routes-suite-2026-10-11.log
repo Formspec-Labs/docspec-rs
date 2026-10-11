@@ -1,0 +1,990 @@
+test_ambiguous_framing_and_content_encoding_refuse (test_client.ClientTests.test_ambiguous_framing_and_content_encoding_refuse) ... ok
+test_bounded_success_with_length_chunked_and_no_length (test_client.ClientTests.test_bounded_success_with_length_chunked_and_no_length) ... ok
+test_excess_response_refuses_for_every_framing_mode (test_client.ClientTests.test_excess_response_refuses_for_every_framing_mode) ... ok
+test_explicit_refusals_preserve_code_message_and_status_even_for_503 (test_client.ClientTests.test_explicit_refusals_preserve_code_message_and_status_even_for_503) ... ok
+test_invalid_capacity_and_timeout_refuse_at_construction (test_client.ClientTests.test_invalid_capacity_and_timeout_refuse_at_construction) ... ok
+test_invalid_requests_never_reach_http (test_client.ClientTests.test_invalid_requests_never_reach_http) ... ok
+test_large_declared_length_refuses_before_waiting_for_payload (test_client.ClientTests.test_large_declared_length_refuses_before_waiting_for_payload) ... ok
+test_malformed_refusal_is_terminal_even_when_server_status_is_500 (test_client.ClientTests.test_malformed_refusal_is_terminal_even_when_server_status_is_500) ... ok
+test_partial_response_and_disconnect_have_unknown_outcome (test_client.ClientTests.test_partial_response_and_disconnect_have_unknown_outcome) ... ok
+test_plan_and_export_acknowledgments_keep_the_same_identity (test_client.ClientTests.test_plan_and_export_acknowledgments_keep_the_same_identity) ... ok
+test_preserves_exact_native_request_and_returns_only_small_identity_summary (test_client.ClientTests.test_preserves_exact_native_request_and_returns_only_small_identity_summary) ... ok
+test_redirect_is_never_followed (test_client.ClientTests.test_redirect_is_never_followed) ... ok
+test_response_json_must_be_unique_finite_and_an_object (test_client.ClientTests.test_response_json_must_be_unique_finite_and_an_object) ... ok
+test_unstructured_server_failure_is_uncertain (test_client.ClientTests.test_unstructured_server_failure_is_uncertain) ... ok
+test_url_scope_is_literal_loopback_without_dns_credentials_or_paths (test_client.ClientTests.test_url_scope_is_literal_loopback_without_dns_credentials_or_paths) ... ok
+test_wrong_acknowledgment_refuses_without_claiming_completion (test_client.ClientTests.test_wrong_acknowledgment_refuses_without_claiming_completion) ... ok
+test_exhausted_unknown_outcome_does_not_become_a_claim_of_rust_failure (test_dagster.DagsterTests.test_exhausted_unknown_outcome_does_not_become_a_claim_of_rust_failure) ... 2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - RUN_START - Started execution of run for "caller_retry_job".
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:10 -0400 - dagster - WARNING - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - docspec_operation - DocSpec outcome is unknown; retrying the unchanged native request.
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - STEP_UP_FOR_RETRY - Execution of step "docspec_operation" failed and has requested a retry.
+
+dagster._core.definitions.events.RetryRequested
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 48, in docspec_operation
+    raise RetryRequested(max_retries=docspec.uncertain_retries, seconds_to_wait=docspec.retry_delay_seconds) from None
+
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - STEP_RESTARTED - Started re-execution (attempt # 2) of step "docspec_operation".
+2026-10-11 04:36:10 -0400 - dagster - ERROR - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - docspec_operation - STEP_FAILURE - Execution of step "docspec_operation" failed.
+
+dagster._core.definitions.events.Failure: DocSpec outcome remains unknown. Retain and resubmit the same native request to reconcile it.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 49, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+2026-10-11 04:36:10 -0400 - dagster - DEBUG - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 11ms
+2026-10-11 04:36:10 -0400 - dagster - ERROR - caller_retry_job - c1c3198d-f5e7-4fc2-aa18-cf2d460e231c - 82238 - RUN_FAILURE - Execution of run for "caller_retry_job" failed. Steps failed: ['docspec_operation'].
+
+dagster._core.definitions.events.Failure: DocSpec outcome remains unknown. Retain and resubmit the same native request to reconcile it.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 49, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+ok
+test_explicit_refusal_overrides_the_callers_retry_policy (test_dagster.DagsterTests.test_explicit_refusal_overrides_the_callers_retry_policy) ... 2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - RUN_START - Started execution of run for "caller_retry_job".
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:11 -0400 - dagster - ERROR - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - docspec_operation - STEP_FAILURE - Execution of step "docspec_operation" failed.
+
+dagster._core.definitions.events.Failure: DocSpec refused capacity (HTTP 503)
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 35, in docspec_operation
+    raise Failure(
+    ...<8 lines>...
+    ) from None
+
+2026-10-11 04:36:11 -0400 - dagster - DEBUG - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 5.51ms
+2026-10-11 04:36:11 -0400 - dagster - ERROR - caller_retry_job - d3aaafec-c0e5-4693-8a50-7c07e8e0ec46 - 82238 - RUN_FAILURE - Execution of run for "caller_retry_job" failed. Steps failed: ['docspec_operation'].
+
+dagster._core.definitions.events.Failure: DocSpec refused capacity (HTTP 503)
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 35, in docspec_operation
+    raise Failure(
+    ...<8 lines>...
+    ) from None
+
+ok
+test_large_refusal_message_has_an_explicit_event_truncation_flag (test_dagster.DagsterTests.test_large_refusal_message_has_an_explicit_event_truncation_flag) ... 2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:12 -0400 - dagster - ERROR - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - docspec_operation - STEP_FAILURE - Execution of step "docspec_operation" failed.
+
+dagster._core.definitions.events.Failure: DocSpec refused operation_conflict (HTTP 409)
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 35, in docspec_operation
+    raise Failure(
+    ...<8 lines>...
+    ) from None
+
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.62ms
+2026-10-11 04:36:12 -0400 - dagster - ERROR - docspec_job - 1f7ea582-e07c-433d-9f9b-f81f35315827 - 82238 - RUN_FAILURE - Execution of run for "docspec_job" failed. Steps failed: ['docspec_operation'].
+
+dagster._core.definitions.events.Failure: DocSpec refused operation_conflict (HTTP 409)
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 35, in docspec_operation
+    raise Failure(
+    ...<8 lines>...
+    ) from None
+
+ok
+test_mismatched_acknowledgment_preserves_unknown_outcome (test_dagster.DagsterTests.test_mismatched_acknowledgment_preserves_unknown_outcome) ... 2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - RUN_START - Started execution of run for "caller_retry_job".
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:12 -0400 - dagster - ERROR - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - docspec_operation - STEP_FAILURE - Execution of step "docspec_operation" failed.
+
+dagster._core.definitions.events.Failure: result acknowledgment does not match the submitted operation. Retain and resubmit the same native request after resolving the response problem.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 55, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+2026-10-11 04:36:12 -0400 - dagster - DEBUG - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 4.89ms
+2026-10-11 04:36:12 -0400 - dagster - ERROR - caller_retry_job - 6c26abb9-c046-44de-94cd-fb5acf07037b - 82238 - RUN_FAILURE - Execution of run for "caller_retry_job" failed. Steps failed: ['docspec_operation'].
+
+dagster._core.definitions.events.Failure: result acknowledgment does not match the submitted operation. Retain and resubmit the same native request after resolving the response problem.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 55, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+ok
+test_native_execution_emits_only_identity_metadata (test_dagster.DagsterTests.test_native_execution_emits_only_identity_metadata) ... 2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 1.85ms.
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 5.06ms
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - docspec_job - b237dbe8-062d-4f77-8d4d-f5e9c7acb887 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+test_response_limit_is_terminal_even_with_a_caller_retry_policy (test_dagster.DagsterTests.test_response_limit_is_terminal_even_with_a_caller_retry_policy) ... 2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - RUN_START - Started execution of run for "caller_retry_job".
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:13 -0400 - dagster - ERROR - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - docspec_operation - STEP_FAILURE - Execution of step "docspec_operation" failed.
+
+dagster._core.definitions.events.Failure: response exceeds its metadata allowance; the operation may have completed. Retain and resubmit the same native request after resolving the response problem.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 55, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+2026-10-11 04:36:13 -0400 - dagster - DEBUG - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 5.47ms
+2026-10-11 04:36:13 -0400 - dagster - ERROR - caller_retry_job - bf70de7d-162d-4ce3-8d0d-25ea949c0ab8 - 82238 - RUN_FAILURE - Execution of run for "caller_retry_job" failed. Steps failed: ['docspec_operation'].
+
+dagster._core.definitions.events.Failure: response exceeds its metadata allowance; the operation may have completed. Retain and resubmit the same native request after resolving the response problem.
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 55, in docspec_operation
+    raise Failure(
+    ...<3 lines>...
+    ) from None
+
+ok
+test_uncertain_response_retries_exactly_the_original_request (test_dagster.DagsterTests.test_uncertain_response_retries_exactly_the_original_request) ... /Users/mikewolfd/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:277: ResourceWarning: unclosed <socket.socket [closed] fd=8, family=2, type=1, proto=6>
+  @property
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:14 -0400 - dagster - WARNING - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - docspec_operation - DocSpec outcome is unknown; retrying the unchanged native request.
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - STEP_UP_FOR_RETRY - Execution of step "docspec_operation" failed and has requested a retry.
+
+dagster._core.definitions.events.RetryRequested
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 48, in docspec_operation
+    raise RetryRequested(max_retries=docspec.uncertain_retries, seconds_to_wait=docspec.retry_delay_seconds) from None
+
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - STEP_RESTARTED - Started re-execution (attempt # 2) of step "docspec_operation".
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 1.45ms.
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.96ms
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 3a0c19a7-87ce-47eb-a6e8-e398cffbac8f - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+test_advertised_routes_select_native_receipts_update_schema_backfill_and_summary (test_rust_integration.RustIntegrationTests.test_advertised_routes_select_native_receipts_update_schema_backfill_and_summary) ... 2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:14 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 520ms.
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 524ms
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 5a2c6a42-29e9-470f-9e2d-a1e19e421523 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 3.83ms.
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.59ms
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - a403c4df-6da8-4085-b5fd-2e80da338ce0 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 3.29ms.
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.54ms
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 1a3de951-65de-42a3-a7ab-df32ad88175d - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 266ms.
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 269ms
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - 646bb9a0-64e9-45a2-ba42-39b0466e7dfe - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 143ms.
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 146ms
+2026-10-11 04:36:15 -0400 - dagster - DEBUG - docspec_job - e6db90ac-bfd1-4334-80dd-c79b595d23a8 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 514ms.
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 517ms
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 9abe861d-57db-446e-8450-82adecf68dae - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 251ms.
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 254ms
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - 7da165ab-1457-470b-a5a7-33614477c801 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 134ms.
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 137ms
+2026-10-11 04:36:16 -0400 - dagster - DEBUG - docspec_job - c85d949b-6130-44af-8d3e-eccfe52ec10d - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 673ms.
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 676ms
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - f05316e3-098a-454c-ac54-1749eaa1e7fe - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:17 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 446ms.
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 450ms
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - fe9ccfd1-ec0c-48d4-913c-8efc84f959d8 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 547ms.
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 550ms
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - e30acdf4-9f79-4797-841b-7adb0668ad8b - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:18 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:19 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:19 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:19 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 968ms.
+2026-10-11 04:36:19 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 971ms
+2026-10-11 04:36:19 -0400 - dagster - DEBUG - docspec_job - ad222aa3-a633-4ef1-a0b6-53433a5bf262 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+test_killed_python_worker_and_native_host_resume_retained_processing (test_rust_integration.RustIntegrationTests.test_killed_python_worker_and_native_host_resume_retained_processing) ... ok
+test_killed_python_worker_reconciles_unfinished_native_request (test_rust_integration.RustIntegrationTests.test_killed_python_worker_reconciles_unfinished_native_request) ... ok
+test_native_completed_response_loss_retries_without_retained_rewrites (test_rust_integration.RustIntegrationTests.test_native_completed_response_loss_retries_without_retained_rewrites) ... 2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:24 -0400 - dagster - WARNING - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - docspec_operation - DocSpec outcome is unknown; retrying the unchanged native request.
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - STEP_UP_FOR_RETRY - Execution of step "docspec_operation" failed and has requested a retry.
+
+dagster._core.definitions.events.RetryRequested
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 48, in docspec_operation
+    raise RetryRequested(max_retries=docspec.uncertain_retries, seconds_to_wait=docspec.retry_delay_seconds) from None
+
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - STEP_RESTARTED - Started re-execution (attempt # 2) of step "docspec_operation".
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 3.63ms.
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 303ms
+2026-10-11 04:36:24 -0400 - dagster - DEBUG - docspec_job - 6593284e-263b-448d-95ca-f1fa0f8782e8 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+test_native_export_response_loss_retries_without_retained_rewrites (test_rust_integration.RustIntegrationTests.test_native_export_response_loss_retries_without_retained_rewrites) ... 2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 311ms.
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 314ms
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 29ee73ff-9de1-4873-bfca-ac160fbb9288 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 3.33ms.
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 5.97ms
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - c45bbe5f-608d-4612-abab-5c0c6cace25c - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:25 -0400 - dagster - WARNING - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - docspec_operation - DocSpec outcome is unknown; retrying the unchanged native request.
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - STEP_UP_FOR_RETRY - Execution of step "docspec_operation" failed and has requested a retry.
+
+dagster._core.definitions.events.RetryRequested
+
+Stack Trace:
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_plan.py", line 243, in dagster_event_sequence_for_step
+    yield from check.generator(step_events)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 505, in core_dagster_event_sequence_for_step
+    for user_event in _step_output_error_checked_user_event_sequence(
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        step_context,
+        ^^^^^^^^^^^^^
+        _process_asset_results_to_events(step_context, user_event_sequence),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 184, in _step_output_error_checked_user_event_sequence
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/execute_step.py", line 88, in _process_asset_results_to_events
+    for user_event in user_event_sequence:
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 188, in execute_core_compute
+    for step_output in _yield_compute_results(step_context, inputs, compute_fn, compute_context):
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute.py", line 157, in _yield_compute_results
+    for event in iterate_with_context(
+                 ~~~~~~~~~~~~~~~~~~~~^
+        lambda: op_execution_error_boundary(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        user_event_generator,
+        ^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_utils/__init__.py", line 394, in iterate_with_context
+    next_output = next(iterator)
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 136, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+        fn, context, kwargs, context_arg_provided, config_arg_class, resource_arg_mapping
+    )
+  File "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/lib/python3.13/site-packages/dagster/_core/execution/plan/compute_generator.py", line 116, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+           ~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/src/docspec_dagster/definitions.py", line 48, in docspec_operation
+    raise RetryRequested(max_retries=docspec.uncertain_retries, seconds_to_wait=docspec.retry_delay_seconds) from None
+
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - STEP_RESTARTED - Started re-execution (attempt # 2) of step "docspec_operation".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 4.27ms.
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 161ms
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - befcaf9a-503a-4139-a60e-f4455e647416 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 3.87ms.
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.88ms
+2026-10-11 04:36:25 -0400 - dagster - DEBUG - docspec_job - 91b74924-11f4-4cbc-9f85-14d42f913cb6 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+test_replacement_python_worker_reconciles_native_completed_response_loss (test_rust_integration.RustIntegrationTests.test_replacement_python_worker_reconciles_native_completed_response_loss) ... ok
+test_same_native_request_reconciles_without_more_retained_writes (test_rust_integration.RustIntegrationTests.test_same_native_request_reconciles_without_more_retained_writes) ... 2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 253ms.
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 256ms
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - d025037a-b62d-4c7c-b995-4d6ca3946b28 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - RUN_START - Started execution of run for "docspec_job".
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - ENGINE_EVENT - Executing steps in process (pid: 82238)
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - RESOURCE_INIT_STARTED - Starting initialization of resources [docspec, io_manager].
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - RESOURCE_INIT_SUCCESS - Finished initialization of resources [docspec, io_manager].
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - LOGS_CAPTURED - Capturing logs for process (pid: 82238).
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - STEP_START - Started execution of step "docspec_operation".
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - STEP_OUTPUT - Yielded output "result" of type "dict". (Type check passed).
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - docspec_operation - STEP_SUCCESS - Finished execution of step "docspec_operation" in 4.08ms.
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - ENGINE_EVENT - Finished steps in process (pid: 82238) in 6.94ms
+2026-10-11 04:36:27 -0400 - dagster - DEBUG - docspec_job - 9cc25495-b30e-45a8-a14d-4003d53f4f95 - 82238 - RUN_SUCCESS - Finished execution of run for "docspec_job".
+ok
+
+----------------------------------------------------------------------
+Ran 30 tests in 32.061s
+
+OK

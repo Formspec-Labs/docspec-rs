@@ -180,5 +180,17 @@ this scoped local qualification. The
 passes the complete adapter suite, including both actual-kill cases. Its
 [independent review](../../docs/reviews/dagster-inflight-recovery-review-2026-10-10.md)
 approves the repaired timing and live-host completion checks.
-Successful receipt materialization through Dagster, other lifecycle routes and
-real-provider recovery remain separate qualification work.
+The [current complete adapter run](../../docs/reviews/dagster-routes-suite-2026-10-11.log)
+also qualifies successful native execution of every advertised route. One small
+lifecycle attaches a receipt, updates its source, renames a stable field, adds a
+scalar backfill and derives a summary. Exact native pins, sharing and coverage
+are checked, followed by one catalog-free deep verification of the summary and
+its producer. The [route review](../../docs/reviews/dagster-routes-review-2026-10-11.md)
+records this scope.
+
+An additional [export response-loss case](../../docs/reviews/dagster-export-recovery-2026-10-11.log)
+proves unchanged-request retry returns the exact completed export without another
+materialization, validation or retained-file rewrite. Its
+[review](../../docs/reviews/dagster-export-recovery-review-2026-10-11.md) preserves the
+boundary: the local Rust host stays alive. Real-provider scheduling/recovery,
+host loss during export and sustained scheduling costs remain separate work.
