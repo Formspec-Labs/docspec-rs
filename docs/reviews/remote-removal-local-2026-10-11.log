@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.60s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test storage::remote::objects::removal_tests::changed_identity_and_unbound_authority_never_delete ... ok
+test storage::remote::objects::removal_tests::unknown_delete_reconciles_same_key_without_another_read_or_delete ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 347 filtered out; finished in 0.56s
+

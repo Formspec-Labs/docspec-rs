@@ -1,4 +1,5 @@
 //! Same-head publication through independent clients or isolated provider processes.
+mod epoch_handoff;
 mod processes;
 use super::*;
 use crate::engine::export::ExportMaterialized;
@@ -26,7 +27,7 @@ struct Rendezvous {
     files: Option<(std::path::PathBuf, String)>,
 }
 
-struct RaceCatalog {
+pub(super) struct RaceCatalog {
     inner: Arc<dyn Catalog>,
     lifecycle: TableIdent,
     armed: AtomicBool,
@@ -58,24 +59,45 @@ impl RaceCatalog {
         })
     }
 
-    fn arm(&self) {
+    pub(super) fn arm(&self) {
         *self.loaded.lock().unwrap() = None;
         assert!(!self.armed.swap(true, Ordering::SeqCst));
     }
+}
+
+#[cfg(feature = "test-util")]
+pub(super) fn held_generation_catalog(
+    inner: Arc<dyn Catalog>,
+    lifecycle: TableIdent,
+    directory: &Path,
+) -> Arc<RaceCatalog> {
+    Arc::new(RaceCatalog {
+        inner,
+        lifecycle,
+        armed: AtomicBool::new(false),
+        loaded: StdMutex::new(None),
+        rendezvous: Arc::new(Rendezvous {
+            barrier: tokio::sync::Barrier::new(1),
+            metadata: StdMutex::new(Vec::new()),
+            files: Some((directory.to_owned(), "maintenance-old".into())),
+        }),
+    })
 }
 
 #[async_trait]
 impl Catalog for RaceCatalog {
     async fn load_table(&self, ident: &TableIdent) -> iceberg::Result<Table> {
         let table = self.inner.load_table(ident).await?;
-        if ident == &self.lifecycle {
+        if table.identifier() == &self.lifecycle {
             *self.loaded.lock().unwrap() = Some(table.metadata_location_result()?.to_owned());
         }
         Ok(table)
     }
 
     async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
-        if commit.identifier() == &self.lifecycle && self.armed.swap(false, Ordering::SeqCst) {
+        let held =
+            commit.identifier() == &self.lifecycle && self.armed.swap(false, Ordering::SeqCst);
+        if held {
             let metadata = self.loaded.lock().unwrap().clone().ok_or_else(|| {
                 iceberg::Error::new(
                     iceberg::ErrorKind::Unexpected,
@@ -110,7 +132,28 @@ impl Catalog for RaceCatalog {
         }
         // Forward the original maintained commit, including all requirements.
         // No synthetic result, metadata rewrite, provider retry or fault response.
-        self.inner.update_table(commit).await
+        let result = self.inner.update_table(commit).await;
+        if held
+            && let Some((directory, side)) = &self.rendezvous.files
+            && side == "epoch-a"
+        {
+            epoch_handoff::native_outcome(directory, &result)?;
+        }
+        if held
+            && let Some((directory, side)) = &self.rendezvous.files
+            && side == "epoch-b"
+            && let Ok(table) = &result
+        {
+            epoch_handoff::hold_selected(directory, table).await?;
+        }
+        #[cfg(feature = "test-util")]
+        if held
+            && let Some((directory, side)) = &self.rendezvous.files
+            && side == "maintenance-old"
+        {
+            super::maintenance::native_outcome(directory, &result)?;
+        }
+        result
     }
 
     async fn list_namespaces(

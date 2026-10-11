@@ -65,6 +65,11 @@ enum Command {
     Resume { spec: PathBuf },
     /// Inspect current retained phase and authority records.
     Inspect { dataset: String },
+    /// Fence older operations without changing the selected release.
+    FenceOperations {
+        dataset: String,
+        expected_epoch: u64,
+    },
     /// Inspect optional change evidence for an exact version reference.
     InspectChanges { version: PathBuf },
     /// Explain protection for exact objects; this does not authorize removal.
@@ -122,6 +127,22 @@ enum Command {
     RemoveObjects {
         #[arg(long)]
         plan: PathBuf,
+    },
+    /// Reserve remote keys and detach their native heads without object deletion.
+    #[cfg(feature = "remote")]
+    PrepareRemoteRemoval {
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Resume saved exact remote deletion with named temporary credential bindings.
+    #[cfg(feature = "remote")]
+    ResumeRemoteRemoval {
+        #[arg(long)]
+        dataset: String,
+        #[arg(long)]
+        removal: String,
+        #[arg(long)]
+        authority: PathBuf,
     },
     /// Inspect an exact saved removal and its effect acknowledgments.
     InspectRemoval {
@@ -233,8 +254,17 @@ enum Command {
     ReadExport { pin: PathBuf, output: PathBuf },
     /// Rewrite selected files while preserving their exact logical values.
     Compact { spec: PathBuf },
-    /// Retain an exact local catalog image and its required immutable files.
+    /// Retain a configured catalog image and its required immutable objects.
     CreateRestorePoint { dataset: String, point: String },
+    /// Restore catalog registrations into an explicitly quiescent fresh remote generation.
+    #[cfg(feature = "remote")]
+    RestoreRemote {
+        point: PathBuf,
+        /// Same object scope and fresh generation; credentials are environment references.
+        target: PathBuf,
+        #[arg(long)]
+        allow_unregistered_import: bool,
+    },
     /// Restore an exact local point while excluding every live workspace actor.
     RestoreLocal {
         point: PathBuf,
@@ -587,6 +617,29 @@ async fn main() -> anyhow::Result<()> {
                         .remove_objects(&read_json::<RemovalPlan>(plan)?)
                         .await?,
                 )?,
+                #[cfg(feature = "remote")]
+                Command::PrepareRemoteRemoval { plan } => print_json(
+                    &engine
+                        .prepare_remote_removal(&read_json::<RemovalPlan>(plan)?)
+                        .await?,
+                )?,
+                #[cfg(feature = "remote")]
+                Command::ResumeRemoteRemoval {
+                    dataset,
+                    removal,
+                    authority,
+                } => print_json(
+                    &engine
+                        .resume_removal_remote(
+                            &Id::new(dataset)?,
+                            &Id::new(removal)?,
+                            read_json::<docspec::storage::remote::objects::RemoteRemovalConfig>(
+                                authority,
+                            )?
+                            .resolve()?,
+                        )
+                        .await?,
+                )?,
                 Command::InspectRemoval { dataset, removal } => print_json(
                     &engine
                         .inspect_removal(&Id::new(dataset)?, &Id::new(removal)?)
@@ -757,6 +810,14 @@ async fn main() -> anyhow::Result<()> {
                         .retire_compaction(&read_json::<RetentionPlan>(plan)?)
                         .await?,
                 )?,
+                Command::FenceOperations {
+                    dataset,
+                    expected_epoch,
+                } => print_json(
+                    &engine
+                        .fence_operations(&Id::new(dataset)?, expected_epoch)
+                        .await?,
+                )?,
                 Command::Abandon {
                     dataset,
                     operation,
@@ -870,6 +931,29 @@ async fn main() -> anyhow::Result<()> {
                         .create_restore_point(&Id::new(dataset)?, &Id::new(point)?)
                         .await?,
                 )?,
+                #[cfg(feature = "remote")]
+                Command::RestoreRemote {
+                    point,
+                    target,
+                    allow_unregistered_import,
+                } => {
+                    let config = read_remote_config(target)?;
+                    let remote = storage::remote::remote_storage(
+                        &config.owned_prefix,
+                        config.properties,
+                        config.secret_env,
+                    )
+                    .await?;
+                    print_json(
+                        &engine
+                            .restore_remote(
+                                &read_json::<RestorePointRef>(point)?,
+                                remote,
+                                allow_unregistered_import,
+                            )
+                            .await?,
+                    )?;
+                }
                 Command::CheckSuccession { prior, target } => {
                     let prior: ReleasePin = read_json(prior)?;
                     let target: ReleasePin = read_json(target)?;
@@ -1002,6 +1086,13 @@ async fn main() -> anyhow::Result<()> {
 // These commands bypass Engine and use local readers/restore directly. Refuse
 // before reading configuration, opening a host, contacting a catalog or writing.
 fn check_startup(cli: &Cli) -> docspec::Result<()> {
+    #[cfg(feature = "remote")]
+    if matches!(&cli.command, Command::RestoreRemote { .. }) && cli.remote.is_none() {
+        return Err(docspec::Error::refusal(
+            "remote_config",
+            "remote restore requires explicit source maintenance configuration",
+        ));
+    }
     if cli.remote.is_some() {
         #[cfg(not(feature = "remote"))]
         return Err(docspec::Error::refusal(

@@ -71,7 +71,7 @@ pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) 
                 size
             };
             let _decoded = worker_budget.reserve(decoded_size)?;
-            decode(&bytes, limit)
+            decode::<TableMetadata>(&bytes, limit)
         })
         .await?;
     if metadata.current_snapshot_id() != pin.snapshot
@@ -92,7 +92,7 @@ pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) 
         .build()?)
 }
 
-fn decode(bytes: &[u8], limit: usize) -> Result<TableMetadata> {
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], limit: usize) -> Result<T> {
     if !bytes.starts_with(&[0x1f, 0x8b]) {
         return Ok(serde_json::from_slice(bytes)?);
     }
@@ -243,7 +243,7 @@ mod tests {
             "metadata_capacity"
         );
         // The accepted cap is configured, not a hard-coded default.
-        assert!(decode(&compressed, json.len()).is_ok());
+        assert!(decode::<TableMetadata>(&compressed, json.len()).is_ok());
     }
 
     #[tokio::test]
@@ -295,29 +295,31 @@ mod tests {
     fn gzip_requires_complete_trailer_one_member_and_bounded_json() {
         let json = serde_json::to_vec(&metadata()).unwrap();
         let compressed = gzip(&json);
-        assert!(decode(&compressed, json.len()).is_ok());
-        assert!(decode(&compressed[..compressed.len() - 1], json.len()).is_err());
+        assert!(decode::<TableMetadata>(&compressed, json.len()).is_ok());
+        assert!(decode::<TableMetadata>(&compressed[..compressed.len() - 1], json.len()).is_err());
         let mut corrupt = compressed.clone();
         let crc = corrupt.len() - 8;
         corrupt[crc] ^= 1;
-        assert!(decode(&corrupt, json.len()).is_err());
+        assert!(decode::<TableMetadata>(&corrupt, json.len()).is_err());
         for trailing in [vec![0], gzip(b" ")] {
             let mut bytes = compressed.clone();
             bytes.extend(trailing);
             assert_eq!(
-                decode(&bytes, json.len()).unwrap_err().code(),
+                decode::<TableMetadata>(&bytes, json.len())
+                    .unwrap_err()
+                    .code(),
                 "invalid_metadata"
             );
         }
         let mut too_much_whitespace = json.clone();
         too_much_whitespace.extend_from_slice(b"  ");
         assert_eq!(
-            decode(&gzip(&too_much_whitespace), json.len())
+            decode::<TableMetadata>(&gzip(&too_much_whitespace), json.len())
                 .unwrap_err()
                 .code(),
             "metadata_capacity"
         );
-        assert!(decode(&gzip(b"{} trailing"), 4096).is_err());
+        assert!(decode::<TableMetadata>(&gzip(b"{} trailing"), 4096).is_err());
     }
 
     #[tokio::test]

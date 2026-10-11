@@ -1,0 +1,15 @@
+{
+  "started_utc": "2026-10-11T15:01:20.137225+00:00",
+  "command": [
+    "./scripts/check"
+  ],
+  "free_before_bytes": 3931209728,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 23758,
+  "min_free_bytes": 3924439040,
+  "last_observed_utc": "2026-10-11T15:01:36.179310+00:00",
+  "exit_code": 101,
+  "free_after_bytes": 3921571840,
+  "finished_utc": "2026-10-11T15:01:38.188102+00:00"
+}

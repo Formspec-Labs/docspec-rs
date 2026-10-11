@@ -50,7 +50,7 @@ impl Engine {
         view: &View,
         dataset: &Id,
     ) -> Result<Vec<Id>> {
-        if &crate::catalog::lifecycle_ident(dataset) != view.table.identifier() {
+        if &crate::catalog::lifecycle_ident(dataset) != view.identifier() {
             return Err(invalid("admission view belongs to a different dataset"));
         }
         let lifecycle = &self.inner.lifecycle;

@@ -1,0 +1,3 @@
+# Owned generation namespace capability
+
+Frozen before provider collection: fresh canonical UUID; create one absent generation root and one child namespace through installed maintained PyIceberg0.12 REST methods, then require scoped list and exact child readback. One attempt per operation,20seconds each, outer150seconds. Retain before-effect stages and sanitized status/error classes; never log config. No table, object bytes, deletion or existing resource changes. A failure stops without mutation retries; retained exactnames permit read-only reconciliation. This capability is required by the reviewed owned-generation adapter; it does not qualify Engine restore/removal. Empty namespaces remain retained.

@@ -196,7 +196,7 @@ impl Engine {
             let location = directory.as_string()?;
             let view = self.inner.lifecycle.open(dataset).await?;
             let output = self
-                .register_output(view.table.identifier().namespace(), move || {
+                .register_output(view.identifier().namespace(), move || {
                     let schema = storage::identity::with_origins(&previous)?;
                     Ok(previous
                         .as_ref()

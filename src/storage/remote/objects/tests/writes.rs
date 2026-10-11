@@ -204,6 +204,7 @@ pub(crate) enum Behavior {
     LosePutResponse,
     LoseCompleteResponse,
     HoldPutResponse,
+    HoldPutThenDelete,
     RejectPut,
     HeadDenied,
 }
@@ -307,6 +308,14 @@ impl WriteFixture {
                         );
                         respond(&mut socket, "200 OK", "ETag: \"fixture-part\"\r\n", b"");
                     }
+                    "DELETE" if matches!(behavior, Behavior::HoldPutThenDelete) => {
+                        assert!(
+                            upload.is_none(),
+                            "only the exact published object is deleted"
+                        );
+                        assert!(report.published.take().is_some(), "one observed deletion");
+                        respond(&mut socket, "204 No Content", "", b"");
+                    }
                     "DELETE" => {
                         assert!(matches!(behavior, Behavior::AbortMultipart));
                         assert_eq!(
@@ -338,6 +347,7 @@ impl WriteFixture {
                             behavior,
                             Behavior::LosePutResponse
                                 | Behavior::HoldPutResponse
+                                | Behavior::HoldPutThenDelete
                                 | Behavior::RejectPut
                         ));
                         assert!(request.create_only, "single PUT is conditional");
@@ -352,7 +362,10 @@ impl WriteFixture {
                         }
                         assert!(report.published.is_none(), "no automatic retransmission");
                         report.published = Some(request.body);
-                        if matches!(behavior, Behavior::HoldPutResponse) {
+                        if matches!(
+                            behavior,
+                            Behavior::HoldPutResponse | Behavior::HoldPutThenDelete
+                        ) {
                             let _ = started.take().unwrap().send(());
                             wait_release.recv_timeout(DEADLINE).unwrap();
                             respond(&mut socket, "200 OK", "ETag: \"fixture-object\"\r\n", b"");
@@ -551,6 +564,7 @@ async fn remote_candidate_creation_sends_one_conditional_put_before_registration
             fail_registration: false,
         });
         let storage = crate::storage::remote::RemoteStorage {
+            maintenance_generation: None,
             catalog: catalog.clone(),
             objects: fixture.objects(),
         };
@@ -627,6 +641,7 @@ async fn remote_candidate_keeps_created_metadata_when_catalog_registration_fails
         fail_registration: true,
     });
     let storage = crate::storage::remote::RemoteStorage {
+        maintenance_generation: None,
         catalog: catalog.clone(),
         objects: fixture.objects(),
     };
@@ -692,6 +707,7 @@ async fn canceled_remote_candidate_keeps_original_admission_until_put_finishes()
         fail_registration: false,
     });
     let storage = crate::storage::remote::RemoteStorage {
+        maintenance_generation: None,
         catalog: catalog.clone(),
         objects: fixture.objects(),
     };
@@ -803,6 +819,7 @@ async fn remote_candidate_refuses_mismatched_location_and_compression_without_ef
         fail_registration: false,
     });
     let storage = crate::storage::remote::RemoteStorage {
+        maintenance_generation: None,
         catalog: catalog.clone(),
         objects: fixture.objects(),
     };

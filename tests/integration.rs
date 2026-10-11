@@ -10,6 +10,7 @@ mod support;
 
 mod abandonment;
 mod admission_formats;
+mod authority;
 mod availability_retirement;
 mod backfill;
 mod backfill_dependencies;

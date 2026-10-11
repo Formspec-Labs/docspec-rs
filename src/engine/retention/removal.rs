@@ -13,6 +13,15 @@ mod native_tests;
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone)]
+enum RemovalActor {
+    Local,
+    #[cfg(feature = "remote")]
+    ReserveRemote,
+    #[cfg(feature = "remote")]
+    Remote(Arc<storage::remote::objects::RemoteRemoval>),
+}
+
 const FAILURE_CODE_BYTES: usize = 64;
 
 pub(crate) fn intent_key(id: &Id) -> String {
@@ -126,7 +135,7 @@ fn failure(error: Error) -> RemovalOutcome {
 impl Engine {
     fn removal_catalog(&self) -> Result<()> {
         self.retirement_catalog()?;
-        if !cfg!(unix) {
+        if matches!(&self.inner.objects, storage::Objects::Local) && !cfg!(unix) {
             return Err(Error::refusal(
                 "removal_platform",
                 "local removal identity checks require Unix",
@@ -152,6 +161,7 @@ impl Engine {
         Ok(View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: crate::catalog::lifecycle_ident(dataset),
         })
     }
     /// Previews explicit owned files without hashing or deleting payloads.
@@ -249,6 +259,168 @@ impl Engine {
         super::owners::confirm_creation(rows, view, objects, &self.inner.lifecycle.budget).await
     }
 
+    /// Reserves exact remote keys and detaches native heads before authority issuance.
+    ///
+    /// Requires explicit quiescent owned-generation startup. Stop every remote
+    /// writer and reader first; the local lock drains only this host. Successful
+    /// unresolved outcomes can then receive provider-enforced temporary HEAD/DELETE
+    /// credentials for only their saved exact keys. This method never deletes objects.
+    /// Reservations are irreversible and prohibit key reuse, including across restore.
+    ///
+    /// # Errors
+    /// Refuses unsupported scope, changed roots, identity or outcome capacity.
+    #[cfg(feature = "remote")]
+    pub async fn prepare_remote_removal(&self, plan: &RemovalPlan) -> Result<RemovalStatus> {
+        self.check_removal_actor(&RemovalActor::ReserveRemote, plan)?;
+        let memory = self.request_memory(plan)?;
+        let plan = plan.clone();
+        self.maintain_work(memory, move |engine| async move {
+            engine
+                .remove_admitted_with_actor(&plan, None, &RemovalActor::ReserveRemote)
+                .await
+        })
+        .await
+    }
+
+    /// Reconciles only a saved remote intent with fresh exact temporary authority.
+    ///
+    /// # Errors
+    /// Refuses missing intent, unsupported authority or changed retained protection.
+    #[cfg(feature = "remote")]
+    pub async fn resume_removal_remote(
+        &self,
+        dataset: &Id,
+        removal: &Id,
+        authority: storage::remote::objects::RemoteRemoval,
+    ) -> Result<RemovalStatus> {
+        self.resume_removal_remote_phase(dataset, removal, authority, None)
+            .await
+    }
+
+    /// Injects an interruption after the real remote deletion and before acknowledgment.
+    ///
+    /// # Errors
+    /// Refuses unsupported boundaries and all ordinary remote removal failures.
+    #[cfg(all(feature = "remote", feature = "test-util"))]
+    pub async fn resume_removal_remote_until(
+        &self,
+        dataset: &Id,
+        removal: &Id,
+        authority: storage::remote::objects::RemoteRemoval,
+        phase: &str,
+    ) -> Result<RemovalStatus> {
+        if phase != "removal-unlink" {
+            return Err(Error::refusal(
+                "unsupported_phase",
+                "unsupported remote removal interruption",
+            ));
+        }
+        self.resume_removal_remote_phase(dataset, removal, authority, Some(phase.to_owned()))
+            .await
+    }
+
+    #[cfg(feature = "remote")]
+    async fn resume_removal_remote_phase(
+        &self,
+        dataset: &Id,
+        removal: &Id,
+        authority: storage::remote::objects::RemoteRemoval,
+        stop: Option<String>,
+    ) -> Result<RemovalStatus> {
+        self.remote_maintenance()?;
+        let memory = self.request_memory(&(dataset, removal, &stop))?;
+        let dataset = dataset.clone();
+        let removal = removal.clone();
+        self.maintain_work(memory, move |engine| async move {
+            let lock = engine.lock(&dataset).await;
+            let _guard = lock.lock().await;
+            let view = engine.existing_removal_view(&dataset).await?;
+            let rows = engine.inner.lifecycle.rows(&view).await?;
+            let _memory = rows.reserve_decoded(
+                &engine.inner.lifecycle.budget,
+                &[&intent_key(&removal), &state_key(&removal)],
+            )?;
+            let (intent, progress) = engine.saved_removal(&rows, &view, &removal)?;
+            engine
+                .finish_removal_with_actor(
+                    view,
+                    intent,
+                    progress,
+                    stop.as_deref(),
+                    false,
+                    &RemovalActor::Remote(Arc::new(authority)),
+                )
+                .await
+        })
+        .await
+    }
+
+    fn check_removal_actor(&self, actor: &RemovalActor, plan: &RemovalPlan) -> Result<()> {
+        match (&self.inner.objects, actor) {
+            (storage::Objects::Local, RemovalActor::Local) => Ok(()),
+            #[cfg(feature = "remote")]
+            (storage::Objects::Remote(_), RemovalActor::ReserveRemote)
+                if matches!(plan.scope, RemovalScope::Objects) =>
+            {
+                self.remote_maintenance().map(|_| ())
+            }
+            #[cfg(feature = "remote")]
+            (storage::Objects::Remote(_), RemovalActor::Remote(authority))
+                if matches!(plan.scope, RemovalScope::Objects) =>
+            {
+                let generation = self.remote_maintenance()?;
+                authority.check(generation, &[])
+            }
+            _ => Err(Error::refusal(
+                "remote_removal_authority",
+                "remote object deletion requires exact temporary authority",
+            )),
+        }
+    }
+
+    async fn removal_absent(&self, actor: &RemovalActor, object: &ObjectRef) -> Result<bool> {
+        match actor {
+            RemovalActor::Local => {
+                storage::removal::reconcile_absent_file(
+                    &self.inner.root,
+                    object,
+                    &self.inner.lifecycle.budget,
+                )
+                .await
+            }
+            #[cfg(feature = "remote")]
+            RemovalActor::ReserveRemote => Ok(false),
+            #[cfg(feature = "remote")]
+            RemovalActor::Remote(authority) => {
+                authority.absent(object, &self.inner.lifecycle.budget).await
+            }
+        }
+    }
+
+    async fn removal_effect(
+        &self,
+        actor: &RemovalActor,
+        object: &ObjectRef,
+    ) -> Result<storage::removal::LocalRemovalOutcome> {
+        match (&self.inner.objects, actor) {
+            (_, RemovalActor::Local) => {
+                storage::removal::remove_owned_file(
+                    &self.inner.root,
+                    object,
+                    &self.inner.lifecycle.budget,
+                )
+                .await
+            }
+            #[cfg(feature = "remote")]
+            (storage::Objects::Remote(reader), RemovalActor::Remote(authority)) => {
+                authority
+                    .remove(reader, object, &self.inner.lifecycle.budget)
+                    .await
+            }
+            _ => Err(invalid()),
+        }
+    }
+
     /// Executes only previewed files that remain eligible, or reconciles the saved intent.
     ///
     /// # Errors
@@ -336,10 +508,21 @@ impl Engine {
         plan: &RemovalPlan,
         stop: Option<&str>,
     ) -> Result<RemovalStatus> {
+        self.remove_admitted_with_actor(plan, stop, &RemovalActor::Local)
+            .await
+    }
+
+    async fn remove_admitted_with_actor(
+        &self,
+        plan: &RemovalPlan,
+        stop: Option<&str>,
+        actor: &RemovalActor,
+    ) -> Result<RemovalStatus> {
         if !matches!(&plan.scope, RemovalScope::Objects) {
             return self.remove_export_stage_admitted(plan, stop).await;
         }
         self.removal_catalog()?;
+        self.check_removal_actor(actor, plan)?;
         let lock = self.lock(&plan.dataset).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
@@ -356,7 +539,7 @@ impl Engine {
                 return Err(conflict());
             }
             return self
-                .finish_removal(view, intent, progress, stop, false)
+                .finish_removal_with_actor(view, intent, progress, stop, false, actor)
                 .await;
         }
         self.validate_removal_plan(&view, plan)?;
@@ -434,7 +617,8 @@ impl Engine {
         // keeping their inventory permit would charge these same values twice
         // while the catalog writer admits its own buffers and metadata.
         drop(inventory_memory);
-        self.start_removal(view, intent, stop).await
+        self.start_removal_with_actor(view, intent, stop, actor)
+            .await
     }
 
     async fn start_removal(
@@ -442,6 +626,17 @@ impl Engine {
         view: View,
         intent: RemovalIntent,
         stop: Option<&str>,
+    ) -> Result<RemovalStatus> {
+        self.start_removal_with_actor(view, intent, stop, &RemovalActor::Local)
+            .await
+    }
+
+    async fn start_removal_with_actor(
+        &self,
+        view: View,
+        intent: RemovalIntent,
+        stop: Option<&str>,
+        actor: &RemovalActor,
     ) -> Result<RemovalStatus> {
         let lifecycle = &self.inner.lifecycle;
         let plan = &intent.plan;
@@ -487,14 +682,14 @@ impl Engine {
             }
         };
         stop_after(stop, "removal-intent")?;
-        self.finish_removal(after, intent, progress, stop, true)
+        self.finish_removal_with_actor(after, intent, progress, stop, true, actor)
             .await
     }
 
     fn validate_removal_plan(&self, view: &View, plan: &RemovalPlan) -> Result<()> {
         if plan.reason.trim().is_empty()
             || plan.table_uuid != view.table.metadata().uuid().to_string()
-            || crate::catalog::lifecycle_ident(&plan.dataset) != *view.table.identifier()
+            || crate::catalog::lifecycle_ident(&plan.dataset) != *view.identifier()
             || plan.inspection.objects.is_empty()
             || !plan
                 .inspection
@@ -509,7 +704,7 @@ impl Engine {
             .inspection
             .boundaries
             .iter()
-            .find(|b| b.table == view.table.identifier().to_string())
+            .find(|b| b.table == view.identifier().to_string())
             .ok_or_else(invalid)?;
         if boundary.revision <= 0 || boundary.revision > view.revision {
             return Err(invalid());
@@ -535,7 +730,7 @@ impl Engine {
         Ok((intent, progress))
     }
 
-    pub(super) fn validate_removal_records(
+    pub(in crate::engine) fn validate_removal_records(
         &self,
         rows: &SnapshotRows,
         view: &View,
@@ -635,11 +830,31 @@ impl Engine {
 
     async fn finish_removal(
         &self,
+        view: View,
+        intent: RemovalIntent,
+        progress: RemovalProgress,
+        stop: Option<&str>,
+        eligibility_checked: bool,
+    ) -> Result<RemovalStatus> {
+        self.finish_removal_with_actor(
+            view,
+            intent,
+            progress,
+            stop,
+            eligibility_checked,
+            &RemovalActor::Local,
+        )
+        .await
+    }
+
+    async fn finish_removal_with_actor(
+        &self,
         mut view: View,
         intent: RemovalIntent,
         mut progress: RemovalProgress,
         stop: Option<&str>,
         eligibility_checked: bool,
+        actor: &RemovalActor,
     ) -> Result<RemovalStatus> {
         self.check_removal_scope(&intent.plan.scope)?;
         let lifecycle = &self.inner.lifecycle;
@@ -656,6 +871,24 @@ impl Engine {
         let floor = validate_progress(&intent, &progress)? as u64;
         if finished(&progress) {
             return status(intent, progress);
+        }
+        if matches!(intent.plan.scope, RemovalScope::Objects) {
+            self.check_removal_actor(actor, &intent.plan)?;
+        }
+        #[cfg(feature = "remote")]
+        if let RemovalActor::Remote(authority) = actor {
+            if !progress.registrations.iter().all(RemovalOutcome::finished) {
+                return Err(Error::refusal(
+                    "remote_removal_pending",
+                    "prepare must detach every saved native head before deletion authority is issued",
+                ));
+            }
+            let objects = intent
+                .objects
+                .iter()
+                .map(|index| intent.plan.inspection.objects[*index].object.clone())
+                .collect::<Vec<_>>();
+            authority.check_plan(self.remote_maintenance()?, &objects)?;
         }
         // Completed retries return above. Unresolved retries check current roots
         // and native heads, but can only perform the original exact effects.
@@ -733,13 +966,7 @@ impl Engine {
                         continue;
                     }
                     let object = &intent.plan.inspection.objects[*index].object;
-                    match storage::removal::reconcile_absent_file(
-                        &self.inner.root,
-                        object,
-                        &lifecycle.budget,
-                    )
-                    .await
-                    {
+                    match self.removal_absent(actor, object).await {
                         Ok(true) => next.objects[position] = RemovalOutcome::Absent,
                         Ok(false) => {}
                         Err(error) => next.objects[position] = failure(error),
@@ -772,7 +999,14 @@ impl Engine {
             };
         }
         stop_after(stop, "removal-registrations")?;
-        if next.registrations.iter().all(RemovalOutcome::finished) {
+        let delete_objects = match actor {
+            RemovalActor::Local => true,
+            #[cfg(feature = "remote")]
+            RemovalActor::Remote(_) => true,
+            #[cfg(feature = "remote")]
+            RemovalActor::ReserveRemote => false,
+        };
+        if delete_objects && next.registrations.iter().all(RemovalOutcome::finished) {
             for (position, index) in intent.objects.iter().enumerate() {
                 if next.objects[position].finished() {
                     continue;
@@ -790,8 +1024,7 @@ impl Engine {
                     )
                     .await
                 } else {
-                    storage::removal::remove_owned_file(&self.inner.root, object, &lifecycle.budget)
-                        .await
+                    self.removal_effect(actor, object).await
                 };
                 next.objects[position] = match effect {
                     Ok(storage::removal::LocalRemovalOutcome::Deleted) => RemovalOutcome::Removed,
@@ -890,22 +1123,7 @@ impl Engine {
         {
             return Err(invalid());
         }
-        let path = Path::new(&registration.metadata);
-        let relative = path
-            .strip_prefix(self.inner.root.join("objects"))
-            .map_err(|_| invalid())?;
-        let components = relative.components().collect::<Vec<_>>();
-        if components.len() < 4
-            || components
-                .iter()
-                .any(|part| !matches!(part, std::path::Component::Normal(_)))
-            || path.components().collect::<PathBuf>().to_str()
-                != Some(registration.metadata.as_str())
-        {
-            return Err(invalid());
-        }
-        let owner = Id::new(components[0].as_os_str().to_str().ok_or_else(invalid)?)?;
-        Id::new(components[1].as_os_str().to_str().ok_or_else(invalid)?)?;
+        let owner = self.retained_owner(&registration.metadata)?;
         if registration.namespace
             != crate::catalog::lifecycle_ident(&owner)
                 .namespace()
@@ -959,7 +1177,11 @@ impl Engine {
                     ));
                 }
                 let table = lifecycle.catalog.load_table(&ident).await?;
-                let files = storage::snapshot_files(&table, &lifecycle.budget).await?;
+                let files = self
+                    .inner
+                    .objects
+                    .snapshot_files(&table, &lifecycle.budget)
+                    .await?;
                 if !files.paths.iter().any(|path| paths.contains(path.as_str())) {
                     continue;
                 }
@@ -967,20 +1189,13 @@ impl Engine {
                 if suffix.len() != 32 || uuid::Uuid::parse_str(suffix).is_err() {
                     return Err(invalid());
                 }
-                let location = Path::new(table.metadata().location());
-                let relative = location
-                    .strip_prefix(self.inner.root.join("objects"))
-                    .map_err(|_| invalid())?;
-                let owner = relative
-                    .components()
-                    .next()
-                    .and_then(|part| part.as_os_str().to_str())
-                    .ok_or_else(invalid)?;
-                let owner = Id::new(owner)?;
+                let location = table.metadata().location();
+                let owner = self.retained_owner(location)?;
                 let owner_ident = crate::catalog::lifecycle_ident(&owner);
                 if owner_ident.namespace() != ident.namespace()
-                    || !Path::new(table.metadata_location_result()?)
-                        .starts_with(location.join("metadata"))
+                    || !table
+                        .metadata_location_result()?
+                        .starts_with(&format!("{}/metadata/", location.trim_end_matches('/')))
                     || !table.metadata().default_partition_spec().is_unpartitioned()
                     || !table.metadata().default_sort_order().is_unsorted()
                     || table.metadata().encryption_keys_iter().next().is_some()

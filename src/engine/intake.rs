@@ -60,7 +60,7 @@ impl Engine {
         let fence: Option<SourceFence> = self.inner.lifecycle.get(view, "source-fence").await?;
         if let Some(fence) = &fence {
             validate_record(fence)?;
-            if &crate::catalog::lifecycle_ident(&fence.dataset) != view.table.identifier() {
+            if &crate::catalog::lifecycle_ident(&fence.dataset) != view.identifier() {
                 return Err(invalid_fence("source fence dataset differs"));
             }
         }
@@ -167,7 +167,7 @@ impl Engine {
         view: &View,
         fence: &SourceFence,
     ) -> Result<()> {
-        if &crate::catalog::lifecycle_ident(&fence.dataset) != view.table.identifier() {
+        if &crate::catalog::lifecycle_ident(&fence.dataset) != view.identifier() {
             return Err(invalid_fence("requested source fence dataset differs"));
         }
         let current = self

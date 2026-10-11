@@ -23,6 +23,7 @@ use std::{
 use tokio::sync::{Mutex, RwLock};
 
 mod admission;
+mod authority;
 mod backfill;
 pub(crate) mod locations;
 #[cfg(all(test, feature = "remote"))]
@@ -86,6 +87,8 @@ struct Inner {
     maintenance: Arc<RwLock<()>>,
     closing: AtomicBool,
     owned_catalog: bool,
+    #[cfg(feature = "remote")]
+    remote_maintenance: Option<uuid::Uuid>,
     #[cfg(test)]
     release_decodes: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -290,14 +293,64 @@ impl Engine {
         limits: Limits,
     ) -> Result<Self> {
         let ownership = worker::Host::acquire(root.as_ref())?;
-        Self::compose(
+        let mut engine = Self::compose(
             std::fs::canonicalize(root)?,
             remote.catalog,
             storage::Objects::Remote(remote.objects),
             limits,
             ownership,
             false,
-        )
+        )?;
+        Arc::get_mut(&mut engine.inner)
+            .expect("new engine has one owner")
+            .remote_maintenance = remote.maintenance_generation;
+        Ok(engine)
+    }
+
+    fn require_data_work(&self) -> Result<()> {
+        #[cfg(feature = "remote")]
+        if self.inner.remote_maintenance.is_some() {
+            return Err(Error::refusal(
+                "maintenance_only",
+                "quiescent maintenance cannot start data operations",
+            ));
+        }
+        Ok(())
+    }
+
+    fn maintenance_catalog(&self) -> bool {
+        if self.inner.owned_catalog {
+            return true;
+        }
+        #[cfg(feature = "remote")]
+        {
+            self.inner.remote_maintenance.is_some()
+        }
+        #[cfg(not(feature = "remote"))]
+        false
+    }
+
+    #[cfg(feature = "remote")]
+    fn remote_maintenance(&self) -> Result<uuid::Uuid> {
+        self.inner.remote_maintenance.ok_or_else(|| {
+            Error::refusal(
+                "retention_catalog_unqualified",
+                "remote maintenance requires an owned generation and explicit quiescence",
+            )
+        })
+    }
+
+    fn retained_owner(&self, location: &str) -> Result<Id> {
+        let relative = self
+            .inner
+            .retained
+            .relative(location)
+            .ok_or_else(locations::invalid)?;
+        let (owner, remainder) = relative.split_once('/').ok_or_else(locations::invalid)?;
+        if remainder.is_empty() {
+            return Err(locations::invalid());
+        }
+        Id::new(owner)
     }
 
     fn require_local(&self) -> Result<()> {
@@ -338,6 +391,7 @@ impl Engine {
     }
 
     fn check_request_backend(&self, request: &OperationRequest) -> Result<()> {
+        self.require_data_work()?;
         if matches!(request, OperationRequest::Update(_))
             || matches!(request, OperationRequest::Build(build) if build.base.is_none() && build.relationship.as_ref().is_none_or(|relationship| matches!(relationship, SourceRelationship::Independent)))
         {
@@ -364,13 +418,16 @@ impl Engine {
             inner: Arc::new(Inner {
                 root,
                 retained,
-                lifecycle: Lifecycle::new(catalog, budget),
+                lifecycle: Lifecycle::new(catalog, budget)
+                    .with_retained_prefix(objects.retained_prefix()),
                 objects,
                 locks: Mutex::new(BTreeMap::new()),
                 host: ownership,
                 maintenance: Arc::new(RwLock::new(())),
                 closing: AtomicBool::new(false),
                 owned_catalog,
+                #[cfg(feature = "remote")]
+                remote_maintenance: None,
                 #[cfg(test)]
                 release_decodes: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
@@ -712,6 +769,7 @@ impl Engine {
         Ok(View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: crate::catalog::lifecycle_ident(dataset),
         })
     }
 

@@ -28,6 +28,7 @@ use std::{
 /// Lifecycle authority injected with a maintained catalog and shared budget.
 #[derive(Clone, Debug)]
 pub struct Lifecycle {
+    retained_prefix: Option<String>,
     pub(crate) catalog: Arc<dyn Catalog>,
     pub(crate) budget: Budget,
     cache: Arc<Mutex<Option<Arc<SnapshotRows>>>>,
@@ -114,7 +115,15 @@ impl SnapshotRows {
 #[derive(Debug, Clone)]
 pub struct View {
     pub(crate) table: Table,
+    pub(crate) logical_identifier: TableIdent,
     pub revision: i64,
+}
+
+impl View {
+    /// Returns the stable DocSpec identity, independent of physical catalog routing.
+    pub(crate) fn identifier(&self) -> &TableIdent {
+        &self.logical_identifier
+    }
 }
 
 pub(crate) fn lifecycle_ident(dataset: &Id) -> TableIdent {
@@ -132,12 +141,18 @@ impl Lifecycle {
     /// Connects lifecycle operations to a maintained catalog.
     pub fn new(catalog: Arc<dyn Catalog>, budget: Budget) -> Self {
         Self {
+            retained_prefix: None,
             catalog,
             budget,
             cache: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             lose_commit_response: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    pub(crate) fn with_retained_prefix(mut self, prefix: Option<String>) -> Self {
+        self.retained_prefix = prefix;
+        self
     }
 
     /// Opens or creates a dataset's lifecycle authority.
@@ -165,6 +180,12 @@ impl Lifecycle {
                     &namespace,
                     TableCreation::builder()
                         .name("lifecycle".into())
+                        .location_opt(self.retained_prefix.as_ref().map(|prefix| {
+                            format!(
+                                "{prefix}/{dataset}/{}/lifecycle",
+                                uuid::Uuid::new_v4().simple()
+                            )
+                        }))
                         .schema(iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
                             &schema,
                         )?)
@@ -176,6 +197,7 @@ impl Lifecycle {
         Ok(View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: ident,
         })
     }
 
@@ -424,6 +446,7 @@ impl Lifecycle {
         Ok(View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: view.logical_identifier.clone(),
         })
     }
 }

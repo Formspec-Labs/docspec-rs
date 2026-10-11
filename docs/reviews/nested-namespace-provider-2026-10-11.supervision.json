@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-11T14:46:57.152186+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/nested-namespace-probe.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/nested-namespace-provider-2026-10-11",
+    "b304e365-e95d-4e58-a691-821f321a37c6"
+  ],
+  "deadline_seconds": 150,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T14:46:58.555742+00:00"
+}

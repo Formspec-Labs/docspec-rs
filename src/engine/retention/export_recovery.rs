@@ -49,7 +49,7 @@ fn collect(
         .ok_or_else(|| Error::refusal("no_export", "export has not been admitted"))?;
     crate::engine::export::validate_operation_record(&saved)?;
     if saved.request.operation != *operation
-        || crate::catalog::lifecycle_ident(&saved.request.dataset) != *view.table.identifier()
+        || crate::catalog::lifecycle_ident(&saved.request.dataset) != *view.identifier()
     {
         return Err(invalid_retirement());
     }

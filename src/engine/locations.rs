@@ -389,4 +389,4 @@ mod tests {
 }
 
 #[cfg(all(test, feature = "remote", feature = "test-util"))]
-mod remote_tests;
+pub(in crate::engine) mod remote_tests;

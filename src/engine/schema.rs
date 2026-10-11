@@ -233,7 +233,7 @@ impl Engine {
         let directory = directory.to_owned();
         let view = self.inner.lifecycle.open(&spec.dataset).await?;
         let output = self
-            .register_output(view.table.identifier().namespace(), move || {
+            .register_output(view.identifier().namespace(), move || {
                 evolve(
                     &previous,
                     &spec_owned,

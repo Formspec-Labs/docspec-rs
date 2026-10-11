@@ -1,0 +1,23 @@
+{
+  "started_utc": "2026-10-11T15:18:03.602682+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "engine::restore::remote::tests::saved_target_intent_survives_restart_and_refuses_retargeting_before_registration",
+    "--",
+    "--exact",
+    "--nocapture"
+  ],
+  "free_before_bytes": 5408051200,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 62144,
+  "min_free_bytes": 5085507584,
+  "last_observed_utc": "2026-10-11T15:18:29.713776+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 5051564032,
+  "finished_utc": "2026-10-11T15:18:31.719249+00:00"
+}

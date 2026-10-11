@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-11T15:27:26.608404+00:00",
+  "command": [
+    "sh",
+    "/tmp/docspec-final-maintenance-gate.sh"
+  ],
+  "free_before_bytes": 4617363456,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 80507,
+  "min_free_bytes": 4567695360,
+  "last_observed_utc": "2026-10-11T15:27:46.659844+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 4616671232,
+  "finished_utc": "2026-10-11T15:27:48.660134+00:00"
+}

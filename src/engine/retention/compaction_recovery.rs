@@ -50,7 +50,7 @@ fn fixed(
         || boundary > view.revision
         || capture.spec.operation != *operation
         || capture.manifest.owner != capture.spec.dataset
-        || &crate::catalog::lifecycle_ident(&capture.spec.dataset) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&capture.spec.dataset) != view.identifier()
     {
         return Err(invalid_retirement());
     }
@@ -105,7 +105,7 @@ fn check_attempt(
         || generation.revision <= admitted
         || generation.revision > boundary
         || attempt.purpose != format!("{operation}/compaction")
-        || &crate::catalog::lifecycle_ident(&attempt.consumer) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&attempt.consumer) != view.identifier()
         || attempt.paths != [format!("{}/", directory.display())]
         || attempt.retired
     {

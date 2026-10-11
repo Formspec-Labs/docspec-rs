@@ -1,0 +1,20 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.43s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test storage::remote::namespaces::tests::foreign_physical_identifiers_and_logical_commits_refuse ... ok
+
+thread 'storage::remote::namespaces::tests::restored_logical_identity_keeps_native_commits_in_each_generation' (51816061) panicked at src/storage/remote/namespaces.rs:209:14:
+called `Result::unwrap()` on an `Err` value: Error { code: "capacity", message: "shared memory budget exhausted; completed phases remain retained", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test storage::remote::namespaces::tests::restored_logical_identity_keeps_native_commits_in_each_generation ... FAILED
+
+failures:
+
+failures:
+    storage::remote::namespaces::tests::restored_logical_identity_keeps_native_commits_in_each_generation
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 343 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `--lib`

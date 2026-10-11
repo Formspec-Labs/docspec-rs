@@ -29,6 +29,16 @@ fn write_new(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 pub(super) async fn hold(directory: &Path, side: &str, metadata: &str) -> iceberg::Result<()> {
+    #[cfg(feature = "test-util")]
+    if side == "maintenance-old" {
+        return super::super::maintenance::hold_old_commit(directory, metadata).await;
+    }
+    if side == "epoch-b" {
+        return Ok(());
+    }
+    if side == "epoch-a" {
+        return super::epoch_handoff::hold(directory, metadata).await;
+    }
     let result: Result<()> = async {
         write_new(&directory.join(format!("{side}.metadata")), &metadata)?;
         let start = Instant::now();

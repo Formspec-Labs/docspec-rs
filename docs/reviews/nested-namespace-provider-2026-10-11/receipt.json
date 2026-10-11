@@ -1,0 +1,48 @@
+{
+  "passed": true,
+  "generation": "b304e365-e95d-4e58-a691-821f321a37c6",
+  "root": [
+    "docspec_generation_b304e365e95d4e58a691821f321a37c6"
+  ],
+  "child": [
+    "docspec_generation_b304e365e95d4e58a691821f321a37c6",
+    "qualification_probe"
+  ],
+  "steps": [
+    {
+      "stage": "connect",
+      "acknowledged": true
+    },
+    {
+      "stage": "require_root_absent",
+      "acknowledged": false,
+      "error_type": "NoSuchNamespaceError",
+      "http_status": 404
+    },
+    {
+      "stage": "create_root",
+      "acknowledged": true
+    },
+    {
+      "stage": "create_child",
+      "acknowledged": true
+    },
+    {
+      "stage": "list_children",
+      "acknowledged": true
+    },
+    {
+      "stage": "read_exact_child",
+      "acknowledged": true
+    }
+  ],
+  "object_requests": 0,
+  "deletions": 0,
+  "observed": [
+    [
+      "docspec_generation_b304e365e95d4e58a691821f321a37c6",
+      "qualification_probe"
+    ]
+  ],
+  "elapsed_seconds": 0.9109029590035789
+}

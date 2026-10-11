@@ -110,6 +110,60 @@ impl Objects {
         Ok((table, inventory))
     }
 
+    // Maintenance follows an entire captured native head. Shared inherited files
+    // need only configured read scope here; their ownership comes from lifecycle
+    // records, not this walk. Native credentials are explicitly rebound once.
+    pub(crate) async fn snapshot_files(
+        &self,
+        table: &Table,
+        budget: &crate::budget::Budget,
+    ) -> Result<super::SnapshotFiles> {
+        if !self.is_remote() {
+            return super::snapshot_files(table, budget).await;
+        }
+        let table = self.bind_table(table)?.into_native();
+        let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+        #[cfg(feature = "remote")]
+        {
+            let root = PinRoot::Remote(format!(
+                "{}/",
+                self.retained_prefix().expect("remote prefix")
+            ));
+            let inherited = std::collections::BTreeMap::new();
+            let guard = PinPaths {
+                objects: self,
+                root: &root,
+                inherited: &inherited,
+            };
+            super::snapshot_files_guarded(&table, budget, Some(&guard), memory).await
+        }
+        #[cfg(not(feature = "remote"))]
+        {
+            drop((table, memory));
+            unreachable!("remote objects require remote feature")
+        }
+    }
+
+    pub(crate) async fn identify(
+        &self,
+        owner: &Id,
+        path: &str,
+        budget: &crate::budget::Budget,
+    ) -> Result<ObjectRef> {
+        self.validate_path(path)?;
+        let objects = self.clone();
+        let owner = owner.clone();
+        let path = path.to_owned();
+        let memory = budget.reserve(self.read_allowance())?;
+        let handle = tokio::runtime::Handle::current();
+        budget
+            .blocking_admitted(move || {
+                let _memory = memory;
+                objects.identity_admitted(&owner, &path, &handle)
+            })
+            .await
+    }
+
     pub(crate) async fn export_scan(
         &self,
         pin: &crate::model::TablePin,

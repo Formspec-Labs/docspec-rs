@@ -30,6 +30,234 @@ pub struct RemoteObjects {
     file_io: FileIO,
     query_store: Arc<dyn ObjectStore>,
     scope: Scope,
+    temporary: bool,
+    placement: String,
+}
+
+/// Exact-key temporary deletion authority for a quiescent namespace generation.
+///
+/// Construct this only from provider-enforced temporary credentials permitting
+/// HeadObject and DeleteObject on exactly `objects`, with the supplied expiry.
+/// The controller must stop all hosts and readers, fence old catalog registrations,
+/// and permanently forbid key reuse before execution. Expiry prevents new requests;
+/// it does not cancel an already accepted deletion. Normal storage credentials are
+/// deliberately not accepted without an explicit session token. Supported DELETE
+/// calls use this temporary operator; the same process can also hold normal read
+/// and catalog credentials. This is not hostile-process credential isolation.
+#[derive(Clone)]
+pub struct RemoteRemoval {
+    objects: RemoteObjects,
+    generation: uuid::Uuid,
+    exact: Arc<std::collections::BTreeMap<String, ObjectRef>>,
+    expires: u64,
+}
+
+/// Nonsecret exact authority description and named temporary credential bindings.
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteRemovalConfig {
+    pub owned_prefix: String,
+    pub generation: uuid::Uuid,
+    pub objects: Vec<ObjectRef>,
+    pub expires: u64,
+    pub properties: HashMap<String, String>,
+    pub secret_env: HashMap<String, String>,
+}
+impl RemoteRemovalConfig {
+    /// Resolves named temporary credentials without connecting a catalog.
+    ///
+    /// # Errors
+    /// Refuses literal credentials, catalog configuration, missing secrets or authority.
+    pub fn resolve(self) -> Result<RemoteRemoval> {
+        const SECRETS: [&str; 3] = [
+            "s3.access-key-id",
+            "s3.secret-access-key",
+            "s3.session-token",
+        ];
+        if self
+            .properties
+            .keys()
+            .any(|key| !key.starts_with("s3.") || SECRETS.contains(&key.as_str()))
+            || self
+                .secret_env
+                .keys()
+                .any(|key| !SECRETS.contains(&key.as_str()))
+            || SECRETS
+                .iter()
+                .any(|key| !self.secret_env.contains_key(*key))
+        {
+            return Err(removal_authority());
+        }
+        let objects = super::remote_objects(&self.owned_prefix, self.properties, self.secret_env)?;
+        RemoteRemoval::new(objects, self.generation, self.objects, self.expires)
+    }
+}
+
+impl fmt::Debug for RemoteRemoval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteRemoval")
+            .field("generation", &self.generation)
+            .field("expires", &self.expires)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RemoteRemoval {
+    /// Binds explicit temporary credentials to an exact removal plan.
+    ///
+    /// This validates supplied scope; provider policy enforcement is an issuer
+    /// responsibility, not inferred from the opaque session token. No requests run.
+    ///
+    /// # Errors
+    /// Refuses absent temporary credentials, invalid identities, duplicate keys,
+    /// invalid scope, or expiry outside the next fifteen minutes.
+    pub fn new(
+        objects: RemoteObjects,
+        generation: uuid::Uuid,
+        expected: Vec<ObjectRef>,
+        expires: u64,
+    ) -> Result<Self> {
+        let now = removal_now()?;
+        if !objects.temporary
+            || generation.is_nil()
+            || expected.is_empty()
+            || expires <= now
+            || expires > now.saturating_add(900)
+        {
+            return Err(removal_authority());
+        }
+        let mut exact = std::collections::BTreeMap::new();
+        for object in expected {
+            objects.scope.key(&object.path)?;
+            if object.digest.len() != 64
+                || !object
+                    .digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                || exact.insert(object.path.clone(), object).is_some()
+            {
+                return Err(removal_authority());
+            }
+        }
+        Ok(Self {
+            objects,
+            generation,
+            exact: Arc::new(exact),
+            expires,
+        })
+    }
+
+    pub(crate) fn check(&self, generation: uuid::Uuid, expected: &[ObjectRef]) -> Result<()> {
+        if generation != self.generation
+            || removal_now()? >= self.expires
+            || expected
+                .iter()
+                .any(|object| self.exact.get(&object.path) != Some(object))
+        {
+            return Err(removal_authority());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_plan(&self, generation: uuid::Uuid, expected: &[ObjectRef]) -> Result<()> {
+        if expected.len() != self.exact.len() {
+            return Err(removal_authority());
+        }
+        self.check(generation, expected)
+    }
+
+    pub(crate) async fn remove(
+        &self,
+        reader: &RemoteObjects,
+        expected: &ObjectRef,
+        budget: &Budget,
+    ) -> Result<crate::storage::removal::LocalRemovalOutcome> {
+        self.check(self.generation, std::slice::from_ref(expected))?;
+        let key = self.objects.scope.key(&expected.path)?;
+        // The identity reader must use the same owned object scope. It keeps
+        // ordinary credentials separate from the HEAD/DELETE-only actor.
+        if self.objects.placement != reader.placement {
+            return Err(removal_authority());
+        }
+        let reader_key = reader.scope.key(&expected.path)?;
+        let memory = budget.reserve(READ_ADMISSION)?;
+        let actor = self.clone();
+        let reader = reader.clone();
+        let expected = expected.clone();
+        let handle = tokio::runtime::Handle::current();
+        budget
+            .blocking_admitted(move || {
+                let _memory = memory;
+                handle.block_on(async {
+                    actor.check(actor.generation, std::slice::from_ref(&expected))?;
+                    let metadata = match actor.objects.operator.stat(&key).await {
+                        Ok(metadata) => metadata,
+                        Err(error) if error.kind() == opendal::ErrorKind::NotFound => {
+                            return Ok(crate::storage::removal::LocalRemovalOutcome::Absent);
+                        }
+                        Err(_) => return Err(removal_effect()),
+                    };
+                    if !metadata.is_file() || metadata.content_length() != expected.bytes {
+                        return Err(mismatch());
+                    }
+                    let (digest, _) = reader
+                        .identity_by_key(&reader_key, Some(expected.bytes))
+                        .await?;
+                    if digest != expected.digest {
+                        return Err(mismatch());
+                    }
+                    actor.check(actor.generation, std::slice::from_ref(&expected))?;
+                    actor
+                        .objects
+                        .operator
+                        .delete(&key)
+                        .await
+                        .map_err(|_| removal_effect())?;
+                    Ok(crate::storage::removal::LocalRemovalOutcome::Deleted)
+                })
+            })
+            .await
+    }
+
+    pub(crate) async fn absent(&self, expected: &ObjectRef, budget: &Budget) -> Result<bool> {
+        self.check(self.generation, std::slice::from_ref(expected))?;
+        let key = self.objects.scope.key(&expected.path)?;
+        let actor = self.clone();
+        let handle = tokio::runtime::Handle::current();
+        budget
+            .blocking_admitted(move || {
+                handle.block_on(async {
+                    if removal_now()? >= actor.expires {
+                        return Err(removal_authority());
+                    }
+                    match actor.objects.operator.stat(&key).await {
+                        Ok(_) => Ok(false),
+                        Err(error) if error.kind() == opendal::ErrorKind::NotFound => Ok(true),
+                        Err(_) => Err(removal_effect()),
+                    }
+                })
+            })
+            .await
+    }
+}
+
+fn removal_now() -> Result<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| removal_authority())
+}
+fn removal_authority() -> Error {
+    Error::refusal(
+        "remote_removal_authority",
+        "exact temporary deletion authority is unavailable",
+    )
+}
+fn removal_effect() -> Error {
+    Error::refusal(
+        "remote_removal_effect",
+        "exact remote deletion or absence is unconfirmed",
+    )
 }
 
 impl fmt::Debug for RemoteObjects {
@@ -39,6 +267,10 @@ impl fmt::Debug for RemoteObjects {
 }
 
 impl RemoteObjects {
+    pub(crate) fn same_placement(&self, other: &Self) -> bool {
+        self.placement == other.placement && self.owned_location() == other.owned_location()
+    }
+
     pub(super) fn from_resolved(
         properties: &HashMap<String, String>,
         owned_prefix: &str,
@@ -133,6 +365,12 @@ impl RemoteObjects {
         } else {
             query_endpoint
         };
+        let placement = format!(
+            "{}\n{}\n{}",
+            query_endpoint,
+            required("s3.region")?,
+            virtual_hosted
+        );
         let mut query = AmazonS3Builder::new()
             .with_bucket_name(&scope.bucket)
             .with_endpoint(query_endpoint)
@@ -161,6 +399,10 @@ impl RemoteObjects {
             file_io,
             query_store,
             scope,
+            temporary: properties
+                .get("s3.session-token")
+                .is_some_and(|token| !token.is_empty()),
+            placement,
         })
     }
 
@@ -706,3 +948,6 @@ fn write_error(error: opendal::Error) -> Error {
 pub(crate) mod tests;
 
 // Rust guideline compliant 2026-02-21
+
+#[cfg(test)]
+mod removal_tests;

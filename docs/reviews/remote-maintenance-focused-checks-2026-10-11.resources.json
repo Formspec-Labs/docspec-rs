@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-11T15:22:57.980086+00:00",
+  "command": [
+    "sh",
+    "/tmp/docspec-finish-focused-checks.sh"
+  ],
+  "free_before_bytes": 3838992384,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 70548,
+  "min_free_bytes": 2414702592,
+  "last_observed_utc": "2026-10-11T15:25:21.137309+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 2738851840,
+  "finished_utc": "2026-10-11T15:25:23.144613+00:00"
+}

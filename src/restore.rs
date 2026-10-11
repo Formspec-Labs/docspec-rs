@@ -6,6 +6,9 @@
 //! catalog without relying on files that later cleanup may have unlinked.
 // Rust guideline compliant 2026-02-21
 
+#[cfg(feature = "remote")]
+pub mod remote;
+
 use crate::{
     Error, Result,
     model::{Id, ObjectRef, RetentionBoundary},

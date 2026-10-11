@@ -21,7 +21,7 @@ fn limits() -> Limits {
     }
 }
 
-async fn fixture(
+pub(in crate::engine) async fn fixture(
     objects: storage::remote::RemoteObjects,
 ) -> (tempfile::TempDir, Engine, RunSpec, Vec<u8>) {
     let root = tempfile::tempdir().unwrap();
@@ -49,7 +49,7 @@ async fn fixture(
     let host = root.path().join("host");
     let ownership = worker::Host::acquire(&host).unwrap();
     let catalog = storage::local_catalog(&host).await.unwrap();
-    let engine = Engine::compose(
+    let mut engine = Engine::compose(
         std::fs::canonicalize(&host).unwrap(),
         catalog,
         storage::Objects::Remote(objects),
@@ -58,6 +58,10 @@ async fn fixture(
         false,
     )
     .unwrap();
+    // This hybrid fixture uses a local filesystem lifecycle catalog; only
+    // payload I/O is remote. Keep catalog files in its temporary warehouse.
+    let inner = Arc::get_mut(&mut engine.inner).unwrap();
+    inner.lifecycle = inner.lifecycle.clone().with_retained_prefix(None);
     let spec = RunSpec {
         dataset: Id::new("dataset").unwrap(),
         operation: Id::new("initial").unwrap(),
@@ -71,7 +75,10 @@ async fn fixture(
     (root, engine, spec, bytes)
 }
 
-async fn saved(engine: &Engine, spec: &RunSpec) -> (SourceAttempt, Option<PhaseResult>) {
+pub(in crate::engine) async fn saved(
+    engine: &Engine,
+    spec: &RunSpec,
+) -> (SourceAttempt, Option<PhaseResult>) {
     let lifecycle = &engine.inner.lifecycle;
     let view = lifecycle.open(&spec.dataset).await.unwrap();
     let rows = lifecycle.rows(&view).await.unwrap();

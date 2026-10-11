@@ -83,7 +83,7 @@ fn admission(
         || revision > view.revision
         || request_revision != revision
         || request.operation() != operation
-        || &crate::catalog::lifecycle_ident(request.dataset()) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(request.dataset()) != view.identifier()
         || !supported_format(admitted.result_format)
         || fingerprint(&request)? != admitted.request_digest
     {

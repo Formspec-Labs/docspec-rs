@@ -367,9 +367,7 @@ impl Engine {
         rows: &crate::catalog::SnapshotRows,
     ) -> Result<TableMetadata> {
         let native = validate(key_value, saved, rows)?;
-        if saved.input != *input
-            || saved.identifier.namespace() != view.table.identifier().namespace()
-        {
+        if saved.input != *input || saved.identifier.namespace() != view.identifier().namespace() {
             return Err(invalid());
         }
         let directory = self
@@ -468,7 +466,7 @@ impl Engine {
             prefix: directory.protection_prefix()?,
             input: input.clone(),
             identifier: TableIdent::new(
-                view.table.identifier().namespace().clone(),
+                view.identifier().namespace().clone(),
                 format!("data_{}", attempt.as_str()),
             ),
             metadata: metadata_ref,

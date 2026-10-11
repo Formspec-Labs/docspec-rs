@@ -610,3 +610,29 @@ async fn empty_metadata_and_changed_availability_use_no_payload_read() {
     );
     assert!(requests.iter().all(|(method, _)| method != "GET"));
 }
+
+#[test]
+fn restore_placement_ignores_credentials_but_refuses_changed_backend_or_scope() {
+    let original = RemoteObjects::from_resolved(&properties(), "s3://bucket/owned/").unwrap();
+    let mut rotated = properties();
+    rotated.insert("s3.access-key-id".into(), "rotated-dummy".into());
+    rotated.insert("s3.secret-access-key".into(), "rotated-dummy".into());
+    assert!(
+        original
+            .same_placement(&RemoteObjects::from_resolved(&rotated, "s3://bucket/owned/").unwrap())
+    );
+    for (key, value) in [
+        ("s3.endpoint", "https://different.invalid"),
+        ("s3.region", "other"),
+        ("s3.path-style-access", "false"),
+    ] {
+        let mut changed = properties();
+        changed.insert(key.into(), value.into());
+        assert!(!original.same_placement(
+            &RemoteObjects::from_resolved(&changed, "s3://bucket/owned/").unwrap()
+        ));
+    }
+    assert!(!original.same_placement(
+        &RemoteObjects::from_resolved(&properties(), "s3://bucket/other/").unwrap()
+    ));
+}

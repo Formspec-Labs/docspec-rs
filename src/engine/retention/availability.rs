@@ -49,7 +49,7 @@ pub(super) fn validate_pointer(
         || pointer.dataset != receipt.plan.dataset
         || pointer.operation != *operation
         || pointer.retirement != receipt.plan.retirement
-        || &crate::catalog::lifecycle_ident(&pointer.dataset) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&pointer.dataset) != view.identifier()
     {
         return Err(invalid_retirement());
     }
@@ -131,7 +131,7 @@ pub(super) fn collect(
         || operation_revision > view.revision
         || request_revision != operation_revision
         || request.operation() != operation
-        || &crate::catalog::lifecycle_ident(request.dataset()) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(request.dataset()) != view.identifier()
         || fingerprint(&request)? != admitted.request_digest
     {
         return Err(invalid_retirement());
@@ -152,7 +152,7 @@ pub(super) fn collect(
         rows,
         &authority,
         authority_revision,
-        &view.table.identifier().to_string(),
+        &view.identifier().to_string(),
         limit,
     )?;
     if authority

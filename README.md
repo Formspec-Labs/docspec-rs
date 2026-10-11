@@ -181,7 +181,10 @@ local default keeps the independent reader. Remote startup supports a dataset's
 first independent Build, source-only Update and recovery of those operations,
 inspect/latest/release, source streaming and primitive source exports. Updates use
 `plan-update update.json` and `update update.json`, with the same exact-base and
-complete-key replacement/deletion rules as local updates. Other Engine operations retain their existing refusal gates.
+complete-key replacement/deletion rules as local updates. Explicit owned-generation
+maintenance adds exact removal and catalog-loss restore through the
+[remote maintenance procedure](docs/remote-maintenance.md). Other Engine operations
+retain their existing refusal gates.
 Standalone local verification, input hashing, restore and independent evidence or
 receipt readers refuse `--remote` before effects. Hash a producer file without
 `--remote` when preparing its Build request.

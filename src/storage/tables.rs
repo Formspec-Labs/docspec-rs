@@ -94,7 +94,7 @@ pub(crate) fn replacement_metadata_at(
 pub(crate) enum CandidateWriter {
     Local,
     #[cfg(feature = "remote")]
-    Remote(super::remote::RemoteObjects, Option<MetadataLocation>),
+    Remote(Box<super::remote::RemoteObjects>, Option<MetadataLocation>),
 }
 
 impl CandidateWriter {
@@ -102,7 +102,7 @@ impl CandidateWriter {
         match objects {
             super::Objects::Local => Self::Local,
             #[cfg(feature = "remote")]
-            super::Objects::Remote(objects) => Self::Remote(objects.clone(), None),
+            super::Objects::Remote(objects) => Self::Remote(Box::new(objects.clone()), None),
         }
     }
 
@@ -146,7 +146,7 @@ impl CandidateWriter {
         match self {
             Self::Local => Ok(table),
             #[cfg(feature = "remote")]
-            Self::Remote(objects, _) => Ok(super::Objects::Remote(objects)
+            Self::Remote(objects, _) => Ok(super::Objects::Remote(*objects)
                 .bind_table(&table)?
                 .into_native()),
         }
@@ -161,7 +161,7 @@ impl CandidateWriter {
         let objects = match self {
             Self::Local => super::Objects::Local,
             #[cfg(feature = "remote")]
-            Self::Remote(objects, _) => super::Objects::Remote(objects),
+            Self::Remote(objects, _) => super::Objects::Remote(*objects),
         };
         objects.create_bytes_admitted(path, bytes, _handle)
     }

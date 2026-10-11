@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.24s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/266bf8e988ae42738941509d53eee70d/data/13709789-5a03-45d4-a05e-26afc0386c03-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/266bf8e988ae42738941509d53eee70d/data/13709789-5a03-45d4-a05e-26afc0386c03-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/266bf8e988ae42738941509d53eee70d/data/13709789-5a03-45d4-a05e-26afc0386c03-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/c737086de2844642b6e0e7cd4ce77613/data/data/258f0546-e0cc-4791-b5a1-2a68c120da44-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/c737086de2844642b6e0e7cd4ce77613/data/data/53e3d0c2-b08d-4cee-95d2-5c0958c133f8-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpeofqWK/workspace/objects/comments/c737086de2844642b6e0e7cd4ce77613/removed/data/0cae50f4-f206-4160-a0b0-15edb5a7abb8-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+test authority::fence_preserves_selection_and_completions_and_reconciles_exact_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 313 filtered out; finished in 1.94s
+

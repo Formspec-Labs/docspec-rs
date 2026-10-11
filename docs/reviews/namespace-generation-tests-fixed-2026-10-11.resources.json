@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T14:45:19.533211+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "storage::remote::namespaces::tests::",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 3861438464,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 83707,
+  "min_free_bytes": 3795050496,
+  "last_observed_utc": "2026-10-11T14:45:45.624496+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 3859345408,
+  "finished_utc": "2026-10-11T14:45:47.632003+00:00"
+}

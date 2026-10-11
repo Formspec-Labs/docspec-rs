@@ -152,7 +152,7 @@ pub(super) fn validate_receipt(
         || plan.revision <= 0
         || plan.revision >= revision
         || plan.table_uuid != view.table.metadata().uuid().to_string()
-        || &crate::catalog::lifecycle_ident(&plan.dataset) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&plan.dataset) != view.identifier()
         || plan.reason.trim().is_empty()
         || plan.records.is_empty()
         || plan
@@ -215,7 +215,7 @@ fn validate_optional(
         .get_record(&generation.key)?
         .ok_or_else(invalid_retirement)?;
     if revision != generation.revision
-        || &crate::catalog::lifecycle_ident(&certificate.after.dataset) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&certificate.after.dataset) != view.identifier()
     {
         return Err(invalid_retirement());
     }
@@ -295,7 +295,7 @@ pub(super) fn retirement_marker(
     if marker.record != phase
         || !retained_key(key)
         || marker.table_uuid != view.table.metadata().uuid().to_string()
-        || &crate::catalog::lifecycle_ident(&marker.dataset) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&marker.dataset) != view.identifier()
         || revision <= 0
         || retired_revision <= revision
         || retired_revision > view.revision
@@ -706,10 +706,10 @@ impl Engine {
     }
 
     pub(in crate::engine) fn retirement_catalog(&self) -> Result<()> {
-        if !self.inner.owned_catalog {
+        if !self.maintenance_catalog() {
             return Err(Error::refusal(
                 "retention_catalog_unqualified",
-                "retirement requires the owned embedded catalog",
+                "retirement requires an owned catalog and maintenance authority",
             ));
         }
         Ok(())

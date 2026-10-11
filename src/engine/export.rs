@@ -71,6 +71,7 @@ impl Engine {
     }
 
     async fn export_request(&self, spec: &ExportSpec, stop: Option<String>) -> Result<ExportPin> {
+        self.require_data_work()?;
         if spec.policy.group != "source" {
             self.require_local()?;
         }

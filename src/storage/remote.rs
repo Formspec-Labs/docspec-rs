@@ -10,10 +10,11 @@ use iceberg::{
     Catalog, CatalogBuilder, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
     table::Table,
 };
-use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
+use iceberg_catalog_rest::RestCatalogBuilder;
 use iceberg_storage_opendal::OpenDalStorageFactory;
 use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
+mod namespaces;
 pub mod objects;
 #[doc(inline)]
 pub use objects::RemoteObjects;
@@ -23,6 +24,7 @@ pub use objects::RemoteObjects;
 pub struct RemoteStorage {
     pub catalog: Arc<dyn Catalog>,
     pub objects: RemoteObjects,
+    pub(crate) maintenance_generation: Option<uuid::Uuid>,
 }
 
 impl RemoteStorage {
@@ -61,7 +63,7 @@ impl RemoteStorage {
         super::register_candidate(
             self.catalog.as_ref(),
             identifier,
-            super::CandidateWriter::Remote(self.objects.clone(), Some(metadata_location)),
+            super::CandidateWriter::Remote(Box::new(self.objects.clone()), Some(metadata_location)),
             move || Ok(metadata),
             budget,
         )
@@ -79,6 +81,10 @@ impl fmt::Debug for RemoteStorage {
 ///
 /// `owned_prefix` is a strict `s3://bucket/nonempty-prefix/` URI. This connects
 /// object primitives only; it does not qualify the complete remote engine.
+/// `docspec.maintenance-mode=quiescent` requires an explicit namespace generation
+/// and declares that every other writer, reader and destructive actor using that
+/// generation has stopped. It grants no distributed exclusion or credential fence.
+/// Keep provider compaction/expiration disabled and do not restart old clients.
 ///
 /// # Errors
 /// Refuses invalid configuration, unavailable secrets, or invalid object scope.
@@ -87,10 +93,42 @@ pub async fn remote_storage(
     properties: HashMap<String, String>,
     secret_env: HashMap<String, String>,
 ) -> Result<RemoteStorage> {
-    let properties = resolve_properties(properties, secret_env)?;
+    let mut properties = resolve_properties(properties, secret_env)?;
+    let maintenance_generation = match properties.remove("docspec.maintenance-mode") {
+        None => None,
+        Some(mode) if mode == "quiescent" => {
+            let value = properties
+                .get("docspec.namespace-generation")
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "remote_config",
+                        "quiescent maintenance requires a namespace generation",
+                    )
+                })?;
+            let generation = uuid::Uuid::parse_str(value)
+                .map_err(|_| Error::refusal("remote_config", "invalid namespace generation"))?;
+            if generation.to_string() != *value {
+                return Err(Error::refusal(
+                    "remote_config",
+                    "namespace generation must be canonical",
+                ));
+            }
+            Some(generation)
+        }
+        Some(_) => {
+            return Err(Error::refusal(
+                "remote_config",
+                "unsupported maintenance mode",
+            ));
+        }
+    };
     let objects = RemoteObjects::from_resolved(&properties, owned_prefix)?;
     let catalog = catalog_from_resolved(properties).await?;
-    Ok(RemoteStorage { catalog, objects })
+    Ok(RemoteStorage {
+        catalog,
+        objects,
+        maintenance_generation,
+    })
 }
 
 /// Initializes conditional object I/O without connecting a catalog.
@@ -119,6 +157,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// (for example `token`) to an environment-variable name, never its value.
 /// Local properties override server-vended table configuration in the maintained
 /// REST adapter. Keep headers redacted and avoid ambient credential discovery.
+/// Optional `docspec.namespace-generation` is a canonical UUID that binds this
+/// client permanently to one physical namespace generation. Logical DocSpec
+/// identities and immutable object URIs stay unchanged. This routing alone does
+/// not qualify remote maintenance or online restore; use explicit quiescence.
 /// REST requests allow 15 seconds to connect and 60 seconds overall.
 /// Catalog construction is lazy; the first catalog operation checks connectivity.
 ///
@@ -148,7 +190,9 @@ fn resolve_properties(
     Ok(properties)
 }
 
-async fn catalog_from_resolved(properties: HashMap<String, String>) -> Result<Arc<dyn Catalog>> {
+async fn catalog_from_resolved(
+    mut properties: HashMap<String, String>,
+) -> Result<Arc<dyn Catalog>> {
     for key in ["uri", "warehouse"] {
         if properties.get(key).is_none_or(|value| value.is_empty()) {
             return Err(Error::refusal(
@@ -157,6 +201,8 @@ async fn catalog_from_resolved(properties: HashMap<String, String>) -> Result<Ar
             ));
         }
     }
+    let scope =
+        namespaces::Scope::from_property(properties.remove("docspec.namespace-generation"))?;
     let client = reqwest_rest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
@@ -170,13 +216,17 @@ async fn catalog_from_resolved(properties: HashMap<String, String>) -> Result<Ar
         .load("docspec", properties)
         .await
         .map_err(|_| Error::refusal("remote_config", "native catalog initialization failed"))?;
-    Ok(Arc::new(RemoteCatalog { inner }))
+    Ok(Arc::new(RemoteCatalog {
+        inner: Arc::new(inner),
+        scope,
+    }))
 }
 
 // Upstream RestCatalog derives Debug over configuration containing secrets.
 // Preserve Catalog's required Debug API without exposing that configuration.
 struct RemoteCatalog {
-    inner: RestCatalog,
+    inner: Arc<dyn Catalog>,
+    scope: namespaces::Scope,
 }
 
 impl fmt::Debug for RemoteCatalog {
@@ -191,56 +241,76 @@ impl Catalog for RemoteCatalog {
         &self,
         p: Option<&NamespaceIdent>,
     ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        self.inner.list_namespaces(p).await
+        self.scope.list_namespaces(self.inner.as_ref(), p).await
     }
     async fn create_namespace(
         &self,
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<Namespace> {
-        self.inner.create_namespace(n, p).await
+        self.scope.create_namespace(self.inner.as_ref(), n, p).await
     }
     async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
-        self.inner.get_namespace(n).await
+        let namespace = self.inner.get_namespace(&self.scope.physical(n)?).await?;
+        self.scope.namespace(namespace)
     }
     async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
-        self.inner.namespace_exists(n).await
+        self.inner.namespace_exists(&self.scope.physical(n)?).await
     }
     async fn update_namespace(
         &self,
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<()> {
-        self.inner.update_namespace(n, p).await
+        self.inner
+            .update_namespace(&self.scope.physical(n)?, p)
+            .await
     }
     async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
-        self.inner.drop_namespace(n).await
+        self.inner.drop_namespace(&self.scope.physical(n)?).await
     }
     async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        self.inner.list_tables(n).await
+        self.inner
+            .list_tables(&self.scope.physical(n)?)
+            .await?
+            .into_iter()
+            .map(|table| self.scope.logical_table(&table))
+            .collect()
     }
     async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
-        self.inner.create_table(n, c).await
+        self.inner.create_table(&self.scope.physical(n)?, c).await
     }
     async fn load_table(&self, t: &TableIdent) -> iceberg::Result<Table> {
-        self.inner.load_table(t).await
+        self.inner.load_table(&self.scope.physical_table(t)?).await
     }
     async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.drop_table(t).await
+        self.inner.drop_table(&self.scope.physical_table(t)?).await
     }
     async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.purge_table(t).await
+        self.inner.purge_table(&self.scope.physical_table(t)?).await
     }
     async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
-        self.inner.table_exists(t).await
+        self.inner
+            .table_exists(&self.scope.physical_table(t)?)
+            .await
     }
     async fn rename_table(&self, s: &TableIdent, d: &TableIdent) -> iceberg::Result<()> {
-        self.inner.rename_table(s, d).await
+        self.inner
+            .rename_table(
+                &self.scope.physical_table(s)?,
+                &self.scope.physical_table(d)?,
+            )
+            .await
     }
     async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
-        self.inner.register_table(t, m).await
+        self.inner
+            .register_table(&self.scope.physical_table(t)?, m)
+            .await
     }
     async fn update_table(&self, c: TableCommit) -> iceberg::Result<Table> {
+        // Native Table identifiers remain physical, so requirements and updates
+        // reach the maintained adapter unchanged. Never retarget a stale commit.
+        self.scope.check_commit(c.identifier())?;
         self.inner.update_table(c).await
     }
 }

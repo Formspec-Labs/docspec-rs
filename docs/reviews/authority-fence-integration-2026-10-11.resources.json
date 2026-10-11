@@ -1,0 +1,23 @@
+{
+  "started_utc": "2026-10-11T14:35:48.846822+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "authority::",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 5753851904,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 61026,
+  "min_free_bytes": 5438271488,
+  "last_observed_utc": "2026-10-11T14:36:16.962918+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 5751775232,
+  "finished_utc": "2026-10-11T14:36:18.973230+00:00"
+}

@@ -224,7 +224,7 @@ async fn authority_alias_refuses_missing_mismatched_and_incomplete_selection_met
             .find(|(key, _, _)| *key == "authority")
             .unwrap();
         let origin = RetentionBlocker {
-            table: view.table.identifier().to_string(),
+            table: view.identifier().to_string(),
             key: "authority".into(),
             revision,
         };
@@ -537,7 +537,7 @@ async fn repeated_bindings_share_claim_memory_and_owner_changes_refuse_inspectio
     let owner = id("owner");
     let view = lifecycle.open(&owner).await.unwrap();
     let boundary = RetentionBoundary {
-        table: view.table.identifier().to_string(),
+        table: view.identifier().to_string(),
         metadata: view.table.metadata_location_result().unwrap().to_owned(),
         revision: view.revision,
     };

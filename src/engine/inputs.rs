@@ -427,8 +427,9 @@ pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'stati
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<T> {
-    read_manifest_inner(objects, object, budget, bytes, memory, false)
+    read_manifest_inner(objects, object, budget, bytes, memory, false, false)
         .await?
+        .map(|(value, _decoded)| value)
         .ok_or_else(|| Error::refusal("unavailable_release", "retained manifest is absent"))
 }
 
@@ -439,7 +440,23 @@ pub(super) async fn read_manifest_if_present<T: serde::de::DeserializeOwned + Se
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<Option<T>> {
-    read_manifest_inner(objects, object, budget, bytes, memory, true).await
+    Ok(
+        read_manifest_inner(objects, object, budget, bytes, memory, true, false)
+            .await?
+            .map(|(value, _decoded)| value),
+    )
+}
+
+pub(super) async fn read_native_manifest<T: serde::de::DeserializeOwned + Send + 'static>(
+    objects: &storage::Objects,
+    object: &ObjectRef,
+    budget: &Budget,
+    bytes: &mut usize,
+    memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<(T, Option<tokio::sync::OwnedSemaphorePermit>)> {
+    read_manifest_inner(objects, object, budget, bytes, memory, false, true)
+        .await?
+        .ok_or_else(|| Error::refusal("unavailable_release", "retained native manifest is absent"))
 }
 
 async fn read_manifest_inner<T: serde::de::DeserializeOwned + Send + 'static>(
@@ -449,7 +466,8 @@ async fn read_manifest_inner<T: serde::de::DeserializeOwned + Send + 'static>(
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
     allow_absence: bool,
-) -> Result<Option<T>> {
+    native: bool,
+) -> Result<Option<(T, Option<tokio::sync::OwnedSemaphorePermit>)>> {
     let size = usize::try_from(object.bytes).map_err(|_| capacity())?;
     *bytes = bytes.saturating_add(size);
     check_size(*bytes, budget.limits.max_metadata_bytes)?;
@@ -458,6 +476,8 @@ async fn read_manifest_inner<T: serde::de::DeserializeOwned + Send + 'static>(
     let buffer = budget.reserve(size.saturating_add(objects.metadata_read_allowance()))?;
     let objects = objects.clone();
     let handle = tokio::runtime::Handle::current();
+    let limit = budget.limits.max_metadata_bytes;
+    let decode_budget = budget.clone();
     budget
         .blocking(move || {
             // Parsing can outlive an async caller's cancellation. Keep both
@@ -472,7 +492,21 @@ async fn read_manifest_inner<T: serde::de::DeserializeOwned + Send + 'static>(
             } else {
                 objects.read_metadata_admitted(&object, &mut bytes, &handle)?;
             }
-            Ok(Some(serde_json::from_slice(&bytes)?))
+            // Match the maintained native decoder's magic-based gzip detection.
+            // Plain JSON keeps the actual-size allowance supplied by the caller.
+            // Compressed JSON admits the remaining maximum decoded allowance
+            // before expansion; its permit follows the parsed value to the caller.
+            let decoded = if native && bytes.starts_with(&[0x1f, 0x8b]) {
+                Some(decode_budget.reserve(limit.saturating_sub(size).saturating_mul(8))?)
+            } else {
+                None
+            };
+            let value = if native {
+                storage::decode_native_metadata(&bytes, limit)?
+            } else {
+                serde_json::from_slice(&bytes)?
+            };
+            Ok(Some((value, decoded)))
         })
         .await
 }

@@ -1,0 +1,150 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error: usage of `contains_key` followed by `insert` on a `BTreeMap`
+  --> src/engine/restore/remote.rs:81:13
+   |
+81 | /             if !image.namespaces.contains_key(&name) {
+82 | |                 let namespace = lifecycle.catalog.get_namespace(ident.namespace()).await?;
+83 | |                 image.namespaces.insert(
+84 | |                     name,
+...  |
+90 | |                 );
+91 | |             }
+   | |_____________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#map_entry
+   = note: `-D clippy::map-entry` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::map_entry)]`
+help: try
+   |
+81 ~             if let std::collections::btree_map::Entry::Vacant(e) = image.namespaces.entry(name) {
+82 +                 let namespace = lifecycle.catalog.get_namespace(ident.namespace()).await?;
+83 +                 e.insert(namespace
+84 +                         .properties()
+85 +                         .iter()
+86 +                         .map(|(key, value)| (key.clone(), value.clone()))
+87 +                         .collect());
+88 +             }
+   |
+
+error: this `if` statement can be collapsed
+   --> src/engine/restore/remote.rs:459:13
+    |
+459 | /             if let Err(error) = self.inner.lifecycle.catalog.drop_table(&ident).await {
+460 | |                 if self.inner.lifecycle.catalog.table_exists(&ident).await? {
+461 | |                     return Err(error.into());
+462 | |                 }
+463 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+459 ~             if let Err(error) = self.inner.lifecycle.catalog.drop_table(&ident).await
+460 ~                 && self.inner.lifecycle.catalog.table_exists(&ident).await? {
+461 |                     return Err(error.into());
+462 ~                 }
+    |
+
+error: this `if` statement can be collapsed
+   --> src/engine/restore/remote.rs:757:9
+    |
+757 | /         if let Err(error) = catalog
+758 | |             .create_namespace(&namespace, expected.clone().into_iter().collect())
+759 | |             .await
+...   |
+764 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+759 ~             .await
+760 ~             && !catalog.namespace_exists(&namespace).await? {
+761 |                 return Err(error.into());
+762 ~             }
+    |
+
+error: large size difference between variants
+  --> src/engine/retention/removal.rs:17:1
+   |
+17 | / enum RemovalActor {
+18 | |     Local,
+   | |     ----- the second-largest variant carries no data at all
+19 | |     #[cfg(feature = "remote")]
+20 | |     ReserveRemote,
+21 | |     #[cfg(feature = "remote")]
+22 | |     Remote(storage::remote::objects::RemoteRemoval),
+   | |     ----------------------------------------------- the largest variant contains at least 232 bytes
+23 | | }
+   | |_^ the entire enum is at least 232 bytes
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#large_enum_variant
+   = note: `-D clippy::large-enum-variant` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::large_enum_variant)]`
+help: consider boxing the large fields or introducing indirection in some other way to reduce the total size of the enum
+   |
+22 -     Remote(storage::remote::objects::RemoteRemoval),
+22 +     Remote(Box<storage::remote::objects::RemoteRemoval>),
+   |
+
+error: unneeded `return` statement
+   --> src/engine.rs:327:13
+    |
+327 |             return self.inner.remote_maintenance.is_some();
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#needless_return
+    = note: `-D clippy::needless-return` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_return)]`
+help: remove `return`
+    |
+327 -             return self.inner.remote_maintenance.is_some();
+327 +             self.inner.remote_maintenance.is_some()
+    |
+
+error: this `if` statement can be collapsed
+   --> src/storage/remote/namespaces.rs:130:9
+    |
+130 | /         if let Some(root) = &self.root {
+131 | |             if !catalog.namespace_exists(root).await? {
+132 | |                 match catalog.create_namespace(root, HashMap::new()).await {
+133 | |                     Ok(_) => {}
+...   |
+138 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+130 ~         if let Some(root) = &self.root
+131 ~             && !catalog.namespace_exists(root).await? {
+132 |                 match catalog.create_namespace(root, HashMap::new()).await {
+...
+136 |                 }
+137 ~             }
+    |
+
+error: large size difference between variants
+  --> src/storage/tables.rs:94:1
+   |
+94 | / pub(crate) enum CandidateWriter {
+95 | |     Local,
+   | |     ----- the second-largest variant carries no data at all
+96 | |     #[cfg(feature = "remote")]
+97 | |     Remote(super::remote::RemoteObjects, Option<MetadataLocation>),
+   | |     -------------------------------------------------------------- the largest variant contains at least 232 bytes
+98 | | }
+   | |_^ the entire enum is at least 232 bytes
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#large_enum_variant
+help: consider boxing the large fields or introducing indirection in some other way to reduce the total size of the enum
+   |
+97 -     Remote(super::remote::RemoteObjects, Option<MetadataLocation>),
+97 +     Remote(Box<super::remote::RemoteObjects>, Option<MetadataLocation>),
+   |
+
+error: could not compile `docspec` (lib) due to 7 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 7 previous errors

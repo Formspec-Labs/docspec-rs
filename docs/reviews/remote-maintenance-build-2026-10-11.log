@@ -1,0 +1,33 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0308]: `match` arms have incompatible types
+   --> src/main.rs:612:59
+    |
+453 |               match command {
+    |               ------------- `match` arms have incompatible types
+...
+606 |                   Command::RemoveObjects { plan } => print_json(
+    |  ____________________________________________________-
+607 | |                     &engine
+608 | |                         .remove_objects(&read_json::<RemovalPlan>(plan)?)
+609 | |                         .await?,
+610 | |                 )?,
+    | |__________________- this and all prior arms are found to be of type `()`
+611 |                   #[cfg(feature = "remote")]
+612 |                   Command::PrepareRemoteRemoval { plan } => print_json(
+    |  ___________________________________________________________^
+613 | |                     &engine
+614 | |                         .prepare_remote_removal(&read_json::<RemovalPlan>(plan)?)
+615 | |                         .await?,
+616 | |                 ),
+    | |_________________^ expected `()`, found `Result<(), Error>`
+    |
+    = note: expected unit type `()`
+                    found enum `Result<(), anyhow::Error>`
+help: consider using `Result::expect` to unwrap the `Result<(), anyhow::Error>` value, panicking if the value is a `Result::Err`
+    |
+616 |                 ).expect("REASON"),
+    |                  +++++++++++++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `docspec` (bin "docspec") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

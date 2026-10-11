@@ -97,7 +97,7 @@ impl Engine {
                     blocker: None,
                 }]
             || plan.inspection.boundaries.len() != 1
-            || plan.inspection.boundaries[0].table != view.table.identifier().to_string()
+            || plan.inspection.boundaries[0].table != view.identifier().to_string()
             || !plan.registrations.is_empty()
         {
             return Err(invalid());
@@ -187,7 +187,7 @@ impl Engine {
                 table_uuid: view.table.metadata().uuid().to_string(),
                 inspection: RetentionInspection {
                     boundaries: vec![RetentionBoundary {
-                        table: view.table.identifier().to_string(),
+                        table: view.identifier().to_string(),
                         metadata: view.table.metadata_location_result()?.into(),
                         revision: view.revision,
                     }],
@@ -243,7 +243,7 @@ impl Engine {
             plan: plan.clone(),
             revision: view.revision.checked_add(1).ok_or_else(invalid)?,
             boundaries: vec![RetentionBoundary {
-                table: view.table.identifier().to_string(),
+                table: view.identifier().to_string(),
                 metadata: view.table.metadata_location_result()?.into(),
                 revision: view.revision,
             }],

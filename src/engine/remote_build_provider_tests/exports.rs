@@ -34,7 +34,7 @@ fn expected_fields() -> Vec<ExportField> {
     ]
 }
 
-async fn assert_values(engine: &Engine, pin: &ExportPin) -> Result<()> {
+pub(super) async fn assert_values(engine: &Engine, pin: &ExportPin) -> Result<()> {
     assert_eq!(pin.rows, 4);
     assert_eq!(pin.fields, expected_fields());
     let mut stream = engine.read_export(pin).await?;

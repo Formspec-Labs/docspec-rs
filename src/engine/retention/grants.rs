@@ -112,6 +112,7 @@ pub(super) async fn check_eligible(
         let consumer_view = View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: ident,
         };
         let consumer_rows = lifecycle.rows(&consumer_view).await?;
         // Keep set state separate from actual per-record decoding, especially

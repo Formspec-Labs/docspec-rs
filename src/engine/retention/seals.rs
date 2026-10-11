@@ -22,7 +22,7 @@ fn validate_record(
         .ok_or_else(invalid_retirement)?;
     inputs::validate_seal(&seal)?;
     if seal.generation != *generation
-        || &crate::catalog::lifecycle_ident(&seal.family) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&seal.family) != view.identifier()
         || members != seal.members.keys().cloned().collect()
     {
         return Err(invalid_retirement());

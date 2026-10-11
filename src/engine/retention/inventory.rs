@@ -102,12 +102,7 @@ impl Engine {
         &self,
         objects: &[ObjectRef],
     ) -> Result<RetentionInspection> {
-        if !self.inner.owned_catalog {
-            return Err(Error::refusal(
-                "retention_catalog_unqualified",
-                "protection inspection requires the owned embedded catalog",
-            ));
-        }
+        self.retirement_catalog()?;
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
         let limit = budget.limits.max_metadata_bytes;
@@ -155,14 +150,19 @@ impl Engine {
             if inventory.candidates.contains_key(&path) {
                 continue;
             }
-            let root = self.inner.root.clone();
-            let owner = owner.clone();
-            let object = budget
-                .blocking(move || {
-                    crate::restore::regular_owned_file(&root, Path::new(&path))?;
-                    storage::object(&owner, Path::new(&path))
-                })
-                .await?;
+            let object = if self.inner.retained.is_local() {
+                let root = self.inner.root.clone();
+                let owner = owner.clone();
+                budget
+                    .blocking(move || {
+                        crate::restore::regular_owned_file(&root, Path::new(&path))?;
+                        storage::object(&owner, Path::new(&path))
+                    })
+                    .await?
+            } else {
+                let owner = self.retained_owner(&path)?;
+                self.inner.objects.identify(&owner, &path, budget).await?
+            };
             inventory.charge(reference_bytes(&object).saturating_add(object.path.len()))?;
             inventory.candidates.insert(
                 object.path.clone(),
@@ -208,6 +208,7 @@ impl Engine {
             let view = View {
                 revision: table.metadata().last_sequence_number(),
                 table,
+                logical_identifier: ident.clone(),
             };
             let table_name = ident.to_string();
             let boundary = RetentionBoundary {
@@ -249,7 +250,7 @@ impl Engine {
                         )?;
                         boundaries.push(boundary);
                     }
-                    let files = storage::snapshot_files(&native, budget).await?;
+                    let files = self.inner.objects.snapshot_files(&native, budget).await?;
                     for path in &files.paths {
                         inventory.path(path, &origin)?;
                     }
@@ -334,7 +335,7 @@ impl Engine {
                         || key != super::owners::unavailable_key(&unavailable.object.path)
                         || unavailable.revision != revision
                         || &crate::catalog::lifecycle_ident(&unavailable.object.owner)
-                            != view.table.identifier()
+                            != view.identifier()
                     {
                         return Err(invalid_inventory("object unavailability identity differs"));
                     }
@@ -694,6 +695,7 @@ impl Inventory {
             let view = View {
                 revision: table.metadata().last_sequence_number(),
                 table,
+                logical_identifier: ident.clone(),
             };
             let rows = lifecycle.rows(&view).await?;
             for (token, claim) in claims {
@@ -1747,14 +1749,6 @@ impl Inventory {
             {
                 continue;
             }
-            // Complete table pins satisfy native dependencies above. Remote
-            // collection supports exact DatasetPin parents only; partial native
-            // roots and other lifecycle families remain explicitly unqualified.
-            if !matches!(objects, storage::Objects::Local)
-                && !matches!(&kind, Expansion::Release { .. })
-            {
-                return Err(locations::unsupported());
-            }
             // The immutable descriptor supplies its size before decoding. The
             // worker retains this allowance if its waiting caller is canceled.
             let bytes = usize::try_from(object.bytes).map_err(|_| capacity())?;
@@ -1765,7 +1759,7 @@ impl Inventory {
             match kind {
                 Expansion::Origins => {
                     let Strict(originals): Strict<ScalarOrigins> = inputs::read_manifest(
-                        &storage::Objects::Local,
+                        objects,
                         &object,
                         budget,
                         &mut self.metadata_bytes,
@@ -1781,7 +1775,7 @@ impl Inventory {
                     // Declarations contain field identities and definitions,
                     // with no transitive object references.
                     let _: Strict<OriginalDeclaration> = inputs::read_manifest(
-                        &storage::Objects::Local,
+                        objects,
                         &object,
                         budget,
                         &mut self.metadata_bytes,
@@ -1809,7 +1803,7 @@ impl Inventory {
                 }
                 Expansion::Changes(prepared) => {
                     let Strict(applied): Strict<AppliedChangeSet> = inputs::read_manifest(
-                        &storage::Objects::Local,
+                        objects,
                         &object,
                         budget,
                         &mut self.metadata_bytes,
@@ -1822,8 +1816,34 @@ impl Inventory {
                     }
                 }
                 Expansion::Restore(reference) => {
+                    #[cfg(feature = "remote")]
+                    if matches!(objects, storage::Objects::Remote(_)) {
+                        let point: crate::restore::remote::RemoteRestorePoint =
+                            inputs::read_manifest(
+                                objects,
+                                &object,
+                                budget,
+                                &mut self.metadata_bytes,
+                                &memory,
+                            )
+                            .await?;
+                        crate::restore::remote::validate(&reference, &point)?;
+                        if Some(point.retained_prefix) != objects.retained_prefix() {
+                            return Err(invalid_inventory("restore scope differs"));
+                        }
+                        self.object(&point.catalog, &origin)?;
+                        for retained in &point.objects {
+                            objects.validate_retained_path(&retained.path)?;
+                            self.object(retained, &origin)?;
+                        }
+                        if let Some(entry) = self.visited.get_mut(&object.path) {
+                            entry.complete = true;
+                        }
+                        self.metadata_objects_read += 1;
+                        continue;
+                    }
                     let point: crate::restore::RestorePoint = inputs::read_manifest(
-                        &storage::Objects::Local,
+                        objects,
                         &object,
                         budget,
                         &mut self.metadata_bytes,
@@ -1837,14 +1857,15 @@ impl Inventory {
                     }
                 }
                 Expansion::Native(_) => {
-                    let Strict(metadata): Strict<TableMetadata> = inputs::read_manifest(
-                        &storage::Objects::Local,
-                        &object,
-                        budget,
-                        &mut self.metadata_bytes,
-                        &memory,
-                    )
-                    .await?;
+                    let (Strict(metadata), _decoded): (Strict<TableMetadata>, _) =
+                        inputs::read_native_manifest(
+                            objects,
+                            &object,
+                            budget,
+                            &mut self.metadata_bytes,
+                            &memory,
+                        )
+                        .await?;
                     let actual = (metadata.current_snapshot_id(), metadata.current_schema_id());
                     let binding = self
                         .visited
@@ -1864,7 +1885,7 @@ impl Inventory {
                         .runtime(iceberg::Runtime::try_current()?)
                         .readonly(true)
                         .build()?;
-                    let files = storage::snapshot_files(&table, budget).await?;
+                    let files = objects.snapshot_files(&table, budget).await?;
                     for path in &files.paths {
                         self.path(path, &origin)?;
                     }
@@ -2315,7 +2336,7 @@ mod correction_tests {
         let rows = lifecycle.rows(&view).await.unwrap();
         for (key, revision, json) in rows.prefix("") {
             let origin = RetentionBlocker {
-                table: view.table.identifier().to_string(),
+                table: view.identifier().to_string(),
                 key: key.into(),
                 revision,
             };
@@ -2346,7 +2367,7 @@ mod correction_tests {
         assert!(decode::<CorrectionDecision>(&unexpected.to_string()).is_err());
         let key = format!("dependency-correction/{}", correction.id);
         let origin = RetentionBlocker {
-            table: view.table.identifier().to_string(),
+            table: view.identifier().to_string(),
             key: key.clone(),
             revision: decision.revision,
         };

@@ -248,10 +248,10 @@ async fn forged_saved_registration_cannot_drop_lifecycle_or_unrelated_selected_n
         let mut plan = preview(&engine, &object).await;
         let view = engine.inner.lifecycle.open(&object.owner).await.unwrap();
         let protected_ident = if lifecycle_target {
-            view.table.identifier().clone()
+            view.identifier().clone()
         } else {
             let ident = TableIdent::new(
-                view.table.identifier().namespace().clone(),
+                view.identifier().namespace().clone(),
                 format!("data_{}", uuid::Uuid::new_v4().simple()),
             );
             engine

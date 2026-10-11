@@ -137,14 +137,11 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(dataset).await?;
         let directory = directory.clone();
-        self.register_output(
-            view.table.identifier().namespace(),
-            move || match directory {
-                locations::Location::Local(path) => storage::fresh_metadata(schema, &path),
-                #[cfg(feature = "remote")]
-                locations::Location::Remote(uri) => storage::fresh_metadata_at(schema, &uri),
-            },
-        )
+        self.register_output(view.identifier().namespace(), move || match directory {
+            locations::Location::Local(path) => storage::fresh_metadata(schema, &path),
+            #[cfg(feature = "remote")]
+            locations::Location::Remote(uri) => storage::fresh_metadata_at(schema, &uri),
+        })
         .await
     }
 
@@ -171,7 +168,7 @@ impl Engine {
         let view = self.inner.lifecycle.open(dataset).await?;
         let source = source.clone();
         let location = directory.as_string()?;
-        self.register_output(view.table.identifier().namespace(), move || {
+        self.register_output(view.identifier().namespace(), move || {
             storage::replacement_metadata_at(source.metadata(), &location)
         })
         .await

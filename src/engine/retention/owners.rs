@@ -154,7 +154,7 @@ impl ReferenceProtections {
         value: &serde_json::Value,
     ) -> Result<(String, serde_json::Value)> {
         if consumer != &self.consumer
-            || &crate::catalog::lifecycle_ident(consumer) != view.table.identifier()
+            || &crate::catalog::lifecycle_ident(consumer) != view.identifier()
         {
             return Err(invalid());
         }
@@ -183,7 +183,7 @@ pub(super) fn binding_key(key: &str) -> String {
     )
 }
 
-pub(super) fn unavailable_key(path: &str) -> String {
+pub(in crate::engine) fn unavailable_key(path: &str) -> String {
     format!(
         "object-unavailable/{}",
         blake3::hash(path.as_bytes()).to_hex()
@@ -212,7 +212,7 @@ pub(super) fn validate_grant(
         || revision > view.revision
         || grant.revision != revision
         || grant.table_uuid != view.table.metadata().uuid().to_string()
-        || &crate::catalog::lifecycle_ident(&grant.owner) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&grant.owner) != view.identifier()
         || key != protection_key(grant)?
     {
         return Err(invalid());
@@ -253,7 +253,7 @@ pub(super) fn validate_binding(
         || revision != claim_revision
         || revision <= 0
         || revision > view.revision
-        || &crate::catalog::lifecycle_ident(&binding.consumer) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&binding.consumer) != view.identifier()
         || binding.digest != value_digest(&claim)?
         || binding
             .protections
@@ -267,7 +267,7 @@ pub(super) fn validate_binding(
         return Err(invalid());
     }
     let origin = RetentionBlocker {
-        table: view.table.identifier().to_string(),
+        table: view.identifier().to_string(),
         key: binding.key.clone(),
         revision: claim_revision,
     };
@@ -307,7 +307,7 @@ pub(super) fn earlier_binding(
         || binding.revision != revision
         || revision <= 0
         || claim_revision > view.revision
-        || &crate::catalog::lifecycle_ident(&binding.consumer) != view.table.identifier()
+        || &crate::catalog::lifecycle_ident(&binding.consumer) != view.identifier()
     {
         return Err(invalid());
     }
@@ -855,7 +855,7 @@ async fn visit_original_creation(
             crate::engine::corrections::validate_qualification(&qualification)?;
             if key != crate::engine::corrections::qualification_key(&qualification)?
                 || crate::catalog::lifecycle_ident(&qualification.origins.owner).to_string()
-                    != view.table.identifier().to_string()
+                    != view.identifier().to_string()
             {
                 return Err(invalid());
             }
@@ -882,7 +882,7 @@ async fn visit_original_creation(
         };
         for anchor in retained {
             // Foreign dependencies are not creation facts at this owner.
-            if &crate::catalog::lifecycle_ident(&anchor.owner) != view.table.identifier() {
+            if &crate::catalog::lifecycle_ident(&anchor.owner) != view.identifier() {
                 continue;
             }
             super::inventory::validate_object(&anchor)?;
@@ -969,17 +969,14 @@ async fn visit_creation(
         if key.starts_with("prepared-changes/") {
             let prepared: crate::engine::changes::PreparedChanges = serde_json::from_str(json)?;
             crate::engine::changes::check_prepared(&prepared, key, &prepared.before.dataset)?;
-            if crate::catalog::lifecycle_ident(&prepared.before.dataset) != *view.table.identifier()
-            {
+            if crate::catalog::lifecycle_ident(&prepared.before.dataset) != *view.identifier() {
                 return Err(invalid());
             }
             observe(&prepared.descriptor)?;
         } else if key.starts_with("change-certificate/") {
             let certificate: ChangeCertificate = serde_json::from_str(json)?;
             crate::engine::changes::check_certificate(rows, revision, key, &certificate)?;
-            if crate::catalog::lifecycle_ident(&certificate.after.dataset)
-                != *view.table.identifier()
-            {
+            if crate::catalog::lifecycle_ident(&certificate.after.dataset) != *view.identifier() {
                 return Err(invalid());
             }
             observe(&certificate.descriptor)?;

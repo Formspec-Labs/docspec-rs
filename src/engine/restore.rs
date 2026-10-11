@@ -2,6 +2,8 @@
 // Rust guideline compliant 2026-02-21
 
 use super::*;
+#[cfg(feature = "remote")]
+mod remote;
 use crate::restore::{
     self, RestoreMaterialized, RestoreObject, RestorePoint, RestorePointRef, RestoreReuse,
     RestoredCatalog,
@@ -65,6 +67,10 @@ impl Engine {
         id: Id,
         stop: Option<&str>,
     ) -> Result<RestorePointRef> {
+        #[cfg(feature = "remote")]
+        if !self.inner.retained.is_local() {
+            return self.create_remote_point(dataset, id, stop).await;
+        }
         self.restore_catalog()?;
         let lifecycle = &self.inner.lifecycle;
         let budget = &lifecycle.budget;
@@ -513,7 +519,7 @@ async fn restore_reference(
         .ok_or_else(|| restore::invalid("restore point record disappeared"))?
         .2;
     if point_key(&reference.id) != key
-        || crate::catalog::lifecycle_ident(&reference.dataset) != *view.table.identifier()
+        || crate::catalog::lifecycle_ident(&reference.dataset) != *view.identifier()
         || reference.manifest.owner != reference.dataset
     {
         return Err(restore::invalid(
@@ -576,7 +582,7 @@ async fn refresh_capture_owner(
     objects: &mut Vec<ObjectRef>,
     budget: &Budget,
 ) -> Result<()> {
-    let name = view.table.identifier().to_string();
+    let name = view.identifier().to_string();
     let boundary = boundaries
         .iter_mut()
         .find(|boundary| boundary.table == name)
@@ -758,6 +764,7 @@ async fn check_current_authority(
         let view = View {
             revision: table.metadata().last_sequence_number(),
             table,
+            logical_identifier: ident,
         };
         restore_reference(&current, &view, &point_key(&reference.id)).await
     }

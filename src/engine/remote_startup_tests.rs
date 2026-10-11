@@ -22,6 +22,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
     )
     .unwrap();
     let remote = storage::remote::RemoteStorage {
+        maintenance_generation: None,
         catalog: catalog.clone(),
         objects,
     };
@@ -34,9 +35,13 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         max_batch_bytes: 64 << 10,
         ..Limits::default()
     };
-    let engine = Engine::with_remote(&host, remote.clone(), limits.clone())
+    let mut engine = Engine::with_remote(&host, remote.clone(), limits.clone())
         .await
         .unwrap();
+    // This hybrid fixture uses a local filesystem lifecycle catalog; only
+    // payload I/O is remote. Keep catalog files in its temporary warehouse.
+    let inner = Arc::get_mut(&mut engine.inner).unwrap();
+    inner.lifecycle = inner.lifecycle.clone().with_retained_prefix(None);
     assert!(!engine.inner.retained.is_local());
     assert!(!format!("{engine:?}").contains("explicit-test-secret"));
     assert!(Engine::with_remote(&host, remote, limits).await.is_err());
@@ -321,7 +326,11 @@ async fn remote_selection_refuses_second_prepared_initial_but_reuses_completed_f
     .unwrap();
     let remote = Engine::with_remote(
         root.path().join("selection-host"),
-        storage::remote::RemoteStorage { catalog, objects },
+        storage::remote::RemoteStorage {
+            catalog,
+            objects,
+            maintenance_generation: None,
+        },
         limits,
     )
     .await

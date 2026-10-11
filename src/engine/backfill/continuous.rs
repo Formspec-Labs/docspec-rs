@@ -200,7 +200,7 @@ impl Engine {
             .map(|id| rows.reserve_decoded(&lifecycle.budget, &[&child_key(id)]))
             .transpose()?;
         validate_child(&child, &rows, revision)?;
-        if crate::catalog::lifecycle_ident(&child.dataset) != *view.table.identifier() {
+        if crate::catalog::lifecycle_ident(&child.dataset) != *view.identifier() {
             return Err(invalid("child belongs to another dataset"));
         }
         Ok(Some(child))
@@ -363,7 +363,7 @@ impl Engine {
             &completed_key(parent),
             &serde_json::to_string(&completed)?,
             &rows,
-            view.table.identifier().to_string().as_str(),
+            view.identifier().to_string().as_str(),
             rows.revision(&completed_key(parent))
                 .ok_or_else(|| invalid("completion revision is missing"))?,
         )?;

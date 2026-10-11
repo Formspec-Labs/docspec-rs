@@ -57,7 +57,7 @@ impl Engine {
     ) -> Result<()> {
         let dataset = &original.dataset.dataset;
         if current.dataset.dataset != *dataset
-            || &crate::catalog::lifecycle_ident(dataset) != view.table.identifier()
+            || &crate::catalog::lifecycle_ident(dataset) != view.identifier()
             || group.as_str() == "source"
         {
             return Err(invalid(

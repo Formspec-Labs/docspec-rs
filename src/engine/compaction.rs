@@ -450,7 +450,7 @@ impl Engine {
         let source_group = spec.group == "source";
         let view = self.inner.lifecycle.open(&spec.dataset).await?;
         let output = self
-            .register_output(view.table.identifier().namespace(), move || {
+            .register_output(view.identifier().namespace(), move || {
                 let metadata = storage::replacement_metadata(&source, &output_directory)?;
                 if source_group && !storage::identity::has_origins(metadata.current_schema())? {
                     let schema = storage::identity::with_origins(&metadata)?;

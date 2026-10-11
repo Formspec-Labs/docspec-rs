@@ -111,7 +111,7 @@ impl Engine {
         if request_revision != revision
             || rows.revision(&format!("operation/{operation}")) != Some(revision)
             || request.operation() != operation
-            || &crate::catalog::lifecycle_ident(request.dataset()) != view.table.identifier()
+            || &crate::catalog::lifecycle_ident(request.dataset()) != view.identifier()
             || dependencies.base.as_ref().is_some_and(|base| {
                 &base.dataset != request.dataset()
                     || base.manifest.owner != base.dataset

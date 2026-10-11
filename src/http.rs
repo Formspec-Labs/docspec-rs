@@ -30,7 +30,7 @@ mod ipc;
 
 /// Builds a bounded local API over an existing execution host.
 pub fn router(engine: Engine) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/plan", post(plan))
         .route("/run", post(run))
         .route("/compare", post(compare))
@@ -112,6 +112,10 @@ pub fn router(engine: Engine) -> Router {
         .route("/retention/compactions/retire", post(retire_compaction))
         .route("/datasets/{dataset}", get(inspect))
         .route(
+            "/datasets/{dataset}/authority/fence",
+            post(fence_operations),
+        )
+        .route(
             "/datasets/{dataset}/operations/{operation}/abandon",
             post(abandon),
         )
@@ -145,7 +149,20 @@ pub fn router(engine: Engine) -> Router {
         .route(
             "/datasets/{dataset}/versions/{version}/occurrences",
             get(read_occurrences),
+        );
+    #[cfg(feature = "remote")]
+    let router = router
+        .route(
+            "/retention/removal/remote/prepare",
+            post(prepare_remote_removal),
         )
+        .route(
+            "/retention/removal/remote/{dataset}/{removal}/resume",
+            post(resume_remote_removal),
+        );
+    #[cfg(feature = "remote")]
+    let router = router.route("/restore-remote", post(restore_remote));
+    router
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(engine)
 }
@@ -323,6 +340,26 @@ async fn remove_objects(
     Json(plan): Json<RemovalPlan>,
 ) -> Result<Json<RemovalStatus>, HttpError> {
     Ok(Json(engine.remove_objects(&plan).await?))
+}
+
+#[cfg(feature = "remote")]
+async fn prepare_remote_removal(
+    State(engine): State<Engine>,
+    Json(plan): Json<RemovalPlan>,
+) -> Result<Json<RemovalStatus>, HttpError> {
+    Ok(Json(engine.prepare_remote_removal(&plan).await?))
+}
+#[cfg(feature = "remote")]
+async fn resume_remote_removal(
+    State(engine): State<Engine>,
+    Path((dataset, removal)): Path<(String, String)>,
+    Json(authority): Json<crate::storage::remote::objects::RemoteRemovalConfig>,
+) -> Result<Json<RemovalStatus>, HttpError> {
+    Ok(Json(
+        engine
+            .resume_removal_remote(&Id::new(dataset)?, &Id::new(removal)?, authority.resolve()?)
+            .await?,
+    ))
 }
 
 async fn inspect_removal(
@@ -628,6 +665,7 @@ impl IntoResponse for HttpError {
             | "stale_retirement"
             | "stale_definition"
             | "stale_eligibility"
+            | "stale_authority"
             | "stale_input"
             | "pending_source"
             | "export_conflict"
@@ -782,6 +820,24 @@ async fn inspect(
 #[derive(serde::Deserialize)]
 struct AbandonRequest {
     reason: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FenceRequest {
+    expected_epoch: u64,
+}
+
+async fn fence_operations(
+    State(engine): State<Engine>,
+    Path(dataset): Path<String>,
+    Json(request): Json<FenceRequest>,
+) -> Result<Json<u64>, HttpError> {
+    Ok(Json(
+        engine
+            .fence_operations(&Id::new(dataset)?, request.expected_epoch)
+            .await?,
+    ))
 }
 
 async fn abandon(
@@ -999,4 +1055,36 @@ mod tests {
             assert_eq!(refusal["code"], code);
         }
     }
+}
+
+#[cfg(feature = "remote")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemoteRestoreRequest {
+    point: RestorePointRef,
+    target_owned_prefix: String,
+    #[serde(default)]
+    target_properties: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    target_secret_env: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    allow_unregistered_import: bool,
+}
+
+#[cfg(feature = "remote")]
+async fn restore_remote(
+    State(engine): State<Engine>,
+    Json(request): Json<RemoteRestoreRequest>,
+) -> Result<Json<crate::restore::remote::RestoredRemoteCatalog>, HttpError> {
+    let target = crate::storage::remote::remote_storage(
+        &request.target_owned_prefix,
+        request.target_properties,
+        request.target_secret_env,
+    )
+    .await?;
+    Ok(Json(
+        engine
+            .restore_remote(&request.point, target, request.allow_unregistered_import)
+            .await?,
+    ))
 }

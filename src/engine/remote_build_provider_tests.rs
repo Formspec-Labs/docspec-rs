@@ -3,6 +3,8 @@
 use super::*;
 
 mod exports;
+#[cfg(feature = "test-util")]
+mod maintenance;
 mod publication_race;
 mod updates;
 use arrow::{
