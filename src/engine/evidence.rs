@@ -189,14 +189,9 @@ impl Engine {
                         .metadata)
                 })
                 .await?;
-            let mut pin = storage::pin(
-                dataset,
-                &output,
-                source.rows,
-                &self.inner.lifecycle.budget,
-                &source.objects,
-            )
-            .await?;
+            let mut pin = self
+                .pin_output(dataset, &output, source.rows, &source.objects)
+                .await?;
             pin.logical_metadata = Some(source.logical_metadata().clone());
             Ok(pin)
         })
@@ -584,7 +579,9 @@ pub(super) fn verify<'a>(
             };
         };
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
-        let base: DatasetPin = inputs::read_manifest(parent, budget, &mut 0, &memory).await?;
+        let base: DatasetPin =
+            inputs::read_manifest(&storage::Objects::Local, parent, budget, &mut 0, &memory)
+                .await?;
         if base.dataset != dataset.dataset
             || (!matches!(dataset.request, OperationRequest::Backfill(_))
                 && dataset.request.base() != Some(&base.version))

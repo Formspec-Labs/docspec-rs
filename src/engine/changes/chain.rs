@@ -120,9 +120,14 @@ impl Engine {
                         .saturating_add(4096),
                 )?,
             );
-            let applied: AppliedChangeSet =
-                inputs::read_manifest(&certificate.descriptor, budget, &mut 0, &descriptor_memory)
-                    .await?;
+            let applied: AppliedChangeSet = inputs::read_manifest(
+                &self.inner.objects,
+                &certificate.descriptor,
+                budget,
+                &mut 0,
+                &descriptor_memory,
+            )
+            .await?;
             changes::check_applied(&applied, &(&certificate).into())?;
             if let Some(source) = applied.source {
                 if source.after_metadata != selected.metadata

@@ -14,7 +14,7 @@ use std::{collections::HashMap, fmt, fs::File, io::Read, path::PathBuf, sync::Ar
 const CHUNK: usize = 8 << 20;
 // Shared admission allowance for a streaming read. The HTTP transport manages
 // response buffers; this is not a configured chunk limit or exact RSS bound.
-const READ_ADMISSION: usize = 2 << 20;
+pub(in crate::storage) const READ_ADMISSION: usize = 2 << 20;
 // S3 supports at most 10,000 multipart parts. Fixed part size also bounds
 // retained native part metadata; reject larger transfers before writing.
 const MAX_UPLOAD_BYTES: u64 = CHUNK as u64 * 10_000;
@@ -293,59 +293,156 @@ impl RemoteObjects {
     pub async fn verify(&self, expected: &ObjectRef, budget: &Budget) -> Result<ObjectRef> {
         let key = self.scope.key(&expected.path)?;
         let memory = budget.reserve(READ_ADMISSION)?;
-        let operator = self.operator.clone();
+        let objects = self.clone();
         let expected = expected.clone();
         let handle = tokio::runtime::Handle::current();
         budget
             .blocking_admitted(move || {
                 let _memory = memory;
-                handle.block_on(async {
-                    if operator
-                        .stat(&key)
-                        .await
-                        .map_err(|_| read_error())?
-                        .content_length()
-                        != expected.bytes
-                    {
-                        return Err(mismatch());
-                    }
-                    let mut hasher = blake3::Hasher::new();
-                    let mut total = 0_u64;
-                    if expected.bytes != 0 {
-                        let reader = operator.reader(&key).await.map_err(|_| read_error())?;
-                        let mut stream = reader
-                            .into_stream(0..expected.bytes)
-                            .await
-                            .map_err(|_| read_error())?;
-                        while let Some(buffer) =
-                            stream.try_next().await.map_err(|_| read_error())?
-                        {
-                            total = total
-                                .checked_add(buffer.len() as u64)
-                                .ok_or_else(mismatch)?;
-                            if total > expected.bytes {
-                                return Err(mismatch());
-                            }
-                            for slice in buffer {
-                                hasher.update(&slice);
-                            }
-                        }
-                    }
-                    if total != expected.bytes
-                        || operator
-                            .stat(&key)
-                            .await
-                            .map_err(|_| read_error())?
-                            .content_length()
-                            != expected.bytes
-                        || hasher.finalize().to_hex().as_str() != expected.digest
-                    {
-                        return Err(mismatch());
-                    }
-                    Ok(expected)
-                })
+                let (digest, _) =
+                    handle.block_on(objects.identity_by_key(&key, Some(expected.bytes)))?;
+                if digest != expected.digest {
+                    return Err(mismatch());
+                }
+                Ok(expected)
             })
             .await
+    }
+
+    pub(in crate::storage) fn validate_path(&self, path: &str) -> Result<()> {
+        self.scope.key(path).map(|_| ())
+    }
+
+    pub(in crate::storage) fn validate_table_location(&self, location: &str) -> Result<()> {
+        let (bucket, key) = split_s3(location)?;
+        let root = self.scope.prefix.trim_end_matches('/');
+        if bucket != self.scope.bucket || (key != root && !key.starts_with(&self.scope.prefix)) {
+            return Err(scope_error());
+        }
+        Ok(())
+    }
+
+    // The caller owns one read allowance and worker for the complete pin inventory.
+    // No nested admission, worker, second GET or implicit verification pass.
+    pub(in crate::storage) async fn identity_admitted(
+        &self,
+        owner: &crate::model::Id,
+        path: &str,
+    ) -> Result<ObjectRef> {
+        let key = self.scope.key(path)?;
+        let (digest, bytes) = self.identity_by_key(&key, None).await?;
+        Ok(ObjectRef {
+            owner: owner.clone(),
+            path: path.into(),
+            digest,
+            bytes,
+        })
+    }
+
+    // Reuse an already captured identity without rehashing unchanged bytes.
+    // Configured scope is read authority; it never changes the retained owner.
+    pub(in crate::storage) async fn check_available_admitted(
+        &self,
+        expected: &ObjectRef,
+    ) -> Result<()> {
+        let key = self.scope.key(&expected.path)?;
+        let unavailable = || {
+            Error::refusal(
+                "unavailable_phase",
+                "retained completion references an unavailable object",
+            )
+        };
+        let metadata = self.operator.stat(&key).await.map_err(|_| unavailable())?;
+        if !metadata.is_file() || metadata.content_length() != expected.bytes {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
+
+    // Fill the caller's admitted metadata buffer once. Hashing and parsing use
+    // that same buffer, so there is no second GET or unverified substitution.
+    pub(in crate::storage) async fn read_metadata_admitted(
+        &self,
+        expected: &ObjectRef,
+        bytes: &mut [u8],
+    ) -> Result<()> {
+        let key = self.scope.key(&expected.path)?;
+        let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
+        if !metadata.is_file() || metadata.content_length() != expected.bytes {
+            return Err(mismatch());
+        }
+        let mut total = 0usize;
+        if !bytes.is_empty() {
+            let reader = self.operator.reader(&key).await.map_err(|_| read_error())?;
+            let mut stream = reader
+                .into_stream(0..expected.bytes)
+                .await
+                .map_err(|_| read_error())?;
+            while let Some(buffer) = stream.try_next().await.map_err(|_| read_error())? {
+                for slice in buffer {
+                    let end = total.checked_add(slice.len()).ok_or_else(mismatch)?;
+                    let target = bytes.get_mut(total..end).ok_or_else(mismatch)?;
+                    target.copy_from_slice(&slice);
+                    total = end;
+                }
+            }
+        }
+        let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
+        if total != bytes.len()
+            || !metadata.is_file()
+            || metadata.content_length() != expected.bytes
+        {
+            return Err(mismatch());
+        }
+        Ok(())
+    }
+
+    async fn identity_by_key(
+        &self,
+        key: &str,
+        expected_bytes: Option<u64>,
+    ) -> Result<(String, u64)> {
+        let bytes = self
+            .operator
+            .stat(key)
+            .await
+            .map_err(|_| read_error())?
+            .content_length();
+        if expected_bytes.is_some_and(|expected| expected != bytes) {
+            return Err(mismatch());
+        }
+        let mut hasher = blake3::Hasher::new();
+        let mut total = 0_u64;
+        if bytes != 0 {
+            let reader = self.operator.reader(key).await.map_err(|_| read_error())?;
+            let mut stream = reader
+                .into_stream(0..bytes)
+                .await
+                .map_err(|_| read_error())?;
+            while let Some(buffer) = stream.try_next().await.map_err(|_| read_error())? {
+                total = total
+                    .checked_add(buffer.len() as u64)
+                    .ok_or_else(mismatch)?;
+                if total > bytes {
+                    return Err(mismatch());
+                }
+                for slice in buffer {
+                    hasher.update(&slice);
+                }
+            }
+        }
+        if total != bytes
+            || self
+                .operator
+                .stat(key)
+                .await
+                .map_err(|_| read_error())?
+                .content_length()
+                != bytes
+        {
+            return Err(mismatch());
+        }
+        Ok((hasher.finalize().to_hex().to_string(), total))
     }
 }
 
@@ -447,6 +544,6 @@ fn write_error(error: opendal::Error) -> Error {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 // Rust guideline compliant 2026-02-21

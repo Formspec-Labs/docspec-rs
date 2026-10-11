@@ -344,9 +344,14 @@ impl Engine {
                     .budget
                     .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
             );
-            let changes: AppliedChangeSet =
-                inputs::read_manifest(&certificate.descriptor, &lifecycle.budget, &mut 0, &memory)
-                    .await?;
+            let changes: AppliedChangeSet = inputs::read_manifest(
+                &engine.inner.objects,
+                &certificate.descriptor,
+                &lifecycle.budget,
+                &mut 0,
+                &memory,
+            )
+            .await?;
             check_applied(&changes, &(&certificate).into())?;
             Ok(Some(CertifiedChanges {
                 revision: selected.revision,
@@ -379,8 +384,14 @@ impl Engine {
             return Err(invalid());
         }
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
-        let applied: AppliedChangeSet =
-            inputs::read_manifest(&prepared.descriptor, budget, &mut 0, &memory).await?;
+        let applied: AppliedChangeSet = inputs::read_manifest(
+            &self.inner.objects,
+            &prepared.descriptor,
+            budget,
+            &mut 0,
+            &memory,
+        )
+        .await?;
         check_applied(&applied, &prepared)?;
         if applied.source.as_ref().is_some_and(|pin| {
             release

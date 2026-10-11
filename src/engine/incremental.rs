@@ -90,7 +90,7 @@ impl Engine {
             let empty = self
                 .replacement_output(&spec.dataset, &directory.join("empty-changes"), &native)
                 .await?;
-            let empty = storage::pin(&spec.dataset, &empty, 0, budget, &[]).await?;
+            let empty = self.pin_output(&spec.dataset, &empty, 0, &[]).await?;
             let key_field_ids = refresh::output_keys(&spec.transform)
                 .iter()
                 .map(|name| {
@@ -393,7 +393,7 @@ impl Engine {
         // Equivalent representations carry their original logical identity. Resolve
         // this before file discovery so physical rewrites never generate work keys.
         if old.logical_metadata() == new.logical_metadata() {
-            return Ok((storage::pin(dataset, &table, 0, budget, &[]).await?, 0));
+            return Ok((self.pin_output(dataset, &table, 0, &[]).await?, 0));
         }
         if let Some(discovered) = self
             .history_keys(
@@ -498,7 +498,7 @@ impl Engine {
         let rows = files.iter().map(|file| file.record_count()).sum();
         let table = storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files).await?;
         Ok((
-            storage::pin(dataset, &table, rows, budget, &[]).await?,
+            self.pin_output(dataset, &table, rows, &[]).await?,
             if keys.is_empty() { 0 } else { scanned },
         ))
     }

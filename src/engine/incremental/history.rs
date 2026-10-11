@@ -87,7 +87,7 @@ impl Engine {
         let rows = files.iter().map(|file| file.record_count()).sum();
         let output = storage::append(output, self.inner.lifecycle.catalog.as_ref(), files).await?;
         Ok(Some((
-            storage::pin(dataset, &output, rows, budget, &[]).await?,
+            self.pin_output(dataset, &output, rows, &[]).await?,
             scanned.load(Ordering::Relaxed),
         )))
     }

@@ -79,6 +79,7 @@ pub(crate) fn replacement_metadata(
 }
 
 /// Concrete create-new metadata I/O for the shared candidate worker.
+#[derive(Clone)]
 pub(crate) enum CandidateWriter {
     Local,
     #[cfg(feature = "remote")]
@@ -119,19 +120,28 @@ impl CandidateWriter {
         }
     }
 
+    fn bind_candidate(self, table: Table) -> Result<Table> {
+        match self {
+            Self::Local => Ok(table),
+            #[cfg(feature = "remote")]
+            Self::Remote(objects, _) => Ok(super::Objects::Remote(objects)
+                .bind_table(&table)?
+                .into_native()),
+        }
+    }
+
     fn create_bytes(
         self,
         path: &str,
         bytes: Vec<u8>,
         _handle: &tokio::runtime::Handle,
     ) -> Result<()> {
-        match self {
-            Self::Local => super::write_new(Path::new(path), &bytes),
+        let objects = match self {
+            Self::Local => super::Objects::Local,
             #[cfg(feature = "remote")]
-            Self::Remote(objects, _) => {
-                _handle.block_on(objects.create_bytes_admitted(path, bytes))
-            }
-        }
+            Self::Remote(objects, _) => super::Objects::Remote(objects),
+        };
+        objects.create_bytes_admitted(path, bytes, _handle)
     }
 }
 
@@ -146,20 +156,22 @@ pub(crate) async fn register_candidate(
         std::sync::Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?);
     let worker_reservation = reservation.clone();
     let limit = budget.limits.max_metadata_bytes;
+    let worker_writer = writer.clone();
     let handle = tokio::runtime::Handle::current();
     let path = budget
         .blocking(move || {
             // The worker keeps admission if its caller is canceled during durable I/O.
             let _reservation = worker_reservation;
             let metadata = prepare()?;
-            let path = writer.metadata_path(&metadata)?;
+            let path = worker_writer.metadata_path(&metadata)?;
             let bytes = bounded_json(&metadata, limit)?;
-            writer.create_bytes(&path, bytes, &handle)?;
+            worker_writer.create_bytes(&path, bytes, &handle)?;
             Ok(path)
         })
         .await?;
     // Keep the same admission while the native catalog parses the retained metadata.
-    Ok(catalog.register_table(identifier, path).await?)
+    let table = catalog.register_table(identifier, path).await?;
+    writer.bind_candidate(table)
 }
 
 pub(crate) fn bounded_json(value: &impl serde::Serialize, limit: usize) -> Result<Vec<u8>> {

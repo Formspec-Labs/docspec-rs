@@ -71,6 +71,7 @@ pub struct Engine {
 struct Inner {
     root: PathBuf,
     lifecycle: Lifecycle,
+    objects: storage::Objects,
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
     host: Arc<worker::Host>,
     maintenance: Arc<RwLock<()>>,
@@ -197,7 +198,7 @@ impl Engine {
             .spawn(async move {
                 let result = async {
                     let catalog = storage::local_catalog(&root).await?;
-                    Self::compose(root, catalog, limits, host, true)
+                    Self::compose(root, catalog, storage::Objects::Local, limits, host, true)
                 }
                 .await;
                 custody.complete();
@@ -219,6 +220,7 @@ impl Engine {
         Self::compose(
             std::fs::canonicalize(root)?,
             catalog,
+            storage::Objects::Local,
             limits,
             ownership,
             false,
@@ -228,6 +230,7 @@ impl Engine {
     fn compose(
         root: PathBuf,
         catalog: Arc<dyn Catalog>,
+        objects: storage::Objects,
         limits: Limits,
         ownership: Arc<worker::Host>,
         owned_catalog: bool,
@@ -239,6 +242,7 @@ impl Engine {
             inner: Arc::new(Inner {
                 root,
                 lifecycle: Lifecycle::new(catalog, budget),
+                objects,
                 locks: Mutex::new(BTreeMap::new()),
                 host: ownership,
                 maintenance: Arc::new(RwLock::new(())),
@@ -1628,8 +1632,14 @@ impl Engine {
                         .budget
                         .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
                 );
-                let decoded: DatasetPin =
-                    inputs::read_manifest(&manifest, &lifecycle.budget, &mut 0, &memory).await?;
+                let decoded: DatasetPin = inputs::read_manifest(
+                    &self.inner.objects,
+                    &manifest,
+                    &lifecycle.budget,
+                    &mut 0,
+                    &memory,
+                )
+                .await?;
                 if decoded != dataset {
                     return Err(Error::refusal(
                         "release_mismatch",
@@ -1783,14 +1793,21 @@ impl Engine {
         )?;
         let found: Option<PhaseResult> = self.active_completion(&view, &key).await?;
         if let Some(found) = found {
-            for output in &found.outputs {
-                if std::fs::metadata(&output.path)?.len() != output.bytes {
-                    return Err(Error::refusal(
-                        "unavailable_phase",
-                        "retained phase output size changed",
-                    ));
-                }
-            }
+            let objects = self.inner.objects.clone();
+            let handle = tokio::runtime::Handle::current();
+            // The worker owns the retained completion until its size checks finish,
+            // including when the awaiting caller is canceled. No payload is read.
+            let found = self
+                .inner
+                .lifecycle
+                .budget
+                .blocking_admitted(move || {
+                    for output in &found.outputs {
+                        objects.check_available_admitted(output, &handle)?;
+                    }
+                    Ok(found)
+                })
+                .await?;
             tracing::info!(phase, operation = %spec.operation(), "reusing qualified phase");
             return Ok(Some(Retained {
                 value: found,

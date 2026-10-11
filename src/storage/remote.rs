@@ -40,6 +40,9 @@ impl RemoteStorage {
     /// but cancellation or response loss during catalog registration may leave a
     /// committed registration. The caller reconciles the retained identifier and
     /// exact metadata URI after an unknown registration outcome.
+    /// The returned owned table uses this connection's object configuration and
+    /// the current native runtime. If its returned location fails validation,
+    /// registration may already exist; reconcile the original identifier and URI.
     /// The caller retains the returned metadata and registration
     /// for its intended availability lifetime. No DocSpec lifecycle selection or
     /// remote Engine operation is performed.

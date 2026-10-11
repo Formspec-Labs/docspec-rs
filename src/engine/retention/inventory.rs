@@ -1576,9 +1576,14 @@ impl Inventory {
             let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
             match kind {
                 Expansion::Origins => {
-                    let Strict(originals): Strict<ScalarOrigins> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let Strict(originals): Strict<ScalarOrigins> = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                     self.group_dependencies(&originals.dependencies, &origin)?;
                     for file in &originals.files {
                         self.file_completion(&file.completion, &origin)?;
@@ -1587,32 +1592,52 @@ impl Inventory {
                 Expansion::Declaration => {
                     // Declarations contain field identities and definitions,
                     // with no transitive object references.
-                    let _: Strict<OriginalDeclaration> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let _: Strict<OriginalDeclaration> = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                 }
                 Expansion::Release => {
-                    let Strict(dataset): Strict<DatasetPin> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let Strict(dataset): Strict<DatasetPin> = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                     if dataset.dataset != object.owner {
                         return Err(invalid_inventory("release owner differs"));
                     }
                     self.dataset(&dataset, &origin)?;
                 }
                 Expansion::Changes(prepared) => {
-                    let Strict(applied): Strict<AppliedChangeSet> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let Strict(applied): Strict<AppliedChangeSet> = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                     crate::engine::changes::check_applied(&applied, &prepared)?;
                     for changes in applied.source.iter().chain(applied.receipts.iter()) {
                         self.optional_changes(changes, &origin)?;
                     }
                 }
                 Expansion::Restore(reference) => {
-                    let point: crate::restore::RestorePoint =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let point: crate::restore::RestorePoint = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                     crate::restore::validate_point(root, &reference, &point)?;
                     self.object(&point.catalog, &origin)?;
                     for retained in &point.objects {
@@ -1620,9 +1645,14 @@ impl Inventory {
                     }
                 }
                 Expansion::Native(_) => {
-                    let Strict(metadata): Strict<TableMetadata> =
-                        inputs::read_manifest(&object, budget, &mut self.metadata_bytes, &memory)
-                            .await?;
+                    let Strict(metadata): Strict<TableMetadata> = inputs::read_manifest(
+                        &storage::Objects::Local,
+                        &object,
+                        budget,
+                        &mut self.metadata_bytes,
+                        &memory,
+                    )
+                    .await?;
                     let actual = (metadata.current_snapshot_id(), metadata.current_schema_id());
                     let binding = self
                         .visited

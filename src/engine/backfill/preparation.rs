@@ -293,14 +293,9 @@ impl Engine {
                 .await?;
             let output =
                 storage::append(&output, lifecycle.catalog.as_ref(), assembly.files).await?;
-            let prepared = storage::pin(
-                request.dataset(),
-                &output,
-                source.rows,
-                &lifecycle.budget,
-                &assembly.inherited,
-            )
-            .await?;
+            let prepared = self
+                .pin_output(request.dataset(), &output, source.rows, &assembly.inherited)
+                .await?;
             let _guard = lock.lock().await;
             let view = lifecycle.open(request.dataset()).await?;
             self.check_completion(&view, operation, request.operation())

@@ -75,5 +75,5 @@ pub(in crate::engine) async fn read<T: serde::de::DeserializeOwned + Send + 'sta
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<T> {
-    inputs::read_manifest(object, budget, bytes, memory).await
+    inputs::read_manifest(&storage::Objects::Local, object, budget, bytes, memory).await
 }

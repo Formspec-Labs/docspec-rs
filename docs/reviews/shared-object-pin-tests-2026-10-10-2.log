@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.50s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 19 tests
+test storage::remote::objects::tests::conditional_conflict_and_uncertain_outcome_have_distinct_refusals ... ok
+test storage::remote::objects::tests::scope_rejects_aliases_and_cross_prefix_destinations ... ok
+test storage::remote::objects::tests::configuration_errors_and_debug_never_disclose_secret_values ... ok
+test storage::remote::objects::tests::incorrect_or_oversized_metadata_refuses_before_provider_io ... ok
+test storage::remote::objects::tests::metadata_spare_capacity_is_admitted_before_provider_io ... ok
+test storage::remote::objects::tests::changed_source_identity_refuses_before_publication ... ok
+test storage::remote::objects::tests::writes::canceled_http_caller_keeps_owned_capacity_until_worker_finishes ... ok
+test storage::remote::objects::tests::writes::accepted_put_with_lost_response_reconciles_without_another_write ... ok
+test storage::remote::objects::tests::empty_readback_uses_only_stats_and_scope_refusal_performs_no_io ... ok
+test storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity ... ok
+test storage::remote::objects::tests::writes::remote_candidate_refuses_mismatched_location_and_compression_without_effects ... ok
+test storage::remote::objects::tests::writes::canceled_remote_candidate_keeps_original_admission_until_put_finishes ... ok
+test storage::remote::objects::tests::writes::remote_candidate_keeps_created_metadata_when_catalog_registration_fails ... ok
+test storage::remote::objects::tests::writes::remote_candidate_creation_sends_one_conditional_put_before_registration ... ok
+test storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change ... ok
+test storage::remote::objects::tests::pinning::populated_pin_guards_manifest_list_and_manifest_before_native_read ... ok
+test storage::remote::objects::tests::pinning::populated_pin_binds_native_inventory_and_identities_to_configured_backend ... ok
+test storage::remote::objects::tests::writes::bad_digest_after_part_upload_aborts_only_its_unpublished_upload ... ok
+test storage::remote::objects::tests::writes::accepted_complete_with_lost_response_reconciles_without_reupload ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 255 filtered out; finished in 0.79s
+

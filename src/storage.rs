@@ -3,7 +3,9 @@
 pub(crate) mod defaults;
 pub(crate) mod identity;
 mod inspection;
+mod object_io;
 mod occurrences;
+pub(crate) use object_io::{Objects, PinTable};
 mod pinned;
 #[doc(inline)]
 pub use pinned::{open_pin, open_pin_with_io};
@@ -568,15 +570,33 @@ pub(crate) struct SnapshotFiles {
 }
 
 pub(crate) async fn snapshot_files(table: &Table, budget: &Budget) -> Result<SnapshotFiles> {
-    let reservation = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    snapshot_files_guarded(table, budget, None, memory).await
+}
+
+async fn snapshot_files_guarded(
+    table: &Table,
+    budget: &Budget,
+    guard: Option<&object_io::PinPaths<'_>>,
+    reservation: tokio::sync::OwnedSemaphorePermit,
+) -> Result<SnapshotFiles> {
+    let check = |path: &str| -> Result<()> {
+        if let Some(guard) = guard {
+            guard.check(path)?;
+        }
+        Ok(())
+    };
+    check(table.metadata_location_result()?)?;
     let mut paths = BTreeSet::from([table.metadata_location_result()?.to_owned()]);
     let mut current_data = BTreeMap::new();
     let mut metadata_bytes = 0u64;
     let mut visited_manifests = BTreeSet::new();
     for statistics in table.metadata().statistics_iter() {
+        check(&statistics.statistics_path)?;
         paths.insert(statistics.statistics_path.clone());
     }
     for statistics in table.metadata().partition_statistics_iter() {
+        check(&statistics.statistics_path)?;
         paths.insert(statistics.statistics_path.clone());
     }
     // Retain every snapshot referenced by this exact metadata file. Earlier
@@ -592,12 +612,14 @@ pub(crate) async fn snapshot_files(table: &Table, budget: &Budget) -> Result<Sna
     for snapshot in snapshots {
         let is_current = Some(snapshot.snapshot_id()) == table.metadata().current_snapshot_id();
         let list_path = snapshot.manifest_list();
+        check(list_path)?;
         metadata_bytes = metadata_bytes
             .saturating_add(table.file_io().new_input(list_path)?.metadata().await?.size);
         check_inventory_size(&paths, metadata_bytes, budget)?;
         paths.insert(list_path.to_owned());
         let list = table.manifest_list_reader(snapshot).load().await?;
         for entry in list.entries() {
+            check(&entry.manifest_path)?;
             if !visited_manifests.insert(entry.manifest_path.clone()) {
                 if is_current {
                     return Err(Error::refusal(
@@ -620,6 +642,7 @@ pub(crate) async fn snapshot_files(table: &Table, budget: &Budget) -> Result<Sna
             let manifest = entry.load_manifest(table.file_io()).await?;
             for item in manifest.entries().iter().filter(|item| item.is_alive()) {
                 let file = item.data_file();
+                check(file.file_path())?;
                 paths.insert(file.file_path().to_owned());
                 if is_current {
                     if file.content_type() != iceberg::spec::DataContentType::Data {
@@ -669,6 +692,7 @@ fn check_inventory_size(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) async fn pin(
     owner: &Id,
     table: &Table,
@@ -676,7 +700,43 @@ pub(crate) async fn pin(
     budget: &Budget,
     shared: &[ObjectRef],
 ) -> Result<TablePin> {
-    let inventory = snapshot_files(table, budget).await?;
+    pin_bound(owner, &PinTable::local(table), rows, budget, shared).await
+}
+
+pub(crate) async fn pin_bound(
+    owner: &Id,
+    binding: &PinTable,
+    rows: u64,
+    budget: &Budget,
+    shared: &[ObjectRef],
+) -> Result<TablePin> {
+    let table = &binding.table;
+    // Admit the complete inventory before copying captured shared identities.
+    let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    let object_io = binding.objects.clone();
+    let mut inherited = BTreeMap::new();
+    for object in shared {
+        if inherited
+            .insert(object.path.clone(), object.clone())
+            .is_some_and(|previous| previous != *object)
+        {
+            return Err(Error::refusal(
+                "conflicting_owner",
+                "one shared path binds conflicting owner or content identities",
+            ));
+        }
+    }
+    let remote_root = if object_io.is_remote() {
+        Some(object_io.pin_root(table.metadata().location())?)
+    } else {
+        None
+    };
+    let guard = remote_root.as_ref().map(|root| object_io::PinPaths {
+        objects: &object_io,
+        root,
+        inherited: &inherited,
+    });
+    let inventory = snapshot_files_guarded(table, budget, guard.as_ref(), memory).await?;
     let native_rows = inventory
         .data
         .iter()
@@ -693,44 +753,53 @@ pub(crate) async fn pin(
             "native live file counts differ from prepared output",
         ));
     }
-    let mut inherited = BTreeMap::new();
-    for object in shared {
-        if inherited
-            .insert(object.path.clone(), object.clone())
-            .is_some_and(|previous| previous != *object)
-        {
-            return Err(Error::refusal(
-                "conflicting_owner",
-                "one shared path binds conflicting owner or content identities",
-            ));
-        }
-    }
     let owner = owner.clone();
     let location = table.metadata().location().to_owned();
     let metadata_path = table.metadata_location_result()?.to_owned();
     let name = table.identifier().name().to_owned();
     let snapshot = table.metadata().current_snapshot_id();
     let schema_id = table.metadata().current_schema_id();
-    budget.blocking(move || {
-        let inventory = inventory;
-        let root = std::fs::canonicalize(location)?;
-        let mut objects = Vec::new();
-        for path in &inventory.paths {
-            if let Some(shared) = inherited.get(path) {
-                check_object_available(shared)?;
-                objects.push(shared.clone());
-            } else {
-                let canonical = std::fs::canonicalize(path)?;
-                if !canonical.starts_with(&root) || std::fs::symlink_metadata(path)?.file_type().is_symlink() {
-                    return Err(Error::refusal("unprotected_reference", "native snapshot references an object without an inherited protection owner"));
+    let memory = budget.reserve(object_io.read_allowance())?;
+    let handle = tokio::runtime::Handle::current();
+    budget
+        .blocking_admitted(move || {
+            let _memory = memory;
+            let inventory = inventory;
+            let root = match remote_root {
+                Some(root) => root,
+                None => object_io.pin_root(&location)?,
+            };
+            let mut objects = Vec::new();
+            for path in &inventory.paths {
+                if let Some(shared) = inherited.get(path) {
+                    object_io.check_available_admitted(shared, &handle)?;
+                    objects.push(shared.clone());
+                } else {
+                    root.check_new_path(path)?;
+                    objects.push(object_io.identity_admitted(&owner, path, &handle)?);
                 }
-                objects.push(object(&owner, Path::new(path))?);
             }
-        }
-        let metadata = objects.iter().find(|object| object.path == metadata_path).cloned()
-            .ok_or_else(|| Error::refusal("incomplete_inventory", "native metadata is absent from snapshot inventory"))?;
-        Ok(TablePin { table: name, metadata, snapshot, schema_id, objects, rows, logical_metadata: None })
-    }).await
+            let metadata = objects
+                .iter()
+                .find(|object| object.path == metadata_path)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "incomplete_inventory",
+                        "native metadata is absent from snapshot inventory",
+                    )
+                })?;
+            Ok(TablePin {
+                table: name,
+                metadata,
+                snapshot,
+                schema_id,
+                objects,
+                rows,
+                logical_metadata: None,
+            })
+        })
+        .await
 }
 
 pub(crate) async fn check_inventory(pin: &TablePin, table: &Table, budget: &Budget) -> Result<()> {

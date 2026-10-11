@@ -377,8 +377,14 @@ impl<'a> History<'a> {
                 Err(invalid_group())
             };
         }
-        let dataset: DatasetPin =
-            inputs::read_manifest(object, self.budget, &mut self.bytes, &self.memory).await?;
+        let dataset: DatasetPin = inputs::read_manifest(
+            &storage::Objects::Local,
+            object,
+            self.budget,
+            &mut self.bytes,
+            &self.memory,
+        )
+        .await?;
         if !supported_format(dataset.format) {
             return Err(invalid_group());
         }

@@ -68,6 +68,17 @@ pub(super) async fn open_captured_source(
 }
 
 impl Engine {
+    pub(super) async fn pin_output(
+        &self,
+        dataset: &Id,
+        table: &Table,
+        rows: u64,
+        shared: &[ObjectRef],
+    ) -> Result<TablePin> {
+        let table = self.inner.objects.bind_table(table)?;
+        storage::pin_bound(dataset, &table, rows, &self.inner.lifecycle.budget, shared).await
+    }
+
     pub(super) async fn create_output(
         &self,
         dataset: &Id,
@@ -209,7 +220,7 @@ impl Engine {
             ..WriteMetrics::default()
         };
         let table = storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files).await?;
-        let table = storage::pin(dataset, &table, rows, budget, &[]).await?;
+        let table = self.pin_output(dataset, &table, rows, &[]).await?;
         Ok(Prepared {
             table,
             changes: None,
@@ -425,8 +436,7 @@ impl Engine {
             let empty = self
                 .replacement_output(dataset, &directory.join("unchanged-changes"), &native)
                 .await?;
-            applied.removed =
-                storage::pin(dataset, &empty, 0, &self.inner.lifecycle.budget, &[]).await?;
+            applied.removed = self.pin_output(dataset, &empty, 0, &[]).await?;
             applied.added = applied.removed.clone();
         }
         Ok(applied)
@@ -669,14 +679,17 @@ impl Engine {
                 before.clone()
             } else {
                 let candidate = storage::append(&candidate, catalog, shared).await?;
-                storage::pin(dataset, &candidate, rows, budget, &before.objects).await?
+                self.pin_output(dataset, &candidate, rows, &before.objects)
+                    .await?
             };
             let removed = storage::append(&removed, catalog, removed_files).await?;
             let added = storage::append(&added, catalog, added_files).await?;
-            let removed =
-                storage::pin(dataset, &removed, metrics.rows_removed, budget, &[]).await?;
-            let added =
-                storage::pin(dataset, &added, metrics.rows_added, budget, &table.objects).await?;
+            let removed = self
+                .pin_output(dataset, &removed, metrics.rows_removed, &[])
+                .await?;
+            let added = self
+                .pin_output(dataset, &added, metrics.rows_added, &table.objects)
+                .await?;
             Ok(Applied {
                 table,
                 removed,

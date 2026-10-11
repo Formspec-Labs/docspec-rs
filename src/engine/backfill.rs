@@ -846,9 +846,14 @@ impl Engine {
                         .budget
                         .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
                 );
-                let decoded: DatasetPin =
-                    inputs::read_manifest(&release.manifest, &lifecycle.budget, &mut 0, &memory)
-                        .await?;
+                let decoded: DatasetPin = inputs::read_manifest(
+                    &self.inner.objects,
+                    &release.manifest,
+                    &lifecycle.budget,
+                    &mut 0,
+                    &memory,
+                )
+                .await?;
                 if decoded != release.dataset {
                     return Err(invalid_group());
                 }

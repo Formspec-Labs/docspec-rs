@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+mod pinning;
 mod writes;
 
 fn properties() -> HashMap<String, String> {
@@ -248,14 +249,50 @@ async fn empty_readback_uses_only_stats_and_scope_refusal_performs_no_io() {
 
 // A tiny read-only S3 HTTP boundary, using the actual configured native operator.
 // Records only method/range, never credential-bearing request headers.
-struct ReadFixture {
+pub(crate) struct ReadFixture {
     endpoint: String,
     stop: Arc<AtomicBool>,
     server: thread::JoinHandle<Vec<(String, Option<String>)>>,
+    paths: Arc<std::sync::Mutex<Vec<(String, String)>>>,
 }
 
 impl ReadFixture {
-    fn new(payload: Vec<u8>, sizes: [u64; 2]) -> Self {
+    pub(crate) fn new(payload: Vec<u8>, sizes: [u64; 2]) -> Self {
+        Self::serve(payload, sizes, None, None)
+    }
+
+    fn inventory(contents: HashMap<String, Vec<u8>>) -> Self {
+        Self::serve(Vec::new(), [0; 2], Some(contents), None)
+    }
+
+    pub(crate) fn held(
+        payload: Vec<u8>,
+    ) -> (
+        Self,
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let size = payload.len() as u64;
+        let (reached, received) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        (
+            Self::serve(payload, [size; 2], None, Some((reached, held))),
+            received,
+            release,
+        )
+    }
+
+    fn serve(
+        payload: Vec<u8>,
+        sizes: [u64; 2],
+        contents: Option<HashMap<String, Vec<u8>>>,
+        mut hold: Option<(
+            tokio::sync::oneshot::Sender<()>,
+            std::sync::mpsc::Receiver<()>,
+        )>,
+    ) -> Self {
+        let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_paths = paths.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -290,14 +327,34 @@ impl ReadFixture {
                 }
                 let request = String::from_utf8(request).unwrap();
                 let method = request.split_whitespace().next().unwrap().to_owned();
+                let path = request.split_whitespace().nth(1).unwrap();
+                let uri = format!("s3://{}", path.strip_prefix('/').unwrap());
+                observed_paths
+                    .lock()
+                    .unwrap()
+                    .push((method.clone(), uri.clone()));
                 let range = request.lines().find_map(|line| {
                     let (name, value) = line.split_once(':')?;
                     name.eq_ignore_ascii_case("range")
                         .then(|| value.trim().to_owned())
                 });
                 requests.push((method.clone(), range));
+                let bytes = if let Some(contents) = &contents {
+                    let Some(bytes) = contents.get(&uri) else {
+                        write!(socket, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                        continue;
+                    };
+                    bytes
+                } else {
+                    &payload
+                };
+                let reported_size = if contents.is_some() {
+                    bytes.len() as u64
+                } else {
+                    sizes[heads.min(1)]
+                };
                 if method == "HEAD" {
-                    let size = sizes[heads.min(1)];
+                    let size = reported_size;
                     heads += 1;
                     write!(
                         socket,
@@ -306,9 +363,18 @@ impl ReadFixture {
                     .unwrap();
                 } else {
                     assert_eq!(method, "GET");
-                    let size = payload.len();
-                    write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes 0-{}/{}\r\nConnection: close\r\n\r\n", size.saturating_sub(1), sizes[0]).unwrap();
-                    socket.write_all(&payload).unwrap();
+                    if let Some((reached, held)) = hold.take() {
+                        reached.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(5)).unwrap();
+                    }
+                    let size = bytes.len();
+                    let range_size = if contents.is_some() {
+                        size as u64
+                    } else {
+                        sizes[0]
+                    };
+                    write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes 0-{}/{}\r\nConnection: close\r\n\r\n", size.saturating_sub(1), range_size).unwrap();
+                    socket.write_all(bytes).unwrap();
                 }
             }
             requests
@@ -317,16 +383,17 @@ impl ReadFixture {
             endpoint,
             stop,
             server,
+            paths,
         }
     }
 
-    fn objects(&self) -> RemoteObjects {
+    pub(crate) fn objects(&self) -> RemoteObjects {
         let mut config = properties();
         config.insert("s3.endpoint".into(), self.endpoint.clone());
         RemoteObjects::from_resolved(&config, "s3://bucket/owned/").unwrap()
     }
 
-    fn finish(self) -> Vec<(String, Option<String>)> {
+    pub(crate) fn finish(self) -> Vec<(String, Option<String>)> {
         self.stop.store(true, Ordering::Release);
         self.server.join().unwrap()
     }
@@ -352,3 +419,136 @@ fn conditional_conflict_and_uncertain_outcome_have_distinct_refusals() {
 }
 
 // Rust guideline compliant 2026-02-21
+
+#[tokio::test]
+async fn metadata_reader_hashes_one_get_and_availability_reads_only_metadata() {
+    let payload = br#"{"value":42}"#.to_vec();
+    let expected = object(&payload);
+    let fixture = ReadFixture::new(payload.clone(), [expected.bytes; 2]);
+    let objects = crate::storage::Objects::Remote(fixture.objects());
+    let budget = Budget::new(Limits::default()).unwrap();
+    let worker_objects = objects.clone();
+    let worker_expected = expected.clone();
+    let memory = budget
+        .reserve(payload.len() + objects.metadata_read_allowance())
+        .unwrap();
+    let handle = tokio::runtime::Handle::current();
+    let value = budget
+        .blocking(move || {
+            let _memory = memory;
+            let mut bytes = vec![0; worker_expected.bytes as usize];
+            worker_objects.read_metadata_admitted(&worker_expected, &mut bytes, &handle)?;
+            worker_objects.check_available_admitted(&worker_expected, &handle)?;
+            Ok(serde_json::from_slice::<serde_json::Value>(&bytes)?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(value["value"], 42);
+    let requests = fixture.finish();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _)| method == "GET")
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _)| method == "HEAD")
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn metadata_reader_refuses_changed_bytes_lengths_and_scope() {
+    let payload = br#"{"value":42}"#.to_vec();
+    let expected = object(&payload);
+    let mut changed = payload.clone();
+    changed[9] ^= 1;
+    for (payload, sizes) in [
+        (changed, [expected.bytes; 2]),
+        (payload[..3].to_vec(), [expected.bytes; 2]),
+        (payload.clone(), [expected.bytes, expected.bytes + 1]),
+    ] {
+        let fixture = ReadFixture::new(payload, sizes);
+        let objects = crate::storage::Objects::Remote(fixture.objects());
+        let expected = expected.clone();
+        let budget = Budget::new(Limits::default()).unwrap();
+        let memory = budget
+            .reserve(expected.bytes as usize + objects.metadata_read_allowance())
+            .unwrap();
+        let handle = tokio::runtime::Handle::current();
+        let error = budget
+            .blocking(move || {
+                let _memory = memory;
+                let mut bytes = vec![0; expected.bytes as usize];
+                objects.read_metadata_admitted(&expected, &mut bytes, &handle)
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error.code(),
+            "corrupt_object" | "object_changed" | "remote_read"
+        ));
+        let requests = fixture.finish();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _)| method == "GET")
+                .count(),
+            1
+        );
+    }
+    let fixture = ReadFixture::new(Vec::new(), [0; 2]);
+    let objects = fixture.objects();
+    let mut escaped = expected;
+    escaped.path = "s3://bucket/outside/file.bin".into();
+    let mut bytes = vec![0; escaped.bytes as usize];
+    assert_eq!(
+        objects
+            .read_metadata_admitted(&escaped, &mut bytes)
+            .await
+            .unwrap_err()
+            .code(),
+        "remote_scope"
+    );
+    assert!(fixture.finish().is_empty());
+}
+
+#[tokio::test]
+async fn empty_metadata_and_changed_availability_use_no_payload_read() {
+    let expected = object(b"");
+    let fixture = ReadFixture::new(Vec::new(), [0; 2]);
+    let objects = crate::storage::Objects::Remote(fixture.objects());
+    let budget = Budget::new(Limits::default()).unwrap();
+    let memory = budget.reserve(objects.metadata_read_allowance()).unwrap();
+    let handle = tokio::runtime::Handle::current();
+    budget
+        .blocking(move || {
+            let _memory = memory;
+            objects.read_metadata_admitted(&expected, &mut [], &handle)?;
+            let mut changed = expected;
+            changed.bytes = 1;
+            assert_eq!(
+                objects
+                    .check_available_admitted(&changed, &handle)
+                    .unwrap_err()
+                    .code(),
+                "unavailable_phase"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let requests = fixture.finish();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _)| method == "HEAD")
+            .count(),
+        3
+    );
+    assert!(requests.iter().all(|(method, _)| method != "GET"));
+}

@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized] target(s) in 0.78s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 3 tests
+test engine::inputs::tests::canceled_manifest_read_keeps_admission_until_its_blocking_work_exits ... ok
+test engine::inputs::tests::canceled_partial_input_lock_acquisition_releases_prior_locks ... ok
+test engine::inputs::tests::canceled_remote_manifest_read_keeps_worker_and_admission_through_decode ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 275 filtered out; finished in 0.03s
+

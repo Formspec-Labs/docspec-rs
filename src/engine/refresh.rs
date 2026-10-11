@@ -551,8 +551,14 @@ pub(super) async fn read_release(
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<ReleasePin> {
-    let dataset: DatasetPin =
-        inputs::read_manifest(&version.manifest, budget, bytes, memory).await?;
+    let dataset: DatasetPin = inputs::read_manifest(
+        &storage::Objects::Local,
+        &version.manifest,
+        budget,
+        bytes,
+        memory,
+    )
+    .await?;
     if dataset.dataset != version.dataset
         || dataset.version != version.version
         || version.manifest.owner != dataset.dataset

@@ -19,6 +19,39 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Shared native pins and bounded metadata reads
+
+The engine now owns one private object backend for native pin creation, direct
+manifest reads and completed-phase availability. Remote native inventory and
+identity reads bind to the same configured storage. Scope checks precede manifest
+access; new files require candidate containment, while inherited files retain
+their captured owner and digest. New nonempty payload identities use one streamed
+GET. Maintained manifest decoding still requires a separate read of new native
+metadata; inherited identities skip that hash pass.
+
+Bounded JSON reads fill one admitted buffer, hash it and parse those same bytes.
+Completed-phase reuse checks file availability and size without reading payloads.
+The [remote object tests](reviews/shared-manifest-tests-2026-10-10.log) and
+[cancellation tests](reviews/shared-manifest-cancellation-tests-2026-10-10.log)
+pass, including actual held-GET cancellation through the engine's manifest reader.
+The worker keeps its memory and execution admission until decoding finishes.
+The [pin review](reviews/shared-object-io-review-2026-10-10.md) and
+[manifest review](reviews/shared-manifest-io-review-2026-10-10.md) approve the
+scoped changes. Inventory admission now precedes copying shared identities.
+The [local-feature Clippy check](reviews/shared-object-local-feature-check-2026-10-10.log)
+and [complete repository gate](reviews/shared-object-manifest-full-check-2026-10-10.log)
+pass. Its [disk guard](reviews/shared-object-manifest-full-check-2026-10-10.resources.json)
+observed at least **9,406,337,024 bytes** free against a 1 GiB stop threshold;
+this is whole-volume capacity, not attributed storage usage or a benchmark.
+
+Public engine constructors still select local storage. Standalone verification
+and retention traversals still select local readers explicitly. Remote admission,
+protected attempt locations, DataFusion inputs, release writes and complete
+selection/readback remain unfinished; the
+[next implementation analysis](reviews/remote-build-seams-2026-10-10.md) identifies
+those concrete connections. This checkpoint adds no dependency, public workflow,
+remote maintenance capability or representative performance claim.
+
 ## Shared local and remote candidate creation
 
 Local and remote candidate creation now use the same bounded serializer and

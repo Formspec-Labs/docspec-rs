@@ -187,14 +187,9 @@ impl Engine {
                 )
             })
             .await?;
-        let table = storage::pin(
-            &spec.dataset,
-            &output,
-            source.rows,
-            &self.inner.lifecycle.budget,
-            &source.objects,
-        )
-        .await?;
+        let table = self
+            .pin_output(&spec.dataset, &output, source.rows, &source.objects)
+            .await?;
         Ok(write::Prepared {
             table,
             changes: None,
@@ -621,6 +616,7 @@ pub(super) async fn check_available(dataset: &DatasetPin, budget: &Budget) -> Re
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?);
     let mut bytes = 0;
     let before: DatasetPin = inputs::read_manifest(
+        &storage::Objects::Local,
         dataset.parent_manifest.as_ref().ok_or_else(invalid)?,
         budget,
         &mut bytes,

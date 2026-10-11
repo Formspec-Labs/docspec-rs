@@ -497,14 +497,14 @@ impl Engine {
             .collect::<Vec<_>>();
         files.extend(written);
         let output = storage::append(&output, self.inner.lifecycle.catalog.as_ref(), files).await?;
-        let mut replacement = storage::pin(
-            &spec.dataset,
-            &output,
-            capture.source.rows,
-            budget,
-            &capture.source.objects,
-        )
-        .await?;
+        let mut replacement = self
+            .pin_output(
+                &spec.dataset,
+                &output,
+                capture.source.rows,
+                &capture.source.objects,
+            )
+            .await?;
         replacement.logical_metadata = Some(capture.source.logical_metadata().clone());
         Ok(CompactionResult {
             spec: spec.clone(),

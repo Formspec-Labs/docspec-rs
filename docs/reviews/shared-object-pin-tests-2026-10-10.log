@@ -1,0 +1,67 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0432]: unresolved import `iceberg::Table`
+   --> src/storage/object_io.rs:7:5
+    |
+  7 | use iceberg::Table;
+    |     ^^^^^^^^^^^^^^ no `Table` in the root
+    |
+note: variant `crate::query::NativeSource::Table` exists but is inaccessible
+   --> src/query.rs:184:5
+    |
+184 |     Table {
+    |     ^^^^^ not accessible
+help: a similar name exists in the module
+    |
+  7 - use iceberg::Table;
+  7 + use iceberg::table;
+    |
+help: consider importing one of these items instead
+    |
+  7 - use iceberg::Table;
+  7 + use crate::storage::Table;
+    |
+  7 - use iceberg::Table;
+  7 + use datafusion::execution::context::RegisterFunction::Table;
+    |
+  7 | use iceberg::table::Table;
+    |              +++++++
+
+error[E0425]: cannot find type `Table` in crate `iceberg`
+   --> src/storage/remote/objects/tests/pinning.rs:102:15
+    |
+102 | ) -> iceberg::Table {
+    |               ^^^^^ not found in `iceberg`
+    |
+help: consider importing one of these structs
+    |
+  2 + use crate::storage::Table;
+    |
+  2 + use iceberg::table::Table;
+    |
+help: if you import `Table`, refer to it directly
+    |
+102 - ) -> iceberg::Table {
+102 + ) -> Table {
+    |
+
+error[E0433]: failed to resolve: could not find `Table` in `iceberg`
+   --> src/storage/remote/objects/tests/pinning.rs:103:14
+    |
+103 |     iceberg::Table::builder()
+    |              ^^^^^ could not find `Table` in `iceberg`
+    |
+help: consider importing one of these structs
+    |
+  2 + use crate::storage::Table;
+    |
+  2 + use iceberg::table::Table;
+    |
+help: if you import `Table`, refer to it directly
+    |
+103 -     iceberg::Table::builder()
+103 +     Table::builder()
+    |
+
+Some errors have detailed explanations: E0425, E0432, E0433.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `docspec` (lib test) due to 3 previous errors

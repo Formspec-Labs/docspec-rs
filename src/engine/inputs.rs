@@ -103,8 +103,14 @@ impl Engine {
         let mut bytes = metadata_size(seal, lifecycle.budget.limits.max_metadata_bytes)?;
         for version in seal.members.values() {
             let accepted = self.qualify_input(version).await?;
-            let declared =
-                read_relationship(version, &lifecycle.budget, &mut bytes, &memory).await?;
+            let declared = read_relationship(
+                &self.inner.objects,
+                version,
+                &lifecycle.budget,
+                &mut bytes,
+                &memory,
+            )
+            .await?;
             if accepted != expected || declared != expected {
                 return Err(invalid_relationship());
             }
@@ -185,7 +191,9 @@ impl Engine {
         // Immutable manifests establish the complete lock set before acquisition.
         // Acquiring family locks after source locks would deadlock with sealing.
         for (dataset, version) in inputs {
-            let relationship = read_relationship(version, budget, &mut bytes, &memory).await?;
+            let relationship =
+                read_relationship(&self.inner.objects, version, budget, &mut bytes, &memory)
+                    .await?;
             if let SourceRelationship::Coupled { family, .. } = &relationship {
                 datasets.insert(family.clone());
             }
@@ -297,7 +305,14 @@ pub async fn verify_input_coverage(coverage: &InputCoverage, limits: Limits) -> 
     for (dataset, version) in &coverage.inputs {
         relationships.insert(
             dataset.clone(),
-            read_relationship(version, &budget, &mut bytes, &memory).await?,
+            read_relationship(
+                &storage::Objects::Local,
+                version,
+                &budget,
+                &mut bytes,
+                &memory,
+            )
+            .await?,
         );
     }
     check_relationships(coverage, &relationships)
@@ -381,12 +396,14 @@ struct InputHeader {
 }
 
 async fn read_relationship(
+    objects: &storage::Objects,
     version: &VersionRef,
     budget: &Budget,
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<SourceRelationship> {
-    let header: InputHeader = read_manifest(&version.manifest, budget, bytes, memory).await?;
+    let header: InputHeader =
+        read_manifest(objects, &version.manifest, budget, bytes, memory).await?;
     if !supported_format(header.format)
         || header.dataset != version.dataset
         || header.version != version.version
@@ -397,6 +414,7 @@ async fn read_relationship(
 }
 
 pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'static>(
+    objects: &storage::Objects,
     object: &ObjectRef,
     budget: &Budget,
     bytes: &mut usize,
@@ -407,34 +425,17 @@ pub(super) async fn read_manifest<T: serde::de::DeserializeOwned + Send + 'stati
     check_size(*bytes, budget.limits.max_metadata_bytes)?;
     let object = object.clone();
     let memory = memory.clone();
-    let buffer = budget.reserve(size)?;
+    let buffer = budget.reserve(size.saturating_add(objects.metadata_read_allowance()))?;
+    let objects = objects.clone();
+    let handle = tokio::runtime::Handle::current();
     budget
         .blocking(move || {
-            use std::io::Read;
-            // Parsing can outlive an async caller's cancellation. Keep its shared
-            // metadata reservation, in addition to the blocking I/O reservation.
+            // Parsing can outlive an async caller's cancellation. Keep both
+            // metadata and buffer/transport admission with the actual worker.
             let _memory = memory;
             let _buffer = buffer;
-            let mut file = std::fs::File::open(&object.path)?;
-            let corrupt = || {
-                Error::refusal(
-                    "corrupt_object",
-                    "input manifest differs from its declared bytes",
-                )
-            };
-            if file.metadata()?.len() != object.bytes {
-                return Err(corrupt());
-            }
-            // Read only admitted bytes plus an overflow probe, then hash and
-            // decode that same buffer. A changed file cannot induce a long scan
-            // or substitute unverified bytes between hashing and decoding.
             let mut bytes = vec![0; size];
-            file.read_exact(&mut bytes)?;
-            if file.read(&mut [0; 1])? != 0
-                || blake3::hash(&bytes).to_hex().as_str() != object.digest
-            {
-                return Err(corrupt());
-            }
+            objects.read_metadata_admitted(&object, &mut bytes, &handle)?;
             Ok(serde_json::from_slice(&bytes)?)
         })
         .await
@@ -551,7 +552,7 @@ mod tests {
             ready.await.unwrap();
             let reader_budget = budget.clone();
             let reader = tokio::spawn(async move {
-                read_relationship(&version, &reader_budget, &mut 0, &memory).await
+                read_relationship(&storage::Objects::Local, &version, &reader_budget, &mut 0, &memory).await
             });
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 while weak.strong_count() < 2 { tokio::task::yield_now().await; }
@@ -576,6 +577,124 @@ mod tests {
             }).await.unwrap();
             assert_eq!(weak.strong_count(), 0);
         });
+    }
+
+    #[cfg(feature = "remote")]
+    #[tokio::test]
+    async fn canceled_remote_manifest_read_keeps_worker_and_admission_through_decode() {
+        use crate::storage::remote::objects::tests::ReadFixture;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Test-local observation of deserialization after its awaiting caller exits.
+        // No production state or test-only hook is added to the reader.
+        static DECODED: AtomicBool = AtomicBool::new(false);
+        #[derive(Debug)]
+        struct Decoded;
+        impl<'de> Deserialize<'de> for Decoded {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
+                let value = serde_json::Value::deserialize(deserializer)?;
+                assert_eq!(
+                    value["value"], 42,
+                    "decode the bytes served by the held GET"
+                );
+                DECODED.store(true, Ordering::Release);
+                Ok(Self)
+            }
+        }
+
+        let payload = br#"{"value":42}"#.to_vec();
+        let expected = ObjectRef {
+            owner: Id::new("manifest-owner").unwrap(),
+            path: "s3://bucket/owned/manifest.json".into(),
+            digest: blake3::hash(&payload).to_hex().to_string(),
+            bytes: payload.len() as u64,
+        };
+        let (fixture, received, release) = ReadFixture::held(payload);
+        let objects = storage::Objects::Remote(fixture.objects());
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 16 << 20,
+            max_metadata_bytes: 1 << 20,
+            ..Limits::default()
+        })
+        .unwrap();
+        let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes).unwrap());
+        let weak = Arc::downgrade(&memory);
+        let worker_budget = budget.clone();
+        let reader = tokio::spawn(async move {
+            read_manifest::<Decoded>(&objects, &expected, &worker_budget, &mut 0, &memory).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), received)
+            .await
+            .unwrap()
+            .unwrap();
+        reader.abort();
+        assert!(reader.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            weak.strong_count(),
+            1,
+            "the active worker owns metadata admission"
+        );
+        assert_eq!(
+            budget
+                .reserve(budget.limits.memory_bytes / 2)
+                .unwrap_err()
+                .code(),
+            "capacity"
+        );
+        assert_eq!(
+            budget
+                .blocking_admitted(|| Ok(()))
+                .await
+                .unwrap_err()
+                .code(),
+            "capacity"
+        );
+        assert!(!DECODED.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if DECODED.load(Ordering::Acquire)
+                    && weak.strong_count() == 0
+                    && let Ok(all) = budget.reserve(budget.limits.memory_bytes / 2)
+                {
+                    drop(all);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Worker-slot release happens just after closure return; await it separately.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match budget.blocking_admitted(|| Ok(())).await {
+                    Ok(()) => break,
+                    Err(error) if error.code() == "capacity" => tokio::task::yield_now().await,
+                    Err(error) => panic!("unexpected worker error: {error}"),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let requests = fixture.finish();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _)| method == "GET")
+                .count(),
+            1
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _)| method == "HEAD")
+                .count(),
+            2
+        );
     }
 
     #[tokio::test]
