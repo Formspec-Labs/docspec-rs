@@ -1,0 +1,21 @@
+{
+  "pid": 41420,
+  "object": {
+    "bytes": 824,
+    "digest": "05074782b79ff9b8097c81e34d2ea6b7da7011fffc7b4e4da44b6b72539253b2",
+    "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+    "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/39812fc88b734914a6ba23b9551d5d11/export.parquet"
+  },
+  "etag": "\"9e048a62bbeac947e72272ec27873a19\"",
+  "range": [
+    0,
+    411
+  ],
+  "saved_bytes": 412,
+  "seconds": 0.1617456249659881,
+  "observed_http_attempts": {
+    "HEAD": 1,
+    "GET": 1
+  },
+  "transferred_bytes": 412
+}

@@ -1,0 +1,20 @@
+{
+  "passed": false,
+  "stage": "config",
+  "started_utc": "2026-10-11T14:05:27.364972+00:00",
+  "probe_sha256": "4784a34b71b98375ad3579402f5be488ef58c915038afb3915eccc0892a93d65",
+  "source_table": "candidate_09879fc9_eb50_47b8_b4c1_903329db55b3.candidate",
+  "destination_table": "docspec_restore_probe_9d0f22ec_f729_4826_abd8_28ea8459a098.candidate",
+  "source_metadata": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3/candidate-probe/metadata/00000-f9e5ced5-800a-4d04-a633-e416a80c8210.metadata.json",
+  "requests": [
+    {
+      "method": "GET",
+      "stage": "config",
+      "status": 403
+    }
+  ],
+  "deadline_seconds": 150,
+  "scope": "One registration of retained empty synthetic metadata while the original registration remains; no object I/O, append, retry, cleanup, or full restore claim.",
+  "error_type": "ValueError",
+  "finished_utc": "2026-10-11T14:05:27.475739+00:00"
+}

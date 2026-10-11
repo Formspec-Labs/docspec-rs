@@ -6,3 +6,15 @@ __pycache__/
 .DS_Store
 /experiments/**/workspace/
 /experiments/**/*.arrow
+
+# Retain raw qualification work locally; committed archives contain its evidence.
+/experiments/lifecycle-costs/results-2026-10-11/
+/experiments/lifecycle-costs/results-fixed-2026-10-11/
+/experiments/lifecycle-costs/growth-2026-10-11/
+/experiments/lifecycle-costs/overlap-2026-10-11/
+/experiments/lifecycle-costs/q1-2026-10-11/
+/docs/reviews/*/host/
+/docs/reviews/*/host-before/
+/docs/reviews/*/host-after/
+/docs/reviews/*/native-paused
+/docs/reviews/*/native-resume

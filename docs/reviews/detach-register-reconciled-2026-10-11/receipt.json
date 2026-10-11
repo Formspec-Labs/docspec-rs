@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "started_utc": "2026-10-11T14:27:39.706568+00:00",
+  "original_receipt_sha256": "bd60c6808053305c74f0064513da51f4f6b612f5d4a80ea119605262f38356f1",
+  "runner_sha256": "6e7dc8cbad2d2ecfb2eebc924ba777e5da5b275ff82e804a47c0cccad6082975",
+  "source_table": "docspec_detach_probe_a8359bcc_f82e_46c1_8751_387f74adb839.candidate",
+  "restored_table": "docspec_detach_probe_a8359bcc_f82e_46c1_8751_387f74adb839_restored.candidate",
+  "steps": [
+    {
+      "stage": "fresh_client_config",
+      "acknowledged": true
+    },
+    {
+      "stage": "old_registration_absent",
+      "acknowledged": false,
+      "error_type": "NoSuchTableError",
+      "http_status": 404
+    },
+    {
+      "stage": "restored_exact_readback",
+      "acknowledged": true
+    }
+  ],
+  "mutations": 0,
+  "client_object_requests": 0,
+  "scope": "Read-only exact registration reconciliation; preserves original strict 404-only probe failure",
+  "old_registration_absent": true,
+  "restored_identity": {
+    "metadata_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe/metadata/00000-01a12b58-05cf-7b63-a9ad-ae5b5076b197.gz.metadata.json",
+    "uuid": "01a12b58-05ce-7bb0-a50c-1fa4834be92b",
+    "location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe",
+    "native_metadata_sha256": "bf47ba86aef90abe036d9580850ed4cf74ee6eeb8bb64bb026df60f05ecd4b92",
+    "native_metadata_json_bytes": 890
+  },
+  "classification": "The recorded old-identifier commit was rejected with HTTP403; the old registration remains absent and the exact restored registration is readable and unchanged. This excludes blanket current authentication failure, not commit-specific authorization as the cause of the original403. No claim of a successful404-only frozen probe or full restoration.",
+  "finished_utc": "2026-10-11T14:27:40.969444+00:00"
+}

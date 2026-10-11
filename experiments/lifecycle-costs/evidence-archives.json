@@ -1,0 +1,72 @@
+[
+  {
+    "series": "results-2026-10-11",
+    "archive": "results-2026-10-11-evidence.tar.gz",
+    "files": 61,
+    "uncompressed_bytes": 369191,
+    "archive_bytes": 66999,
+    "sha256": "a3024162780815545f85e8551eec4a98221ce7f9e66d8bfbc591153b23066a68",
+    "excluded": [
+      "Engine workspace directories",
+      "frozen/docspec binary",
+      "Python caches"
+    ],
+    "source_directories_retained": true
+  },
+  {
+    "series": "results-fixed-2026-10-11",
+    "archive": "results-fixed-2026-10-11-evidence.tar.gz",
+    "files": 654,
+    "uncompressed_bytes": 7721085,
+    "archive_bytes": 1214542,
+    "sha256": "5513136f4484a5fb0ba962a8b8b9270e600333d36108867dbe32e5280ef40b6c",
+    "excluded": [
+      "Engine workspace directories",
+      "frozen/docspec binary",
+      "Python caches"
+    ],
+    "source_directories_retained": true
+  },
+  {
+    "series": "growth-2026-10-11",
+    "archive": "growth-2026-10-11-evidence.tar.gz",
+    "files": 1361,
+    "uncompressed_bytes": 118688503,
+    "archive_bytes": 17374997,
+    "sha256": "3ff32365b00f082224c7d8a08649c36f5e1eb86a173626188a8e11392162e3f9",
+    "excluded": [
+      "Engine workspace directories",
+      "frozen/docspec binary",
+      "Python caches"
+    ],
+    "source_directories_retained": true
+  },
+  {
+    "series": "overlap-2026-10-11",
+    "archive": "overlap-2026-10-11-evidence.tar.gz",
+    "files": 9,
+    "uncompressed_bytes": 8535,
+    "archive_bytes": 2501,
+    "sha256": "2fd96118e0971b8fffd997e7cb157459837c85bed277c117192d0bd4bb5e3b30",
+    "excluded": [
+      "Engine workspace directories",
+      "frozen/docspec binary",
+      "Python caches"
+    ],
+    "source_directories_retained": true
+  },
+  {
+    "series": "q1-2026-10-11",
+    "archive": "q1-2026-10-11-evidence.tar.gz",
+    "files": 9,
+    "uncompressed_bytes": 4066,
+    "archive_bytes": 2161,
+    "sha256": "7deaa62ea8ce7e0a0a779d10d9b8a6810cefd69e2d079ef7e4a9dd8509e6989c",
+    "excluded": [
+      "Engine workspace directories",
+      "frozen/docspec binary",
+      "Python caches"
+    ],
+    "source_directories_retained": true
+  }
+]

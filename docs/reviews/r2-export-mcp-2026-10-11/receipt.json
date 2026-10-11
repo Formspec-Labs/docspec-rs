@@ -1,0 +1,35 @@
+{
+  "passed": true,
+  "started_utc": "2026-10-11T14:27:03.309840+00:00",
+  "runner_sha256": "38a780e8dd45df331da97ca701278762e00382c4522d9455a2bb7f7fd94ca6ea",
+  "scope": "Retained824-byte R2 export to resumed local transfer to trusted MCP; no remote mutation/receipt update/throughput claim",
+  "transfer_seconds": 0.267248791991733,
+  "complete_path_seconds": 5.090381833026186,
+  "transfer_requests": {
+    "HEAD": 1,
+    "GET": 2
+  },
+  "transfer_bytes": 824,
+  "prefix_bytes_repeated": false,
+  "admissions": {
+    "metadata": 2,
+    "hash": 1
+  },
+  "original_input_needed": false,
+  "retained_files": [
+    "comments.parquet",
+    "pin.json",
+    "binding.json"
+  ],
+  "source": {
+    "dataset": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+    "manifest": {
+      "bytes": 5840,
+      "digest": "7942b583c780e2b9e307d63e14d7f0b688a620ed97a2793eef749b4c78893492",
+      "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+      "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/60ff8b1abb8f4da39382034d44e14ee9/release.json"
+    },
+    "version": "update-two"
+  },
+  "finished_utc": "2026-10-11T14:27:08.417830+00:00"
+}

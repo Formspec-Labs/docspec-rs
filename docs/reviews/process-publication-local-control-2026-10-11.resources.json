@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T14:26:42.076337+00:00",
+  "command": [
+    "target/debug/deps/docspec-f22faff8f24325f2",
+    "--exact",
+    "engine::remote_build_provider_tests::publication_race::independent_clients_preserve_one_publication_winner_and_losing_completion",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "free_before_bytes": 4703330304,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 40379,
+  "min_free_bytes": 4701483008,
+  "last_observed_utc": "2026-10-11T14:26:44.090687+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 4703555584,
+  "finished_utc": "2026-10-11T14:26:46.091964+00:00"
+}

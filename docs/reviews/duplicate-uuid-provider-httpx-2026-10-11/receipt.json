@@ -1,0 +1,69 @@
+{
+  "passed": false,
+  "stage": "registration_rejected",
+  "started_utc": "2026-10-11T14:08:36.868281+00:00",
+  "probe_sha256": "3870a2ea5540814a4dce0988b145c300ffa5dd2eae2b98b5ee4cfae0b6b124cc",
+  "source_table": "candidate_09879fc9_eb50_47b8_b4c1_903329db55b3.candidate",
+  "destination_table": "docspec_restore_probe_9d0f22ec_f729_4826_abd8_28ea8459a098.candidate",
+  "source_metadata": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3/candidate-probe/metadata/00000-f9e5ced5-800a-4d04-a633-e416a80c8210.metadata.json",
+  "requests": [
+    {
+      "method": "GET",
+      "stage": "config",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "stage": "source_guard",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "stage": "destination_absence",
+      "status": 404,
+      "error_type": "NamespaceActionForbidden",
+      "error_code": 404
+    },
+    {
+      "method": "POST",
+      "stage": "create_namespace",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "stage": "register_once",
+      "status": 409,
+      "error_type": "EntityAlreadyExists",
+      "error_code": 409
+    },
+    {
+      "method": "GET",
+      "stage": "reconcile_destination",
+      "status": 404,
+      "error_type": "TableActionForbidden",
+      "error_code": 404
+    },
+    {
+      "method": "GET",
+      "stage": "source_unchanged",
+      "status": 200
+    }
+  ],
+  "deadline_seconds": 150,
+  "scope": "One registration of retained empty synthetic metadata while the original registration remains; no object I/O, append, retry, cleanup, or full restore claim.",
+  "source_before": {
+    "metadata_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3/candidate-probe/metadata/00000-f9e5ced5-800a-4d04-a633-e416a80c8210.metadata.json",
+    "table_uuid": "01a1289a-93cb-74fb-bc0d-2e80965a79d1",
+    "location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-09879fc9-eb50-47b8-b4c1-903329db55b3/candidate-probe",
+    "native_metadata_sha256": "45d6549cb7e586e5ad4773749a9042553a799275d5744501e051b4e3b359c09d",
+    "field_ids": [
+      7,
+      42
+    ],
+    "snapshot_count": 0
+  },
+  "registration_status": 409,
+  "destination_status": 404,
+  "source_unchanged": true,
+  "finished_utc": "2026-10-11T14:08:38.617046+00:00"
+}

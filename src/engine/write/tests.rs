@@ -840,3 +840,6 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
         crate::engine::verify_table(pin, budget).await.unwrap();
     }
 }
+
+#[cfg(feature = "remote")]
+mod resources;

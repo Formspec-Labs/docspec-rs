@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-11T14:22:29.798411+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/detach-register-probe.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/detach-register-provider-2026-10-11",
+    "a8359bcc-f82e-46c1-8751-387f74adb839"
+  ],
+  "deadline_seconds": 260,
+  "exit_code": 1,
+  "finished_utc": "2026-10-11T14:22:34.396713+00:00"
+}

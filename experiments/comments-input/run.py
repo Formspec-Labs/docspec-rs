@@ -103,8 +103,9 @@ def measured_totals(workspace, scratch_prefixes=("scratch",)):
 
 def command(directory, workspace, label, argv, disk_bound, *, limits=None,
             timeout_seconds=1800, process_tree_root=None,
-            scratch_prefixes=("scratch",), progress_seconds=None, deadline_monotonic=None):
-    """Same raw command/time evidence as local-reuse, plus bounded live sampling."""
+            scratch_prefixes=("scratch",), progress_seconds=None, deadline_monotonic=None,
+            json_output=True):
+    """Retain raw command/time evidence and sampled bounds; optionally decode JSON."""
     limits = LIMITS if limits is None else limits
     if timeout_seconds <= 0:
         raise RuntimeError(f"{label}: no remaining time in the run deadline")
@@ -158,7 +159,7 @@ def command(directory, workspace, label, argv, disk_bound, *, limits=None,
                 if elapsed > timeout_seconds:
                     metrics["stop_reason"] = f"{timeout_seconds:g}-second remaining deadline"
                 elif rss > limits["memory_bytes"]:
-                    metrics["stop_reason"] = "sampled process-tree RSS exceeded 24 GiB"
+                    metrics["stop_reason"] = f"sampled process-tree RSS exceeded {limits['memory_bytes']} bytes"
                 elif free < 2 * GIB:
                     metrics["stop_reason"] = "less than 2 GiB volume free space"
                 elif metrics["sampled_peak_scratch_bytes"] > limits["scratch_bytes"]:
@@ -213,7 +214,7 @@ def command(directory, workspace, label, argv, disk_bound, *, limits=None,
                 if metrics["elapsed_seconds"] > timeout_seconds:
                     metrics["stop_reason"] = f"{timeout_seconds:g}-second remaining deadline"
                 elif (metrics.get("time_max_rss_bytes") or 0) > limits["memory_bytes"]:
-                    metrics["stop_reason"] = "reported maximum RSS exceeded 24 GiB"
+                    metrics["stop_reason"] = f"reported maximum RSS exceeded {limits['memory_bytes']} bytes"
                 elif metrics["sampled_peak_workspace_bytes"] > disk_bound:
                     metrics["stop_reason"] = "workspace exceeded preflight allowance"
                 elif metrics["sampled_peak_scratch_bytes"] > limits["scratch_bytes"]:
@@ -225,7 +226,8 @@ def command(directory, workspace, label, argv, disk_bound, *, limits=None,
     print(json.dumps({"arm": label, **metrics}), flush=True)
     if process.returncode or metrics["stop_reason"]:
         raise RuntimeError(f"{label} failed: see retained logs and metrics")
-    return json.loads((directory / f"{label}.stdout.json").read_text()), metrics
+    output = json.loads((directory / f"{label}.stdout.json").read_text()) if json_output else None
+    return output, metrics
 
 
 def independent_readback(release_path, source, limits=None):

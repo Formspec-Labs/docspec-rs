@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-11T14:27:39.285333+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/detach-register-reconcile.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/detach-register-provider-2026-10-11/receipt.json",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/detach-register-reconciled-2026-10-11/receipt.json"
+  ],
+  "deadline_seconds": 110,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T14:27:41.070959+00:00"
+}

@@ -1,0 +1,79 @@
+{
+  "passed": false,
+  "stage": "stale_old_identifier_commit",
+  "source_table": "docspec_detach_probe_a8359bcc_f82e_46c1_8751_387f74adb839.candidate",
+  "restored_table": "docspec_detach_probe_a8359bcc_f82e_46c1_8751_387f74adb839_restored.candidate",
+  "table_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe",
+  "pyiceberg": "0.12.0",
+  "runner_sha256": "fed633f9080e8b7d3c1fb99422d61584220b009c45a0e32ca9417370425427c7",
+  "started_utc": "2026-10-11T14:22:30.168457+00:00",
+  "steps": [
+    {
+      "stage": "connect",
+      "acknowledged": true
+    },
+    {
+      "stage": "namespace_absence_source",
+      "acknowledged": false,
+      "error_type": "NoSuchNamespaceError",
+      "http_status": 404
+    },
+    {
+      "stage": "namespace_absence_restored",
+      "acknowledged": false,
+      "error_type": "NoSuchNamespaceError",
+      "http_status": 404
+    },
+    {
+      "stage": "create_namespace_source",
+      "acknowledged": true
+    },
+    {
+      "stage": "create_namespace_restored",
+      "acknowledged": true
+    },
+    {
+      "stage": "create_empty_candidate",
+      "acknowledged": true
+    },
+    {
+      "stage": "detach_without_purge",
+      "acknowledged": true
+    },
+    {
+      "stage": "old_registration_absent",
+      "acknowledged": false,
+      "error_type": "NoSuchTableError",
+      "http_status": 404
+    },
+    {
+      "stage": "register_exact_metadata_once",
+      "acknowledged": true
+    },
+    {
+      "stage": "stale_old_identifier_commit",
+      "acknowledged": false,
+      "error_type": "ForbiddenError",
+      "http_status": 403
+    }
+  ],
+  "step_deadline_seconds": 25,
+  "total_deadline_seconds": 240,
+  "scope": "One new empty synthetic table; detach its registration without purge, register exact metadata under a fresh name, reject an old-identifier commit. No data files, S3 DELETE, original-evidence mutation, cleanup, or full restore claim.",
+  "source_identity": {
+    "metadata_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe/metadata/00000-01a12b58-05cf-7b63-a9ad-ae5b5076b197.gz.metadata.json",
+    "uuid": "01a12b58-05ce-7bb0-a50c-1fa4834be92b",
+    "location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe",
+    "native_metadata_sha256": "bf47ba86aef90abe036d9580850ed4cf74ee6eeb8bb64bb026df60f05ecd4b92",
+    "native_metadata_json_bytes": 890
+  },
+  "registered_identity": {
+    "metadata_location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe/metadata/00000-01a12b58-05cf-7b63-a9ad-ae5b5076b197.gz.metadata.json",
+    "uuid": "01a12b58-05ce-7bb0-a50c-1fa4834be92b",
+    "location": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a8359bcc-f82e-46c1-8751-387f74adb839/detach-probe",
+    "native_metadata_sha256": "bf47ba86aef90abe036d9580850ed4cf74ee6eeb8bb64bb026df60f05ecd4b92",
+    "native_metadata_json_bytes": 890
+  },
+  "error_type": "ForbiddenError",
+  "finished_utc": "2026-10-11T14:22:34.330233+00:00"
+}

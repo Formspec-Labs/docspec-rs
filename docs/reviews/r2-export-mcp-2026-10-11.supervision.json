@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T14:27:03.282436+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/r2-export-mcp.py",
+    "--output",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/r2-export-mcp-2026-10-11",
+    "--binary",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec",
+    "--remote",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-retained-provider-2026-10-11/remote.json",
+    "--limits",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-retained-provider-2026-10-11/limits.json",
+    "--spicy-regs",
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs"
+  ],
+  "deadline_seconds": 340,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T14:27:08.463511+00:00"
+}

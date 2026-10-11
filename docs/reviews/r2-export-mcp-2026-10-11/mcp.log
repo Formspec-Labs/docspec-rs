@@ -1,0 +1,40 @@
+[10/11/26 10:27:04] INFO     StreamableHTTP       streamable_http_manager.py:162
+                             session manager                                    
+                             started                                            
+[10/11/26 10:27:07] INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:53302/datasets/doc                
+                             spec-rs-qualification-0e38b494-34a4                
+                             -47e4-a96e-f8ae27822f00/exports/dow                
+                             nload "HTTP/1.1 200 OK"                            
+                    INFO     HTTP Request: GET                   _client.py:1025
+                             http://127.0.0.1:53302/datasets/doc                
+                             spec-rs-qualification-0e38b494-34a4                
+                             -47e4-a96e-f8ae27822f00/versions/up                
+                             date-two "HTTP/1.1 200 OK"                         
+[10/11/26 10:27:08] INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     Terminating session: None    streamable_http.py:855
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://testserver/mcp "HTTP/1.1 200                
+                             OK"                                                
+                    INFO     StreamableHTTP       streamable_http_manager.py:166
+                             session manager                                    
+                             shutting down                                      

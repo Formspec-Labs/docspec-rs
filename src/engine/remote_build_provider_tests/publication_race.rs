@@ -1,4 +1,5 @@
-//! Same-head publication race through two independent configured Engine clients.
+//! Same-head publication through independent clients or isolated provider processes.
+mod processes;
 use super::*;
 use crate::engine::export::ExportMaterialized;
 use crate::export::{
@@ -22,6 +23,7 @@ const HOLD_DEADLINE: Duration = Duration::from_secs(60);
 struct Rendezvous {
     barrier: tokio::sync::Barrier,
     metadata: StdMutex<Vec<String>>,
+    files: Option<(std::path::PathBuf, String)>,
 }
 
 struct RaceCatalog {
@@ -43,6 +45,7 @@ impl RaceCatalog {
         let rendezvous = Arc::new(Rendezvous {
             barrier: tokio::sync::Barrier::new(2),
             metadata: StdMutex::new(Vec::new()),
+            files: None,
         });
         [first, second].map(|inner| {
             Arc::new(Self {
@@ -89,17 +92,21 @@ impl Catalog for RaceCatalog {
                     )
                     .with_retryable(false));
                 }
-                observed.push(metadata);
+                observed.push(metadata.clone());
             }
-            tokio::time::timeout(HOLD_DEADLINE, self.rendezvous.barrier.wait())
-                .await
-                .map_err(|_| {
-                    iceberg::Error::new(
-                        iceberg::ErrorKind::Unexpected,
-                        "publication peer did not reach its commit boundary",
-                    )
-                    .with_retryable(false)
-                })?;
+            if let Some((directory, side)) = &self.rendezvous.files {
+                processes::hold(directory, side, &metadata).await?;
+            } else {
+                tokio::time::timeout(HOLD_DEADLINE, self.rendezvous.barrier.wait())
+                    .await
+                    .map_err(|_| {
+                        iceberg::Error::new(
+                            iceberg::ErrorKind::Unexpected,
+                            "publication peer did not reach its commit boundary",
+                        )
+                        .with_retryable(false)
+                    })?;
+            }
         }
         // Forward the original maintained commit, including all requirements.
         // No synthetic result, metadata rewrite, provider retry or fault response.
@@ -252,6 +259,7 @@ async fn race(
     catalogs: &[Arc<RaceCatalog>; 2],
     dataset: &Id,
     producer: &Path,
+    process_scope: Option<(&Path, &str)>,
 ) -> Result<Outcome> {
     let original = input(
         &producer.join("initial.parquet"),
@@ -305,9 +313,18 @@ async fn race(
         right_completed.materialized.object.path
     );
     assert_eq!(first.latest_export(dataset, &left.channel).await?, old);
-    catalogs[0].arm();
-    catalogs[1].arm();
-    let (left_result, right_result) = tokio::join!(first.export(&left), second.export(&right));
+    let (left_result, right_result, captured) = if let Some((directory, prefix)) = process_scope {
+        processes::run(directory, prefix, &left, &right).await?
+    } else {
+        catalogs[0].arm();
+        catalogs[1].arm();
+        let (left_result, right_result) = tokio::join!(first.export(&left), second.export(&right));
+        (
+            left_result.map_err(|e| e.code().to_owned()),
+            right_result.map_err(|e| e.code().to_owned()),
+            catalogs[0].rendezvous.metadata.lock().unwrap().clone(),
+        )
+    };
     let (winner, winner_engine, winner_spec, loser_engine, loser_spec, losing_code, losing_object) =
         match (left_result, right_result) {
             (Ok(winner), Err(error)) => (
@@ -316,7 +333,7 @@ async fn race(
                 &left,
                 second,
                 &right,
-                error.code(),
+                error,
                 right_completed.materialized.object.clone(),
             ),
             (Err(error), Ok(winner)) => (
@@ -325,13 +342,13 @@ async fn race(
                 &right,
                 first,
                 &left,
-                error.code(),
+                error,
                 left_completed.materialized.object.clone(),
             ),
             (left, right) => {
                 eprintln!(
                     "{}",
-                    json!({"phase": "publication_race_outcome_mismatch", "left_code": left.as_ref().err().map(Error::code), "right_code": right.as_ref().err().map(Error::code), "arrivals": catalogs[0].rendezvous.metadata.lock().unwrap().len()})
+                    json!({"phase": "publication_race_outcome_mismatch", "left_code": left.as_ref().err(), "right_code": right.as_ref().err(), "arrivals": catalogs[0].rendezvous.metadata.lock().unwrap().len()})
                 );
                 return Err(Error::refusal(
                     "provider_evidence",
@@ -339,7 +356,6 @@ async fn race(
                 ));
             }
         };
-    let captured = catalogs[0].rendezvous.metadata.lock().unwrap().clone();
     assert_eq!(captured.len(), 2);
     assert_eq!(captured[0], captured[1]);
     assert!(!catalogs[0].armed.load(Ordering::SeqCst));
@@ -393,7 +409,7 @@ async fn race(
         "{}",
         json!({"phase": "publication_race_selected", "dataset": dataset, "captured_metadata": captured[0], "winner": winner.id, "loser": loser_spec.operation, "initial_loser_code": losing_code,
         "old_object": old.object, "winning_object": winner.object, "losing_object": losing_object, "retained_export_bytes": old.object.bytes + winner.object.bytes + losing_object.bytes,
-        "catalog_and_native_attempt_bytes_excluded": true, "separate_os_processes": false})
+        "catalog_and_native_attempt_bytes_excluded": true, "separate_os_processes": process_scope.is_some()})
     );
     Ok(Outcome {
         old,
@@ -493,7 +509,7 @@ async fn independent_clients_preserve_one_publication_winner_and_losing_completi
     let second = Engine::with_catalog(root.path().join("second"), catalogs[1].clone(), limits())
         .await
         .unwrap();
-    let outcome = race(&first, &second, &catalogs, &dataset, producer.path())
+    let outcome = race(&first, &second, &catalogs, &dataset, producer.path(), None)
         .await
         .unwrap();
     first.shutdown().await.unwrap();
@@ -568,9 +584,23 @@ async fn qualify() -> Result<()> {
     let second = Engine::with_remote(second_host.path(), remote_b, limits()).await?;
     println!(
         "{}",
-        json!({"phase": "publication_race_start", "dataset": dataset, "prefix": prefix, "clients": 2, "separate_os_processes": false, "hold_deadline_seconds": HOLD_DEADLINE.as_secs()})
+        json!({"phase": "publication_race_start", "dataset": dataset, "prefix": prefix, "clients": 2, "separate_os_processes": true, "hold_deadline_seconds": HOLD_DEADLINE.as_secs()})
     );
-    let outcome = race(&first, &second, &catalogs, &dataset, producer.path()).await?;
+    // Retain the tiny control records/logs even when a child fails.
+    let rendezvous = tempfile::tempdir()?.keep();
+    println!(
+        "{}",
+        json!({"phase":"publication_process_control", "directory":rendezvous})
+    );
+    let outcome = race(
+        &first,
+        &second,
+        &catalogs,
+        &dataset,
+        producer.path(),
+        Some((&rendezvous, &prefix)),
+    )
+    .await?;
     first.shutdown().await?;
     second.shutdown().await?;
     drop(first);

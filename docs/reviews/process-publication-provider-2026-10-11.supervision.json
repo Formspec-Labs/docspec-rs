@@ -1,0 +1,14 @@
+{
+  "started_utc": "2026-10-11T14:28:17.357012+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps/docspec-f22faff8f24325f2",
+    "--exact",
+    "engine::remote_build_provider_tests::publication_race::native_remote_clients_race_publication_and_read_pins_from_a_fresh_host",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "deadline_seconds": 420,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T14:32:18.571994+00:00"
+}

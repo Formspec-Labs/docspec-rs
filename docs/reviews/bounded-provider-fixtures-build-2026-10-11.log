@@ -1,0 +1,23 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0308]: mismatched types
+   --> src/engine/write/tests/resources.rs:166:13
+    |
+163 |         .create_output(
+    |          ------------- arguments to this method are incorrect
+...
+166 |             native.metadata().current_schema().clone(),
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Schema`, found `Arc<Schema>`
+    |
+    = note: expected struct `iceberg::spec::Schema`
+               found struct `std::sync::Arc<iceberg::spec::Schema>`
+note: method defined here
+   --> src/engine/write.rs:117:25
+    |
+117 |     pub(super) async fn create_output(
+    |                         ^^^^^^^^^^^^^
+...
+121 |         schema: Schema,
+    |         --------------
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `docspec` (lib test) due to 1 previous error

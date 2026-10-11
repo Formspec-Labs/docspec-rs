@@ -1,0 +1,11 @@
+{
+  "started_utc": "2026-10-11T14:07:37.194014+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/tmp/docspec-compare-catalog-http.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/duplicate-uuid-client-comparison-fixed-2026-10-11"
+  ],
+  "deadline_seconds": 90,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T14:07:38.356925+00:00"
+}

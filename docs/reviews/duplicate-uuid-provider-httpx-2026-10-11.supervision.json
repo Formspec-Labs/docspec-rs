@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-11T14:08:36.772458+00:00",
+  "command": [
+    "/Users/mikewolfd/Work/spicy-stack/spicy-regs/.venv/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/duplicate-uuid-probe.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/duplicate-uuid-provider-httpx-2026-10-11",
+    "9d0f22ec-f729-4826-abd8-28ea8459a098"
+  ],
+  "deadline_seconds": 170,
+  "exit_code": 1,
+  "finished_utc": "2026-10-11T14:08:38.657187+00:00"
+}

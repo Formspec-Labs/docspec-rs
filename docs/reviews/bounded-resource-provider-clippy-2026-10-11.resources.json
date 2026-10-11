@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T14:33:10.992796+00:00",
+  "command": [
+    "cargo",
+    "clippy",
+    "--locked",
+    "--all-features",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "free_before_bytes": 3411582976,
+  "stop_below_bytes": 1073741824,
+  "status": "complete",
+  "child_pid": 56020,
+  "min_free_bytes": 3379634176,
+  "last_observed_utc": "2026-10-11T14:33:27.039408+00:00",
+  "exit_code": 0,
+  "free_after_bytes": 3381850112,
+  "finished_utc": "2026-10-11T14:33:29.045520+00:00"
+}
