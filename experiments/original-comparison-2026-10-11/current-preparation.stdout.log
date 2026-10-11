@@ -1,0 +1,1 @@
+{"rust-current-release": {"binary": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec", "sha256": "1a1c8cdc83704f7503010e260c8705f675af831f6bb155e5a3e199204c3e2b82", "bytes": 164532064, "mtime_ns": 1791735763071261213, "commit": "9d01704983a1400ef80c40ae3341ee60a61af291", "profile": "release", "features": [], "CARGO_PROFILE_RELEASE_DEBUG": "0"}}

@@ -1,0 +1,2870 @@
+[
+  {
+    "case": "bill-actions",
+    "arm": "python",
+    "repetition": 1,
+    "result": {
+      "arm": "python",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.2587624170118943,
+          "self_peak_rss_bytes": 361480192,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.04883787501603365,
+          "self_peak_rss_bytes": 364314624,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.014947124989703298,
+          "self_peak_rss_bytes": 388890624,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.015095749986357987,
+          "self_peak_rss_bytes": 388890624,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.0687355839763768,
+          "self_peak_rss_bytes": 388890624,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.0037347080069594085,
+          "self_peak_rss_bytes": 389791744,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        3.984375,
+        5.24267578125,
+        5.77294921875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 6581236,
+      "same_selection": true,
+      "worker_seconds": 5.6590599159826525,
+      "first_admit_read_seconds": 2.307600292027928,
+      "peak_self_rss_bytes": 389791744,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 2570204,
+        "allocated_bytes": 2686976,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 2574563,
+        "allocated_bytes": 2711552,
+        "files": 53
+      },
+      "load_after": [
+        3.8251953125,
+        5.1884765625,
+        5.75048828125
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 345505792,
+      "min_volume_free_bytes": 4283637760,
+      "sampled_peak_workspace_bytes": 2577727,
+      "sampled_peak_allocated_bytes": 2719744,
+      "sampled_peak_scratch_bytes": 1488863,
+      "inventory_sampling_seconds": 0.0014716250007040799,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 5.847593916987535,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 2577727,
+          "allocated_bytes": 2719744
+        },
+        "total": {
+          "files": 53,
+          "bytes": 2577727,
+          "allocated_bytes": 2719744
+        }
+      },
+      "volume_free_after_bytes": 4281692160,
+      "time_max_rss_bytes": 389791744
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-release",
+    "repetition": 1,
+    "result": {
+      "arm": "rust-release",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.42141070804791525,
+          "self_peak_rss_bytes": 47398912,
+          "child_peak_rss_bytes": 67256320
+        },
+        "read": {
+          "seconds": 0.020816666015889496,
+          "self_peak_rss_bytes": 47415296,
+          "child_peak_rss_bytes": 67256320
+        },
+        "oracle_read": {
+          "seconds": 0.058885457983706146,
+          "self_peak_rss_bytes": 86425600,
+          "child_peak_rss_bytes": 67256320
+        },
+        "retry": {
+          "seconds": 0.020079042005818337,
+          "self_peak_rss_bytes": 86425600,
+          "child_peak_rss_bytes": 67256320
+        },
+        "reopen_read": {
+          "seconds": 0.01799770799698308,
+          "self_peak_rss_bytes": 86425600,
+          "child_peak_rss_bytes": 67256320
+        },
+        "oracle_reopen": {
+          "seconds": 0.004128958040382713,
+          "self_peak_rss_bytes": 86491136,
+          "child_peak_rss_bytes": 67256320
+        }
+      },
+      "load_before": [
+        3.8251953125,
+        5.1884765625,
+        5.75048828125
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4644325,
+      "same_selection": true,
+      "worker_seconds": 0.5946638329769485,
+      "first_admit_read_seconds": 0.44222737406380475,
+      "peak_self_rss_bytes": 86491136,
+      "peak_child_rss_bytes": 67256320,
+      "retained_engine": {
+        "logical_bytes": 612822,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 626992,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.8251953125,
+        5.1884765625,
+        5.75048828125
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1310720,
+      "min_volume_free_bytes": 4281647104,
+      "sampled_peak_workspace_bytes": 630123,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00046150002162903547,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 0.644823707989417,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 630123,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 630123,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4280651776,
+      "time_max_rss_bytes": 86491136
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-debug",
+    "repetition": 1,
+    "result": {
+      "arm": "rust-debug",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.9010322500253096,
+          "self_peak_rss_bytes": 47529984,
+          "child_peak_rss_bytes": 115671040
+        },
+        "read": {
+          "seconds": 0.04691787500632927,
+          "self_peak_rss_bytes": 47562752,
+          "child_peak_rss_bytes": 115671040
+        },
+        "oracle_read": {
+          "seconds": 0.0363670420483686,
+          "self_peak_rss_bytes": 86900736,
+          "child_peak_rss_bytes": 115671040
+        },
+        "retry": {
+          "seconds": 0.03699337498983368,
+          "self_peak_rss_bytes": 86900736,
+          "child_peak_rss_bytes": 115671040
+        },
+        "reopen_read": {
+          "seconds": 0.04368983302265406,
+          "self_peak_rss_bytes": 86900736,
+          "child_peak_rss_bytes": 115671040
+        },
+        "oracle_reopen": {
+          "seconds": 0.003913040971383452,
+          "self_peak_rss_bytes": 86933504,
+          "child_peak_rss_bytes": 115671040
+        }
+      },
+      "load_before": [
+        3.8251953125,
+        5.1884765625,
+        5.75048828125
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4647386,
+      "same_selection": true,
+      "worker_seconds": 1.1132080419920385,
+      "first_admit_read_seconds": 0.9479501250316389,
+      "peak_self_rss_bytes": 86933504,
+      "peak_child_rss_bytes": 115671040,
+      "retained_engine": {
+        "logical_bytes": 613032,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 630054,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 59293696,
+      "min_volume_free_bytes": 4276072448,
+      "sampled_peak_workspace_bytes": 633186,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00043304101563990116,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.1711687500355765,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 633186,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 633186,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4280033280,
+      "time_max_rss_bytes": 115671040
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-release",
+    "repetition": 2,
+    "result": {
+      "arm": "rust-release",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.2281734169810079,
+          "self_peak_rss_bytes": 47267840,
+          "child_peak_rss_bytes": 68009984
+        },
+        "read": {
+          "seconds": 0.013429832994006574,
+          "self_peak_rss_bytes": 47284224,
+          "child_peak_rss_bytes": 68009984
+        },
+        "oracle_read": {
+          "seconds": 0.038506750017404556,
+          "self_peak_rss_bytes": 86196224,
+          "child_peak_rss_bytes": 68009984
+        },
+        "retry": {
+          "seconds": 0.014121083018835634,
+          "self_peak_rss_bytes": 86196224,
+          "child_peak_rss_bytes": 68009984
+        },
+        "reopen_read": {
+          "seconds": 0.013208749995101243,
+          "self_peak_rss_bytes": 86196224,
+          "child_peak_rss_bytes": 68009984
+        },
+        "oracle_reopen": {
+          "seconds": 0.0038594999932684004,
+          "self_peak_rss_bytes": 86245376,
+          "child_peak_rss_bytes": 68009984
+        }
+      },
+      "load_before": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4644293,
+      "same_selection": true,
+      "worker_seconds": 0.3463019169867039,
+      "first_admit_read_seconds": 0.24160324997501448,
+      "peak_self_rss_bytes": 86245376,
+      "peak_child_rss_bytes": 68009984,
+      "retained_engine": {
+        "logical_bytes": 612789,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 626961,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1310720,
+      "min_volume_free_bytes": 4279980032,
+      "sampled_peak_workspace_bytes": 630096,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0004121669917367399,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 0.4199221250019036,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 630096,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 630096,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4279226368,
+      "time_max_rss_bytes": 86245376
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-debug",
+    "repetition": 2,
+    "result": {
+      "arm": "rust-debug",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.4264940419816412,
+          "self_peak_rss_bytes": 47333376,
+          "child_peak_rss_bytes": 114704384
+        },
+        "read": {
+          "seconds": 0.042917917016893625,
+          "self_peak_rss_bytes": 47398912,
+          "child_peak_rss_bytes": 114704384
+        },
+        "oracle_read": {
+          "seconds": 0.037121333996765316,
+          "self_peak_rss_bytes": 86736896,
+          "child_peak_rss_bytes": 114704384
+        },
+        "retry": {
+          "seconds": 0.034507083997596055,
+          "self_peak_rss_bytes": 86736896,
+          "child_peak_rss_bytes": 114704384
+        },
+        "reopen_read": {
+          "seconds": 0.04307341598905623,
+          "self_peak_rss_bytes": 86736896,
+          "child_peak_rss_bytes": 114704384
+        },
+        "oracle_reopen": {
+          "seconds": 0.0037283329875208437,
+          "self_peak_rss_bytes": 86786048,
+          "child_peak_rss_bytes": 114704384
+        }
+      },
+      "load_before": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4647119,
+      "same_selection": true,
+      "worker_seconds": 0.6218475829809904,
+      "first_admit_read_seconds": 0.46941195899853483,
+      "peak_self_rss_bytes": 86786048,
+      "peak_child_rss_bytes": 114704384,
+      "retained_engine": {
+        "logical_bytes": 613008,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 629788,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1310720,
+      "min_volume_free_bytes": 4279177216,
+      "sampled_peak_workspace_bytes": 632928,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00038649997441098094,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 0.7032321669976227,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 632928,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 632928,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4278267904,
+      "time_max_rss_bytes": 114704384
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "python",
+    "repetition": 2,
+    "result": {
+      "arm": "python",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.6222722909878939,
+          "self_peak_rss_bytes": 342818816,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.042152500012889504,
+          "self_peak_rss_bytes": 346161152,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.010007208038587123,
+          "self_peak_rss_bytes": 370753536,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.015432332991622388,
+          "self_peak_rss_bytes": 370753536,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.06412933301180601,
+          "self_peak_rss_bytes": 370753536,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.003540791047271341,
+          "self_peak_rss_bytes": 371671040,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 6580610,
+      "same_selection": true,
+      "worker_seconds": 1.0162597090238705,
+      "first_admit_read_seconds": 0.6644247910007834,
+      "peak_self_rss_bytes": 371671040,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 2570190,
+        "allocated_bytes": 2686976,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 2574184,
+        "allocated_bytes": 2711552,
+        "files": 53
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 372965376,
+      "min_volume_free_bytes": 4271370240,
+      "sampled_peak_workspace_bytes": 2577357,
+      "sampled_peak_allocated_bytes": 2719744,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00043458404252305627,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.169773209025152,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 2577357,
+          "allocated_bytes": 2719744
+        },
+        "total": {
+          "files": 53,
+          "bytes": 2577357,
+          "allocated_bytes": 2719744
+        }
+      },
+      "volume_free_after_bytes": 4275351552,
+      "time_max_rss_bytes": 371671040
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-debug",
+    "repetition": 3,
+    "result": {
+      "arm": "rust-debug",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.4087776250089519,
+          "self_peak_rss_bytes": 47169536,
+          "child_peak_rss_bytes": 116621312
+        },
+        "read": {
+          "seconds": 0.042344083019997925,
+          "self_peak_rss_bytes": 47202304,
+          "child_peak_rss_bytes": 116621312
+        },
+        "oracle_read": {
+          "seconds": 0.0370689170085825,
+          "self_peak_rss_bytes": 85917696,
+          "child_peak_rss_bytes": 116621312
+        },
+        "retry": {
+          "seconds": 0.03485654195537791,
+          "self_peak_rss_bytes": 85917696,
+          "child_peak_rss_bytes": 116621312
+        },
+        "reopen_read": {
+          "seconds": 0.04228724999120459,
+          "self_peak_rss_bytes": 85917696,
+          "child_peak_rss_bytes": 116621312
+        },
+        "oracle_reopen": {
+          "seconds": 0.003687958000227809,
+          "self_peak_rss_bytes": 85950464,
+          "child_peak_rss_bytes": 116621312
+        }
+      },
+      "load_before": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4647111,
+      "same_selection": true,
+      "worker_seconds": 0.6009759589796886,
+      "first_admit_read_seconds": 0.4511217080289498,
+      "peak_self_rss_bytes": 85950464,
+      "peak_child_rss_bytes": 116621312,
+      "retained_engine": {
+        "logical_bytes": 612997,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 629779,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1310720,
+      "min_volume_free_bytes": 4275318784,
+      "sampled_peak_workspace_bytes": 632913,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00041562505066394806,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 372,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 0.6371541249682195,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 632913,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 632913,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4274647040,
+      "time_max_rss_bytes": 116621312
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "python",
+    "repetition": 3,
+    "result": {
+      "arm": "python",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.6229794159880839,
+          "self_peak_rss_bytes": 340885504,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.042646124958992004,
+          "self_peak_rss_bytes": 344342528,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.011093250010162592,
+          "self_peak_rss_bytes": 368902144,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.017107416002545506,
+          "self_peak_rss_bytes": 368902144,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.06670895899878815,
+          "self_peak_rss_bytes": 368902144,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.00405041704652831,
+          "self_peak_rss_bytes": 370098176,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 3987680,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 6580624,
+      "same_selection": true,
+      "worker_seconds": 1.015051249996759,
+      "first_admit_read_seconds": 0.6656255409470759,
+      "peak_self_rss_bytes": 370098176,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 2570204,
+        "allocated_bytes": 2686976,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 2574197,
+        "allocated_bytes": 2711552,
+        "files": 53
+      },
+      "load_after": [
+        3.7587890625,
+        5.15185546875,
+        5.73388671875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 371408896,
+      "min_volume_free_bytes": 4267749376,
+      "sampled_peak_workspace_bytes": 2577367,
+      "sampled_peak_allocated_bytes": 2719744,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0003980839974246919,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.1810496249818243,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 2577367,
+          "allocated_bytes": 2719744
+        },
+        "total": {
+          "files": 53,
+          "bytes": 2577367,
+          "allocated_bytes": 2719744
+        }
+      },
+      "volume_free_after_bytes": 4271718400,
+      "time_max_rss_bytes": 370098176
+    }
+  },
+  {
+    "case": "bill-actions",
+    "arm": "rust-release",
+    "repetition": 3,
+    "result": {
+      "arm": "rust-release",
+      "case": "bill-actions",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.2746491669677198,
+          "self_peak_rss_bytes": 47284224,
+          "child_peak_rss_bytes": 68730880
+        },
+        "read": {
+          "seconds": 0.013375582988373935,
+          "self_peak_rss_bytes": 47300608,
+          "child_peak_rss_bytes": 68730880
+        },
+        "oracle_read": {
+          "seconds": 0.037074624968227,
+          "self_peak_rss_bytes": 85950464,
+          "child_peak_rss_bytes": 68730880
+        },
+        "retry": {
+          "seconds": 0.013976667018141598,
+          "self_peak_rss_bytes": 85950464,
+          "child_peak_rss_bytes": 68730880
+        },
+        "reopen_read": {
+          "seconds": 0.01286366704152897,
+          "self_peak_rss_bytes": 85950464,
+          "child_peak_rss_bytes": 68730880
+        },
+        "oracle_reopen": {
+          "seconds": 0.004128583008423448,
+          "self_peak_rss_bytes": 86016000,
+          "child_peak_rss_bytes": 68730880
+        }
+      },
+      "load_before": [
+        3.53759765625,
+        5.08251953125,
+        5.7060546875
+      ],
+      "checks": [
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 20000,
+          "columns": [
+            "bill_id",
+            "action_index",
+            "action_date",
+            "action_time",
+            "action_text",
+            "action_code",
+            "action_type",
+            "source_system_name",
+            "recorded_vote_count",
+            "is_latest_action",
+            "stage",
+            "benchmark_row"
+          ],
+          "bytes": 4017928,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 4644359,
+      "same_selection": true,
+      "worker_seconds": 0.38933500001439825,
+      "first_admit_read_seconds": 0.28802474995609373,
+      "peak_self_rss_bytes": 86016000,
+      "peak_child_rss_bytes": 68730880,
+      "retained_engine": {
+        "logical_bytes": 612859,
+        "allocated_bytes": 675840,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 627026,
+        "allocated_bytes": 733184,
+        "files": 66
+      },
+      "load_after": [
+        3.53759765625,
+        5.08251953125,
+        5.7060546875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1310720,
+      "min_volume_free_bytes": 4271685632,
+      "sampled_peak_workspace_bytes": 630158,
+      "sampled_peak_allocated_bytes": 741376,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0004258750122971833,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 376,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 0.435577749973163,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 630158,
+          "allocated_bytes": 741376
+        },
+        "total": {
+          "files": 66,
+          "bytes": 630158,
+          "allocated_bytes": 741376
+        }
+      },
+      "volume_free_after_bytes": 4270968832,
+      "time_max_rss_bytes": 86016000
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "python",
+    "repetition": 1,
+    "result": {
+      "arm": "python",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.9115544579690322,
+          "self_peak_rss_bytes": 1074298880,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.5469085410004482,
+          "self_peak_rss_bytes": 1096908800,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.18239245796576142,
+          "self_peak_rss_bytes": 2094333952,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.06582266697660089,
+          "self_peak_rss_bytes": 2094333952,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.3908337089815177,
+          "self_peak_rss_bytes": 2094333952,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.03662266704486683,
+          "self_peak_rss_bytes": 2094333952,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        3.53759765625,
+        5.08251953125,
+        5.7060546875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 209281585,
+      "same_selection": true,
+      "worker_seconds": 4.416539208963513,
+      "first_admit_read_seconds": 3.4584629989694804,
+      "peak_self_rss_bytes": 2094333952,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 29587753,
+        "allocated_bytes": 29704192,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 29592695,
+        "allocated_bytes": 29728768,
+        "files": 53
+      },
+      "load_after": [
+        3.53759765625,
+        5.08251953125,
+        5.7060546875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1737424896,
+      "min_volume_free_bytes": 4238835712,
+      "sampled_peak_workspace_bytes": 29596354,
+      "sampled_peak_allocated_bytes": 29736960,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0004794169799424708,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 4.60857020795811,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 29596354,
+          "allocated_bytes": 29736960
+        },
+        "total": {
+          "files": 53,
+          "bytes": 29596354,
+          "allocated_bytes": 29736960
+        }
+      },
+      "volume_free_after_bytes": 4239970304,
+      "time_max_rss_bytes": 2094333952
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-release",
+    "repetition": 1,
+    "result": {
+      "arm": "rust-release",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.49070412502624094,
+          "self_peak_rss_bytes": 48005120,
+          "child_peak_rss_bytes": 323010560
+        },
+        "read": {
+          "seconds": 0.12847420800244436,
+          "self_peak_rss_bytes": 48021504,
+          "child_peak_rss_bytes": 323010560
+        },
+        "oracle_read": {
+          "seconds": 0.1992164170369506,
+          "self_peak_rss_bytes": 1076576256,
+          "child_peak_rss_bytes": 323010560
+        },
+        "retry": {
+          "seconds": 0.01597066700924188,
+          "self_peak_rss_bytes": 1076576256,
+          "child_peak_rss_bytes": 323010560
+        },
+        "reopen_read": {
+          "seconds": 0.25039924995508045,
+          "self_peak_rss_bytes": 1076576256,
+          "child_peak_rss_bytes": 323010560
+        },
+        "oracle_reopen": {
+          "seconds": 0.05450029199710116,
+          "self_peak_rss_bytes": 1077477376,
+          "child_peak_rss_bytes": 323010560
+        }
+      },
+      "load_before": [
+        4.0546875,
+        5.1640625,
+        5.73095703125
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216311880,
+      "same_selection": true,
+      "worker_seconds": 1.1728386670001782,
+      "first_admit_read_seconds": 0.6191783330286853,
+      "peak_self_rss_bytes": 1077477376,
+      "peak_child_rss_bytes": 323010560,
+      "retained_engine": {
+        "logical_bytes": 36418778,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36433765,
+        "allocated_bytes": 36536320,
+        "files": 66
+      },
+      "load_after": [
+        4.0546875,
+        5.1640625,
+        5.73095703125
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1005420544,
+      "min_volume_free_bytes": 4153479168,
+      "sampled_peak_workspace_bytes": 36437385,
+      "sampled_peak_allocated_bytes": 36544512,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00041041598888114095,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.2791206660331227,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36437385,
+          "allocated_bytes": 36544512
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36437385,
+          "allocated_bytes": 36544512
+        }
+      },
+      "volume_free_after_bytes": 4203499520,
+      "time_max_rss_bytes": 1077477376
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-debug",
+    "repetition": 1,
+    "result": {
+      "arm": "rust-debug",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.3991722500068136,
+          "self_peak_rss_bytes": 47890432,
+          "child_peak_rss_bytes": 375242752
+        },
+        "read": {
+          "seconds": 0.7230263329693116,
+          "self_peak_rss_bytes": 47906816,
+          "child_peak_rss_bytes": 375242752
+        },
+        "oracle_read": {
+          "seconds": 0.19898545899195597,
+          "self_peak_rss_bytes": 1076740096,
+          "child_peak_rss_bytes": 375242752
+        },
+        "retry": {
+          "seconds": 0.03827245801221579,
+          "self_peak_rss_bytes": 1076740096,
+          "child_peak_rss_bytes": 375242752
+        },
+        "reopen_read": {
+          "seconds": 0.7816008750232868,
+          "self_peak_rss_bytes": 1076740096,
+          "child_peak_rss_bytes": 375242752
+        },
+        "oracle_reopen": {
+          "seconds": 0.055182416981551796,
+          "self_peak_rss_bytes": 1077608448,
+          "child_peak_rss_bytes": 375242752
+        }
+      },
+      "load_before": [
+        4.0546875,
+        5.1640625,
+        5.73095703125
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216315483,
+      "same_selection": true,
+      "worker_seconds": 4.229898499965202,
+      "first_admit_read_seconds": 3.122198582976125,
+      "peak_self_rss_bytes": 1077608448,
+      "peak_child_rss_bytes": 375242752,
+      "retained_engine": {
+        "logical_bytes": 36419103,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36437369,
+        "allocated_bytes": 36528128,
+        "files": 66
+      },
+      "load_after": [
+        4.61083984375,
+        5.2607421875,
+        5.76171875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1058619392,
+      "min_volume_free_bytes": 4012933120,
+      "sampled_peak_workspace_bytes": 36440990,
+      "sampled_peak_allocated_bytes": 36536320,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00038295798003673553,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 4.331014499999583,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36440990,
+          "allocated_bytes": 36536320
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36440990,
+          "allocated_bytes": 36536320
+        }
+      },
+      "volume_free_after_bytes": 4166692864,
+      "time_max_rss_bytes": 1077608448
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-release",
+    "repetition": 2,
+    "result": {
+      "arm": "rust-release",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.4710088749998249,
+          "self_peak_rss_bytes": 47923200,
+          "child_peak_rss_bytes": 332726272
+        },
+        "read": {
+          "seconds": 0.1624358329572715,
+          "self_peak_rss_bytes": 47923200,
+          "child_peak_rss_bytes": 332726272
+        },
+        "oracle_read": {
+          "seconds": 0.20241274998988956,
+          "self_peak_rss_bytes": 1076609024,
+          "child_peak_rss_bytes": 332726272
+        },
+        "retry": {
+          "seconds": 0.017097084026318043,
+          "self_peak_rss_bytes": 1076609024,
+          "child_peak_rss_bytes": 332726272
+        },
+        "reopen_read": {
+          "seconds": 0.23249820800265297,
+          "self_peak_rss_bytes": 1076609024,
+          "child_peak_rss_bytes": 332726272
+        },
+        "oracle_reopen": {
+          "seconds": 0.053819999971892685,
+          "self_peak_rss_bytes": 1077493760,
+          "child_peak_rss_bytes": 332726272
+        }
+      },
+      "load_before": [
+        4.61083984375,
+        5.2607421875,
+        5.76171875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216311811,
+      "same_selection": true,
+      "worker_seconds": 1.1746259170467965,
+      "first_admit_read_seconds": 0.6334447079570964,
+      "peak_self_rss_bytes": 1077493760,
+      "peak_child_rss_bytes": 332726272,
+      "retained_engine": {
+        "logical_bytes": 36418706,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36433697,
+        "allocated_bytes": 36536320,
+        "files": 66
+      },
+      "load_after": [
+        4.61083984375,
+        5.2607421875,
+        5.76171875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 991903744,
+      "min_volume_free_bytes": 4081946624,
+      "sampled_peak_workspace_bytes": 36437330,
+      "sampled_peak_allocated_bytes": 36544512,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00043583399383351207,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.2823737079743296,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36437330,
+          "allocated_bytes": 36544512
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36437330,
+          "allocated_bytes": 36544512
+        }
+      },
+      "volume_free_after_bytes": 4130058240,
+      "time_max_rss_bytes": 1077493760
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-debug",
+    "repetition": 2,
+    "result": {
+      "arm": "rust-debug",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.5146331249852665,
+          "self_peak_rss_bytes": 48185344,
+          "child_peak_rss_bytes": 373063680
+        },
+        "read": {
+          "seconds": 0.9229329999652691,
+          "self_peak_rss_bytes": 48185344,
+          "child_peak_rss_bytes": 373063680
+        },
+        "oracle_read": {
+          "seconds": 0.1935743329813704,
+          "self_peak_rss_bytes": 1076854784,
+          "child_peak_rss_bytes": 373063680
+        },
+        "retry": {
+          "seconds": 0.038141915982123464,
+          "self_peak_rss_bytes": 1076854784,
+          "child_peak_rss_bytes": 373063680
+        },
+        "reopen_read": {
+          "seconds": 0.9189911669818684,
+          "self_peak_rss_bytes": 1076854784,
+          "child_peak_rss_bytes": 373063680
+        },
+        "oracle_reopen": {
+          "seconds": 0.05312325002159923,
+          "self_peak_rss_bytes": 1077772288,
+          "child_peak_rss_bytes": 373063680
+        }
+      },
+      "load_before": [
+        4.61083984375,
+        5.2607421875,
+        5.76171875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216315518,
+      "same_selection": true,
+      "worker_seconds": 4.675002624979243,
+      "first_admit_read_seconds": 3.4375661249505356,
+      "peak_self_rss_bytes": 1077772288,
+      "peak_child_rss_bytes": 373063680,
+      "retained_engine": {
+        "logical_bytes": 36419128,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36437403,
+        "allocated_bytes": 36528128,
+        "files": 66
+      },
+      "load_after": [
+        4.4814453125,
+        5.22314453125,
+        5.7451171875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1031045120,
+      "min_volume_free_bytes": 3976159232,
+      "sampled_peak_workspace_bytes": 36441033,
+      "sampled_peak_allocated_bytes": 36536320,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0004033749573864043,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 4.72558383399155,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36441033,
+          "allocated_bytes": 36536320
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36441033,
+          "allocated_bytes": 36536320
+        }
+      },
+      "volume_free_after_bytes": 4032819200,
+      "time_max_rss_bytes": 1077772288
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "python",
+    "repetition": 2,
+    "result": {
+      "arm": "python",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.5273159579955973,
+          "self_peak_rss_bytes": 1073823744,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.36129054200137034,
+          "self_peak_rss_bytes": 1094418432,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.1617087500053458,
+          "self_peak_rss_bytes": 2091646976,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.10432270803721622,
+          "self_peak_rss_bytes": 2091646976,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.3547326670377515,
+          "self_peak_rss_bytes": 2091646976,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.049220875022001565,
+          "self_peak_rss_bytes": 2091646976,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        4.4814453125,
+        5.22314453125,
+        5.7451171875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 209281574,
+      "same_selection": true,
+      "worker_seconds": 3.9403807090129703,
+      "first_admit_read_seconds": 2.8886064999969676,
+      "peak_self_rss_bytes": 2091646976,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 29587745,
+        "allocated_bytes": 29704192,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 29592591,
+        "allocated_bytes": 29728768,
+        "files": 53
+      },
+      "load_after": [
+        4.52294921875,
+        5.21923828125,
+        5.74072265625
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1087995904,
+      "min_volume_free_bytes": 3995635712,
+      "sampled_peak_workspace_bytes": 29596254,
+      "sampled_peak_allocated_bytes": 29736960,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0004063749802298844,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 4.075335542031098,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 29596254,
+          "allocated_bytes": 29736960
+        },
+        "total": {
+          "files": 53,
+          "bytes": 29596254,
+          "allocated_bytes": 29736960
+        }
+      },
+      "volume_free_after_bytes": 4063035392,
+      "time_max_rss_bytes": 2091646976
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-debug",
+    "repetition": 3,
+    "result": {
+      "arm": "rust-debug",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.470415999996476,
+          "self_peak_rss_bytes": 47841280,
+          "child_peak_rss_bytes": 385253376
+        },
+        "read": {
+          "seconds": 0.935717083979398,
+          "self_peak_rss_bytes": 47890432,
+          "child_peak_rss_bytes": 385253376
+        },
+        "oracle_read": {
+          "seconds": 0.19047370797488838,
+          "self_peak_rss_bytes": 1077166080,
+          "child_peak_rss_bytes": 385253376
+        },
+        "retry": {
+          "seconds": 0.040488499973434955,
+          "self_peak_rss_bytes": 1077166080,
+          "child_peak_rss_bytes": 385253376
+        },
+        "reopen_read": {
+          "seconds": 0.7602428329992108,
+          "self_peak_rss_bytes": 1077166080,
+          "child_peak_rss_bytes": 385253376
+        },
+        "oracle_reopen": {
+          "seconds": 0.05661108298227191,
+          "self_peak_rss_bytes": 1078083584,
+          "child_peak_rss_bytes": 385253376
+        }
+      },
+      "load_before": [
+        4.52294921875,
+        5.21923828125,
+        5.74072265625
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216315390,
+      "same_selection": true,
+      "worker_seconds": 4.488595042028464,
+      "first_admit_read_seconds": 3.406133083975874,
+      "peak_self_rss_bytes": 1078083584,
+      "peak_child_rss_bytes": 385253376,
+      "retained_engine": {
+        "logical_bytes": 36419002,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36437275,
+        "allocated_bytes": 36528128,
+        "files": 66
+      },
+      "load_after": [
+        4.48095703125,
+        5.19873046875,
+        5.73046875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1045987328,
+      "min_volume_free_bytes": 3900440576,
+      "sampled_peak_workspace_bytes": 36440904,
+      "sampled_peak_allocated_bytes": 36536320,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00046662503154948354,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 364,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 4.545952417014632,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36440904,
+          "allocated_bytes": 36536320
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36440904,
+          "allocated_bytes": 36536320
+        }
+      },
+      "volume_free_after_bytes": 3900264448,
+      "time_max_rss_bytes": 1078083584
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "python",
+    "repetition": 3,
+    "result": {
+      "arm": "python",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 2.412496834003832,
+          "self_peak_rss_bytes": 1115406336,
+          "child_peak_rss_bytes": 0
+        },
+        "read": {
+          "seconds": 0.42440970899770036,
+          "self_peak_rss_bytes": 1136984064,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_read": {
+          "seconds": 0.1681187499780208,
+          "self_peak_rss_bytes": 2155282432,
+          "child_peak_rss_bytes": 0
+        },
+        "retry": {
+          "seconds": 0.1278675840003416,
+          "self_peak_rss_bytes": 2155282432,
+          "child_peak_rss_bytes": 0
+        },
+        "reopen_read": {
+          "seconds": 0.32479287503520027,
+          "self_peak_rss_bytes": 2155282432,
+          "child_peak_rss_bytes": 0
+        },
+        "oracle_reopen": {
+          "seconds": 0.050287332967855036,
+          "self_peak_rss_bytes": 2155282432,
+          "child_peak_rss_bytes": 0
+        }
+      },
+      "load_before": [
+        4.48095703125,
+        5.19873046875,
+        5.73046875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179670664,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "original_module": "/Users/mikewolfd/Work/spicy-stack/DocSpec/src/docspec/__init__.py",
+      "readback_boundary_usage": 209281571,
+      "same_selection": true,
+      "worker_seconds": 3.793204165995121,
+      "first_admit_read_seconds": 2.8369065430015326,
+      "peak_self_rss_bytes": 2155282432,
+      "peak_child_rss_bytes": 0,
+      "retained_engine": {
+        "logical_bytes": 29587741,
+        "allocated_bytes": 29704192,
+        "files": 45
+      },
+      "retained_run": {
+        "logical_bytes": 29592588,
+        "allocated_bytes": 29728768,
+        "files": 53
+      },
+      "load_after": [
+        4.48095703125,
+        5.19873046875,
+        5.73046875
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 1133117440,
+      "min_volume_free_bytes": 3833921536,
+      "sampled_peak_workspace_bytes": 29596241,
+      "sampled_peak_allocated_bytes": 29736960,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.0006380000268109143,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 356,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 3.9870454159681685,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 53,
+          "bytes": 29596241,
+          "allocated_bytes": 29736960
+        },
+        "total": {
+          "files": 53,
+          "bytes": 29596241,
+          "allocated_bytes": 29736960
+        }
+      },
+      "volume_free_after_bytes": 3969175552,
+      "time_max_rss_bytes": 2155282432
+    }
+  },
+  {
+    "case": "comments",
+    "arm": "rust-release",
+    "repetition": 3,
+    "result": {
+      "arm": "rust-release",
+      "case": "comments",
+      "status": "passed",
+      "phases": {
+        "admit": {
+          "seconds": 0.7099392079981044,
+          "self_peak_rss_bytes": 48152576,
+          "child_peak_rss_bytes": 355172352
+        },
+        "read": {
+          "seconds": 0.3303226249990985,
+          "self_peak_rss_bytes": 48168960,
+          "child_peak_rss_bytes": 355172352
+        },
+        "oracle_read": {
+          "seconds": 0.20339275000151247,
+          "self_peak_rss_bytes": 1077215232,
+          "child_peak_rss_bytes": 355172352
+        },
+        "retry": {
+          "seconds": 0.017987083992920816,
+          "self_peak_rss_bytes": 1077215232,
+          "child_peak_rss_bytes": 355172352
+        },
+        "reopen_read": {
+          "seconds": 0.2874389170319773,
+          "self_peak_rss_bytes": 1077215232,
+          "child_peak_rss_bytes": 355172352
+        },
+        "oracle_reopen": {
+          "seconds": 0.05409512500045821,
+          "self_peak_rss_bytes": 1078149120,
+          "child_peak_rss_bytes": 355172352
+        }
+      },
+      "load_before": [
+        4.48095703125,
+        5.19873046875,
+        5.73046875
+      ],
+      "checks": [
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        },
+        {
+          "rows": 102400,
+          "columns": [
+            "comment_id",
+            "docket_id",
+            "agency_code",
+            "first_name",
+            "last_name",
+            "organization",
+            "category",
+            "title",
+            "comment",
+            "document_type",
+            "posted_date",
+            "modify_date",
+            "receive_date",
+            "attachments_json",
+            "text_content",
+            "text_extraction_status",
+            "pdf_extraction_results_json",
+            "comment_on_document_id",
+            "comment_on_object_id",
+            "original_document_id",
+            "comment_reference_values_json",
+            "subtype",
+            "duplicate_comments",
+            "benchmark_row"
+          ],
+          "bytes": 179879048,
+          "types_and_nullability_equal": true,
+          "all_values_equal": true
+        }
+      ],
+      "readback_boundary_usage": 216311866,
+      "same_selection": true,
+      "worker_seconds": 1.6392852500430308,
+      "first_admit_read_seconds": 1.0402618329972029,
+      "peak_self_rss_bytes": 1078149120,
+      "peak_child_rss_bytes": 355172352,
+      "retained_engine": {
+        "logical_bytes": 36418761,
+        "allocated_bytes": 36478976,
+        "files": 46
+      },
+      "retained_run": {
+        "logical_bytes": 36433751,
+        "allocated_bytes": 36536320,
+        "files": 66
+      },
+      "load_after": [
+        4.9228515625,
+        5.2783203125,
+        5.75537109375
+      ]
+    },
+    "metrics": {
+      "sampled_peak_tree_rss_bytes": 178585600,
+      "min_volume_free_bytes": 3767496704,
+      "sampled_peak_workspace_bytes": 36437387,
+      "sampled_peak_allocated_bytes": 36544512,
+      "sampled_peak_scratch_bytes": 0,
+      "inventory_sampling_seconds": 0.00045641703763976693,
+      "before": {
+        "catalog_and_other": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        },
+        "total": {
+          "files": 1,
+          "bytes": 368,
+          "allocated_bytes": 4096
+        }
+      },
+      "stop_reason": null,
+      "elapsed_seconds": 1.7246124160010368,
+      "exit_code": 0,
+      "after": {
+        "catalog_and_other": {
+          "files": 66,
+          "bytes": 36437387,
+          "allocated_bytes": 36544512
+        },
+        "total": {
+          "files": 66,
+          "bytes": 36437387,
+          "allocated_bytes": 36544512
+        }
+      },
+      "volume_free_after_bytes": 3932717056,
+      "time_max_rss_bytes": 1078149120
+    }
+  }
+]

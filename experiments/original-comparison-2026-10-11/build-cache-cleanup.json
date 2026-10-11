@@ -1,0 +1,28 @@
+{
+  "reason": "Make room for current optimized local benchmark build; preserve executable, sources, datasets and evidence",
+  "time": 1791735405.940272,
+  "free_before": 3695828992,
+  "paths": [
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/deps",
+      "logical_bytes": 4427164591,
+      "allocated_bytes": 4433354752
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/build",
+      "logical_bytes": 116176261,
+      "allocated_bytes": 118710272
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/examples",
+      "logical_bytes": 998572696,
+      "allocated_bytes": 998662144
+    },
+    {
+      "path": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/.fingerprint",
+      "logical_bytes": 1263916,
+      "allocated_bytes": 20373504
+    }
+  ],
+  "free_after": 8420442112
+}

@@ -1,0 +1,107 @@
+{
+  "preparation_started": 1791735058.046127,
+  "python": "3.12.9 (main, Mar 17 2025, 21:36:21) [Clang 20.1.0 ]",
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "packages": {
+    "docspec": "0.12.4",
+    "duckdb": "1.5.5",
+    "pyarrow": "25.0.1",
+    "pyiceberg": "0.12.0",
+    "spicy-docs": "0.54.0",
+    "msgspec": "0.21.1",
+    "jsonschema-rs": "0.52.1"
+  },
+  "original_commit": "168079e53474c403030d93a70c8a5f6093574f9d",
+  "rust_current_commit": "9d01704983a1400ef80c40ae3341ee60a61af291",
+  "arms": {
+    "rust-current-release": {
+      "binary": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/release/docspec",
+      "sha256": "1a1c8cdc83704f7503010e260c8705f675af831f6bb155e5a3e199204c3e2b82",
+      "bytes": 164532064,
+      "mtime_ns": 1791735763071261213,
+      "commit": "9d01704983a1400ef80c40ae3341ee60a61af291",
+      "profile": "release",
+      "features": [],
+      "CARGO_PROFILE_RELEASE_DEBUG": "0"
+    }
+  },
+  "cases": {
+    "bill-actions": {
+      "source": "/Users/mikewolfd/Work/spicy-stack/experiments/docspec-spicyregs-performance-20261007/inputs/bill-actions/bill_actions.parquet",
+      "source_stat": {
+        "bytes": 221362,
+        "mtime_ns": 1791384389131570240
+      },
+      "source_row_groups": [
+        0
+      ],
+      "rows": 20000,
+      "input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/inputs/bill-actions/table.parquet",
+      "bytes": 224480,
+      "sha256": "sha256:db173175a74a97de07f11f73223fb69d805fcd6158dc3632a4608016ffc84872",
+      "blake3": "681e81e8db3679b8eda7adc6cb559196e85247ed5503779a2259c725176de5b1",
+      "generation": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/inputs/bill-actions",
+      "family": "benchmark-bill-actions",
+      "pin": {
+        "logicalId": "urn:spicy:artifact:spicy-regs-rollup-generation:e1928b65e06e0fdb1028b4b235063ea08da6ec96a5125a8bc589ac3c76cd9332",
+        "artifactDigest": "sha256:9a469cc25e447e44a69c0e7dcf09ddb6dd15730a1b5e3ac2c6002882a4653520"
+      },
+      "schema": "bill_id: string\naction_index: int64\naction_date: string\naction_time: string\naction_text: string\naction_code: string\naction_type: string\nsource_system_name: string\nrecorded_vote_count: int64\nis_latest_action: bool\nstage: string\nbenchmark_row: string"
+    },
+    "comments": {
+      "source": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/workspaces/qualification/comments-10m-20261008/comments.parquet",
+      "source_stat": {
+        "bytes": 2670490619,
+        "mtime_ns": 1791469143865380101
+      },
+      "source_row_groups": [
+        0,
+        97,
+        195,
+        292,
+        390,
+        488,
+        585,
+        683,
+        781,
+        878,
+        976,
+        1074,
+        1171,
+        1269,
+        1366,
+        1464,
+        1562,
+        1659,
+        1757,
+        1855,
+        1952,
+        2050,
+        2148,
+        2245,
+        2343
+      ],
+      "rows": 102400,
+      "input": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/inputs/comments/table.parquet",
+      "bytes": 18246715,
+      "sha256": "sha256:762d54dae3a7f3fecbd7b52a35fdbdcaee99e969dcf688a103a050dc2fbfa74c",
+      "blake3": "05ed7353c3fa906fff5bf8b723663e2eb24db9016ca78d8c8271ba899322c7bb",
+      "generation": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/original-comparison-2026-10-11/inputs/comments",
+      "family": "benchmark-comments",
+      "pin": {
+        "logicalId": "urn:spicy:artifact:spicy-regs-rollup-generation:e6b61bd26cc984702345433ec5f61cc08ac3d51b5af9c719d92c668654adf738",
+        "artifactDigest": "sha256:fb892fd8ebb0018001e865891758811d73a941a732d8fa2491bb519397ad62fc"
+      },
+      "schema": "comment_id: string\ndocket_id: string\nagency_code: string\nfirst_name: string\nlast_name: string\norganization: string\ncategory: string\ntitle: string\ncomment: string\ndocument_type: string\nposted_date: string\nmodify_date: string\nreceive_date: string\nattachments_json: string\ntext_content: string\ntext_extraction_status: string\npdf_extraction_results_json: string\ncomment_on_document_id: string\ncomment_on_object_id: string\noriginal_document_id: string\ncomment_reference_values_json: string\nsubtype: string\nduplicate_comments: string\nbenchmark_row: string"
+    }
+  },
+  "preparation_seconds": 0.7654120830120519,
+  "build": {
+    "command": "CARGO_PROFILE_RELEASE_DEBUG=0 cargo build --release --locked --bin docspec",
+    "cargo_completion": "    Finished `release` profile [optimized] target(s) in 5m 52s",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+    "lock_sha256": "03709a5e69f0065b55a85677ad380706311a946c0f7e14ae069d7c4b12e60009",
+    "frozen_at": 1791735767.9892201
+  }
+}

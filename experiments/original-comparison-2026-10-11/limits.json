@@ -1,0 +1,8 @@
+{
+  "compute_threads": 12,
+  "memory_bytes": 6442450944,
+  "scratch_bytes": 536870912,
+  "batch_rows": 4096,
+  "max_batch_bytes": 268435456,
+  "max_metadata_bytes": 33554432
+}

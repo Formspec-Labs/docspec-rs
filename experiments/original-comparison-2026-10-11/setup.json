@@ -1,0 +1,8 @@
+{
+  "original_setup": "UV_PROJECT_ENVIRONMENT=<experiment>/env uv sync --project <workspace>/DocSpec --frozen --offline --no-dev",
+  "original_setup_result": "success; exact locked package versions in preparation.json",
+  "optional_monitor_package_attempt": "uv pip install --python <experiment>/env/bin/python --offline psutil blake3",
+  "optional_monitor_package_result": "refused because blake3 absent from cache; no packages installed by this attempt",
+  "resolution": "existing system Python3.12.9 with psutil7.0.0 drives supervisor; shared inputs use maintained docspec hash command for BLAKE3; no download needed",
+  "new_or_modified_production_sources": false
+}
