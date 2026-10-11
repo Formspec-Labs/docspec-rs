@@ -1240,6 +1240,20 @@ impl Inventory {
                 self.table(&result.source, origin)?;
             }
             self.table(&result.replacement, origin)?;
+        } else if [
+            "export-attempt/",
+            "export-staged/",
+            "export-stage-validation/",
+        ]
+        .iter()
+        .any(|prefix| key.starts_with(prefix))
+        {
+            // Host staging is a retained recovery dependency, never remote creation evidence.
+            if let Some(staged) =
+                crate::engine::export::remote::validate_record(key, json, rows, None)?
+            {
+                self.object(&staged, origin)?;
+            }
         } else if let Some(id) = key.strip_prefix("export-operation/") {
             let operation: crate::engine::export::ExportOperation = decode(json)?;
             crate::engine::export::validate_operation_record(&operation)?;
@@ -1261,6 +1275,17 @@ impl Inventory {
                     != origin.table
             {
                 return Err(invalid_inventory("export creation identity differs"));
+            }
+            if output.object.path.starts_with("s3://") {
+                let validation: crate::export::ExportValidation =
+                    required_record(rows, &format!("export-validation/{id}"))?;
+                crate::engine::export::remote::check_completed(
+                    &operation,
+                    &output,
+                    &validation,
+                    rows,
+                    None,
+                )?;
             }
             self.object(&output.object, origin)?;
         } else if let Some(id) = key.strip_prefix("export-validation/") {
@@ -1288,6 +1313,9 @@ impl Inventory {
                 || crate::catalog::lifecycle_ident(&pin.dataset).to_string() != origin.table
             {
                 return Err(invalid_inventory("export selection identity differs"));
+            }
+            if pin.object.path.starts_with("s3://") {
+                crate::engine::export::remote::check_pin_binding(&pin, &operation, rows, None)?;
             }
             self.object(&pin.object, origin)?;
             self.release(&pin.source.manifest, origin)?;

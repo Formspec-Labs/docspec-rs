@@ -1,6 +1,7 @@
 //! Bounded local objects and maintained Iceberg readers, writers, and commit actions.
 
 pub(crate) mod defaults;
+mod flat;
 pub(crate) mod identity;
 mod inspection;
 mod object_io;

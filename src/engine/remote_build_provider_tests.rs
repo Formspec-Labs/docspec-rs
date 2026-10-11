@@ -1,6 +1,8 @@
 //! Opt-in synthetic Engine qualification; all remote objects remain retained.
 
 use super::*;
+
+mod exports;
 use arrow::{
     array::{Array, Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},

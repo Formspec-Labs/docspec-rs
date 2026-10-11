@@ -1,0 +1,35 @@
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+error[E0308]: `?` operator has incompatible types
+   --> src/engine/export.rs:233:22
+    |
+233 |                     &lifecycle.rows(&view).await?,
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `SnapshotRows`, found `Arc<SnapshotRows>`
+    |
+    = note: `?` operator cannot convert from `std::sync::Arc<catalog::SnapshotRows>` to `catalog::SnapshotRows`
+    = note: expected struct `catalog::SnapshotRows`
+               found struct `std::sync::Arc<catalog::SnapshotRows>`
+
+error[E0308]: `?` operator has incompatible types
+   --> src/engine/export.rs:287:18
+    |
+287 |                 &lifecycle.rows(&view).await?,
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `SnapshotRows`, found `Arc<SnapshotRows>`
+    |
+    = note: `?` operator cannot convert from `std::sync::Arc<catalog::SnapshotRows>` to `catalog::SnapshotRows`
+    = note: expected struct `catalog::SnapshotRows`
+               found struct `std::sync::Arc<catalog::SnapshotRows>`
+
+error[E0308]: `?` operator has incompatible types
+   --> src/engine/export.rs:203:18
+    |
+203 |                 &self.inner.lifecycle.rows(&view).await?,
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `SnapshotRows`, found `Arc<SnapshotRows>`
+    |
+    = note: `?` operator cannot convert from `std::sync::Arc<catalog::SnapshotRows>` to `catalog::SnapshotRows`
+    = note: expected struct `catalog::SnapshotRows`
+               found struct `std::sync::Arc<catalog::SnapshotRows>`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `docspec` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `docspec` (lib test) due to 3 previous errors

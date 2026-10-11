@@ -1,0 +1,21 @@
+{
+  "utc": "2026-10-11T06:13:29.067483+00:00",
+  "scope": "Two inactive rebuildable default-feature executables only; current all-feature binaries and dependency caches retained",
+  "entries": [
+    {
+      "path": "target/debug/deps/docspec-cf86d714da94fd5e",
+      "logical_bytes": 269945392,
+      "allocated_bytes": 269946880,
+      "inode": 776134902
+    },
+    {
+      "path": "target/debug/deps/integration-b59a65dd6021de5a",
+      "logical_bytes": 271734816,
+      "allocated_bytes": 271736832,
+      "inode": 776134946
+    }
+  ],
+  "lsof_exit": 1,
+  "free_before_bytes": 3616620544,
+  "free_after_bytes": 4158689280
+}

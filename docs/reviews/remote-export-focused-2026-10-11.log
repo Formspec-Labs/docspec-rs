@@ -1,0 +1,21 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.92s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 5 tests
+test engine::export::tests::schema_authorization_removes_metadata_and_refuses_internal_or_nested_columns ... ok
+test storage::flat::tests::local_flat_reader_holds_shared_capacity_until_stream_drop ... ok
+DOCSPEC_TEST_WORK admission
+test storage::remote::objects::tests::flat::flat_reader_bounds_footer_before_decode_and_releases_failed_open_capacity ... ok
+DOCSPEC_TEST_WORK processing
+test storage::remote::objects::tests::flat::flat_reader_reuses_one_footer_and_preserves_duplicates_null_and_empty ... ok
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpYxaaRW/workspace/objects/data/9a5c0dff4ced469bb65ea83f89bfa383/data/eae81523-e1c1-4332-84b2-b38f8c70d974-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+test engine::export::tests::retained_lookup_binds_requested_identity_and_output_is_protected ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 301 filtered out; finished in 0.97s
+

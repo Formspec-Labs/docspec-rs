@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T06:24:14.169477+00:00",
+  "command": [
+    "cargo",
+    "clippy",
+    "--locked",
+    "--lib",
+    "--bin",
+    "docspec",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "free_before_bytes": 2813751296,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 2812219392,
+  "free_after_bytes": 2817519616,
+  "finished_utc": "2026-10-11T06:24:26.220803+00:00"
+}

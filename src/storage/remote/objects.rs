@@ -176,6 +176,19 @@ impl RemoteObjects {
         Ok(())
     }
 
+    pub(in crate::storage) fn flat_reader(
+        &self,
+        object: &ObjectRef,
+    ) -> Result<Box<dyn parquet::arrow::async_reader::AsyncFileReader>> {
+        // The complete URI is checked before constructing a native range reader.
+        let key = self.scope.key(&object.path)?;
+        let path = object_store::path::Path::parse(key).map_err(|_| scope_error())?;
+        Ok(Box::new(
+            parquet::arrow::async_reader::ParquetObjectReader::new(self.query_store.clone(), path)
+                .with_file_size(object.bytes),
+        ))
+    }
+
     /// Returns native I/O for independently opening immutable table pins.
     ///
     /// This native handle is unrestricted and includes credential configuration;

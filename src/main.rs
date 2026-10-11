@@ -192,6 +192,8 @@ enum Command {
     LatestExport { dataset: String, channel: String },
     /// Resolve a completed historical export by its stable operation identity.
     ExportPin { dataset: String, operation: String },
+    /// Stream an exact retained flat export as Arrow IPC with configured credentials.
+    ReadExport { pin: PathBuf, output: PathBuf },
     /// Rewrite selected files while preserving their exact logical values.
     Compact { spec: PathBuf },
     /// Retain an exact local catalog image and its required immutable files.
@@ -881,6 +883,12 @@ async fn main() -> anyhow::Result<()> {
                 } => {
                     let release: ReleasePin = read_json(release)?;
                     let stream = engine.read_group(&release, &group).await?;
+                    write_stream(output, stream).await?;
+                    engine.shutdown().await?;
+                }
+                Command::ReadExport { pin, output } => {
+                    let pin: docspec::export::ExportPin = read_json(pin)?;
+                    let stream = engine.read_export(&pin).await?;
                     write_stream(output, stream).await?;
                     engine.shutdown().await?;
                 }

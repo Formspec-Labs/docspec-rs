@@ -113,6 +113,10 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/datasets/{dataset}/exports/{operation}", get(export_pin))
         .route(
+            "/datasets/{dataset}/exports/{operation}/arrow",
+            get(read_export),
+        )
+        .route(
             "/datasets/{dataset}/versions/{version}/arrow",
             get(read_combined),
         )
@@ -783,6 +787,27 @@ async fn read_combined(
     read(engine, dataset, version, ReadKind::Combined).await
 }
 
+async fn read_export(
+    State(engine): State<Engine>,
+    Path((dataset, operation)): Path<(String, String)>,
+) -> Result<Response, HttpError> {
+    let dataset = Id::new(dataset)?;
+    let operation = Id::new(operation)?;
+    let batches = engine.read_export_id(&dataset, &operation).await?;
+    arrow_response(
+        engine,
+        batches,
+        [
+            (
+                "content-type",
+                "application/vnd.apache.arrow.stream".to_owned(),
+            ),
+            ("docspec-dataset", dataset.to_string()),
+            ("docspec-export", operation.to_string()),
+        ],
+    )
+}
+
 async fn read_group(
     State(engine): State<Engine>,
     Path((dataset, version, group)): Path<(String, String, String)>,
@@ -834,13 +859,9 @@ async fn read(
         ReadKind::Receipts => engine.read_receipts(&release).await?,
         ReadKind::Occurrences => engine.read_source_occurrences(&release).await?,
     };
-    let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
-        // The in-flight response retains local workspace ownership as well as
-        // reader admission, even if the router itself is dropped.
-        let _owner = &engine;
-        chunk
-    });
-    Ok((
+    arrow_response(
+        engine,
+        batches,
         [
             (
                 "content-type",
@@ -850,9 +871,20 @@ async fn read(
             ("docspec-version", release.id.to_string()),
             ("docspec-manifest-blake3", release.manifest.digest),
         ],
-        Body::from_stream(stream),
     )
-        .into_response())
+}
+
+fn arrow_response<const N: usize>(
+    engine: Engine,
+    batches: datafusion::physical_plan::SendableRecordBatchStream,
+    headers: [(&'static str, String); N],
+) -> Result<Response, HttpError> {
+    let stream = ipc::encode(batches, engine.read_budget())?.map(move |chunk| {
+        // In-flight responses retain host custody and reader admission.
+        let _owner = &engine;
+        chunk
+    });
+    Ok((headers, Body::from_stream(stream)).into_response())
 }
 
 #[cfg(test)]

@@ -1,0 +1,8 @@
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-05838119-6e26-4e34-9614-d15caa735209/engine-export/docspec-rs-qualification-05838119-6e26-4e34-9614-d15caa735209/5e79c2e6a2cb4f6db77c5c56d01f6099/data/5f88cd7b-9dfc-40e3-b96a-344431062061-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-materialization

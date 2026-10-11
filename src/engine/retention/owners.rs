@@ -990,8 +990,25 @@ async fn visit_creation(
             for object in &created.backups {
                 observe(object)?;
             }
-        } else if key.starts_with("export-materialized/") {
+        } else if let Some(id) = key.strip_prefix("export-materialized/") {
             let output: crate::engine::export::ExportMaterialized = serde_json::from_str(json)?;
+            if output.object.path.starts_with("s3://") {
+                let operation: crate::engine::export::ExportOperation = rows
+                    .get_record(&format!("export-operation/{id}"))?
+                    .ok_or_else(invalid)?
+                    .2;
+                let validation: crate::export::ExportValidation = rows
+                    .get_record(&format!("export-validation/{id}"))?
+                    .ok_or_else(invalid)?
+                    .2;
+                crate::engine::export::remote::check_completed(
+                    &operation,
+                    &output,
+                    &validation,
+                    rows,
+                    None,
+                )?;
+            }
             observe(&output.object)?;
         } else if key.starts_with("compaction-prepared/") {
             let result: CompactionResult = serde_json::from_str(json)?;

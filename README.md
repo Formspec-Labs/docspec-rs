@@ -10,7 +10,7 @@ from the [accepted greenfield plan](docs/PLAN.md). **The complete dataset lifecy
 remains unfinished; the defined full local 10-million-Comments gate passes.** See
 [implementation status](docs/STATUS.md) for the requirement and qualification map.
 
-## Local exports, compaction and restore
+## Exports and local maintenance
 
 `export export.json` creates an independently readable Parquet file containing
 only the explicitly selected columns and all active rows of one retained group.
@@ -20,8 +20,11 @@ The policy names the group, sets `rows` to `"all"`, and lists columns in output
 order. Row restrictions must already be applied upstream. The caller supplies
 this authorization; the loopback HTTP service does not implement user accounts.
 Use `latest-export DATASET CHANNEL` or `export-pin DATASET OPERATION` to resolve
-the immutable file. Repeating an operation reuses completed work. Remote upload
-and public hosting remain unfinished.
+the immutable file. `read-export export-pin.json output.arrow` streams that exact
+export through the configured Engine. HTTP offers the same reader at
+`GET /datasets/{dataset}/exports/{operation}/arrow`. Repeating an operation reuses
+completed work. Remote source exports use the configured object store; anonymous
+public hosting remains unfinished.
 
 `compact compaction.json` accepts [CompactionSpec](src/model.rs): dataset,
 operation, version, group, exact file paths (an empty list selects all active
@@ -99,8 +102,12 @@ catalog and object configuration. Initial independent Build, recovery, selection
 source-group streaming are qualified on the configured R2/Basin path. Remote
 Build supports a dataset's first selection and recovery of that same operation;
 a new Build after selection refuses before source or lifecycle mutation. Other remote
-mutations refuse before lifecycle effects; remote export, maintenance, computed
-and related groups remain unqualified. CLI and loopback HTTP startup accept the
+source mutations refuse before lifecycle effects. Primitive-column exports of
+that initial source are implemented with protected host staging, conditional
+remote transfer and retained completion. Maintenance, computed and related groups
+remain unqualified. Host stages currently remain retained alongside remote
+objects; unfinished transfers require the original host. See the status record
+for the exact recovery and resource limits. CLI and loopback HTTP startup accept the
 same explicit remote configuration. See [current qualification](docs/STATUS.md).
 
 ```rust,ignore
@@ -165,8 +172,8 @@ target/debug/docspec --workspace workspaces/my-project --remote remote.json serv
 
 Remote `read` uses the configured Engine and its exact retained source pin. The
 local default keeps the independent reader. Remote startup supports a dataset's
-first independent Build and recovery of that same operation, inspect/latest/release
-and source streaming. Other Engine operations retain their existing refusal gates.
+first independent Build and recovery of that same operation, inspect/latest/release,
+source streaming and primitive source exports. Other Engine operations retain their existing refusal gates.
 Standalone local verification, input hashing, restore and independent evidence or
 receipt readers refuse `--remote` before effects. Hash a producer file without
 `--remote` when preparing its Build request.

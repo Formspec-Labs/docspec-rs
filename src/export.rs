@@ -1,4 +1,4 @@
-//! Explicit disclosure policies and immutable local Parquet distributions.
+//! Explicit disclosure policies and immutable primitive Parquet distributions.
 // Rust guideline compliant 2026-02-21
 
 use crate::model::{Id, ObjectRef, OperationId, VersionRef};
@@ -68,7 +68,8 @@ pub struct ExportValidation {
 /// Identifies an independently readable file selected through the dataset catalog.
 ///
 /// Resolve a channel once and retain this pin while reading its immutable file.
-/// This local format does not establish remote publication or anonymous access.
+/// Configured remote source exports retain host staging as protected custody.
+/// Neither placement establishes anonymous public hosting or application evidence access.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExportPin {

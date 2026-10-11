@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+mod flat;
 mod pinning;
 pub(crate) mod writes;
 

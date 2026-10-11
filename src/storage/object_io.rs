@@ -75,7 +75,56 @@ impl Objects {
         self.validate_path(path)
     }
 
+    pub(crate) async fn export_scan(
+        &self,
+        pin: &crate::model::TablePin,
+        budget: &crate::budget::Budget,
+    ) -> Result<super::OccurrenceScan> {
+        let table = self.open_pin(pin, budget).await?;
+        let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+        let inherited = pin
+            .objects
+            .iter()
+            .map(|object| (object.path.clone(), object.clone()))
+            .collect();
+        let root = if self.is_remote() {
+            Some(self.pin_root(table.metadata().location())?)
+        } else {
+            None
+        };
+        let guard = root.as_ref().map(|root| PinPaths {
+            objects: self,
+            root,
+            inherited: &inherited,
+        });
+        let inventory =
+            super::snapshot_files_guarded(&table, budget, guard.as_ref(), memory).await?;
+        super::check_inventory_files(pin, &inventory)?;
+        super::OccurrenceScan::values(&table, budget, inventory).await
+    }
+
+    pub(crate) async fn read_flat_parquet(
+        &self,
+        object: &ObjectRef,
+        budget: &crate::budget::Budget,
+    ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
+        super::flat::read(self, object, budget).await
+    }
+
     pub(crate) async fn admit_source(
+        &self,
+        expected: &ObjectRef,
+        source: PathBuf,
+        budget: &crate::budget::Budget,
+        _resuming: bool,
+    ) -> Result<ObjectRef> {
+        self.transfer_immutable_file(expected, source, budget, _resuming)
+            .await
+    }
+
+    // Shared create-only transfer for admitted source and validated export bytes.
+    // Recovery checks the exact destination before opening a host source file.
+    pub(crate) async fn transfer_immutable_file(
         &self,
         expected: &ObjectRef,
         source: PathBuf,

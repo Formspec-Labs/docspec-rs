@@ -151,6 +151,63 @@ fn independent_rows(pin: &ExportPin) -> Vec<(Option<i64>, Option<String>)> {
     actual
 }
 
+fn assert_authorized_ipc(bytes: &[u8]) {
+    let reader =
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
+    let schema = reader.schema();
+    assert!(schema.metadata().is_empty());
+    assert_eq!(schema.fields().len(), 2);
+    for (field, name, data_type, field_id) in [
+        (&schema.fields()[0], "public", DataType::Utf8, "2"),
+        (&schema.fields()[1], "id", DataType::Int64, "1"),
+    ] {
+        assert_eq!(field.name(), name);
+        assert_eq!(field.data_type(), &data_type);
+        assert!(field.is_nullable());
+        assert_eq!(
+            field.metadata(),
+            &std::collections::HashMap::from([(
+                parquet::arrow::PARQUET_FIELD_ID_META_KEY.to_owned(),
+                field_id.to_owned()
+            ),])
+        );
+    }
+    let mut actual = Vec::new();
+    for batch in reader {
+        let batch = batch.unwrap();
+        let texts = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        actual.extend(
+            ids.iter()
+                .zip(texts.iter())
+                .map(|(id, text)| (id, text.map(str::to_owned))),
+        );
+    }
+    actual.sort();
+    assert_eq!(
+        actual,
+        vec![
+            (None, Some("null key".to_owned())),
+            (Some(1), Some("duplicate".to_owned())),
+            (Some(1), Some("one".to_owned())),
+            (Some(2), None),
+        ]
+    );
+    assert!(
+        !bytes
+            .windows(b"private-canary".len())
+            .any(|part| part == b"private-canary")
+    );
+}
+
 #[tokio::test]
 async fn primitive_exports_preserve_types_values_nulls_and_authorized_column_order() {
     use arrow::array::{
@@ -856,6 +913,25 @@ async fn killed_export_workers_resume_without_repeating_completed_work() {
             &["export-pin", spec.dataset.as_str(), spec.operation.as_str()],
         );
         assert_eq!(historical, pin);
+        let manifest = root.path().join("export-pin.json");
+        let output = root.path().join("export.arrow");
+        std::fs::write(&manifest, serde_json::to_vec(&pin).unwrap()).unwrap();
+        let read = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+            .arg("--workspace")
+            .arg(root.path().join("workspace"))
+            .arg("--limits")
+            .arg(root.path().join("limits.json"))
+            .arg("read-export")
+            .arg(&manifest)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            read.status.success(),
+            "{}",
+            String::from_utf8_lossy(&read.stderr)
+        );
+        assert_authorized_ipc(&std::fs::read(output).unwrap());
     }
 }
 
@@ -912,6 +988,38 @@ async fn http_exports_compaction_and_restore_points_use_the_shared_services() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/datasets/comments/exports/http-file/arrow")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/vnd.apache.arrow.stream"
+    );
+    assert_eq!(response.headers()["docspec-dataset"], "comments");
+    assert_eq!(response.headers()["docspec-export"], "http-file");
+    assert_authorized_ipc(&to_bytes(response.into_body(), 1 << 20).await.unwrap());
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/datasets/comments/exports/missing/arrow")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let refusal: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert_eq!(refusal["code"], "no_export");
     let compaction = docspec::model::CompactionSpec {
         dataset: spec.dataset.clone(),
         operation: id("compact-http"),

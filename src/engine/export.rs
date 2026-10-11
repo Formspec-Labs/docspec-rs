@@ -2,11 +2,14 @@
 // Rust guideline compliant 2026-02-21
 
 use super::*;
+
+pub(super) mod remote;
 use crate::export::{ExportField, ExportPin, ExportPolicy, ExportSpec, ExportValidation};
 use arrow::{
     datatypes::{DataType, Field, Schema, SchemaRef},
     record_batch::RecordBatch,
 };
+use datafusion::physical_plan::SendableRecordBatchStream;
 use parquet::{
     arrow::{
         ArrowWriter, PARQUET_FIELD_ID_META_KEY, arrow_reader::ParquetRecordBatchReaderBuilder,
@@ -67,7 +70,9 @@ impl Engine {
     }
 
     async fn export_request(&self, spec: &ExportSpec, stop: Option<String>) -> Result<ExportPin> {
-        self.require_local()?;
+        if spec.policy.group != "source" {
+            self.require_local()?;
+        }
         let memory = self.request_memory(&(spec, &stop))?;
         validate_request(spec)?;
         let spec = spec.clone();
@@ -95,54 +100,130 @@ impl Engine {
             .await
     }
 
+    /// Streams an exact retained primitive export with configured object credentials.
+    ///
+    /// The pin fixes values and disclosure independently of a later channel selection.
+    /// Ordinary reads check availability and schema, without a full payload digest pass.
+    ///
+    /// # Errors
+    /// Refuses inconsistent pins, unavailable objects, unqualified scope, or exhausted capacity.
+    pub async fn read_export(&self, pin: &ExportPin) -> Result<SendableRecordBatchStream> {
+        let memory = self.request_memory(pin)?;
+        let pin = pin.clone();
+        self.admit_stream(memory, move |engine| async move {
+            let retained = engine
+                .load_export_pin(&pin.dataset, &format!("export-result/{}", pin.id))
+                .await?;
+            if retained != pin {
+                return Err(invalid_export());
+            }
+            engine.open_export_stream(&retained).await
+        })
+        .await
+    }
+
+    /// Streams a catalog-retained export by its immutable operation identity.
+    ///
+    /// # Errors
+    /// Refuses unknown or inconsistent exports, unavailable objects, or exhausted capacity.
+    pub async fn read_export_id(
+        &self,
+        dataset: &Id,
+        operation: &Id,
+    ) -> Result<SendableRecordBatchStream> {
+        let memory = self.request_memory(&(dataset, operation))?;
+        let dataset = dataset.clone();
+        let operation = operation.clone();
+        self.admit_stream(memory, move |engine| async move {
+            let pin = engine
+                .load_export_pin(&dataset, &format!("export-result/{operation}"))
+                .await?;
+            engine.open_export_stream(&pin).await
+        })
+        .await
+    }
+
+    async fn open_export_stream(&self, pin: &ExportPin) -> Result<SendableRecordBatchStream> {
+        let stream = self
+            .inner
+            .objects
+            .read_flat_parquet(&pin.object, &self.inner.lifecycle.budget)
+            .await?;
+        if describe_schema(&stream.schema())? != pin.fields {
+            return Err(invalid_export());
+        }
+        Ok(stream)
+    }
+
     async fn lookup_export(&self, dataset: &Id, key: &str) -> Result<ExportPin> {
-        self.require_local()?;
         let memory = self.request_memory(&(dataset, key))?;
         let dataset = dataset.clone();
         let key = key.to_owned();
         self.admit_work(memory, move |engine| async move {
-            let lock = engine.lock(&dataset).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&dataset).await?;
-            let pin: ExportPin = engine
-                .inner
-                .lifecycle
-                .get(&view, &key)
-                .await?
-                .ok_or_else(|| Error::refusal("no_export", "no completed export is selected"))?;
-            let result: ExportPin = engine
+            engine.load_export_pin(&dataset, &key).await
+        })
+        .await
+    }
+
+    async fn load_export_pin(&self, dataset: &Id, key: &str) -> Result<ExportPin> {
+        let lock = self.lock(dataset).await;
+        let _guard = lock.lock().await;
+        let view = self.read_view(dataset).await?;
+        let pin: ExportPin = self
+            .inner
+            .lifecycle
+            .get(&view, key)
+            .await?
+            .ok_or_else(|| Error::refusal("no_export", "no completed export is selected"))?;
+        if pin.dataset != *dataset {
+            return Err(invalid_export());
+        }
+        if key != format!("export-result/{}", pin.id) {
+            let result: ExportPin = self
                 .inner
                 .lifecycle
                 .get(&view, &format!("export-result/{}", pin.id))
                 .await?
                 .ok_or_else(invalid_export)?;
-            if result != pin || pin.dataset != dataset {
+            if result != pin {
                 return Err(invalid_export());
             }
-            check_pin(&pin)?;
-            let operation: ExportOperation = engine
-                .inner
-                .lifecycle
-                .get(&view, &format!("export-operation/{}", pin.id))
-                .await?
-                .ok_or_else(invalid_export)?;
-            check_result(&pin, &operation)?;
-            let expected_key = if key.starts_with("export-result/") {
-                format!("export-result/{}", pin.id)
-            } else {
-                format!("export-channel/{}", operation.request.channel)
-            };
-            if key != expected_key {
-                return Err(invalid_export());
-            }
-            Ok(pin)
-        })
-        .await
+        }
+        check_pin(&pin)?;
+        let operation: ExportOperation = self
+            .inner
+            .lifecycle
+            .get(&view, &format!("export-operation/{}", pin.id))
+            .await?
+            .ok_or_else(invalid_export)?;
+        check_result(&pin, &operation)?;
+        self.check_export_backend(&operation.source, &operation.request.policy)?;
+        self.inner
+            .objects
+            .validate_retained_path(&pin.object.path)?;
+        if !self.inner.retained.is_local() {
+            remote::check_pin_binding(
+                &pin,
+                &operation,
+                self.inner.lifecycle.rows(&view).await?.as_ref(),
+                Some(&self.inner.lifecycle.budget),
+            )?;
+        }
+        let expected_key = if key.starts_with("export-result/") {
+            format!("export-result/{}", pin.id)
+        } else {
+            format!("export-channel/{}", operation.request.channel)
+        };
+        if key != expected_key {
+            return Err(invalid_export());
+        }
+        Ok(pin)
     }
 
     async fn export_admitted(&self, spec: &ExportSpec, stop: Option<&str>) -> Result<ExportPin> {
         let digest = storage::json_digest(spec)?.to_hex().to_string();
         let operation = self.admit_export(spec, &digest).await?;
+        self.check_export_backend(&operation.source, &spec.policy)?;
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
         if let Some(pin) = lifecycle
@@ -150,6 +231,14 @@ impl Engine {
             .await?
         {
             check_result(&pin, &operation)?;
+            if !self.inner.retained.is_local() {
+                remote::check_pin_binding(
+                    &pin,
+                    &operation,
+                    lifecycle.rows(&view).await?.as_ref(),
+                    Some(&lifecycle.budget),
+                )?;
+            }
             return Ok(pin);
         }
         self.check_export_authority(&view, &operation).await?;
@@ -162,7 +251,11 @@ impl Engine {
         {
             Some(value) => value,
             None => {
-                let value = self.materialize_export(&operation).await?;
+                let value = if self.inner.retained.is_local() {
+                    self.materialize_export(&operation, None).await?
+                } else {
+                    self.remote_materialize_export(&operation, stop).await?
+                };
                 self.retain_export_record(&operation, &materialized_key, &value)
                     .await?
             }
@@ -177,6 +270,9 @@ impl Engine {
         {
             Some(value) => value,
             None => {
+                if !self.inner.retained.is_local() {
+                    return Err(invalid_export());
+                }
                 #[cfg(feature = "test-util")]
                 work_started("export-validation");
                 let value = validate_output(&materialized, &lifecycle.budget).await?;
@@ -186,6 +282,19 @@ impl Engine {
         };
         if validation.object != materialized.object || validation.rows != materialized.rows {
             return Err(invalid_export());
+        }
+        if !self.inner.retained.is_local() {
+            self.inner
+                .objects
+                .validate_retained_path(&materialized.object.path)?;
+            let view = lifecycle.open(&spec.dataset).await?;
+            remote::check_completed(
+                &operation,
+                &materialized,
+                &validation,
+                lifecycle.rows(&view).await?.as_ref(),
+                Some(&lifecycle.budget),
+            )?;
         }
         stop_after(stop, "validation")?;
         let pin = ExportPin {
@@ -254,6 +363,7 @@ impl Engine {
         let source = self
             .available_release_admitted(&spec.dataset, &spec.source.version)
             .await?;
+        self.check_export_backend(&source, &spec.policy)?;
         if source.version_ref() != spec.source {
             return Err(invalid_export());
         }
@@ -379,7 +489,21 @@ impl Engine {
         Ok(value.clone())
     }
 
-    async fn materialize_export(&self, operation: &ExportOperation) -> Result<ExportMaterialized> {
+    fn check_export_backend(&self, source: &ReleasePin, policy: &ExportPolicy) -> Result<()> {
+        if !self.inner.retained.is_local()
+            && (policy.group != "source"
+                || !matches!(&source.dataset.request, OperationRequest::Build(build) if build.base.is_none() && matches!(&source.dataset.relationship, SourceRelationship::Independent)))
+        {
+            return Err(locations::unsupported());
+        }
+        Ok(())
+    }
+
+    async fn materialize_export(
+        &self,
+        operation: &ExportOperation,
+        staged_directory: Option<PathBuf>,
+    ) -> Result<ExportMaterialized> {
         let spec = &operation.request;
         let budget = &self.inner.lifecycle.budget;
         let table_pin = operation
@@ -390,20 +514,20 @@ impl Engine {
             .ok_or_else(|| {
                 Error::refusal("missing_group", "export policy names an absent field group")
             })?;
-        let table = storage::open_pin(table_pin, &self.inner.lifecycle.budget).await?;
-        let inventory = storage::snapshot_files(&table, budget).await?;
         // This maintained shared reader projects by native field ID and refuses
         // unqualified native delete files instead of globbing historical data.
-        let scan = storage::OccurrenceScan::values(&table, budget, inventory).await?;
+        let scan = self.inner.objects.export_scan(table_pin, budget).await?;
         let (indices, schema, fields) = authorized_schema(scan.schema(), &spec.policy)?;
+        let is_staged = staged_directory.is_some();
         let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
-        let directory = self
-            .inner
-            .root
-            .join("objects")
-            .join(spec.dataset.as_str())
-            .join(id.as_str());
-        {
+        let directory = staged_directory.unwrap_or_else(|| {
+            self.inner
+                .root
+                .join("objects")
+                .join(spec.dataset.as_str())
+                .join(id.as_str())
+        });
+        if !is_staged {
             let lock = self.lock(&spec.dataset).await;
             let _guard = lock.lock().await;
             let view = self.inner.lifecycle.open(&spec.dataset).await?;
@@ -432,7 +556,11 @@ impl Engine {
                 .saturating_mul(4)
                 .saturating_add(budget.limits.max_metadata_bytes),
         )?;
-        let path = directory.join("export.parquet");
+        let path = directory.join(if is_staged {
+            format!("stage-{}.parquet", uuid::Uuid::new_v4())
+        } else {
+            "export.parquet".into()
+        });
         let initial_path = path.clone();
         let output_schema = schema.clone();
         let mut writer = budget
@@ -550,7 +678,7 @@ fn validate_request(spec: &ExportSpec) -> Result<()> {
     {
         return Err(Error::refusal(
             "invalid_export",
-            "export requires one exact local source and distinct explicit columns",
+            "export requires one exact source and distinct explicit columns",
         ));
     }
     Ok(())
@@ -957,6 +1085,37 @@ mod tests {
             },
         };
         let pin = engine.export(&spec).await.unwrap();
+        // Both transport entrypoints resolve the same immutable retained export.
+        let read = engine
+            .read_export_id(&spec.dataset, &spec.operation)
+            .await
+            .unwrap();
+        let batches = datafusion::physical_plan::common::collect(read)
+            .await
+            .unwrap();
+        let values = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap()
+                    .iter()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![Some(1), None]);
+        let mut wrong_pin = pin.clone();
+        wrong_pin.object.digest = "0".repeat(64);
+        assert_eq!(
+            engine.read_export(&wrong_pin).await.err().unwrap().code(),
+            "invalid_export"
+        );
+        let read = engine.read_export(&pin).await.unwrap();
+        let batches = datafusion::physical_plan::common::collect(read)
+            .await
+            .unwrap();
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
         let inspection = engine
             .inspect_retention(std::slice::from_ref(&pin.object))
             .await
@@ -995,5 +1154,6 @@ mod tests {
             engine.export_pin(&spec.dataset, &pin.id).await.unwrap(),
             pin
         );
+        remote::test_retained_phase_revision_bindings(&engine, &spec, &pin).await;
     }
 }
