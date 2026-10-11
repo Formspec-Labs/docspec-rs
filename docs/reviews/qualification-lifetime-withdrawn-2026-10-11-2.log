@@ -1,0 +1,28 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.05s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfSCIbS/workspace/objects/comments/d8eb08be4b6148a4a2721e0d88d42be8/data/4f3184bb-dbad-4c23-9c78-7c956d90c795-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfSCIbS/workspace/objects/comments/bfd695db06de455785987c7385a8c6b4/data/07cbc427-98f9-4fb7-9d12-82f28985070b-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfSCIbS/workspace/objects/comments/f18805b5c1be44efaf2f00749de212d2/data/97daef06-15cc-4024-bce4-3ed1b7d21929-00000.parquet
+DOCSPEC_TEST_WORK readback
+test qualification_roots::unselected_qualification_promise_ends_after_explicit_retirement ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 299 filtered out; finished in 2.77s
+
