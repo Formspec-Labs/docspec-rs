@@ -18,3 +18,5 @@ __pycache__/
 /docs/reviews/*/host-after/
 /docs/reviews/*/native-paused
 /docs/reviews/*/native-resume
+/experiments/lifecycle-costs/sustained-related-2026-10-11/
+/experiments/lifecycle-costs/sustained-related-fixed-2026-10-11/

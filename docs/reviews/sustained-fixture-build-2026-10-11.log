@@ -1,0 +1,3 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 11.34s
+  Executable tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)

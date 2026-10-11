@@ -461,6 +461,59 @@ async fn retained_child_catches_up_correction_with_sibling_and_compaction_in_fli
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repeated_corrections_preserve_one_backfill_intent_during_compaction() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, mut selected, mut rows) = fixture(root.path(), false).await;
+    let mut request = continuous(&selected);
+    // Four changing captures remain within the declared optimistic window.
+    request.optimistic_rounds = 8;
+    let mut completed = BTreeMap::new();
+    for wave in 0..4 {
+        let compact = super::compaction::request(&selected, &format!("wave-layout-{wave}"));
+        let (prepared, compacted) = tokio::join!(
+            engine.continuous_backfill_until(&request, "files"),
+            engine.compact(&compact),
+        );
+        assert_eq!(prepared.unwrap_err().code(), "injected_failure");
+        assert!(compacted.unwrap().verified);
+        let records = engine.inspect(&selected.dataset.dataset).await.unwrap();
+        assert_retained(&completed, &records);
+        completed.extend(completed_work(&records));
+        let key = Some(wave);
+        let replacement = (key, Some(format!("wave-{wave} 文🎉")));
+        selected = engine
+            .update(&UpdateSpec {
+                dataset: selected.dataset.dataset.clone(),
+                operation: id(&format!("wave-update-{wave}")),
+                definition: "v1".into(),
+                base: selected.id.clone(),
+                keys: vec!["id".into()],
+                replacements: input(
+                    &root.path().join(format!("wave-{wave}.parquet")),
+                    std::slice::from_ref(&replacement),
+                ),
+                deletions: None,
+            })
+            .await
+            .unwrap();
+        rows.retain(|row| row.0 != key);
+        rows.push(replacement);
+    }
+    let release = engine.continuous_backfill(&request).await.unwrap();
+    assert_eq!(
+        release.dataset.groups["source"],
+        selected.dataset.groups["source"]
+    );
+    assert_eq!(release.dataset.boundary, selected.dataset.boundary);
+    assert_values(&engine, &release, rows).await;
+    assert_retained(
+        &completed,
+        &engine.inspect(&selected.dataset.dataset).await.unwrap(),
+    );
+    assert_eq!(engine.continuous_backfill(&request).await.unwrap(), release);
+}
+
 #[tokio::test]
 async fn parent_identity_conflicts_and_public_child_entry_points_refuse() {
     let root = tempfile::tempdir().unwrap();

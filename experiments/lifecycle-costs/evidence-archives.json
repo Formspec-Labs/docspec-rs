@@ -68,5 +68,29 @@
       "Python caches"
     ],
     "source_directories_retained": true
+  },
+  {
+    "series": "sustained-related-2026-10-11",
+    "archive": "sustained-related-2026-10-11-evidence.tar.gz",
+    "files": 10,
+    "uncompressed_bytes": 47350,
+    "archive_bytes": 12028,
+    "sha256": "6f1d115bc110058f1819651d3f3bbb8af401cbff5b95a561ccfab10020cf6e2d",
+    "excluded": [
+      "Engine workspace directories"
+    ],
+    "source_directories_retained": true
+  },
+  {
+    "series": "sustained-related-fixed-2026-10-11",
+    "archive": "sustained-related-fixed-2026-10-11-evidence.tar.gz",
+    "files": 29,
+    "uncompressed_bytes": 119331,
+    "archive_bytes": 25958,
+    "sha256": "3dab7d895de5e161b6e1c62596c20dc492e14d94cfda5372e23c0dbb9d328416",
+    "excluded": [
+      "Engine workspace directories"
+    ],
+    "source_directories_retained": true
   }
 ]

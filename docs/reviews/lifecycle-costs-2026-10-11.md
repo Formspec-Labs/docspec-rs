@@ -3,7 +3,7 @@
 The fixed and growth runs passed their exact value/type and retained-phase
 checks. These are small local diagnostic observations, separate from the accepted
 10-million-Comments gate. They do not establish a general performance limit or
-complete Q1/Q2/Q7 qualification.
+universal Q1/Q2/Q7 capacity.
 
 Evidence is retained under `experiments/lifecycle-costs/`:
 `results-fixed-2026-10-11/`, `growth-2026-10-11/` and
@@ -107,10 +107,28 @@ output files and does **not** establish Engine spill. `Q1_OBSERVATION` in exact
 stderr binds the admission assertions. Retain the initial compile-failure log
 and its narrow owned-Schema correction alongside the passed collection.
 
-These runs close the bounded required local observations represented by their
-protocols. Sustained Q2 input/backfill/compaction overlap, related join/summary
-costs, wider independent data growth and physical I/O where available remain.
-They do not establish whole-provider resource or universal capacity promises.
+The [bounded sustained/related supplement](../../experiments/lifecycle-costs/sustained-related-protocol.md)
+then passed on the same workstation:
+
+| Complete fixture | Elapsed seconds | Peak reported / sampled tree RSS, bytes | Sampled temporary logical bytes |
+| --- | ---: | ---: | ---: |
+| Four source-correction rounds with one retained scalar intent and concurrent compaction | 8.415 | 107,560,960 / 107,134,976 | 3,944,680 |
+| Successive producer edits across declared equality-join/null modes and literal oracles | 83.195 | 107,282,432 / 108,412,928 | 4,331,335 |
+| Incremental summaries, moved/deleted groups, new contributors and full reconstruction | 12.233 | 103,628,800 / 104,742,912 | 3,515,287 |
+
+Each fixture includes its first builds, changes, independent correctness reads
+and assertions. These totals are neither a single-update latency nor perpetual
+ingestion throughput. All stayed below the frozen180-second/512MiB observation
+bounds. The first collection failed before sustained work: a long diagnostic
+TMPDIR expanded metadata past the fixture's intentional16KiB batch allowance.
+The corrected harness used short, fresh, explicitly recorded TMPDIR roots;
+limits and binary stayed unchanged. Both attempts are retained.
+
+Together these runs close the bounded local observations in their frozen
+protocols. Wider capacity claims need further measurements; they are not implied
+by this qualification. Physical I/O totals and unsampled transient peaks remain
+unknown. No additional metadata backend or monitoring framework is justified by
+these measurements.
 
 ## Retained evidence
 
