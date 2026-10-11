@@ -946,6 +946,11 @@ impl Engine {
                     coverage: admission.coverage.clone(),
                     metrics: prepared.metrics,
                     dependencies: Some(PhaseDependencies {
+                        input_sources: admission
+                            .dependencies
+                            .as_ref()
+                            .map(|dependencies| dependencies.input_sources.clone())
+                            .unwrap_or_default(),
                         admitted_inputs: spec
                             .inputs()
                             .keys()
@@ -2376,6 +2381,12 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
                 .map(|version| version.manifest.clone()),
         );
         objects.extend(related.evidence.objects.iter().cloned());
+        objects.extend(
+            related
+                .input_sources
+                .values()
+                .flat_map(|source| source.objects.iter().cloned()),
+        );
     }
     objects.extend(
         dataset

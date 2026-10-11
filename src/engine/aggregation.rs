@@ -206,6 +206,10 @@ impl Engine {
                     &previous.releases[&aggregate.input.dataset],
                     &current.releases[&aggregate.input.dataset],
                 ),
+                (
+                    previous.canonical_source(&aggregate.input.dataset)?,
+                    current.canonical_source(&aggregate.input.dataset)?,
+                ),
                 &aggregate.grouping.keys,
             )
             .await?;
@@ -323,6 +327,11 @@ impl Engine {
         context.register_table("affected_groups", scope.clone().into_view())?;
         let loaded = refresh::load_inputs(
             processing.coverage.as_ref().ok_or_else(invalid)?,
+            processing
+                .dependencies
+                .as_ref()
+                .map(|dependencies| &dependencies.input_sources)
+                .unwrap_or(&BTreeMap::new()),
             &self.inner.lifecycle.budget,
         )
         .await?;

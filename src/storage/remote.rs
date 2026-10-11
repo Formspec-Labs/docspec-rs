@@ -1,7 +1,7 @@
 //! Maintained REST catalog and S3 storage configured at application startup.
 //!
-//! This adapter establishes native catalog and table I/O only. Filesystem source
-//! admission, exports, restore, and removal still need remote qualification.
+//! This adapter connects native catalog reads and conditional object primitives.
+//! Source admission, exports, restore, and removal still need remote qualification.
 //! Secrets are resolved from named environment variables without logging values.
 
 use crate::{Error, Result};
@@ -13,6 +13,55 @@ use iceberg::{
 use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
 use iceberg_storage_opendal::OpenDalStorageFactory;
 use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
+
+pub mod objects;
+#[doc(inline)]
+pub use objects::RemoteObjects;
+
+/// Startup connections sharing one resolved configuration.
+#[derive(Clone)]
+pub struct RemoteStorage {
+    pub catalog: Arc<dyn Catalog>,
+    pub objects: RemoteObjects,
+}
+
+impl fmt::Debug for RemoteStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteStorage").finish_non_exhaustive()
+    }
+}
+
+/// Initializes catalog and conditional object I/O from one secret resolution.
+///
+/// `owned_prefix` is a strict `s3://bucket/nonempty-prefix/` URI. This connects
+/// object primitives only; it does not qualify the complete remote engine.
+///
+/// # Errors
+/// Refuses invalid configuration, unavailable secrets, or invalid object scope.
+pub async fn remote_storage(
+    owned_prefix: &str,
+    properties: HashMap<String, String>,
+    secret_env: HashMap<String, String>,
+) -> Result<RemoteStorage> {
+    let properties = resolve_properties(properties, secret_env)?;
+    let objects = RemoteObjects::from_resolved(&properties, owned_prefix)?;
+    let catalog = catalog_from_resolved(properties).await?;
+    Ok(RemoteStorage { catalog, objects })
+}
+
+/// Initializes conditional object I/O without connecting a catalog.
+///
+/// Uses the same property and secret resolution as [`remote_storage`].
+///
+/// # Errors
+/// Refuses invalid configuration, unavailable secrets, or invalid object scope.
+pub fn remote_objects(
+    owned_prefix: &str,
+    properties: HashMap<String, String>,
+    secret_env: HashMap<String, String>,
+) -> Result<RemoteObjects> {
+    RemoteObjects::from_resolved(&resolve_properties(properties, secret_env)?, owned_prefix)
+}
 
 // Bound metadata control requests while allowing remote connection setup.
 // These limits cover REST requests, not whole operations or bulk S3 transfers.
@@ -32,17 +81,16 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// # Errors
 /// Refuses missing required properties, unavailable secrets, and initialization failures.
 pub async fn remote_catalog(
-    mut properties: HashMap<String, String>,
+    properties: HashMap<String, String>,
     secret_env: HashMap<String, String>,
 ) -> Result<Arc<dyn Catalog>> {
-    for key in ["uri", "warehouse"] {
-        if properties.get(key).is_none_or(|value| value.is_empty()) {
-            return Err(Error::refusal(
-                "remote_config",
-                "catalog URI and warehouse are required",
-            ));
-        }
-    }
+    catalog_from_resolved(resolve_properties(properties, secret_env)?).await
+}
+
+fn resolve_properties(
+    mut properties: HashMap<String, String>,
+    secret_env: HashMap<String, String>,
+) -> Result<HashMap<String, String>> {
     for (property, variable) in secret_env {
         let value = std::env::var(variable)
             .ok()
@@ -53,6 +101,18 @@ pub async fn remote_catalog(
     properties.insert("disable-header-redaction".into(), "false".into());
     properties.insert("s3.disable-ec2-metadata".into(), "true".into());
     properties.insert("s3.disable-config-load".into(), "true".into());
+    Ok(properties)
+}
+
+async fn catalog_from_resolved(properties: HashMap<String, String>) -> Result<Arc<dyn Catalog>> {
+    for key in ["uri", "warehouse"] {
+        if properties.get(key).is_none_or(|value| value.is_empty()) {
+            return Err(Error::refusal(
+                "remote_config",
+                "catalog URI and warehouse are required",
+            ));
+        }
+    }
     let client = reqwest_rest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)

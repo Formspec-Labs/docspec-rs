@@ -576,3 +576,427 @@ async fn equivalent_new_admission_reuses_processing_from_the_prior_output_layout
         check_related(&engine, &result, &left, &right).await;
     }
 }
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn new_refresh_reads_selected_producer_layout_and_preserves_exact_contributors() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+
+    for summary in [false, true] {
+        let root = TempDir::new().unwrap();
+        let (engine, left, right, base, _) = prepared(root.path(), summary).await;
+        let selected = compact(&engine, &left, "producer-layout", vec![]).await;
+        let right_selected = if summary {
+            None
+        } else {
+            Some(compact(&engine, &right, "right-producer-layout", vec![]).await)
+        };
+        let mut spec = base.dataset.related.as_ref().unwrap().request.clone();
+        spec.dataset = id("captured-producers");
+        spec.operation = id("captured-inputs");
+        spec.base = None;
+        spec.mode = RefreshMode::Full;
+        assert_eq!(
+            engine
+                .refresh_until(&spec, "admission")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        let admitted = engine.inspect(&spec.dataset).await.unwrap();
+        let captures = &admitted["request-dependencies/captured-inputs"]["input_sources"];
+        assert_eq!(
+            serde_json::from_value::<TablePin>(captures[left.dataset.dataset.as_str()].clone())
+                .unwrap(),
+            selected.replacement
+        );
+        let budget = Budget::new(limits()).unwrap();
+        let canonical_files = physical_files(&left.dataset.groups["source"], &budget).await;
+        let selected_files = physical_files(&selected.replacement, &budget).await;
+        let original_file = canonical_files.difference(&selected_files).next().unwrap();
+        // Preserve size/availability while making the original payload unreadable.
+        // Processing must consume the captured replacement, not the old file.
+        let original_bytes = std::fs::read(original_file).unwrap();
+        std::fs::write(original_file, vec![0; original_bytes.len()]).unwrap();
+        let processing = engine.refresh_until(&spec, "processing").await;
+        std::fs::write(original_file, original_bytes).unwrap();
+        assert_eq!(processing.unwrap_err().code(), "injected_failure");
+        let release = engine.refresh(&spec).await.unwrap();
+        let related = release.dataset.related.as_ref().unwrap();
+        assert_eq!(related.coverage.inputs, spec.inputs());
+        assert_eq!(
+            related.input_sources[&left.dataset.dataset],
+            selected.replacement
+        );
+        if let Some(right_selected) = right_selected {
+            assert_eq!(
+                related.input_sources[&right.dataset.dataset],
+                right_selected.replacement
+            );
+        }
+        assert!(
+            selected
+                .output_files
+                .iter()
+                .all(|file| selected_files.contains(file))
+        );
+        check_related(&engine, &release, &left, &right).await;
+        verify_release_at(&release, limits(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+        // A rehashed result cannot certify changed producer values by assigning
+        // them the old logical metadata identity and preserving the row count.
+        let changed = incremental::update(
+            &engine,
+            root.path(),
+            &left,
+            "false-equivalence",
+            &[(Some(10), Some(10), Some("false-equivalence".into()))],
+            &[],
+        )
+        .await;
+        let mut false_source = changed.dataset.groups["source"].clone();
+        assert_eq!(false_source.rows, selected.replacement.rows);
+        false_source.logical_metadata =
+            Some(left.dataset.groups["source"].logical_metadata().clone());
+        let mut altered = release.clone();
+        altered
+            .dataset
+            .related
+            .as_mut()
+            .unwrap()
+            .input_sources
+            .insert(left.dataset.dataset.clone(), false_source);
+        let altered = forged(root.path(), "false-input-layout", altered);
+        assert_eq!(
+            verify_release_at(&altered, limits(), VerificationLevel::Deep)
+                .await
+                .unwrap_err()
+                .code(),
+            "invalid_related_result"
+        );
+    }
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn completed_refresh_keeps_its_producer_layout_after_later_compaction_and_new_admission() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+
+    for summary in [false, true] {
+        let root = TempDir::new().unwrap();
+        let (engine, left, right, base, _) = prepared(root.path(), summary).await;
+        let left = incremental::update(
+            &engine,
+            root.path(),
+            &left,
+            "producer-edit",
+            &[row("producer-changed")],
+            &[],
+        )
+        .await;
+        let first = compact(&engine, &left, "first-producer-layout", vec![]).await;
+        let original = next(&base, &left, &right, "original-input-capture");
+        assert_eq!(
+            engine
+                .refresh_until(&original, "processing")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        let retained = engine.inspect(&original.dataset).await.unwrap();
+        let (key, record) = retained
+            .iter()
+            .filter(|(key, _)| key.starts_with("phase/refresh/") && key.ends_with("/processing"))
+            .find(|(_, value)| {
+                serde_json::from_value::<PhaseResult>((*value).clone())
+                    .unwrap()
+                    .operation
+                    == original.operation
+            })
+            .unwrap();
+        let processing: PhaseResult = serde_json::from_value(record.clone()).unwrap();
+        assert_eq!(
+            processing.dependencies.as_ref().unwrap().input_sources[&left.dataset.dataset],
+            first.replacement
+        );
+        // A separate catalog retains only the completed phase. It must protect
+        // the consumed producer representation without its owner's selection.
+        let inspection_root = root.path().join("input-inspection");
+        let inspector = Engine::open(&inspection_root, limits()).await.unwrap();
+        let lifecycle = docspec::catalog::Lifecycle::new(
+            storage::local_catalog(&inspection_root).await.unwrap(),
+            Budget::new(limits()).unwrap(),
+        );
+        let view = lifecycle.open(&id("isolated-inputs")).await.unwrap();
+        lifecycle
+            .commit(
+                &view,
+                vec![docspec::catalog::record(key, &processing).unwrap()],
+            )
+            .await
+            .unwrap();
+        let protected = inspector
+            .inspect_retention(&first.replacement.objects)
+            .await
+            .unwrap();
+        assert!(protected.objects.iter().all(|object| {
+            object
+                .blocker
+                .as_ref()
+                .is_some_and(|blocker| blocker.key == *key)
+        }));
+        engine
+            .abandon(
+                &original.dataset,
+                &original.operation,
+                "reuse completed processing with a new operation",
+            )
+            .await
+            .unwrap();
+        let second = compact(&engine, &left, "later-producer-layout", vec![]).await;
+        assert_ne!(first.replacement.metadata, second.replacement.metadata);
+        let mut replacement = original.clone();
+        replacement.operation = id("replacement-input-capture");
+        assert_eq!(
+            engine
+                .refresh_until(&replacement, "admission")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        let admitted = engine.inspect(&replacement.dataset).await.unwrap();
+        assert_eq!(
+            serde_json::from_value::<TablePin>(
+                admitted["request-dependencies/replacement-input-capture"]["input_sources"]
+                    [left.dataset.dataset.as_str()]
+                .clone()
+            )
+            .unwrap(),
+            second.replacement
+        );
+        drop(engine);
+        let engine = Engine::open(root.path().join("workspace"), limits())
+            .await
+            .unwrap();
+        let result = engine.refresh(&replacement).await.unwrap();
+        let resumed = engine.inspect(&replacement.dataset).await.unwrap();
+        assert_eq!(resumed.get(key), Some(record));
+        assert_eq!(result.dataset.groups["source"], processing.table.unwrap());
+        assert_eq!(
+            result.dataset.related.as_ref().unwrap().input_sources[&left.dataset.dataset],
+            first.replacement
+        );
+        check_related(&engine, &result, &left, &right).await;
+        verify_release_at(&result, limits(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn legacy_summary_processing_resumes_canonical_inputs_without_recomputation() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+
+    for incremental in [false, true] {
+        let root = TempDir::new().unwrap();
+        let (engine, mut left, _) = fixture(root.path()).await;
+        let spec = if incremental {
+            let base = engine
+                .refresh(&aggregation::summary(&left, false))
+                .await
+                .unwrap();
+            left = incremental::update(
+                &engine,
+                root.path(),
+                &left,
+                "legacy-producer-edit",
+                &[row("legacy-change"), row("legacy-change")],
+                &[],
+            )
+            .await;
+            aggregation::next(&base, &left, "legacy-summary")
+        } else {
+            let mut spec = aggregation::summary(&left, false);
+            spec.operation = id("legacy-summary");
+            spec
+        };
+        assert_eq!(
+            engine
+                .refresh_until(&spec, "processing")
+                .await
+                .unwrap_err()
+                .code(),
+            "injected_failure"
+        );
+        let retained = engine.inspect(&spec.dataset).await.unwrap();
+        let (key, value) = retained
+            .iter()
+            .filter(|(key, _)| key.starts_with("phase/refresh/") && key.ends_with("/processing"))
+            .find(|(_, value)| {
+                serde_json::from_value::<PhaseResult>((*value).clone())
+                    .unwrap()
+                    .operation
+                    == spec.operation
+            })
+            .unwrap();
+        let mut processing: PhaseResult = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            processing
+                .dependencies
+                .as_ref()
+                .unwrap()
+                .input_sources
+                .is_empty()
+        );
+        let exact_table = processing.table.clone().unwrap();
+        processing.dependencies = None;
+        // Retire the protected generation before installing the old record shape,
+        // keeping its original admission older than this processing completion.
+        let retirement = engine
+            .plan_phase_retirement(
+                &spec.dataset,
+                &id("legacy-processing-shape"),
+                std::slice::from_ref(key),
+                "qualify older aggregate recovery records",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&retirement).await.unwrap();
+        let lifecycle = docspec::catalog::Lifecycle::new(
+            storage::local_catalog(&root.path().join("workspace"))
+                .await
+                .unwrap(),
+            Budget::new(limits()).unwrap(),
+        );
+        let view = lifecycle.open(&spec.dataset).await.unwrap();
+        lifecycle
+            .commit(
+                &view,
+                vec![docspec::catalog::record(key, &processing).unwrap()],
+            )
+            .await
+            .unwrap();
+        let later = compact(&engine, &left, "later-legacy-producer-layout", vec![]).await;
+        let plan = engine.plan_refresh(&spec).await.unwrap();
+        assert!(
+            plan.reusable_phases
+                .iter()
+                .any(|phase| phase == "processing")
+        );
+        let original_files = later
+            .output_files
+            .iter()
+            .map(|path| {
+                let bytes = std::fs::read(path).unwrap();
+                std::fs::write(path, vec![0; bytes.len()]).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        // Its original canonical input still reads normally; the newer selected
+        // layout cannot be used for evidence or resumed processing in this case.
+        let resumed = engine.refresh(&spec).await;
+        for (path, bytes) in original_files {
+            std::fs::write(path, bytes).unwrap();
+        }
+        let result = resumed.unwrap();
+        assert_eq!(result.dataset.groups["source"], exact_table);
+        assert!(
+            result
+                .dataset
+                .related
+                .as_ref()
+                .unwrap()
+                .input_sources
+                .is_empty()
+        );
+        let after = engine.inspect(&spec.dataset).await.unwrap();
+        assert_eq!(after[key], serde_json::to_value(&processing).unwrap());
+        aggregation::check_summary(&engine, &result, &left, false).await;
+        verify_release_at(&result, limits(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn subsequent_incremental_refresh_uses_old_and_new_captured_producer_layouts() {
+    use docspec::{engine::verify_release_at, model::VerificationLevel};
+
+    for summary in [false, true] {
+        for retired_history in [false, true] {
+            let root = TempDir::new().unwrap();
+            let (engine, left, right) = fixture(root.path()).await;
+            let old_layout = compact(&engine, &left, "old-input-layout", vec![]).await;
+            let initial = if summary {
+                aggregation::summary(&left, false)
+            } else {
+                recipe(&left, &right)
+            };
+            let base = engine.refresh(&initial).await.unwrap();
+            assert_eq!(
+                base.dataset.related.as_ref().unwrap().input_sources[&left.dataset.dataset],
+                old_layout.replacement
+            );
+            // Moving a duplicate key group also changes a null-key group. The
+            // independent oracle checks departing, new and untouched contributors.
+            let moved = (Some(30), Some(30), Some("moved-duplicate".into()));
+            let null_neighbor = (None, Some(2), Some("changed-null".into()));
+            let updated = incremental::update(
+                &engine,
+                root.path(),
+                &left,
+                "move-input-key",
+                &[moved.clone(), moved, null_neighbor.clone(), null_neighbor],
+                &[(Some(1), Some(2), None)],
+            )
+            .await;
+            let new_layout = compact(&engine, &updated, "new-input-layout", vec![]).await;
+            if retired_history {
+                let retirement = engine
+                    .plan_change_retirement(
+                        &updated.dataset.dataset,
+                        &id("retire-input-delta"),
+                        std::slice::from_ref(&updated.id),
+                        "qualify captured-layout discovery without optional deltas",
+                    )
+                    .await
+                    .unwrap();
+                engine.retire_changes(&retirement).await.unwrap();
+            }
+            assert_eq!(
+                engine
+                    .change_certificate(&updated.version_ref())
+                    .await
+                    .unwrap()
+                    .is_none(),
+                retired_history
+            );
+            let spec = next(&base, &updated, &right, "captured-input-successor");
+            let successor = engine.refresh(&spec).await.unwrap();
+            assert_eq!(
+                successor.dataset.related.as_ref().unwrap().input_sources[&updated.dataset.dataset],
+                new_layout.replacement
+            );
+            assert_eq!(
+                successor.dataset.related.as_ref().unwrap().coverage.inputs,
+                spec.inputs()
+            );
+            check_related(&engine, &successor, &updated, &right).await;
+            let names: &[&str] = if summary {
+                &["a", "rows", "count", "sum", "min", "max"]
+            } else {
+                &["left_text", "right_text"]
+            };
+            forward_changes::check_forward(&engine, &base, &successor, names).await;
+            verify_release_at(&successor, limits(), VerificationLevel::Deep)
+                .await
+                .unwrap();
+        }
+    }
+}

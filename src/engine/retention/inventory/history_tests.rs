@@ -100,6 +100,7 @@ fn related(result: &mut ReleasePin, target: &ReleasePin) {
     };
     result.dataset.request = OperationRequest::Refresh(Box::new(request.clone()));
     result.dataset.related = Some(Box::new(RelatedResult {
+        input_sources: BTreeMap::new(),
         request,
         coverage: InputCoverage {
             inputs: BTreeMap::from([(target.dataset.dataset.clone(), target.version_ref())]),

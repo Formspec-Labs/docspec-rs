@@ -1,0 +1,39 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 19.90s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 11 tests
+test storage::remote::objects::tests::conditional_conflict_and_uncertain_outcome_have_distinct_refusals ... ok
+test storage::remote::objects::tests::scope_rejects_aliases_and_cross_prefix_destinations ... ok
+test storage::remote::tests::missing_required_configuration_is_refused_before_connecting ... ok
+test storage::remote::tests::debug_redacts_dummy_secrets_without_network_requests ... ok
+test storage::remote::objects::tests::configuration_errors_and_debug_never_disclose_secret_values ... ok
+test storage::remote::objects::tests::metadata_spare_capacity_is_admitted_before_provider_io ... ok
+test storage::remote::objects::tests::incorrect_or_oversized_metadata_refuses_before_provider_io ... ok
+test storage::remote::objects::tests::changed_source_identity_refuses_before_publication ... ok
+test storage::remote::objects::tests::empty_readback_uses_only_stats_and_scope_refusal_performs_no_io ... ok
+
+thread '<unnamed>' (41177270) panicked at src/storage/remote/objects/tests.rs:304:48:
+called `Result::unwrap()` on an `Err` value: Os { code: 35, kind: WouldBlock, message: "Resource temporarily unavailable" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread '<unnamed>' (41177272) panicked at src/storage/remote/objects/tests.rs:304:48:
+called `Result::unwrap()` on an `Err` value: Os { code: 35, kind: WouldBlock, message: "Resource temporarily unavailable" }
+
+thread 'storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity' (41177262) panicked at src/storage/remote/objects/tests.rs:177:57:
+called `Result::unwrap()` on an `Err` value: Error { code: "remote_read", message: "independent remote object read failed", source: None, backtrace: <disabled> }
+
+thread 'storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change' (41177261) panicked at src/storage/remote/objects/tests.rs:324:28:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+test storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change ... FAILED
+test storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity ... FAILED
+
+failures:
+
+failures:
+    storage::remote::objects::tests::streamed_readback_refuses_tail_corruption_short_stream_and_size_change
+    storage::remote::objects::tests::streamed_readback_uses_one_get_and_preserves_retained_identity
+
+test result: FAILED. 9 passed; 2 failed; 0 ignored; 0 measured; 253 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `--lib`

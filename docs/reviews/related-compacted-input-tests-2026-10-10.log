@@ -1,0 +1,2361 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.55s
+     Running tests/integration.rs (target/debug/deps/integration-abaa5f04bc6ebf04)
+
+running 9 tests
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/16ca34a63a43487fb1b286b364dcf753/data/f07f21f8-9437-4b41-b002-0174689b62d1-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/2377c191f7244ef5a96ff14080a4dff2/data/5c38747d-870a-4f44-a01a-44485e1c36b6-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJVU53s/workspace/objects/comments/8f71e54f1a844244a033213daa9e1057/data/54bcc2f9-bf30-4f20-8de6-ee3d83bef8c0-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/comments/c9403e9379d242b289b2c2233ee551ab/data/3a1cbccc-c6a2-44c1-bd6a-f0501120b336-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/873cca4207c8400bb5de66d50159fd82/data/9a2c52ff-4556-48db-82f2-dde828c83b13-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/d206bc14901c4257bd8fc51617549278/data/9a6d1efd-d917-43b6-a50d-905de8892032-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/3cbbc82fdbb346a6939f44471fecd255/data/1df4796b-def8-4302-a5b8-84ddc5d6e1eb-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/26c51a8547d141179660017ccb0cde58/data/5cc9fb29-637e-4520-880e-66789f7010b9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJVU53s/workspace/objects/dockets/96d3f98a8c6e400e97d032cb98befafa/data/9a29a7cb-ddd2-4f0b-8067-1ed53d0e7b97-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/dockets/b4d1a69b322048daaa33e2ea6d829d38/data/d9c2fc71-e238-4078-ad81-a6c3e2104ffa-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/dockets/b5f0c69b737f47399a0419aeb19d418a/data/4d0e3d71-4283-4c3a-bf56-14c4e6fcea9e-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/dockets/cabef56e9d8241598c2e9cc57f8cd798/data/63aacaaf-524d-404c-b1e3-b3a1fc1e13de-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/dockets/3981d32cfb1b46c09ee79473162809c2/data/514e81db-05e6-4fb9-90cd-7c96fb578468-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/dockets/d5654c2b9d6a454388f8f7821623ca9f/data/3e64d5dd-2123-4e7c-9653-a66915e50a1f-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/dockets/184d8ef418774fb784ee08c5a6bc05a0/data/5c459669-52a2-4908-a6dc-3263d8903251-00000.parquet
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/8be9469e25b34baea2f465b3e13d9b38/data/6f7f518a-b5fa-4c98-955b-23627d206fad-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/5d47b91643c14d63afc7806b8409adf5/data/d0ec03dc-abd9-4817-a8fc-b2f62522c8d5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/e1c604268e5f4bf8957f7eab9c4f4add/data/ee7a6c01-b6a3-4d1f-9a29-af1645fea2f4-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/12ad19a4c92e4f7b8b499c892f0f2677/data/9a625a6f-66fd-4dd2-97e2-89b2341802e4-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/989bcc9720704027a3212b5ec843d79e/data/1154bc17-a251-47b0-803c-1d5f7c8db3b2-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/e24ce454f5b24e41a94b5d85037a5fad/data/15db6bdc-c1b6-48aa-b3c9-1200c03d974a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/d8c0aa2684304b6fac3bdf25018283cc/data/a596cb23-57ac-4018-a42f-f5b696cd00b0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/d06ee80a1e184479aa07d900eabfb4ab/data/8c670426-5c2d-4f56-b11f-7e992bf9ed17-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/8bc67fd19ef34301835c44c3a231a97f/data/a0c93035-ee06-48ef-99d7-b69f9a71f2cd-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/6ca1542e52ed43c2a2982bf8a2a4ad0f/data/10f851a3-304e-4515-9f8a-16c527483812-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/f4424002ab11492f9b12bb3d6aa14817/data/eec8fb04-edaa-4574-9100-768b49e9ac86-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/525a0905d671475081ec71098129b580/data/2a0b64bb-35e5-4fc4-be40-ea9f5ae848cf-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/f202e400415344b7aa3c5c46192907f7/data/bb3e0cd7-e3b0-4b6f-a121-09c7119aa1b5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/f36b2cd8f95d4e5c8a10c48580e8cf92/data/fad1d3dc-92be-412a-94ae-d4ac1045ea4f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJVU53s/workspace/objects/summary/585620ab2d76494c8431ddd82c476061/data/180891a6-6dbb-4b94-b3b4-fee56f87d8eb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpJVU53s/workspace/objects/summary/94691f6c7242474caf8d0fc42fb8be06/data/59acf02a-d0fc-4b76-8589-03fef2301b9b-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/b1e9d83f458a44cea3a2bcd0784b2c31/data/1c0c6e63-e478-4c00-90b7-65a8b27c201c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/f0795577d744420484b09ae75cb5da85/data/9c9cde30-2465-48bb-94d4-08580009f51a-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/a16d9a4f2a37480aa1b4a64f5cf99df1/data/data/f944d363-4595-4b06-83cc-d282e297ecec-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/e5d79ee554de4c1dab9134f884ad976e/data/data/2218d95c-697b-4b5b-9b60-b5267d97d086-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/56b0f298564849099dda10c5c971236b/data/data/ad9ff59f-448d-444d-8c27-642603e892c7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/30b8e2a876e54551a09b22d107cd386a/data/data/faf1730e-bd54-4594-9a3b-01cf9664f2c4-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/0e3da39bd80849a3ab797685c82cbc77/data/data/c6175b0f-e4b7-4f10-a4c7-dddd47b7f05c-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/ac8a3f7501dd416886c352de1f4dc9ee/data/data/f0342e22-1f5a-4197-b4cb-5b8e025cfc78-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/9a9aee7b815b4c909974e658c2679cce/data/14080065-3dfc-497e-8cfd-861f72921c16-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/comments/4290849dcc484892bfea14dc7b4ba4e3/data/9470b24e-9d89-4676-a403-8a85c6cf2058-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/comments/59f4fe6b05b24803a59216d740d2e614/data/data/15e18feb-614d-47a8-933f-263bdc221d4a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/comments/59f4fe6b05b24803a59216d740d2e614/data/data/6868a0d9-f74f-4fb5-8223-b3fb6700be9a-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/comments/59f4fe6b05b24803a59216d740d2e614/removed/data/c3477ddd-dfd1-4d46-8d98-bc156cdb2ec0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/dockets/f5f9afe295664f20a67a411ece199300/data/data/e7ac7b2a-e449-4a8e-b677-db0c4e4b22b4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/dockets/75dea0ea3fe2420caccc28c93f7192f1/data/data/4b4a57bb-aaa9-430f-8f59-013fa3748808-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/dockets/c261b9b7d1e441f398a70e112fb06629/data/fc55498b-1aae-4d85-bce9-1e255f86bcfb-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/dockets/b6e351ebd84c40279c0e286b5023faaf/data/data/13cbae4d-a70b-4ecd-80b4-1f1095eb9f9e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/f6092e498ca248ae927b31380d595ae8/data/data/c0a2f226-0cf6-4016-ade2-b4a9d4de6c23-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/dockets/a1b851ec347f4dde959d9e7da8af7138/data/data/409c5143-0610-4120-9ae1-da9ab03ed0ab-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/dockets/465ed0c90ccd4b51bf9a8cb1617f6161/data/data/21073f10-e2dd-4cc8-87de-2bde0cc57779-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/summary/9187ba1d13c245c5a97f026e17e4a61e/data/ee34e2d4-a858-4644-916a-5da67f7bfd11-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/summary/cd3d48deb5f24f9a9d189595d84e611b/data/47f5043e-95e2-425f-bc0c-6629356f525e-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/input/5cb6396ff9784f6da02dd2cb233ce952/data/data/deb715ac-d688-4f60-8f96-5665a24286d8-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/comments/d897de8f5bc347acb869aad1a43c3772/data/data/daba18f0-c52e-450e-b042-46edc3109665-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/7bb87a2640e74b7e8ad490fd96fe0b10/replacement/data/data/bd524756-12e5-4e43-9522-de1e73f0ab42-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/849fe27f01364cd3916278e118cc9228/replacement/data/data/45a9786f-51e4-4802-bfea-1b3f66320ea9-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/db8175a3905d49159c98cac2ff9b85be/data/data/9fcfe685-8e1a-4cc1-b076-155f6fee4654-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/635f6a4f8f2c4602be5de4cf19b420ca/data/data/3075113e-1e8a-4e29-9cd2-358072f66da0-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/1cb291b12b2648309a494e4b8ac581da/replacement/data/data/98a8b347-5372-403d-862d-9f7c86885639-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/ed89bf35a64a4b6091e8cae743de6a9e/data/data/e08cf1b0-8064-4d44-94ba-5a62d58adf5b-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/d70768f97dcf44478363fbbb12e1cc62/replacement/data/data/ffca4898-fb15-4ad9-a857-99b81fa4c40b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/1539f0df9f6f4800bbb278d4b7401fea/data/data/cfe60cd7-0388-46be-a36f-e9f44ba2641b-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/a16af23b7c4544d2b863eea7a342ae57/replacement/data/data/bbe5bc6d-1596-4ab9-a479-e31d3bbf43de-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/a16af23b7c4544d2b863eea7a342ae57/replacement/data/data/e937af32-5fb1-4d0f-84fa-5fc2f5335035-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/a16af23b7c4544d2b863eea7a342ae57/replacement/removed/data/2ae9b570-9311-4fa2-840e-ec800e7b37aa-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/e017732ddaa540238366727ea03daf02/data/data/56c6000a-6d0b-4afb-80de-19bfa83b3d1b-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpf2rBth/workspace/objects/joined/e017732ddaa540238366727ea03daf02/data/data/ad09d8c8-167c-47c4-bb49-7e03d3f7bc58-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/77a0d017089b45a9a594223b442a8177/replacement/data/data/bfd94e92-27b6-4051-92f5-6eb1b1c33b8d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/a92f9a52c3284cce929174dfbcc2c0c2/data/data/a80ec8f5-8c0b-4d0a-a633-9181be5eeeab-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/3e43d7a8034c4a8397c648a481246b86/replacement/data/data/77bc73bb-a49c-472e-b2e8-53f4a4b026f7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/bb16ac5273004529bb28f693b1f2534b/data/data/fd6e649d-b87c-4bbd-9942-42851d10d7d6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/7e111cb3bee649c9a6bddecbba0d349c/replacement/data/data/e9969378-effd-428b-ac2c-6d408c81a687-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/7e111cb3bee649c9a6bddecbba0d349c/replacement/removed/data/2996fb35-41a6-4a81-bd4a-40ddf192d8a3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/66ec9dbb21cf496a980e81d456ee4a20/data/data/ee38c75f-0d68-43d5-a7d9-b8fa7b7cc52c-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/263f3bd18c59452a8bd38beec56452d4/data/data/e9e38911-03fd-401f-85b3-4942612b5e55-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/749816e51c4e4492bcdde4983bbde7f2/data/data/6ad27865-cd27-48d5-a76b-2e3549a72afc-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/5878e48029e84ef288b2405624e5ea9f/data/data/36bbf2df-c1fd-4830-a917-f482ef9af706-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/eecde3078ecc4ed0b08511ce0077dfc4/data/data/bbb700c8-f266-4c5b-916e-bdc0a7ff5e04-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/6cb2063693b54cfb93dcf5bdd474c85e/data/data/ce8ff5a0-dae3-4618-ae2b-2feff0375b5a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/c0ee4f774f484c2fb775f099795d5d16/data/data/da4715b3-59bb-4a09-85ed-154a3f92a1af-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/comments/63b7f3852516478fbf17d26e60bb17de/data/8fe2be31-3e1d-4c2c-ae1a-268ccc1914c7-00000.parquet
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/summary/de6ca8e5a9ec4f9ead524dd06660f969/replacement/data/data/6f5a52c0-feb0-40f1-b925-a8a235677be3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpAbDtg1/workspace/objects/summary/532a4d1017644fd28b9002896301363b/data/data/20c28ddb-77e5-4e63-99c0-19e38fa8c9ed-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/dockets/68e083017e8d449796e58c1e38d5f0b4/data/92bfb90c-6886-4f1f-af8d-272c4ebda23a-00000.parquet
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/dockets/b4b357a560134503856d54b5d07872d3/data/data/7b93cddb-6fc4-4cc3-bd5d-de89da8b5e12-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/dockets/2778199db5084e13831bf94c34a68cb7/data/data/8551668a-2116-41ae-b84d-7c02a328d26f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/dockets/df43c3c1a79143eaa2d7511f2cebe33a/data/data/f0af25d5-9cb1-4925-9226-61ec94365ac7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/b1180fa7321845d1b1c51422f3e346c5/data/data/6a87cb73-dd93-4221-b765-688bd9d42053-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/dockets/0cd1be1a668b4a58856eda7af329617a/data/data/896821b2-5eeb-4454-9605-e6bc79feed20-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/dockets/08854eab41794f5ea5e207784daea7d8/data/data/755d3d33-51a8-4cd3-b729-d53aad2a6205-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+test related_refresh::compaction::legacy_summary_processing_resumes_canonical_inputs_without_recomputation ... ok
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/joined/8c6c431688e34135af3e19969ba26421/data/437bdae8-be99-46f0-bdc9-f228ad0d2b74-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/joined/853e4693320c49ec8916ab58f44174c5/data/356136ed-e5d3-428d-b64b-15021b8473ad-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/b933287008b94037948ee727c70f7908/data/243fcef3-74cc-4e2e-86bd-bacb6b38667f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/comments/97b98f48bc5e455e9dd250e99f6471ad/data/data/9f148fc5-ac39-4312-bb2b-939a9674c3ff-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/comments/97b98f48bc5e455e9dd250e99f6471ad/data/data/ebfa5a32-f003-400a-978a-4b5e930b29b3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/comments/97b98f48bc5e455e9dd250e99f6471ad/removed/data/d8276c5b-0960-4189-9c9c-9efac4ed05a1-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/827fc838c0894b5eb326afbb9bd32e70/replacement/data/data/ff0251e4-6b02-4321-932f-41a1737ec465-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/7f06592c297e424782f3293e584096b8/data/data/96d0e1a3-95a1-4cf7-9c69-cbe8412a0c66-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/7c8308f201f941e88fd776c50dc76eb8/replacement/data/data/21a074de-a66e-47c8-94c5-8557465e6ad0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/99498317acbc45509c3983a8a3e199f2/data/data/efd9c36d-f27b-4498-8e23-acb30bb6492d-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/83199e1b18f742d59d00b72e94a5686f/replacement/data/data/fe809623-9fcc-4328-8402-4199a7e63d93-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/52a9d425b2c7412d8122948be3f1915a/data/data/93efcb45-4ecf-49b7-bc45-403fc60d670e-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/79df42fb81c947bd862226d7dbb0c836/replacement/data/data/a2a9cf28-bbc0-4def-afb2-9a47d77cc383-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/d447fc6b99fa431fb7b128c016008ef6/data/data/d7ab93b0-0fb9-4a6b-baca-cc7da8b427b4-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/30915368e3c846f991329273573a2697/replacement/data/data/b92ac12c-90b2-48c0-907f-ec467a59b307-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/a1f0d29cca354e6dabff2c53b9b19e5b/replacement/data/data/ee3efa3f-9d65-42ea-8c9c-205b8d8066e0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/4d1f4141be224653a3d5cbc2d043815a/data/data/3b03d901-d2cc-40bb-804e-a6dccfae03c5-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/ea54c08e1c9b4c519ece983ab12ce341/data/data/5059f933-db65-416b-a6ae-60cf7c086768-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/5c809cadd14b40e099a718994db9b8f9/data/data/6c1dbdde-5d06-434f-a4a6-a68979e3bf37-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/d15bdabbd23848d8b37218c542af2ea8/data/data/1d938746-c47b-42d2-a9a8-eda21aad9291-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/4759ef9874e54fb98f697d99150af6e3/data/data/9bdedf13-f4e4-4fba-babc-bc1edb3dd0fd-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/49dc10eabc914b7fbf4ac2b432c2f05d/data/data/6bbc28db-084b-486d-9206-d8c2b45cc131-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/474087122928401284e69f332eeef653/data/data/e431bcfb-ab4e-48c1-b132-febc133c813d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/ae597f62028143cdb877f6677c5b3ce5/data/data/01432e83-3c1b-4e5e-b8de-84618bb0c5f8-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/input/59278a2252d84bff8c5a8d242b9c6823/removed/data/7d2ced78-64a7-4eee-9b6d-4a3011e11265-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/joined/46910765d0d846aa8ffdbb6ea8f9ac89/replacement/data/data/8390173a-b461-4ae6-b89f-f62c3653ff4c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/joined/46910765d0d846aa8ffdbb6ea8f9ac89/replacement/removed/data/0209c302-1324-45e5-a7a6-2b82334c0413-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp482s90/workspace/objects/joined/08814334f7c340d299f86daff8f8c823/data/data/2cb9eb03-d62c-4173-9fa9-4b4b1877baec-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/dockets/104869b4d5a04eba8754cbbd8c56c9be/data/data/ca4f50e3-21f7-4c48-b6b6-d7a44f25bf40-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/dockets/d43ca7b5bdf24d18870fbbb3300de8ef/data/data/6552cb19-4b08-4555-abcf-c64d635f7e44-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/dockets/c11292f9fb1e4d3b827ca2dd96eb9017/data/data/f114551a-4863-4c44-ac73-eb6aeaa20819-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/dockets/1b65d4344b44485d83b70affb3b8eb5a/data/data/775c2264-e9c9-4edd-ac20-e302e0016935-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/dockets/ca48ae97d31d4a6ebc5d06b3ca074282/data/data/d5acc172-a5e2-41c7-ae86-8c8200c52bf3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/e79fe70cc23c43e5a146d20a0d7b5ec1/data/data/3a7de8b1-f710-4960-a908-f0e109bafd5f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/comments/c38d341136d145dc8532b679462fe934/data/ebb5a14b-52a1-474b-8592-5270e3e1f2d6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/dockets/b841c2e3a3b04cefb06786629d9aa4aa/data/05e68936-b84f-4386-b0ea-feb903ff78de-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/4e5018d4470e4e518681dde573d77439/replacement/data/data/f6938b6b-ae69-4207-9e5c-707b9fb4fd53-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/4e5018d4470e4e518681dde573d77439/replacement/removed/data/849a9be3-3fe8-41a6-ba80-dbb594997659-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/ac939d7b4f4c4b429561e546a86c4037/data/f6f3abf2-a826-4c56-be9e-00341b8fda51-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/463504c82c0442238e8cfd4b5722e72f/data/2f2c81d8-d17a-417a-87fe-ddcacd1980fc-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/comments/6ac86e95e51044418745c1aa409ccfb3/data/data/4dd5147f-1bea-460c-a478-e972f85aad74-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/comments/6ac86e95e51044418745c1aa409ccfb3/data/data/61ca420e-ca11-47e3-a4f7-9160c846f12e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/comments/6ac86e95e51044418745c1aa409ccfb3/removed/data/87b2399c-0768-4095-9da1-792abf00fb59-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/efce28828253403389a892273989b509/replacement/data/data/e8ee5edc-d74b-49a7-9375-77d75970e117-00000.parquet
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/bf1a500c235d4da3819e24271efff108/data/data/2b4a5bd8-95cb-4271-834a-28897139f526-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/ef2b3127788a47478f2fbbd18744c19d/replacement/data/data/16016927-eb68-4591-913c-55c39bd4d4ff-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/4d0ceaac12e14d33b61ebffd8eacf907/replacement/data/data/20ca7a4a-0c60-4781-9af3-74f697108f44-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/436e1ab3588b42a2b46ac530b24ccd23/data/data/4d4ab0c0-370e-472a-a7a7-686f9682f7fc-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/joined/e0dbc3c07fd74cdb93c6062fae5c94aa/data/data/a3df230a-8c33-49ec-bcb3-0bf2a2228405-00000.parquet
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/669ef59e59af4e4eb465c2d9509fca73/replacement/data/data/5b730ec0-db9a-4229-bf79-6d291c6c0895-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/32b07a6bf0fc4b28ba8a498d350bd854/data/data/23eb8dc7-1a31-4af3-aa41-12b196778c41-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/499b3ee423c94cf9b38074839512b08a/replacement/data/data/d5ce8445-6d88-4aed-91e9-c1a3fdb1f7ca-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/3d34f1a144e1437a8aec6d2c00bd3ba5/replacement/data/data/ed0186b7-e9d3-4a1f-82db-8f4e7b64b367-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/b741b9183a354103b10f67c5a2af5b7d/data/data/51b87a41-24fe-4aa7-adc1-0a6ffbfac95d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/4ba52b3735154dfc9733fcda5d77db2b/data/data/e245a654-fd85-46aa-a46c-d3e2594cf419-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/3d09d46cfa56417dbb844fc37f815373/replacement/data/data/e485355a-52c2-46c9-bbfe-aa0356bfe90e-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/3d09d46cfa56417dbb844fc37f815373/replacement/data/data/eebf9e82-fcd5-4e2d-b327-64dab57122bd-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/3d09d46cfa56417dbb844fc37f815373/replacement/removed/data/9be083be-e360-4387-97c8-719d6dd2a3a6-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/8f202ef9a7fe4a9c8a31e968b286594e/data/data/1b29c70e-fdb2-4adc-9ded-570627a6d9b9-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpwwQs5o/workspace/objects/summary/8f202ef9a7fe4a9c8a31e968b286594e/data/data/ed244226-1a28-4de2-8aca-0e38d01be95b-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/f417cf1dc9264955973e7932d2862eeb/data/data/865b47bd-3811-41fc-b239-f0b44337f2f6-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/comments/f417cf1dc9264955973e7932d2862eeb/removed/data/e16aa2e0-f052-4748-8c98-36a85b5b5934-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/922a7fe92a5345dcb09872eb6dc47c04/data/data/467dc019-df2d-4fda-ab30-c75ce1c88f67-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/comments/922a7fe92a5345dcb09872eb6dc47c04/removed/data/98e72b26-2331-4e0a-9690-cc7b0c4b1ad2-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/95b4658eb1d64a7c99ea3608f12d00cb/data/data/c2b63c12-8bde-44d6-919b-b8382afedf68-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/comments/95b4658eb1d64a7c99ea3608f12d00cb/removed/data/c3efe1c2-df4c-41be-ba57-54343ca2051b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/1275305f22564fad9a92a68d13fa4a0b/data/data/c8e5350f-bd39-41bf-b18e-d5ddf62db1f9-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/7bf0c447123e4670939d8b0468927fcb/data/data/96d05f1a-cfe8-4531-9399-7a9a457d3fcf-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/7bf0c447123e4670939d8b0468927fcb/removed/data/88334bc7-28f7-4434-a940-6d36398925a5-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/comments/1275305f22564fad9a92a68d13fa4a0b/removed/data/5883d529-b153-4814-b90c-b28f84a48d91-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/comments/0dedf59144414122a8ae666e1a8daa51/data/3f5cf9d0-0f91-435d-96cf-09ca3994e443-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpTEyCWJ/workspace/objects/global/73459c3d5a86456fbfe1152a493ab9c0/data/7a1082bb-5d3d-468b-a672-43c47ad0ae64-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/dockets/f1a084c4d1f2457e8d8e09a16ee0574b/data/888d612f-b974-44f3-87c8-94ec92813e83-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/summary/7a0c0ed7125b4335b83ab3cebb40432b/data/312325ac-86c7-45cb-875e-3047146424ec-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/summary/62406248039b4a75b3af4d0c64795f29/data/bee28228-a1eb-46c5-bde1-a451f14ddc6b-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/c895425ef11a48ca9914ff69a96e056d/removed/data/57ec5597-e65d-425f-bb0c-fa7afda4d394-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/captured-producers/a47f91d08e904f6f96ff1bcfbddbec18/data/becb45a8-935d-412b-a859-58c8bed054eb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/captured-producers/66ff700c4d9f4e9096028d999e7fcec4/data/c1144494-a5d4-4419-8145-bdcf27535da6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/comments/f3320fa296374dbda679f3331e1c2447/data/data/0d83c2a9-6890-425e-b16b-9af29c59aecc-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/comments/f3320fa296374dbda679f3331e1c2447/data/data/6203e1e6-266d-4e9d-9b99-cf283502aa7a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/comments/f3320fa296374dbda679f3331e1c2447/removed/data/9dd2d84f-9d14-410d-958b-39268989fb1c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+test related_refresh::compaction::global_summary_compaction_preserves_empty_nonempty_and_noop_transitions ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/df5c0a4a36d845018cb7fe78e14c1943/replacement/data/data/18e97560-bc1f-4fdd-83c4-65a7aa13c7bd-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/df5c0a4a36d845018cb7fe78e14c1943/replacement/data/data/1e3bd60a-0a58-4d47-8ed0-f20ac0da91f0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/df5c0a4a36d845018cb7fe78e14c1943/replacement/removed/data/04d71217-d121-4a52-bb99-c341b386a40c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpmI7l52/workspace/objects/joined/591a74a30c9a43e1893f54f5d493af8d/data/data/1395814b-c8d3-4d0a-8864-9afda77b06be-00000.parquet
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/6e2d5f87fbc24027a6958a1cae574c3a/data/data/63db3699-d965-4d52-bcaf-fc0837077fd5-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/6e2d5f87fbc24027a6958a1cae574c3a/data/data/c0cdf4b4-494e-4f3f-abcc-2cb8bd0d0cfb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpHvY1dP/workspace/objects/comments/6e2d5f87fbc24027a6958a1cae574c3a/removed/data/495084b5-e243-44fc-a5d4-ca9467a1977b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/a12b40d10caa4b18b60c7c6789329ddc/replacement/data/data/efe9aaa1-925a-47a6-a203-1138e5b51a52-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/ff9afe4fbae64a2f9b1279824ba8201d/data/25669221-05d2-44d7-b84d-c0af41125a1f-00000.parquet
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/a12b40d10caa4b18b60c7c6789329ddc/replacement/removed/data/ba46afd9-d7f7-4183-8f72-40acac492091-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpoGBMSa/workspace/objects/joined/139a48b181e44f1eaa6576272e53feee/data/data/55762ecf-fdfc-4a1f-a87d-24956c6dc578-00000.parquet
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/5c1ea194f2654885a77240b5688c6ebb/data/271765ac-fc49-42dd-9a0a-6e75b152f621-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/7822dc7a77a14aee8d26999653f1e7f3/replacement/data/data/463a457a-e9ba-4fde-b943-9231ba032eaa-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/7822dc7a77a14aee8d26999653f1e7f3/replacement/removed/data/69797ebf-9861-4aca-8d7a-a11157512865-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp1JcGsH/workspace/objects/joined/c80b7841cdf64388b226b407cde092dc/data/data/a8ab11d7-653f-4507-8eba-c7e46303e33b-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/summary/0a49118f4ed949928a769eaaaa5fa466/replacement/data/data/09d9d26d-d192-4460-bb71-61cb4970cc39-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/summary/0a49118f4ed949928a769eaaaa5fa466/replacement/removed/data/f2ca8f12-938d-4a49-ac05-9767394b7f22-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfZgKem/workspace/objects/summary/64865d680823414daea7d6db171e68f9/data/data/93371076-41b4-45ee-83fd-1f615c9b12e6-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/d931e52593d64ea29f9e0d911191cf10/data/ccd72ac8-5759-48f1-8f70-a3142622d1a0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/68cf6dfa532045b29a1a5e01c5736901/data/4084a31e-50f6-4c28-b176-9979f3fb9046-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/d8b68bc634d24da096d306d2a27dd33b/replacement/data/data/8b81e445-b09d-4ad2-8022-7e72dc1aca71-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/d8b68bc634d24da096d306d2a27dd33b/replacement/removed/data/3640e142-e46b-4dc9-8c16-e633302f6ad3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/be1f91febea5412d82eeab2c9be3ae52/data/data/10108ac1-7d33-4a5c-8fac-58cdecedbf82-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/fab868cf61f145a195148b4217b6961b/data/3965f225-0ee5-4c6e-9240-de32ed6461b2-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/dockets/1dbbf06d169445f3b42938a7ce95bd20/data/df1f786d-3b89-4816-b463-7196b2a3b2f5-00000.parquet
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+test related_refresh::compaction::subsequent_incremental_refresh_uses_old_and_new_captured_producer_layouts ... ok
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/dockets/7c415378f9004503ad2a14b2500090bb/data/9cceb301-82d7-47ca-aaf6-b4e490f0e941-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/ac758648f73f46e4ab3eb419ed484aa9/data/335c9387-3566-4b18-abb8-8373c5c57391-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/ea02974bfcd4446ab387c66da398c3bc/data/c1928657-6faf-4555-8672-eed3eee4600f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/f2bd4c21d7ba41da915d9f02a093c958/data/b40fb8f4-e9eb-4238-9852-e03c43953b52-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/73b495b14e9e446e8857d064a9a9c623/replacement/data/data/5c095e42-ec1f-4fcd-8239-a967deb98fed-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/eec15dba9d324306b64e8f93316af75c/data/ee53310e-a9dc-4157-a1f0-53701038243d-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/73b495b14e9e446e8857d064a9a9c623/replacement/removed/data/3072f3e1-a299-4fec-9e58-6d1c50068efc-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpUnxz6x/workspace/objects/joined/9b9c7492d1b447beb8d632a48277aacd/data/data/25a738bf-93a0-4fe6-ba43-a5366ad0cd48-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/dockets/9168e9691319432b8ce6153adf205be1/data/f8064c8a-24c5-40f3-8fe0-886da31fad48-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/30127186bac14a94a6cc12b59b6e4b26/data/8b37f972-5873-4d79-8aac-06b3b34c4189-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/343c75a5488c4006accf2d9421e33a45/data/6e44985d-d2bb-4f2f-859b-eb7cd62c3dbe-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/2b78d24a37324063b8836c969b57c6e1/data/data/6ae16ebb-c549-4679-86ed-6e7fa292f0a7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/a86dabf369d04cd5831a3d2fcd3f56bd/data/data/cf08809c-1bfa-4a49-b4f5-a42491d362cb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/comments/a86dabf369d04cd5831a3d2fcd3f56bd/removed/data/da08c60d-7b2e-412a-aa34-0f2201b9362e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/00a15d5d3a1e4e95a71939cbc9f9986b/data/edf88e04-2ebe-473f-b5d6-941d03ffddd4-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/1dcb341beeb34d13817d09639a02b3c1/data/64460e5f-86d5-4135-9cde-1034ba2014d1-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/8e38d0db92bf4baeb5667849214effa8/data/867a2e81-abc9-4128-8e3b-9f3928f828f0-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/c43867b4774447b1a70d80c503b7b99c/data/data/6a540967-009c-460b-bc10-6a1c409c8180-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/dockets/6e779ff48c354722ab80d001d81e5168/data/ec1831b9-d38a-4245-aa4a-644617d8a8e4-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/dockets/eda90255fdea4e2f8530c1f1934e5f1d/data/data/8ef6a9c2-18c8-46c3-85d0-bdfe1aefad51-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/5d5b79a4fd4e49049b52e55f243b5d9f/data/data/d7260822-1edc-4497-9931-72446f1a7f0b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/132ff3143b08435da2ebd17aaa0d73b2/data/7187d451-9746-49ea-b0f7-e86789bab743-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/07db6b91170345d39c2cbdf940d5429e/data/864aae52-927e-4546-ac34-02e7c8d4fcf6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/dockets/53b7f1b2cec64b8ead20f3e7a0912804/data/data/b4afc2f2-8078-40ce-a709-c977b1e8ec97-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/7b70d430793b4f8587d1b0f74b144285/data/6f27cdb7-2565-40d8-a6c8-74c29560d7bf-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/dockets/ac0fb48e7289436c87218db3071f6ca9/data/data/851fc882-9bf0-47d0-a5ad-469d7286040c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/703a46e79dcc43a5afea96fff6bc0096/data/data/ecce75ef-8ca4-4ad0-8ddb-e28c1dda5e5e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/dockets/cd7aa354ebd349e690d1e98cc90e1d58/data/data/f2f5692e-1a32-43c1-9e6a-b3d312a207db-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/dockets/62a2d6969c3b4af4a77bcab2ab699fc1/data/7f6104fd-f661-4f00-8dd6-ecec8823f8e9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/272004b5faa549a2a0ae323b24de3df2/replacement/data/data/5b9e306e-fd95-4029-8055-5432890ce014-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/f5a0a01b67364137b1444dd57403e300/data/data/7953d577-6bb3-467f-9937-b69e257c1625-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/267d5b92d0054f8db9a670878ea53102/replacement/data/data/0ef9b5c8-0aaf-4d38-841e-03b4d1b062b2-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/1e3665caf8e04b738bc47f217ca0fd68/data/data/c56a610f-c5b7-4ea0-abfc-0c4e4421f031-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/8bebcabe3bb643c8b39c163393f0cf72/data/343cf426-958f-4093-921e-b92cdc0fabab-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/cd8e2ec78f6f4609b80a92163d5a55e0/data/3fa94d9d-cf77-4cc6-af95-a714f757158a-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/dockets/39fa5a1755d1460dbec06988aa1af5cd/data/data/18d5f0b6-7423-4830-bc53-ac963e215704-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/9c1477d92f06459bbcebb9301b0df6d2/data/data/9e84ee30-0354-4a0c-8b90-f231a21a8b19-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/2f85d4b64b6e4e91ac765eedee4c49f2/data/data/a384e77b-871f-4940-81e8-8d90d55ac8a2-00000.parquet
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/a8c9aa03139b43f4b42670a135aaf0eb/replacement/data/data/4e2fdfe9-13fb-4589-bb02-5bcc28896645-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/61160d8da9084d3ba1991e21bd10cc7e/data/data/4d1c2ea9-a315-46e9-8bae-6afea3534b8b-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/cbc90cb9398647f18960c8de99b68fa4/data/data/2d02e113-1a0d-4c02-b6a0-be127badc969-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/3a5458910ef44ac886de4ab205e2a9f2/replacement/data/data/4c8cb3ec-f552-49f3-b405-bbde2ea83693-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/30d341e693f9418ba1eb1b8f8ef5b309/data/data/585d282b-3af6-46f3-9ad8-0c4d058a859b-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/dockets/704728e03b62489ba5aa1b4b16d523cc/data/data/72a79e89-21aa-4030-ac35-0bb8d28eb86b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/dockets/d8b99b9109374209b6b871d6e3df547a/data/data/01b8c6e3-39af-452c-a2d9-206fbf8d3f67-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/dockets/7baf9c8745574cf9b8b7530332cc8b29/data/data/fdc25ea3-e5a2-4cdf-9654-321e6bfd3d27-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/d47ad89be96949a08462d923e952e160/data/data/707756a7-0b1f-4ab9-a547-8d87867a40ec-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/fd44dffb01f0446f8fcf22b79f93a6ce/data/data/fe67cde5-573d-46ff-9d26-401aad14f443-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/de486fcead72478da04d83fd66448d38/replacement/data/data/47502e48-894d-48bd-aa9f-7c3da2c7bf26-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/de486fcead72478da04d83fd66448d38/replacement/removed/data/0ca3afd0-ac5b-4846-ba11-3091568a8d3d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/bfd11b90bff443e8ad9e8856e5f62e19/data/data/5f9f46f4-0024-4045-8f87-d57ddff0803c-00000.parquet
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/003151842189435c88211c130c6d08d2/replacement/data/data/3a7cb045-2d74-4668-960a-deac4df472a5-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/deed53cc04f64f7584503c9e71f7fb17/data/data/ad53c81c-88fe-440c-befe-b11a5bc32f26-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/78aab6063a74466a9d68d1c6f92d3199/replacement/data/data/ea677ba0-6c83-4140-84b4-be873e54d1e5-00000.parquet
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/dockets/f0e96a0e32dd421ebc2f3d2dbae4bf2d/data/data/9164ac5c-cd6a-4e74-b941-a670d3ce4d3a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/bf3d46cf97fc46fcb06b09279d47bdd1/data/data/27913d4d-ec28-4f9d-827b-51cb8511885f-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/dockets/b158cd9b76f6410f9fdd5a7d6e4b3e81/data/data/0f078600-1647-4324-ba90-7953f5262421-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/a0f7ef770c3844b9a7d9f66e81c2488e/replacement/data/data/a7e3b7fa-d8a5-43f2-ae82-9f73fc139e95-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/b16db7247b2943e7a885343651293a59/data/data/04c4e683-a1f6-4393-8f33-e8b34bade7e6-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/587ca83ae7324d5298218947802694f2/data/data/04280777-d695-418f-b2f2-f3cebd4e1796-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/c848d8fd202b470e9a92923d7c215290/data/data/d93d1d76-32ff-495d-9f55-1a6b5fc14fa4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/8a543393604c44efacabb48c837f0b6a/data/data/da37d9da-d636-4239-a5e6-3aba5177974b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/dockets/041039bfeae84314a6ef821756fda73b/data/data/6cdf83b2-cc77-434e-9a7e-5ac8ddd25b1b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/3a7d864a53e24ed9a256fb834f3446a8/replacement/data/data/5b7b6a9a-7452-4cbc-9f45-2426ef97aa68-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/2642b02b834b4b70ae4688214ebe5e3e/data/data/09413e04-fd09-4303-b059-fd8a640fc171-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/4d9a9496bbfe41ed8ff43abc08a13d57/replacement/data/data/a2ffee90-0b65-41ee-a223-03890dbe31a1-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/dc0d976e95574b1ca2a5b46c37aabe80/data/data/47dfbaf4-7809-4ed4-b4cf-3a0f04bd8736-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen has been running for over 60 seconds
+test related_refresh::compaction::completed_refresh_keeps_its_producer_layout_after_later_compaction_and_new_admission has been running for over 60 seconds
+test related_refresh::compaction::edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes has been running for over 60 seconds
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout has been running for over 60 seconds
+test related_refresh::compaction::new_refresh_reads_selected_producer_layout_and_preserves_exact_contributors has been running for over 60 seconds
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage has been running for over 60 seconds
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/dockets/3d7c8badd7e74e71b6e282bdef8140c9/data/data/8e650234-8a97-4cb1-b2e3-73a3229ab78e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/dockets/4449e8b576f74b7ea5163a24cee045cd/data/data/e6a42629-6755-4808-81e4-77a88ef8e8a9-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/59e00a9a60fc40caa63e647360ecbd8e/data/data/37d71b83-7205-48e4-acc0-1a8788e563d0-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/bd6d502828294b97a1233625d34050ea/replacement/data/data/9e89639f-5f5a-423f-b4f9-0d0a63673b5f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/b1958b5de2194e0eb7f5507e792b65d7/data/data/0706c481-8c1e-4438-ae99-fcae580cab8f-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/72179d48ed0244aa916d029c5c0ceaf4/data/data/e0cc74be-9f65-4672-8f86-8ab9eb27efb1-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/10faac4eeb6846da9e35a7470362d995/replacement/data/data/f4a89fe9-5a94-4c40-93a2-dd7dc9347d04-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/25c1ecc1c5ab4c2084472a2cc85aa97f/data/data/2c58747b-522f-46ff-b3a2-8039dff0f434-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/dockets/5545c23846be4d1bb172d20c35d107b7/data/data/104989b0-9552-41aa-b68e-0121740be854-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/a69407b883e54ba38ba11885a2f86c48/data/data/fe9c9652-670c-41df-b28a-542152fd1328-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/dockets/ced1019170e7452a8418377c6736cf95/data/data/7a27fceb-61e8-4ae9-89a2-ff56599fca50-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/258c340a89454a45872c325da5071540/replacement/data/data/b09571c6-1b5a-41b7-a7dd-26e79c387473-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/summary/e7214be4e71a4a15bdca5964d21ec02e/data/data/88ac931d-9bbe-4a9b-9387-a115f46433f0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpIwyibW/workspace/objects/joined/63d5cb6e093347d79c531a3911533cd9/data/1897cac2-296e-4f25-815b-7d9c17122af9-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/dockets/929f8ab0a53e459781e72b0c55ea1b44/data/data/482870c9-e265-4184-a14a-a0c573f79734-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/fecabc8b18ec4bcd9e2010274e3e9f37/replacement/data/data/36b38ddb-98b4-47bc-b4c3-ba462d4855c5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/fed2a98c4e9c4b969d118124a405b2b3/data/data/138449a2-d52e-425d-922c-bfcbe24d78c0-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/39291f87079045b5a29a2624592eb845/data/data/367bdc43-53cd-4206-a05f-85f7ed482590-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/comments/39291f87079045b5a29a2624592eb845/removed/data/f86ee28d-08c6-467a-b7cb-db9e3bf5a396-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/ba00cf98209c4f15ae895a07b4f9a410/data/54f34d7e-4f03-46a4-9f86-adc7d126497a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/5bf49c29b91f4cb99a4a5dd8eb771301/replacement/data/data/3b0b3467-c715-459b-8714-1fb9d3988858-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/captured-producers/0658f3e4c5534d6d8f4fe29ffc74d01e/data/72b29ccf-4966-481b-b5b4-a7823dc06a4f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/d269178ff7e64a03a9f8912ecd44b564/data/data/ad38c465-dc04-44b3-bb2c-fd4101269b2d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/captured-producers/8827c9c8ffce430aa76d7b4bcb118b19/data/30ada017-3c68-4b3c-b1f4-433364f70303-00000.parquet
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/a99bce951aee4bb39222b6ef1f2cf789/data/7a842db6-41b2-49e5-8907-aa30a8a79c45-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/69c2dfdd0d2e40a4a4cbfbe655e5ae97/replacement/data/data/9f9642db-57fd-4abe-818b-f0578d95b961-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/58326568f4b04291a1d62f3ff1b43121/data/data/717ee522-0501-451d-bdd5-5623ed4f888f-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/8621378877ef421d9bf26d202bcf405e/data/ecd8ded0-1d6c-48c7-8078-533c636bd430-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/6809b8a6b008419083a6b14ae7a4ec60/data/ad0470d4-fa74-4e2e-8bba-1393daf07b4a-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/22b37f43c16d47c1ace727199a820118/data/data/a38b21d4-1a77-4fea-9eb8-83f827d8eb4b-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/comments/22b37f43c16d47c1ace727199a820118/removed/data/f6d43777-8bec-47dd-bc70-f54c3345a674-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/5009904ffdd94bbe92a0ffb7237b96f2/data/data/fea4ea34-13e7-40e2-b293-f77a2fe1e681-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/ee50f2e75a3f4be2a8aa574d53ca3ad9/data/data/194c6a5b-99fb-4bda-b69d-53fab869e541-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/ee50f2e75a3f4be2a8aa574d53ca3ad9/data/data/49ec85a2-30d1-4341-ac46-9091770f98ea-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpuAntyf/workspace/objects/comments/ee50f2e75a3f4be2a8aa574d53ca3ad9/removed/data/986d7e18-4c4e-46a5-9b95-5bd42dbcebaa-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/d6e7b9f42ff64b31ba238f7a5944f4f7/replacement/data/data/00d649b8-f381-412d-a227-b700272d131f-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/d6e7b9f42ff64b31ba238f7a5944f4f7/replacement/data/data/d8d40863-7a3e-4105-a7f4-d70973ae80aa-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/d6e7b9f42ff64b31ba238f7a5944f4f7/replacement/removed/data/357df575-ecd8-42c9-bd44-45c22cce9e23-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpyBf9Qs/workspace/objects/summary/2c6edd0826a74e75b1381d277c3a4119/data/data/5c9d8796-770a-4136-81ec-4744fb0876a2-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/ee9a2272558a4153a6e15db97ecab2de/data/data/49b2091a-449c-4347-8d7a-7d0d61b2e07a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/60dcda16ff43479d955a075b2baf83fd/data/data/405846ed-1c16-4983-97a0-3ba8e489df6f-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/comments/60dcda16ff43479d955a075b2baf83fd/removed/data/24681aed-f6b8-414e-b0f6-31a833066336-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+test related_refresh::compaction::new_refresh_reads_selected_producer_layout_and_preserves_exact_contributors ... ok
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/2aef03e4a2684fda80eb9bd760620ec1/data/data/2a2c1ded-7267-44c3-9928-1dc02fd67bd5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/comments/2aef03e4a2684fda80eb9bd760620ec1/removed/data/3c3797ae-c1df-42d8-968f-aa27de22c242-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+test related_refresh::compaction::edits_inside_compacted_related_files_preserve_untouched_occurrences_and_public_changes ... ok
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/90f1a4fb8c674d5db2a8d48257d4e23a/replacement/data/data/49e97756-5ae0-4565-a020-7d0ed9cea68e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/ee19de06045c4155ac40c33ab172a42b/data/data/bf83d163-8796-411e-b22a-b5a6942e446c-00000.parquet
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/4b0fbe5510154091bbc448bee86da519/data/data/9a0cc30b-ff7a-4b40-8522-d722171bd550-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/0f1a3eeaf8c54710a70caa19ec3e6592/data/893a9879-1fca-454d-bca8-361ce379c4fb-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/205f4598542d4e0ea5f77a7f2a4ca8b1/replacement/data/data/76917086-952a-4fc2-bd1e-2cbf7d9122a7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/205f4598542d4e0ea5f77a7f2a4ca8b1/replacement/removed/data/2b048d8d-75d8-4d0a-b32c-4c3be05baf0f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmppUMlXR/workspace/objects/summary/232e9c92a4394d42b97b231ffe9f71f6/data/data/9fcc4313-b941-417f-ba27-ba295e187eb1-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/240b8042c0ce4754a526031a8a225143/data/data/2cbf4ebb-d6b0-4d87-80fe-2acf33220a76-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+test related_refresh::compaction::equivalent_new_admission_reuses_processing_from_the_prior_output_layout ... ok
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/3d6e6b41a09a4c3f9a0c398519e2d41c/replacement/data/data/327543a9-b350-4851-95f5-6aca45e4a56a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/cbe4a8f359de4ab8b13ff94ea54afb70/data/2b101d71-49e8-4053-b09e-e8550dea864c-00000.parquet
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/3d6e6b41a09a4c3f9a0c398519e2d41c/replacement/removed/data/a8937574-1432-4094-a77f-bfa8894ca12a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmptCUTTn/workspace/objects/joined/2d8f3087432e46efbb8a9c2145efd362/data/data/73932626-6595-46db-9e57-b376870b942b-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/b5c374b8951a471788e8dfb622a2c699/replacement/data/data/13ce2332-aa54-420d-b5e8-a0f939255239-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/ba1966c26dc24d99935cac0eea47f8c5/data/data/2cb05987-0a00-47e6-b960-a14e12be0f1f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/0962894a30ad4668b9cf27607e0883c9/data/df8c96bf-2f2c-44d8-9c43-799a288ad950-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/830f53ada16e488e8872d7f29e495928/replacement/data/data/6b27c518-a99e-4dda-b62a-e8e6ce5e0621-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/cd6bff72bfac49b6ba7510b85d56aaa3/data/1594775a-aee1-4d8b-932b-c249f2579c1f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/830f53ada16e488e8872d7f29e495928/replacement/removed/data/17474a46-e180-4904-89a4-15ef0c30484b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpffabjr/workspace/objects/summary/ede1be0a56554e67b27115f21e4c8b49/data/data/2ba742ad-3477-405d-a1b8-930874bc8960-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/dockets/d2c53892ce7646c5874e537f503b7631/data/f4825526-7696-407b-8203-acdfaa182bfd-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/a57be8fe86c8477a8f0eaeb3a785d685/data/data/b67a20dd-1b94-4bd2-b63f-7c550ac977d1-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/18fece8ee8e941a39f5ab732a13790ee/data/674df25e-cb97-4093-83bb-8ae4ca2f10df-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/f7b14de3d48f47c09e8b367a4688bbcf/data/94a13927-dac6-4c2e-ae46-24caa229a3c6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_WORK processing
+test related_refresh::compaction::completed_refresh_keeps_its_producer_layout_after_later_compaction_and_new_admission ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/f28e362c74ad45eaa5307e6bc719914e/data/data/c68aa113-92bb-4e4a-94fa-26f7291949a9-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/714e34b3ce244e81aa82e22bcc6df830/data/data/c852f62a-8b66-4b2d-993b-c98178c75c0c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/dockets/186b0a2f884f4044a47ca19f0e41ddc0/data/data/bbe35c75-977e-482f-bc21-43068e674814-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/1c5bcbe8adeb4b70acd8a4b75ce94e57/replacement/data/data/34db7794-5e44-4b51-9cd3-e90f56b3d7a4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/ac84157f0b554e2faeddd367c194d809/data/data/43690057-644c-4dee-b241-d3fff87249a2-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/96348c9401254372af2e438e73a0626b/replacement/data/data/3c377c5c-9f24-455b-83eb-43abab068c1e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/bfecf8be61ec45ac8c208d13e2782d07/data/data/fae1ffa1-18aa-4b32-b687-dca2188d8944-00000.parquet
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/f22298d57eb947e290f53f75c70146d9/data/data/b722484e-853b-4082-9334-7431f254468f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/dockets/7aa3959031c243d2a16084c2a7770f10/data/data/8073d355-82c4-4db9-8e01-dd7bbb1abf12-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/9af8ab67f2164a969e0ea9d4841118f0/data/data/22e88b23-64a9-4125-a0e8-e9a4a170ad59-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/9af8ab67f2164a969e0ea9d4841118f0/removed/data/a2478734-0172-413f-b559-1efbc95a4a5f-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/2789473bb97f4875abcc84245388ce2d/replacement/data/data/c76b2b46-5e53-4392-9960-bb48a5da806e-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/764ccd62ab8e4d25b800f80feb2647e3/data/data/0b44730e-6fb4-42fd-8f21-cdbd6dec056e-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/6e7c692050dc41de8344ddafce402ef5/removed/data/6f2e2b65-8951-44e4-a2f4-1eea64d6b43b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/c9e7d9edce3f4aa3a72b4fed7d9f852e/data/data/4b8a81c6-6aa2-4e33-b6cc-41c9714c9ecf-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/dockets/6156e38567ba442d8c7c0bd535071abc/data/data/a266efc9-4faf-44d0-9bca-aea9a0bbe51a-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/c8f3facb0ae84559986a4b732234dacf/replacement/data/data/8f849674-b5c9-40d3-8c86-784f856a4e08-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/d8c875dc69b14202b6255314ba551795/data/f98c5be3-8c91-43cf-801e-b51f5ab17e6d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/c8f3facb0ae84559986a4b732234dacf/replacement/removed/data/064613bb-1332-4b5b-853a-caa49070cae4-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/a0f64e21a14a43e7bc2cf9e607a35e21/data/data/f171d09d-140e-44ad-a3c7-00383af2b72b-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/c950dd2ebd494b36a8d1c74b023909b8/replacement/data/data/5017e21d-1963-4b8e-9066-80572d6cd80b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/02ba2bec98b545d5a68a949ea335bec3/data/data/7943a899-f1b1-49ac-9246-2344284a69cd-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/ebf0bcf318a1454a9ab928d975157661/data/data/d6aa83dd-32e0-4c0e-bf0a-ffb742ab870b-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/comments/ebf0bcf318a1454a9ab928d975157661/removed/data/5cda6d32-d588-465c-8ff1-57dd9ccba452-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/d2c8572f32ff4499ab4451155983c118/data/data/6e6e6249-428e-424d-847b-902fadc1a490-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/comments/d2c8572f32ff4499ab4451155983c118/removed/data/cc231873-fd3e-4cea-aa77-45da5e210a61-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/dockets/c71946c274d94732b06900e812e137b1/data/data/6a92d746-311c-4d80-8801-68e927892dda-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/a9cb37f73bcb4368b11754872545a7a9/replacement/data/data/a7c21166-3823-4a56-8c7f-913a79f74488-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/a9cb37f73bcb4368b11754872545a7a9/replacement/removed/data/8fa207c2-6139-4cf4-af33-5f1a1a55c1ff-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/29dd2c85976b473e8e62d6fcbf5de25e/data/data/ce2f2352-2c5e-45e2-9dee-c1d5015e3e92-00000.parquet
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/3df83e796ae24d6db0d4940e6442c306/replacement/data/data/47596ca9-0c0c-495f-820a-5e25334cd572-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/6878b1087cfe41048848b96d11b3bfd2/data/938f89f0-d286-4a4b-bc80-34ffb161d127-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/3df83e796ae24d6db0d4940e6442c306/replacement/removed/data/8040f4e6-88e7-42e7-9b9b-912857d4e6bf-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpfzSt2l/workspace/objects/summary/b7058716e56745deb5e4ff1d377b1726/data/data/64624460-d6ba-49ae-8746-c30909afaee8-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/d0e24c1b9b8748eabd835b5e07cf6ac7/data/d59b0338-cff4-48ee-8866-79480550ee09-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/dockets/7798998e11db4c0a802363a74abb70b1/data/a609c797-d62c-4f63-948b-171e0a728cba-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/8870c22ae5ec47a9b10efa942a271bf5/data/905c1ee3-f89e-4793-9ba5-f5c0ba7acb54-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/6afdcca6918a4c5abd2ceceb24885ea1/data/a72e0d5c-9204-4ba9-babf-40951093d5e9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/4dcfdfbb736b40168f317778f6ab920f/data/data/5307bad4-37c5-47bd-80a3-0521167aef49-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/dockets/bf30f08d150d4bcf828353e4d69cc014/data/data/0b25f594-bca9-4ed3-9098-a222beddcce7-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/500483e644114d58b769657439091515/replacement/data/data/b980b8cb-d51f-4b07-b885-bf2a2b24d3f6-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/a4e8aa992ac341d387aa2268d675dbee/data/data/0c148c95-33b4-4677-a08c-a569e8cbbe50-00000.parquet
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpcL4kcB/workspace/objects/summary/12737308fab84af1bcb51aeb3461312a/data/262a6d8e-eb96-42e6-bac8-dad1ee33e943-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/9e88be19703245a2b32a35a64a372750/data/data/5e050e4d-4a67-4349-8abd-4047e03ad3a6-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/dockets/d8de47f71ac84e65bcff58717b3af650/data/data/d7178e74-33eb-4fc2-b7f8-9e285dce9af6-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+test related_refresh::compaction::partial_compaction_is_shared_by_disjoint_refresh_and_noop_advances_coverage ... ok
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/2e959ee6b2ec43cf8dcda5f6e2affa3c/replacement/data/data/0a0ee970-ffd0-45b8-aef4-25674271cbb2-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/1c225754a2634ee780c76c0f38a1ab37/data/data/ba387ca4-8931-4cae-8137-1f1fb838c606-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/3aa7e9c3da234af7accb69e52075ab8e/data/data/cf2b4fe4-adb0-41ca-b9f0-c047c9707130-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/dockets/4d55d9e3dfc8402290f8baef88c3c407/data/data/8745d15f-6526-480f-a614-2abe32430a70-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/bc695a2421b042da89b4a011758c46b5/replacement/data/data/52043624-ddc8-4fd6-b279-60b693fd2af3-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/6f621a050010489e8aeca191a216424a/data/data/11cc0698-efc4-42e5-a689-56d645e7c201-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/e0ed269d83c5402bb09b73612fb1cd12/data/data/cda71e05-a90e-40e0-abc6-8a4374b67336-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/comments/e0ed269d83c5402bb09b73612fb1cd12/removed/data/1fea2410-f34a-43af-8be8-44d35f731d14-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/97f73fdb64d343308054bdf4ab17d7d9/data/5619d174-849f-4421-bf7b-a8059915bc09-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/bbed3e2d0374487e8d6449b88f3a4bcb/replacement/data/data/81a31b0b-89a9-4591-a3d8-d1c8d810ecdb-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/bbed3e2d0374487e8d6449b88f3a4bcb/replacement/removed/data/549aa926-0a9c-4298-8b2d-a9b03534c48d-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpWjpmKy/workspace/objects/summary/b525de425ae742ad9c0961fccbb353e1/data/data/72c79f43-1af5-49c4-acd4-2f697601b57d-00000.parquet
+DOCSPEC_TEST_WORK readback
+test related_refresh::compaction::admitted_related_refresh_resumes_exact_output_after_later_compaction_and_reopen ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 280 filtered out; finished in 116.76s
+

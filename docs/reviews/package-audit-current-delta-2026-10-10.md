@@ -183,3 +183,36 @@ The combined implementation passes the
 [shared-footer/provider-probe review](shared-footer-provider-probe-review-2026-10-10.md)
 approves its bounded scope. The exact provider-probe source digest matches the
 retained run. No accepted corpus workload was repeated.
+
+## Rust conditional-transfer follow-up
+
+The optional direct `opendal = 0.57.0` declaration now exposes the maintained
+conditional writer that Iceberg FileIO cannot express. Cargo.lock changes only
+DocSpec's direct dependency entry; no package/version was added. S3 and timeout
+features were already in the resolved remote graph. The shared startup
+composition resolves provider properties once for catalog, conditional writer
+and native table I/O. It adds no signer, durable selection or transfer journal.
+
+Uploads hash while streaming eight-MiB parts with one native part in flight.
+Verification uses OpenDAL `Reader::into_stream` without range chunking or
+prefetching and hashes each returned buffer before polling the next. The
+[HTTP-boundary fixture](remote-objects-streaming-tests-2026-10-10-2.log) records
+one payload GET and two HEADs; empty objects need only HEADs. This removes the
+initial per-MiB request loop and whole-range buffer coalescing. Buffer admission
+is not measured transport memory or aggregate RSS. The corrected metadata path
+charges retained Vec capacity as well as payload length.
+
+The [Rust/provider probe](r2-rust-objects-provider-2026-10-10.jsonl) passes
+create-only metadata/multipart competition and exact streaming readback on R2.
+Its [receipt](r2-rust-objects-provider-2026-10-10.json) binds source and executable
+digests. This qualifies the actual adapter's bounded success/conflict path;
+representative throughput, full transfer reuse, lost responses and complete
+remote engine integration remain open. See the
+[independent review](conditional-remote-objects-review-2026-10-10.md) and
+[current status](../STATUS.md#rust-create-only-r2-objects-and-streaming-readback).
+
+The combined adapter and compacted-input changes pass the
+[repository gate](remote-related-full-check-2026-10-10.log). A bounded read-only
+[R2 inventory](r2-rust-objects-retained-storage-2026-10-10.json) reports 17,825,833
+visible synthetic bytes and no unfinished multipart uploads at observation.
+It did not read payloads again or perform cleanup.

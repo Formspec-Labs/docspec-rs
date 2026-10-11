@@ -60,7 +60,7 @@ and leaves lifecycle decisions in Rust. Local tests cover completion-response
 loss, Python worker death and cold Rust-host recovery after retained processing.
 Wider route and provider qualification remain unfinished.
 
-## Qualify the remote catalog
+## Qualify remote storage
 
 The optional `remote` feature supplies maintained Iceberg REST and S3 adapters.
 The [synthetic probe](examples/r2_catalog_probe.rs) checks native commit conflicts
@@ -73,6 +73,15 @@ change existing tables or maintenance policies. Configuration uses the
 
 ```sh
 cargo run --locked --features remote --example r2_catalog_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
+```
+
+The [object probe](examples/r2_objects_probe.rs) uses the same configuration plus
+`DOCSPEC_S3_BUCKET`. It checks create-only metadata and multipart uploads, then
+streams one exact readback of each winner. Use a fresh UUID; it retains synthetic
+objects and possible unfinished multipart parts under its isolated prefix.
+
+```sh
+cargo run --locked --features remote --example r2_objects_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
 ```
 
 This adapter does not yet make the local engine, publication or maintenance

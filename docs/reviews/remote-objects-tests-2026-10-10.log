@@ -1,0 +1,16 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.37s
+     Running unittests src/lib.rs (target/debug/deps/docspec-8efaad379e46ee74)
+
+running 8 tests
+test storage::remote::objects::tests::conditional_conflict_and_uncertain_outcome_have_distinct_refusals ... ok
+test storage::remote::objects::tests::scope_rejects_aliases_and_cross_prefix_destinations ... ok
+test storage::remote::tests::missing_required_configuration_is_refused_before_connecting ... ok
+test storage::remote::tests::debug_redacts_dummy_secrets_without_network_requests ... ok
+test storage::remote::objects::tests::configuration_errors_and_debug_never_disclose_secret_values ... ok
+test storage::remote::objects::tests::incorrect_or_oversized_metadata_refuses_before_provider_io ... ok
+test storage::remote::objects::tests::changed_source_length_refuses_before_provider_io ... ok
+test storage::remote::objects::tests::independent_native_readback_returns_retained_identity_and_refuses_changes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 253 filtered out; finished in 0.05s
+

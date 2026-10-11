@@ -1,0 +1,17 @@
+{
+  "owner": "docspec-rs-qualification-bcf2167f-5773-4533-913a-c5d38a10bae4",
+  "root": "s3://spicy-regs/docspec-qualification/docspec-rs-qualification-bcf2167f-5773-4533-913a-c5d38a10bae4/rust-objects",
+  "started_utc": "2026-10-11T01:12:52.166829+00:00",
+  "protocol": "Concurrent conditional metadata creates, repeated winner refusal, one exact streaming readback; multipart create and competing replacement refusal, one exact streaming readback. Fresh synthetic prefix only. Retain objects and incomplete parts. No injected transport loss or throughput claim.",
+  "source_sha256": {
+    "Cargo.toml": "dac7d3a33a86714110f9215fe2f9e603f7e8d4b38c59c30528c3ecf9e438b3e5",
+    "Cargo.lock": "d1409a8065272834be57e999dad54f725ca9aad2fdb1265f66d6d95fb9ca78dc",
+    "src/storage/remote.rs": "bed9495b373e57a870424e04773103ba7698aa4b3ba61a937b4246e1fa185206",
+    "src/storage/remote/objects.rs": "bea8ee23b57cb5fc67d80556a80f0afef72a45b598f8cd028eaeaa30bf334557",
+    "examples/r2_objects_probe.rs": "4775b56d47253a2c630fb6bc00e4735774fabf99af25443d67ffb6bba95cfce8",
+    "target/debug/examples/r2_objects_probe": "cc633b1d5b679973e1ce2130bfd86ec4728867e4c5a9554303cc692ac092cb70"
+  },
+  "state": "completed",
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T01:13:01.357545+00:00"
+}

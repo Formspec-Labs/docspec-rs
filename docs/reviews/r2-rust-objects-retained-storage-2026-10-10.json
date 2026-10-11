@@ -1,0 +1,19 @@
+{
+  "observed_utc": "2026-10-11T01:15:52.373913+00:00",
+  "bucket": "spicy-regs",
+  "prefix": "docspec-qualification/docspec-rs-qualification-bcf2167f-5773-4533-913a-c5d38a10bae4/rust-objects/",
+  "scope": "Read-only inventory of this synthetic probe prefix; no payload reads or deletion",
+  "objects": [
+    {
+      "key": "docspec-qualification/docspec-rs-qualification-bcf2167f-5773-4533-913a-c5d38a10bae4/rust-objects/metadata.json",
+      "bytes": 22
+    },
+    {
+      "key": "docspec-qualification/docspec-rs-qualification-bcf2167f-5773-4533-913a-c5d38a10bae4/rust-objects/multipart.bin",
+      "bytes": 17825811
+    }
+  ],
+  "unfinished_multipart": [],
+  "visible_bytes": 17825833,
+  "unfinished_part_bytes": 0
+}

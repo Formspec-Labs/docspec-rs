@@ -19,6 +19,83 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Rust create-only R2 objects and streaming readback
+
+The optional remote composition now supplies a maintained conditional writer and
+native table I/O from the same resolved provider configuration. Metadata creation
+and bounded local-file upload use OpenDAL's `if_not_exists` option; both ordinary
+PUT and multipart completion refuse an existing destination. Upload hashes its
+single source pass and checks retained length/digest before close. Unknown write
+outcomes have a distinct refusal and require explicit identity reconciliation.
+There is no automatic write retry or durable partial-multipart resume.
+
+Independent readback hashes one streamed range response with backpressure and
+exact byte counting, plus size checks before and after. It does not collect the
+object or issue one GET per MiB. Empty objects use only size checks and the empty
+digest. The [localhost checks](reviews/remote-objects-streaming-tests-2026-10-10-2.log)
+observe HEAD/GET/HEAD for a nonempty object and cover tail corruption, short
+responses, changed size, scope refusal and metadata spare-capacity admission.
+The prior failed fixture run is retained: macOS accepted sockets inherited
+nonblocking mode; the dedicated test server now uses blocking sockets with
+bounded waits. Small wrong-digest uploads refuse before publication.
+
+The [actual Rust/provider receipt](reviews/r2-rust-objects-provider-2026-10-10.json)
+and [raw output](reviews/r2-rust-objects-provider-2026-10-10.jsonl) pass concurrent
+metadata creates, repeated winner refusal, multipart replacement refusal and one
+exact readback per winner in a fresh synthetic SpicyRegs prefix. The multipart
+winner contains **17,825,811 bytes**. A scoped, read-only
+[storage inventory](reviews/r2-rust-objects-retained-storage-2026-10-10.json) records
+**17,825,833 visible bytes** and no unfinished multipart uploads at observation.
+The synthetic objects remain retained; no production objects or provider policy
+changed. Source and executable digests bind the probe. This is correctness
+evidence, not a throughput, network-request or whole-process memory measurement.
+
+The adapter charges owned metadata capacity and retains worker admission through
+caller cancellation. Upload buffers/part inventory and read buffers have explicit
+admission allowances; native HTTP allocation and aggregate RSS remain unqualified.
+The [independent review](reviews/conditional-remote-objects-review-2026-10-10.md)
+approves the corrected implementation. Multipart failure after transfer starts,
+lost close responses and actual remote-I/O cancellation still need qualification.
+The direct optional OpenDAL declaration uses the already locked **0.57.0** package;
+no new package/version was added by this checkpoint.
+
+These are shared storage primitives. Remote native source admission, complete
+release/evidence availability, retained transfer/readback phases, single Basin
+selection, multi-host fencing and remote maintenance/restore remain unfinished.
+The local CLI/HTTP engine does not acquire those capabilities from this probe.
+
+## Dependent refreshes retain compacted producer files
+
+Joins and summaries now capture each producer's selected equivalent source
+layout at protected admission. Processing, contributor evidence, recovery and
+retention use those exact files even after another compaction. The logical input
+version stays unchanged; qualified change history still checks its canonical
+endpoints. Older records without a capture retain their canonical interpretation.
+The shared maintained readers preserve original row occurrences. This extends the
+existing compaction path without adding a second selection or metadata cache.
+
+The [focused suite](reviews/related-compacted-input-tests-2026-10-10.log) passes
+full and subsequent incremental joins/summaries, old/new compacted inputs,
+duplicate/null-key moves, retired-history fallback, completed-processing reuse,
+legacy recovery and phase-only retention. Independent value/contributor oracles,
+full-versus-forward changes and explicit deep verification agree. A forged
+replacement with changed values refuses. The
+[blind review](reviews/related-compacted-input-review-2026-10-10.md) approves after
+fixing the legacy aggregate fallback and adding the subsequent-refresh case.
+
+Ordinary reads do not compare full canonical and compacted payloads. Explicit
+deep verification still reconstructs canonical inputs and checks equivalence;
+this checkpoint therefore does not make every original layout reclaimable.
+Contributor-table compaction, selected representation-authority retirement and
+broader lifetime/process qualification remain open. No representative latency or
+disk-saving claim follows from these synthetic correctness cases.
+
+Both changes pass the [repository gate](reviews/remote-related-full-check-2026-10-10.log):
+formatting, strict all-target/all-feature Clippy, library/integration, restore,
+worker-initialization and documentation checks. The existing external Comments
+physical-plan probe remains explicitly ignored. The accepted full-corpus
+benchmark was not repeated; the new evidence covers these changed behaviors.
+
 ## Native read measurements and shared footer inspection
 
 Qualification can now retain maintained Iceberg `ScanMetrics` while consuming
@@ -2321,7 +2398,7 @@ or compatibility layer for legacy DocSpec.
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption; one retained local continuous scalar intent with exact source captures and bounded intake fencing | Nested/type evolution; related-output schema edits; global source IDs across non-evolved full rebuilds; nested computed values; broader selective dependencies beyond same-file primitive scalar correction; broader continuous-cutover process/race/resource qualification |
 | R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, retained source rename/reorder alignment, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers; shared qualified history discovery for local R5 consumers under existing maintenance and processing protection | Broader type/schema-mapping comparison, portable trust and remaining scaling/failure qualification |
 | R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage | Evidence-dependent policy requalification and dependency correction; computed input groups; broader aggregate functions and key types |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation and compaction recovery, and unused owner-grant retirement; actual obsolete intermediate-layout reclamation through native registration detachment and exact removal; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads, source updates and incremental join/summary outputs with exact captured-layout recovery; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; compacted related-input selection, contributor table compaction and selected representation-authority retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation and compaction recovery, and unused owner-grant retirement; actual obsolete intermediate-layout reclamation through native registration detachment and exact removal; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads, source updates and incremental join/summary outputs with exact captured-layout recovery; dependent refreshes capture and protect compacted producer source layouts; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore | Historical observation bindings, seal and descendant dependency lifetimes; contributor table compaction and selected representation-authority retirement; broader reader/removal and interrupted-restore process qualification; abandoned restore-prefix disposal; remote provider qualification |
 | R7 Operations and qualification | Shared services; CLI; loopback HTTP; plan, run, inspect, resume, read, verify, compare/changes, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss, actual Python worker death, cold Rust host recovery after retained processing and replacement-worker reconciliation | Complete counters; aggregate resource and real-network qualification; broader fault tests; unchanged/update/backfill/resume and remote performance gates; Dagster wider route and arbitrary crash-boundary qualification |
 
 The CLI exposes implemented operations only. Source updates support complete key

@@ -62,8 +62,18 @@ impl Engine {
         // source instead of resolving a newly selected representation.
         let captured = captured_source.unwrap_or(canonical);
         let native = write::open_captured_source(canonical, captured, budget).await?;
-        let previous = refresh::load_inputs(&related.coverage, budget).await?;
-        let current = refresh::load_inputs(coverage, budget).await?;
+        let previous =
+            refresh::load_inputs(&related.coverage, &related.input_sources, budget).await?;
+        let current = refresh::load_inputs(
+            coverage,
+            admission
+                .dependencies
+                .as_ref()
+                .map(|dependencies| &dependencies.input_sources)
+                .unwrap_or(&BTreeMap::new()),
+            budget,
+        )
+        .await?;
         if previous.releases.iter().all(|(dataset, old)| {
             current.releases.get(dataset).is_some_and(|new| {
                 old.dataset
@@ -179,6 +189,10 @@ impl Engine {
                     (
                         &previous.releases[&old_version.dataset],
                         &current.releases[&new_version.dataset],
+                    ),
+                    (
+                        previous.canonical_source(&old_version.dataset)?,
+                        current.canonical_source(&new_version.dataset)?,
                     ),
                     &keys,
                 )
@@ -338,6 +352,7 @@ impl Engine {
         dataset: &Id,
         directory: &Path,
         versions: (&ReleasePin, &ReleasePin),
+        canonical: (&TablePin, &TablePin),
         keys: &[String],
     ) -> Result<(TablePin, u64)> {
         let budget = &self.inner.lifecycle.budget;
@@ -385,6 +400,7 @@ impl Engine {
                 dataset,
                 &table,
                 versions,
+                canonical,
                 &old_native,
                 keys,
                 key_schema.clone(),

@@ -5,11 +5,16 @@ use arrow::datatypes::SchemaRef;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 impl Engine {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "History discovery binds canonical endpoints separately from physical scans"
+    )]
     pub(super) async fn history_keys(
         &self,
         dataset: &Id,
         output: &iceberg::table::Table,
         versions: (&ReleasePin, &ReleasePin),
+        canonical: (&TablePin, &TablePin),
         old_native: &iceberg::table::Table,
         keys: &[String],
         key_schema: SchemaRef,
@@ -21,13 +26,7 @@ impl Engine {
             .open(&versions.1.dataset.dataset)
             .await?;
         let chain = match self
-            .change_chain(
-                &view,
-                versions,
-                (source(versions.0)?, source(versions.1)?),
-                old_native,
-                changes::MAX_LINKS,
-            )
+            .change_chain(&view, versions, canonical, old_native, changes::MAX_LINKS)
             .await?
         {
             changes::Forward::Eligible(chain) => chain,

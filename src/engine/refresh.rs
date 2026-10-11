@@ -66,15 +66,21 @@ impl Engine {
         let budget = &self.inner.lifecycle.budget;
         let view = self.inner.lifecycle.open(&spec.dataset).await?;
         let _memory = self.admission_memory(&view, &spec.operation).await?;
-        let coverage =
+        let (coverage, input_sources) =
             if let Some(captured) = self.admitted_dependencies(&view, &spec.operation).await? {
-                captured.coverage.ok_or_else(invalid)?
+                (
+                    captured.coverage.ok_or_else(invalid)?,
+                    captured.input_sources,
+                )
             } else {
                 // Earlier requests predate protected admission and retain their
                 // existing capture behavior while physical cleanup stays disabled.
-                self.capture_inputs_admitted(&spec.inputs(), false).await?
+                (
+                    self.capture_inputs_admitted(&spec.inputs(), false).await?,
+                    BTreeMap::new(),
+                )
             };
-        let loaded = load_inputs(&coverage, budget).await?;
+        let loaded = load_inputs(&coverage, &input_sources, budget).await?;
         if let RefreshTransform::Aggregate(aggregate) = &spec.transform {
             aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
                 .await?;
@@ -94,7 +100,10 @@ impl Engine {
             changes: None,
             coverage: Some(coverage),
             metrics: WriteMetrics::default(),
-            dependencies: Some(PhaseDependencies::default()),
+            dependencies: Some(PhaseDependencies {
+                input_sources,
+                ..PhaseDependencies::default()
+            }),
         };
         let protections = self.request_protections(&view, &spec.operation).await?;
         self.complete(
@@ -128,7 +137,16 @@ impl Engine {
         if coverage.inputs != spec.inputs() {
             return Err(invalid());
         }
-        let loaded = load_inputs(coverage, &self.inner.lifecycle.budget).await?;
+        let input_sources = admission
+            .dependencies
+            .as_ref()
+            .map(|dependencies| &dependencies.input_sources);
+        let loaded = load_inputs(
+            coverage,
+            input_sources.unwrap_or(&BTreeMap::new()),
+            &self.inner.lifecycle.budget,
+        )
+        .await?;
         let context = self.context();
         let frame = source_frame(
             &context,
@@ -191,6 +209,11 @@ impl Engine {
                     RefreshTransform::Aggregate(aggregate) => {
                         let loaded = load_inputs(
                             processing.coverage.as_ref().ok_or_else(invalid)?,
+                            processing
+                                .dependencies
+                                .as_ref()
+                                .map(|dependencies| &dependencies.input_sources)
+                                .unwrap_or(&BTreeMap::new()),
                             &self.inner.lifecycle.budget,
                         )
                         .await?;
@@ -225,6 +248,11 @@ impl Engine {
         stop_after(stop, "evidence")?;
         Ok(Retained {
             value: RelatedResult {
+                input_sources: processing
+                    .dependencies
+                    .as_ref()
+                    .map(|dependencies| dependencies.input_sources.clone())
+                    .unwrap_or_default(),
                 request: spec.clone(),
                 coverage: processing.coverage.clone().ok_or_else(invalid)?,
                 evidence: evidence.value.table.ok_or_else(invalid)?,
@@ -454,9 +482,16 @@ pub(super) fn phase_key(
 
 pub(super) struct LoadedInputs {
     pub releases: BTreeMap<Id, ReleasePin>,
+    canonical_sources: BTreeMap<Id, TablePin>,
     _metadata: Arc<tokio::sync::OwnedSemaphorePermit>,
 }
 impl LoadedInputs {
+    pub(super) fn canonical_source(&self, dataset: &Id) -> Result<&TablePin> {
+        self.canonical_sources
+            .get(dataset)
+            .or_else(|| self.releases.get(dataset)?.dataset.groups.get("source"))
+            .ok_or_else(invalid)
+    }
     pub(super) fn borrowed(&self) -> BTreeMap<Id, &ReleasePin> {
         self.releases
             .iter()
@@ -465,7 +500,11 @@ impl LoadedInputs {
     }
 }
 
-pub(super) async fn load_inputs(coverage: &InputCoverage, budget: &Budget) -> Result<LoadedInputs> {
+pub(super) async fn load_inputs(
+    coverage: &InputCoverage,
+    input_sources: &BTreeMap<Id, TablePin>,
+    budget: &Budget,
+) -> Result<LoadedInputs> {
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = inputs::metadata_size(coverage, budget.limits.max_metadata_bytes)?;
     let mut releases = BTreeMap::new();
@@ -476,6 +515,24 @@ pub(super) async fn load_inputs(coverage: &InputCoverage, budget: &Budget) -> Re
         }
         releases.insert(dataset.clone(), release);
     }
+    let mut canonical_sources = BTreeMap::new();
+    for (dataset, captured) in input_sources {
+        bytes = bytes.saturating_add(inputs::metadata_size(
+            captured,
+            budget.limits.max_metadata_bytes,
+        )?);
+        if bytes > budget.limits.max_metadata_bytes || captured.metadata.owner != *dataset {
+            return Err(invalid());
+        }
+        let release = releases.get_mut(dataset).ok_or_else(invalid)?;
+        let canonical = release.dataset.groups.get("source").ok_or_else(invalid)?;
+        write::open_captured_source(canonical, captured, budget).await?;
+        canonical_sources.insert(dataset.clone(), canonical.clone());
+        release
+            .dataset
+            .groups
+            .insert("source".into(), captured.clone());
+    }
     let relationships = releases
         .iter()
         .map(|(dataset, release)| (dataset.clone(), release.dataset.relationship.clone()))
@@ -483,6 +540,7 @@ pub(super) async fn load_inputs(coverage: &InputCoverage, budget: &Budget) -> Re
     inputs::check_relationships(coverage, &relationships)?;
     Ok(LoadedInputs {
         releases,
+        canonical_sources,
         _metadata: memory,
     })
 }
@@ -768,7 +826,7 @@ pub(super) async fn verify_related(
     budget: &Budget,
     checks: &mut verification::Checks,
 ) -> Result<()> {
-    let loaded = load_inputs(&related.coverage, budget).await?;
+    let loaded = load_inputs(&related.coverage, &BTreeMap::new(), budget).await?;
     verify_related_with_inputs(source, related, &loaded.borrowed(), budget, checks).await
 }
 
@@ -794,6 +852,48 @@ pub(super) async fn verify_related_with_inputs(
         })
         .collect::<Result<_>>()?;
     inputs::check_relationships(&related.coverage, &relationships)?;
+    // Reconstruction retains the canonical producer interpretation. The physical
+    // capture is checked separately so its logical label cannot certify itself.
+    for (dataset, captured) in &related.input_sources {
+        if !related.coverage.inputs.contains_key(dataset) || captured.metadata.owner != *dataset {
+            return Err(invalid());
+        }
+        let canonical = releases
+            .get(dataset)
+            .ok_or_else(invalid)?
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(invalid)?;
+        let selected = write::open_captured_source(canonical, captured, budget).await?;
+        if checks.deep() {
+            checks.table(captured, budget).await?;
+            let context = budget.context();
+            for (alias, native, rows) in [
+                (
+                    "canonical_input",
+                    storage::open_pin(canonical, budget).await?,
+                    canonical.rows,
+                ),
+                ("captured_input", selected, captured.rows),
+            ] {
+                context.register_table(
+                    alias,
+                    crate::query::occurrences(native, budget.clone(), Some(rows))?,
+                )?;
+            }
+            let columns = context
+                .table("canonical_input")
+                .await?
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| quote(field.name()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            equal_multisets(&context, "canonical_input", "captured_input", &columns).await?;
+        }
+    }
     let context = budget.context();
     validate(&related.request)?;
     let expected = source_frame(

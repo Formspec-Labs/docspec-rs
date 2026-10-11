@@ -17,6 +17,9 @@ pub(in crate::engine) struct AdmissionDependencies {
     /// Exact physical source consumed by a source update or incremental refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_source: Option<TablePin>,
+    /// Exact equivalent producer sources selected before protected request admission.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_sources: BTreeMap<Id, TablePin>,
 }
 
 pub(super) fn captures_source(request: &OperationRequest) -> bool {
@@ -131,6 +134,15 @@ impl Engine {
         }) {
             return Err(invalid());
         }
+        if dependencies.input_sources.iter().any(|(dataset, source)| {
+            source.metadata.owner != *dataset
+                || dependencies
+                    .coverage
+                    .as_ref()
+                    .is_none_or(|coverage| !coverage.inputs.contains_key(dataset))
+        }) {
+            return Err(invalid());
+        }
         let inputs = request.inputs();
         if dependencies.inputs.iter().any(|(name, object)| {
             inputs
@@ -172,6 +184,7 @@ impl Engine {
             coverage,
             inputs: BTreeMap::new(),
             update_source,
+            input_sources: BTreeMap::new(),
         };
         let mut releases = base.into_iter().collect::<Vec<_>>();
         let mut release_bytes = inputs::metadata_size(&releases, limit)?;
@@ -197,24 +210,40 @@ impl Engine {
             if dependencies.base.as_ref() == Some(&version) {
                 continue;
             }
-            let (release, charge) = {
-                let lock = self.lock(&version.dataset).await;
-                let _guard = lock.lock().await;
-                let view = self.inner.lifecycle.open(&version.dataset).await?;
-                self.check_operation_available(&view, &version.version)
-                    .await?;
-                let charge = self
-                    .inner
-                    .lifecycle
-                    .rows(&view)
-                    .await?
-                    .reserve_decoded(budget, &[&format!("result/{}", version.version)])?;
-                (
-                    self.resolve_release(&view, &version.dataset, &version.version)
-                        .await?,
-                    charge,
-                )
-            };
+            let (release, charge) =
+                {
+                    let lock = self.lock(&version.dataset).await;
+                    let _guard = lock.lock().await;
+                    let view = self.inner.lifecycle.open(&version.dataset).await?;
+                    self.check_operation_available(&view, &version.version)
+                        .await?;
+                    let charge = self
+                        .inner
+                        .lifecycle
+                        .rows(&view)
+                        .await?
+                        .reserve_decoded(budget, &[&format!("result/{}", version.version)])?;
+                    let release = self
+                        .resolve_release(&view, &version.dataset, &version.version)
+                        .await?;
+                    if dependencies.coverage.as_ref().is_some_and(|coverage| {
+                        coverage.inputs.get(&version.dataset) == Some(&version)
+                    }) {
+                        let canonical = release.dataset.groups.get("source").ok_or_else(invalid)?;
+                        let source = self
+                            .representation_pin(&view, &version.version, "source", canonical)
+                            .await?;
+                        if source != *canonical {
+                            memory.merge(budget.reserve(
+                                inputs::metadata_size(&source, limit)?.saturating_mul(4),
+                            )?);
+                            dependencies
+                                .input_sources
+                                .insert(version.dataset.clone(), source);
+                        }
+                    }
+                    (release, charge)
+                };
             if release.version_ref() != version {
                 return Err(inputs::invalid_relationship());
             }
@@ -288,6 +317,12 @@ impl Engine {
         if !dependencies.inputs.is_empty() {
             let objects = dependencies.inputs.values().cloned().collect::<Vec<_>>();
             protections.merge(self.protect_objects(spec.dataset(), &objects).await?)?;
+        }
+        for source in dependencies.input_sources.values() {
+            protections.merge(
+                self.protect_objects(spec.dataset(), &source.objects)
+                    .await?,
+            )?;
         }
         if let Some(source) = &dependencies.update_source {
             protections.merge(

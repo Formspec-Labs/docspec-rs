@@ -979,6 +979,9 @@ impl Inventory {
 
     fn related(&mut self, related: &RelatedResult, origin: &RetentionBlocker) -> Result<()> {
         self.coverage(&related.coverage, origin)?;
+        for source in related.input_sources.values() {
+            self.table(source, origin)?;
+        }
         self.table(&related.evidence, origin)
     }
 
@@ -1324,6 +1327,9 @@ impl Inventory {
             for schema in &dependencies.schema_metadata {
                 self.object(schema, origin)?;
             }
+            for source in dependencies.input_sources.values() {
+                self.table(source, origin)?;
+            }
             for table in &dependencies.tables {
                 self.snapshot(table, origin)?;
             }
@@ -1398,6 +1404,9 @@ impl Inventory {
             }
             for object in dependencies.inputs.values() {
                 self.object(object, origin)?;
+            }
+            for source in dependencies.input_sources.values() {
+                self.table(source, origin)?;
             }
             if let Some(source) = &dependencies.update_source {
                 self.table(source, origin)?;

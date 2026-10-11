@@ -298,6 +298,7 @@ async fn closure_collects_history_computation_coverage_and_seals_without_payload
     );
     let evidence = table(root.path(), "evidence_owner", "evidence");
     selected.dataset.related = Some(Box::new(RelatedResult {
+        input_sources: BTreeMap::new(),
         request: RefreshSpec {
             dataset: id("consumer"),
             operation: id("selected"),

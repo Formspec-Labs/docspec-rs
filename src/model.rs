@@ -432,6 +432,9 @@ impl RefreshSpec {
 /// Retained contributor evidence bound to a complete related-source computation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelatedResult {
+    /// Exact equivalent source layouts consumed while retaining logical input coverage.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_sources: BTreeMap<Id, TablePin>,
     pub request: RefreshSpec,
     pub coverage: InputCoverage,
     pub evidence: TablePin,
@@ -493,6 +496,9 @@ pub struct PhaseResult {
 /// Small immutable references needed to recover or reuse a completed phase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhaseDependencies {
+    /// Equivalent related-input sources actually consumed by this completion.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_sources: BTreeMap<Id, TablePin>,
     /// Input names before the operation-specific release prefix is applied.
     pub admitted_inputs: BTreeMap<String, ObjectRef>,
     /// Selected schema/history consumed while preparing this phase.
