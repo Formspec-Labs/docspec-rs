@@ -1,5 +1,10 @@
 # Package efficiency audit
 
+For changes since this audit's pinned inventory, see the
+[current delta review](reviews/package-audit-current-delta-2026-10-10.md).
+It covers the optional REST/S3 dependencies and distinguishes delivered changes
+from remaining measurements and implementation work.
+
 **Keep the current dependency family. The remaining useful work is to avoid redundant cardinality scans, extend selected-column reading to scalar preparation, and qualify native row-group sizing. Reuse immutable metadata where a repeated open remains.** The [current follow-up](#current-follow-up-2026-10-10) rechecks every direct package, enabled defaults, relevant duplicate dependencies and maintained adapter alternatives. It distinguishes completed improvements from work still in progress; its status and priorities supersede earlier snapshots below. Enabling every optional feature would increase the surface to maintain without establishing a benefit.
 
 The latest [independent completeness review](reviews/package-efficiency-completeness-review-2026-10-10.md)

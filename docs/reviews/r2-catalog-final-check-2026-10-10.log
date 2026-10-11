@@ -1,0 +1,114 @@
+     Locking 1 package to latest Rust 1.94 compatible version
+      Adding webpki-roots v1.0.9
+   Compiling ring v0.17.14
+   Compiling rustls v0.23.45
+   Compiling webpki-roots v1.0.9
+   Compiling parquet v58.4.0
+   Compiling rustls-webpki v0.103.15
+   Compiling tokio-rustls v0.26.6
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling hyper-rustls v0.27.10
+   Compiling reqwest v0.13.5
+   Compiling reqwest v0.12.28
+   Compiling opendal-core v0.57.0
+   Compiling datafusion-common v53.1.0
+   Compiling iceberg v0.10.1
+   Compiling opendal-service-s3 v0.57.0
+   Compiling opendal-layer-concurrent-limit v0.57.0
+   Compiling opendal-layer-timeout v0.57.0
+   Compiling opendal-layer-logging v0.57.0
+   Compiling opendal-layer-retry v0.57.0
+   Compiling opendal v0.57.0
+   Compiling datafusion-expr-common v53.1.0
+   Compiling datafusion-physical-expr-common v53.1.0
+   Compiling datafusion-functions-aggregate-common v53.1.0
+   Compiling datafusion-functions-window-common v53.1.0
+   Compiling datafusion-expr v53.1.0
+   Compiling datafusion-physical-expr v53.1.0
+   Compiling datafusion-execution v53.1.0
+   Compiling datafusion-functions v53.1.0
+   Compiling iceberg-catalog-sql v0.10.1
+   Compiling iceberg-storage-opendal v0.10.1
+   Compiling iceberg-catalog-rest v0.10.1
+   Compiling datafusion-functions-aggregate v53.1.0
+   Compiling datafusion-optimizer v53.1.0
+   Compiling datafusion-physical-plan v53.1.0
+   Compiling datafusion-physical-expr-adapter v53.1.0
+   Compiling datafusion-functions-window v53.1.0
+   Compiling datafusion-functions-nested v53.1.0
+   Compiling datafusion-sql v53.1.0
+   Compiling datafusion-session v53.1.0
+   Compiling datafusion-datasource v53.1.0
+   Compiling datafusion-pruning v53.1.0
+   Compiling datafusion-catalog v53.1.0
+   Compiling datafusion-datasource-json v53.1.0
+   Compiling datafusion-physical-optimizer v53.1.0
+   Compiling datafusion-datasource-parquet v53.1.0
+   Compiling datafusion-datasource-arrow v53.1.0
+   Compiling datafusion-datasource-csv v53.1.0
+   Compiling datafusion-functions-table v53.1.0
+   Compiling datafusion-catalog-listing v53.1.0
+   Compiling datafusion v53.1.0
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 1m 31s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f07ec1eefcd8bb0d)
+
+running 2 tests
+test storage::remote::tests::missing_required_configuration_is_refused_before_connecting ... ok
+test storage::remote::tests::debug_redacts_dummy_secrets_without_network_requests ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 240 filtered out; finished in 0.00s
+
+    Checking ring v0.17.14
+    Checking webpki-roots v1.0.9
+    Checking parquet v58.4.0
+    Checking rustls-webpki v0.103.15
+    Checking rustls v0.23.45
+    Checking tokio-rustls v0.26.6
+    Checking rustls-platform-verifier v0.7.1
+    Checking hyper-rustls v0.27.10
+    Checking reqwest v0.13.5
+    Checking reqwest v0.12.28
+    Checking opendal-core v0.57.0
+    Checking datafusion-common v53.1.0
+    Checking iceberg v0.10.1
+    Checking opendal-layer-logging v0.57.0
+    Checking opendal-service-s3 v0.57.0
+    Checking opendal-layer-timeout v0.57.0
+    Checking opendal-layer-retry v0.57.0
+    Checking opendal-layer-concurrent-limit v0.57.0
+    Checking opendal v0.57.0
+    Checking datafusion-expr-common v53.1.0
+    Checking datafusion-physical-expr-common v53.1.0
+    Checking datafusion-functions-window-common v53.1.0
+    Checking datafusion-functions-aggregate-common v53.1.0
+    Checking datafusion-expr v53.1.0
+    Checking datafusion-physical-expr v53.1.0
+    Checking datafusion-execution v53.1.0
+    Checking datafusion-functions v53.1.0
+    Checking iceberg-storage-opendal v0.10.1
+    Checking iceberg-catalog-rest v0.10.1
+    Checking iceberg-catalog-sql v0.10.1
+    Checking datafusion-functions-aggregate v53.1.0
+    Checking datafusion-optimizer v53.1.0
+    Checking datafusion-functions-window v53.1.0
+    Checking datafusion-physical-plan v53.1.0
+    Checking datafusion-physical-expr-adapter v53.1.0
+    Checking datafusion-functions-nested v53.1.0
+    Checking datafusion-sql v53.1.0
+    Checking datafusion-session v53.1.0
+    Checking datafusion-datasource v53.1.0
+    Checking datafusion-pruning v53.1.0
+    Checking datafusion-catalog v53.1.0
+    Checking datafusion-datasource-arrow v53.1.0
+    Checking datafusion-datasource-json v53.1.0
+    Checking datafusion-datasource-csv v53.1.0
+    Checking datafusion-physical-optimizer v53.1.0
+    Checking datafusion-datasource-parquet v53.1.0
+    Checking datafusion-catalog-listing v53.1.0
+    Checking datafusion-functions-table v53.1.0
+    Checking datafusion v53.1.0
+    Checking docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 48.03s
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `dev` profile [unoptimized] target(s) in 16.99s

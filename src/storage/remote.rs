@@ -1,0 +1,185 @@
+//! Maintained REST catalog and S3 storage configured at application startup.
+//!
+//! This adapter establishes native catalog and table I/O only. Filesystem source
+//! admission, exports, restore, and removal still need remote qualification.
+//! Secrets are resolved from named environment variables without logging values.
+
+use crate::{Error, Result};
+use async_trait::async_trait;
+use iceberg::{
+    Catalog, CatalogBuilder, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+    table::Table,
+};
+use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
+use iceberg_storage_opendal::OpenDalStorageFactory;
+use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
+
+// Bound metadata control requests while allowing remote connection setup.
+// These limits cover REST requests, not whole operations or bulk S3 transfers.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Connects maintained REST and S3 adapters using explicit properties and secret references.
+///
+/// `properties` contains Iceberg REST/S3 properties such as `uri`, `warehouse`,
+/// `s3.endpoint`, and `s3.region`. Each `secret_env` entry maps an Iceberg property
+/// (for example `token`) to an environment-variable name, never its value.
+/// Local properties override server-vended table configuration in the maintained
+/// REST adapter. Keep headers redacted and avoid ambient credential discovery.
+/// REST requests allow 15 seconds to connect and 60 seconds overall.
+/// Catalog construction is lazy; the first catalog operation checks connectivity.
+///
+/// # Errors
+/// Refuses missing required properties, unavailable secrets, and initialization failures.
+pub async fn remote_catalog(
+    mut properties: HashMap<String, String>,
+    secret_env: HashMap<String, String>,
+) -> Result<Arc<dyn Catalog>> {
+    for key in ["uri", "warehouse"] {
+        if properties.get(key).is_none_or(|value| value.is_empty()) {
+            return Err(Error::refusal(
+                "remote_config",
+                "catalog URI and warehouse are required",
+            ));
+        }
+    }
+    for (property, variable) in secret_env {
+        let value = std::env::var(variable)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| Error::refusal("remote_secret", "a referenced secret is unavailable"))?;
+        properties.insert(property, value);
+    }
+    properties.insert("disable-header-redaction".into(), "false".into());
+    properties.insert("s3.disable-ec2-metadata".into(), "true".into());
+    properties.insert("s3.disable-config-load".into(), "true".into());
+    let client = reqwest_rest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|_| Error::refusal("remote_config", "native HTTP client initialization failed"))?;
+    let inner = RestCatalogBuilder::default()
+        .with_client(client)
+        .with_storage_factory(Arc::new(OpenDalStorageFactory::S3 {
+            customized_credential_load: None,
+        }))
+        .load("docspec", properties)
+        .await
+        .map_err(|_| Error::refusal("remote_config", "native catalog initialization failed"))?;
+    Ok(Arc::new(RemoteCatalog { inner }))
+}
+
+// Upstream RestCatalog derives Debug over configuration containing secrets.
+// Preserve Catalog's required Debug API without exposing that configuration.
+struct RemoteCatalog {
+    inner: RestCatalog,
+}
+
+impl fmt::Debug for RemoteCatalog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteCatalog").finish_non_exhaustive()
+    }
+}
+
+#[async_trait]
+impl Catalog for RemoteCatalog {
+    async fn list_namespaces(
+        &self,
+        p: Option<&NamespaceIdent>,
+    ) -> iceberg::Result<Vec<NamespaceIdent>> {
+        self.inner.list_namespaces(p).await
+    }
+    async fn create_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<Namespace> {
+        self.inner.create_namespace(n, p).await
+    }
+    async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        self.inner.get_namespace(n).await
+    }
+    async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
+        self.inner.namespace_exists(n).await
+    }
+    async fn update_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<()> {
+        self.inner.update_namespace(n, p).await
+    }
+    async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
+        self.inner.drop_namespace(n).await
+    }
+    async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        self.inner.list_tables(n).await
+    }
+    async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
+        self.inner.create_table(n, c).await
+    }
+    async fn load_table(&self, t: &TableIdent) -> iceberg::Result<Table> {
+        self.inner.load_table(t).await
+    }
+    async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.drop_table(t).await
+    }
+    async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.purge_table(t).await
+    }
+    async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
+        self.inner.table_exists(t).await
+    }
+    async fn rename_table(&self, s: &TableIdent, d: &TableIdent) -> iceberg::Result<()> {
+        self.inner.rename_table(s, d).await
+    }
+    async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
+        self.inner.register_table(t, m).await
+    }
+    async fn update_table(&self, c: TableCommit) -> iceberg::Result<Table> {
+        self.inner.update_table(c).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn debug_redacts_dummy_secrets_without_network_requests() {
+        let secret = "dummy-secret-must-not-appear";
+        let catalog = remote_catalog(
+            HashMap::from([
+                ("uri".into(), "https://catalog.invalid".into()),
+                ("warehouse".into(), "test-warehouse".into()),
+                ("token".into(), secret.into()),
+                ("s3.secret-access-key".into(), secret.into()),
+            ]),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        let debug = format!("{catalog:?}");
+        assert!(!debug.contains(secret));
+        assert!(debug.contains("RemoteCatalog"));
+    }
+
+    #[tokio::test]
+    async fn missing_required_configuration_is_refused_before_connecting() {
+        for properties in [
+            HashMap::new(),
+            HashMap::from([("uri".into(), "https://catalog.invalid".into())]),
+            HashMap::from([
+                ("uri".into(), "https://catalog.invalid".into()),
+                ("warehouse".into(), String::new()),
+            ]),
+        ] {
+            let error = remote_catalog(properties, HashMap::new())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), "remote_config");
+        }
+    }
+}
+
+// Rust guideline compliant 2026-02-21

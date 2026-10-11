@@ -1,0 +1,87 @@
+{
+  "target": "aarch64-apple-darwin",
+  "features": [
+    "remote"
+  ],
+  "manifest_sha256": "b1573561a5368a190907dc68d48e36e8a00830ad7206bb50e5b156c1bf36f9ed",
+  "lock_sha256": "a9cf755107441e1a1039944a15bbf7eaf0a4a132322de7bed7172a3c1510fa1b",
+  "packages": [
+    {
+      "package": "iceberg-catalog-rest",
+      "version": "0.10.1",
+      "features": []
+    },
+    {
+      "package": "iceberg-storage-opendal",
+      "version": "0.10.1",
+      "features": [
+        "opendal-s3",
+        "reqsign-aws-v4",
+        "reqsign-core"
+      ]
+    },
+    {
+      "package": "opendal",
+      "version": "0.57.0",
+      "features": [
+        "auto-register-services",
+        "default",
+        "executors-tokio",
+        "layers-concurrent-limit",
+        "layers-logging",
+        "layers-retry",
+        "layers-timeout",
+        "reqwest-rustls-tls",
+        "services-s3"
+      ]
+    },
+    {
+      "package": "opendal-core",
+      "version": "0.57.0",
+      "features": [
+        "executors-tokio",
+        "reqwest-rustls-tls"
+      ]
+    },
+    {
+      "package": "opendal-service-s3",
+      "version": "0.57.0",
+      "features": []
+    },
+    {
+      "package": "reqwest",
+      "version": "0.12.28",
+      "features": [
+        "__rustls",
+        "__rustls-ring",
+        "__tls",
+        "json",
+        "rustls-tls",
+        "rustls-tls-webpki-roots",
+        "rustls-tls-webpki-roots-no-provider"
+      ]
+    },
+    {
+      "package": "reqwest",
+      "version": "0.13.5",
+      "features": [
+        "__rustls",
+        "__rustls-aws-lc-rs",
+        "__tls",
+        "rustls",
+        "stream"
+      ]
+    },
+    {
+      "package": "rustls",
+      "version": "0.23.45",
+      "features": [
+        "aws-lc-rs",
+        "aws_lc_rs",
+        "ring",
+        "std",
+        "tls12"
+      ]
+    }
+  ]
+}

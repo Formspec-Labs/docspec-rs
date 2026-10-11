@@ -19,6 +19,41 @@ This does not complete the wider lifecycle plan or qualify remote execution.
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
 
+## Live R2/Basin catalog foundation
+
+The optional `remote` feature uses maintained Iceberg REST and OpenDAL S3 adapters.
+It resolves credentials from environment references, redacts catalog debug output,
+and bounds REST connection/request time. The
+[independent review](reviews/r2-catalog-foundation-review-2026-10-10.md) caught
+and resolved a missing REST-specific HTTPS feature and absent request deadlines.
+The [resolved feature record](reviews/r2-resolved-features-2026-10-10.json)
+keeps this optional stack distinct from the default local build.
+
+Using the existing SpicyRegs bucket and Basin catalog, the
+[live synthetic probe](reviews/r2-catalog-provider-2026-10-10.jsonl) **passes**:
+an actual server expected-snapshot conflict rejects the stale candidate, the
+winning rows remain selected, and a fresh client recovers exact native rows after
+an injected lost commit response. The [run receipt](reviews/r2-catalog-provider-2026-10-10.json)
+identifies the isolated namespace. Test objects remain retained; no existing table,
+production dataset or maintenance policy was changed. The earlier
+[read-only preflight](reviews/r2-provider-preflight-2026-10-10.json) is retained.
+
+The [full gate](reviews/schema-dagster-remote-full-check-2026-10-10.log) passes
+for the combined local checkpoint and initial adapter. The final HTTPS/client
+adjustment additionally passes its network-free unit tests, strict all-target
+lint and example build in the [follow-up](reviews/r2-catalog-final-check-2026-10-10.log),
+followed by the live probe. This is coverage across runs; the complete suite was
+not repeated after that adapter adjustment. The offline dependency check's
+[missing-package failure](reviews/r2-catalog-build-2026-10-10.log) and subsequent
+[successful resolution/build](reviews/r2-catalog-build-2026-10-10-2.log) remain retained.
+
+This qualifies the native catalog/lifecycle seam only. Bulk transfer/reuse,
+independent remote release admission, Basin-selected native release delivery,
+multi-host ownership, protection/expiration and restore remain unfinished.
+The [next-slice review](reviews/remote-publication-next-slice-2026-10-10.md)
+identifies the remaining filesystem and reader dependencies without introducing
+a second release authority.
+
 ## Compare retained column renames and reordering
 
 Source comparisons now align compatible root fields across retained schema edits.

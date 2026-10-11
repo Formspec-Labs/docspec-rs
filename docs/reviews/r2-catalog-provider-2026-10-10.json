@@ -1,0 +1,10 @@
+{
+  "dataset": "docspec-rs-qualification-bd8cc84d-8066-4244-bde6-2712967992c5",
+  "configuration_source": "../spicy-regs/.env",
+  "bucket": "spicy-regs",
+  "scope": "synthetic catalog lifecycle seam only",
+  "timeout_seconds": 180,
+  "production_tables_modified": false,
+  "exit_code": 0,
+  "elapsed_seconds": 17.453
+}

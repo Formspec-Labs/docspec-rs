@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-10",
+  "configuration_source": "../spicy-regs/.env",
+  "bucket": "spicy-regs",
+  "catalog_uri": "https://catalog.cloudflarestorage.com/174055408ff1560e60601c4d12c561c4/spicy-regs",
+  "warehouse": "174055408ff1560e60601c4d12c561c4_spicy-regs",
+  "catalog_config_http": 200,
+  "catalog_config_default_keys": [],
+  "catalog_config_override_keys": ["prefix", "s3.signer.uri"],
+  "bucket_head_http": 200,
+  "writes": false,
+  "scope": "Authenticated catalog configuration and bucket availability only; no write, conflict, retention or remote lifecycle qualification."
+}

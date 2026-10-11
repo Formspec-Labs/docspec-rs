@@ -56,8 +56,27 @@ restore promises. Retirement and physical deletion remain separate operations.
 
 The [Dagster adapter](adapters/dagster/README.md) submits bounded native requests
 to one local Rust HTTP host. It preserves operation IDs across uncertain retries
-and leaves lifecycle decisions in Rust. Its local build/replay path is tested;
-provider and replacement-worker qualification remain unfinished.
+and leaves lifecycle decisions in Rust. Local tests cover completion-response
+loss, Python worker death and cold Rust-host recovery after retained processing.
+Wider route and provider qualification remain unfinished.
+
+## Qualify the remote catalog
+
+The optional `remote` feature supplies maintained Iceberg REST and S3 adapters.
+The [synthetic probe](examples/r2_catalog_probe.rs) checks native commit conflicts
+and lost-response readback in a fresh `docspec-rs-qualification-<UUID>` namespace.
+It requires `--allow-synthetic-writes`, retains its test objects and does not
+change existing tables or maintenance policies. Configuration uses the
+`DOCSPEC_CATALOG_URI`, `DOCSPEC_CATALOG_WAREHOUSE`, `DOCSPEC_S3_ENDPOINT`,
+`DOCSPEC_CATALOG_TOKEN`, `DOCSPEC_S3_ACCESS_KEY_ID` and
+`DOCSPEC_S3_SECRET_ACCESS_KEY` environment variables. Keep secrets out of arguments.
+
+```sh
+cargo run --locked --features remote --example r2_catalog_probe -- --allow-synthetic-writes "docspec-rs-qualification-<UUID>"
+```
+
+This adapter does not yet make the local engine, publication or maintenance
+remote-capable. See [current qualification](docs/STATUS.md).
 
 ## Run locally
 

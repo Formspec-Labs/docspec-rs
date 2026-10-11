@@ -4,6 +4,8 @@ pub(crate) mod defaults;
 pub(crate) mod identity;
 mod inspection;
 mod occurrences;
+#[cfg(feature = "remote")]
+pub mod remote;
 pub(crate) mod removal;
 mod schema;
 mod selection;
