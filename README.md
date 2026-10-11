@@ -98,12 +98,16 @@ cargo run --locked --features remote --example r2_candidate_probe -- --allow-syn
 ```
 
 The Rust library can open a local execution host with the same explicitly resolved
-catalog and object configuration. Initial independent Build, recovery, selection and selected
-source-group streaming are qualified on the configured R2/Basin path. Remote
+catalog and object configuration. Initial independent Build, source-only updates,
+recovery, selection and selected source-group streaming have scoped R2/Basin
+qualification. Remote
 Build supports a dataset's first selection and recovery of that same operation;
-a new Build after selection refuses before source or lifecycle mutation. Other remote
-source mutations refuse before lifecycle effects. Primitive-column exports of
-that initial source are implemented with protected host staging, conditional
+a new Build after selection refuses before source or lifecycle mutation. Updates
+support complete-key replacement and deletion on an independent Build/Update
+lineage with no computed groups, related inputs or receipts. Completed processing
+is reused; an unacknowledged attempt may restart under a new protected prefix,
+retaining its partial objects. Primitive-column exports of the selected source
+are implemented with protected host staging, conditional
 remote transfer and retained completion. A completed export can explicitly reclaim
 its exact original host stage after durable remote verification; unfinished
 transfers require the original host. Remote object maintenance, computed and

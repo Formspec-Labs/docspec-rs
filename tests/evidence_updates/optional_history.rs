@@ -355,3 +355,249 @@ async fn equal_null_receipts_cannot_hide_a_changed_native_payload_type() {
         verify_release(original, limits()).await.unwrap();
     }
 }
+
+// This ends explicit receipt availability/recovery, rather than discarding
+// ancestry needed by a still-promised receipt-bearing result.
+#[tokio::test]
+async fn final_receipt_promises_end_before_exact_payload_reclamation() {
+    let root = TempDir::new().unwrap();
+    let (engine, initial) = fixture(root.path()).await;
+    let positions = locations(&engine, &initial).await;
+    let attached = engine
+        .update_evidence(&request(
+            root.path(),
+            &initial,
+            "lifetime-attached",
+            &[
+                (positions[0].1.clone(), Some("old".into())),
+                (positions[0].1.clone(), Some("old".into())),
+                (positions[1].1.clone(), None),
+            ],
+            &[],
+        ))
+        .await
+        .unwrap();
+    let replacements = vec![
+        (positions[0].1.clone(), None),
+        (positions[0].1.clone(), Some("".into())),
+        (positions[0].1.clone(), Some("new".into())),
+        (positions[0].1.clone(), Some("new".into())),
+    ];
+    let replaced = engine
+        .update_evidence(&request(
+            root.path(),
+            &attached,
+            "lifetime-replaced",
+            &replacements,
+            &[(positions[1].1.clone(), None)],
+        ))
+        .await
+        .unwrap();
+    let mut expected = replacements;
+    expected.sort();
+    assert_eq!(receipts(&engine, &replaced).await, expected);
+    verify_release(&replaced, limits()).await.unwrap();
+    let candidate = attached
+        .dataset
+        .evidence
+        .as_ref()
+        .unwrap()
+        .table
+        .objects
+        .iter()
+        .find(|object| {
+            object.path.ends_with(".parquet")
+                && !replaced
+                    .dataset
+                    .evidence
+                    .as_ref()
+                    .unwrap()
+                    .table
+                    .objects
+                    .contains(object)
+        })
+        .expect("replacement must have one obsolete authoritative receipt file")
+        .clone();
+    assert!(Path::new(&candidate.path).exists());
+
+    // Ending the earlier availability cannot end the later result's required
+    // reconstruction edge (or its independently retained phase/recovery edges).
+    let availability = engine
+        .plan_availability_retirement(
+            &initial.dataset.dataset,
+            &id("lifetime-attached-availability"),
+            &attached.id,
+            "end original receipt release availability",
+        )
+        .await
+        .unwrap();
+    engine.retire_availability(&availability).await.unwrap();
+    assert!(
+        engine
+            .inspect_retention(std::slice::from_ref(&candidate))
+            .await
+            .unwrap()
+            .objects[0]
+            .blocker
+            .is_some()
+    );
+    assert_eq!(receipts(&engine, &replaced).await, expected);
+    verify_release(&replaced, limits()).await.unwrap();
+
+    // An unbased independent Build is supported here: there are no computed or
+    // related groups, and its new input produces a genuinely new material state.
+    // It does not inherit receipts; the unchanged active definition names v1,
+    // not a receipt payload or a selected historical release.
+    let input = values(
+        &root.path().join("lifetime-new.parquet"),
+        &[
+            (9, Some("current")),
+            (9, Some("current")),
+            (10, None),
+            (11, Some("")),
+        ],
+    );
+    let current = engine
+        .run(&RunSpec {
+            dataset: initial.dataset.dataset.clone(),
+            operation: id("lifetime-current"),
+            base: None,
+            relationship: None,
+            input: input.path.clone(),
+            expected_digest: input.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: initial.dataset.definition.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(current.dataset.parent_manifest.is_none());
+    assert!(current.dataset.evidence.is_none());
+    assert!(current.dataset.computed.is_empty());
+    assert!(current.dataset.related.is_none());
+    assert!(
+        !current
+            .dataset
+            .groups
+            .values()
+            .any(|table| table.objects.contains(&candidate))
+    );
+    assert!(
+        engine
+            .inspect_retention(std::slice::from_ref(&candidate))
+            .await
+            .unwrap()
+            .objects[0]
+            .blocker
+            .is_some()
+    );
+
+    let dataset = &initial.dataset.dataset;
+    for release in [&initial, &replaced] {
+        let plan = engine
+            .plan_availability_retirement(
+                dataset,
+                &id(&format!("{}-availability", release.id)),
+                &release.id,
+                "end superseded receipt-lineage availability",
+            )
+            .await
+            .unwrap();
+        engine.retire_availability(&plan).await.unwrap();
+    }
+    // Optional changes have their own lifetime; they are not silently expired
+    // by result or phase retirement.
+    let changes = engine
+        .plan_change_retirement(
+            dataset,
+            &id("lifetime-changes"),
+            &[attached.id.clone(), replaced.id.clone()],
+            "end optional receipt transition history",
+        )
+        .await
+        .unwrap();
+    engine.retire_changes(&changes).await.unwrap();
+    let old_operations = [&initial.id, &attached.id, &replaced.id];
+    let phases = engine
+        .inspect(dataset)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|(key, value)| {
+            if !key.starts_with("phase/") {
+                return None;
+            }
+            let phase: PhaseResult = serde_json::from_value(value).unwrap();
+            old_operations.contains(&&phase.operation).then_some(key)
+        })
+        .collect::<Vec<_>>();
+    assert!(!phases.is_empty());
+    let phase_plan = engine
+        .plan_phase_retirement(
+            dataset,
+            &id("lifetime-phases"),
+            &phases,
+            "end obsolete receipt-lineage phase recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&phase_plan).await.unwrap();
+    for operation in old_operations {
+        let plan = engine
+            .plan_operation_retirement(
+                dataset,
+                &id(&format!("{operation}-recovery")),
+                operation,
+                "end obsolete terminal receipt recovery",
+            )
+            .await
+            .unwrap();
+        engine.retire_operation(&plan).await.unwrap();
+    }
+    // Every recorded grant would be a separate promise. This own-dataset fixture
+    // intentionally has none; it does not claim foreign-grant lifetime coverage.
+    assert!(
+        !engine
+            .inspect(dataset)
+            .await
+            .unwrap()
+            .keys()
+            .any(|key| key.starts_with("owner-protection/"))
+    );
+    let removal = engine
+        .plan_removal(
+            dataset,
+            &id("lifetime-receipt-file"),
+            std::slice::from_ref(&candidate),
+            "remove the exact last-unpromised receipt payload",
+        )
+        .await
+        .unwrap();
+    assert_eq!(removal.inspection.protected_bytes, 0);
+    let removed = engine.remove_objects(&removal).await.unwrap();
+    assert!(removed.complete);
+    assert_eq!(removed.intent.objects, vec![0]);
+    assert_eq!(removed.intent.plan.inspection.objects[0].object, candidate);
+    assert_eq!(removed.confirmed_unlinked_bytes, candidate.bytes);
+    assert_eq!(removed.progress.objects, vec![RemovalOutcome::Removed]);
+    assert!(!Path::new(&candidate.path).exists());
+    std::fs::remove_file(&input.path).unwrap();
+    engine.shutdown().await.unwrap();
+    drop(engine);
+
+    let cold = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    assert_eq!(cold.latest(dataset).await.unwrap(), current);
+    assert_eq!(
+        source_values(&cold, &current).await,
+        vec![
+            (9, Some("current".into())),
+            (9, Some("current".into())),
+            (10, None),
+            (11, Some("".into()))
+        ]
+    );
+    verify_release(&current, limits()).await.unwrap();
+    assert_eq!(cold.remove_objects(&removal).await.unwrap(), removed);
+    assert!(!Path::new(&candidate.path).exists());
+}

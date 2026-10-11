@@ -491,8 +491,7 @@ impl Engine {
 
     fn check_export_backend(&self, source: &ReleasePin, policy: &ExportPolicy) -> Result<()> {
         if !self.inner.retained.is_local()
-            && (policy.group != "source"
-                || !matches!(&source.dataset.request, OperationRequest::Build(build) if build.base.is_none() && matches!(&source.dataset.relationship, SourceRelationship::Independent)))
+            && (policy.group != "source" || !remote_source_only(&source.dataset))
         {
             return Err(locations::unsupported());
         }

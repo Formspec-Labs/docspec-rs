@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T08:15:25.146917+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "source_update_location_path_reuses_processing_and_shares_files",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 7033622528,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 6636064768,
+  "free_after_bytes": 6636974080,
+  "finished_utc": "2026-10-11T08:16:01.288285+00:00"
+}

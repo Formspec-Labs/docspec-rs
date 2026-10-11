@@ -1,0 +1,13 @@
+
+running 1 test
+{"dataset":"docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00","phase":"updates_start","prefix":"s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update"}
+test engine::remote_build_provider_tests::updates::native_remote_updates_export_and_read_from_a_fresh_host has been running for over 60 seconds
+test engine::remote_build_provider_tests::updates::native_remote_updates_export_and_read_from_a_fresh_host ... FAILED
+
+failures:
+
+failures:
+    engine::remote_build_provider_tests::updates::native_remote_updates_export_and_read_from_a_fresh_host
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 328 filtered out; finished in 99.57s
+

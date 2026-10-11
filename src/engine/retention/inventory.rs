@@ -63,7 +63,9 @@ impl Engine {
             };
             inventory.release_pin(release, &origin)?;
         }
-        inventory.expand(budget, &self.inner.root).await?;
+        inventory
+            .expand(&self.inner.objects, budget, &self.inner.root)
+            .await?;
         let objects = inventory.into_references()?;
         let bytes = objects.iter().fold(0usize, |bytes, object| {
             bytes.saturating_add(reference_bytes(object))
@@ -360,7 +362,9 @@ impl Engine {
                     continue;
                 }
                 inventory.record(key, json, &rows, &origin)?;
-                inventory.expand(budget, &self.inner.root).await?;
+                inventory
+                    .expand(&self.inner.objects, budget, &self.inner.root)
+                    .await?;
             }
         }
         boundaries.sort_by(|left, right| left.table.cmp(&right.table));
@@ -1692,7 +1696,12 @@ impl Inventory {
         Ok(())
     }
 
-    async fn expand(&mut self, budget: &Budget, root: &Path) -> Result<()> {
+    async fn expand(
+        &mut self,
+        objects: &storage::Objects,
+        budget: &Budget,
+        root: &Path,
+    ) -> Result<()> {
         while let Some(Pending {
             object,
             kind,
@@ -1706,6 +1715,14 @@ impl Inventory {
                 .is_some_and(|entry| entry.complete)
             {
                 continue;
+            }
+            // Complete table pins satisfy native dependencies above. Remote
+            // collection supports exact DatasetPin parents only; partial native
+            // roots and other lifecycle families remain explicitly unqualified.
+            if !matches!(objects, storage::Objects::Local)
+                && !matches!(&kind, Expansion::Release { .. })
+            {
+                return Err(locations::unsupported());
             }
             // The immutable descriptor supplies its size before decoding. The
             // worker retains this allowance if its waiting caller is canceled.
@@ -1743,7 +1760,7 @@ impl Inventory {
                 }
                 Expansion::Release { .. } => {
                     let Strict(dataset): Strict<DatasetPin> = inputs::read_manifest(
-                        &storage::Objects::Local,
+                        objects,
                         &object,
                         budget,
                         &mut self.metadata_bytes,
@@ -2166,7 +2183,10 @@ mod scalar_origins_tests {
         inventory
             .enqueue(&originals, Expansion::Origins, &origin())
             .unwrap();
-        inventory.expand(&budget, root.path()).await.unwrap();
+        inventory
+            .expand(&storage::Objects::Local, &budget, root.path())
+            .await
+            .unwrap();
         assert_eq!(inventory.metadata_objects_read, 2);
         assert!(
             !inventory
@@ -2451,13 +2471,22 @@ mod release_history_tests {
             let mut inventory = Inventory::new(std::slice::from_ref(&payload), 1 << 20).unwrap();
             if history_first {
                 inventory.history(&manifest, &origin).unwrap();
-                inventory.expand(&budget, root.path()).await.unwrap();
+                inventory
+                    .expand(&storage::Objects::Local, &budget, root.path())
+                    .await
+                    .unwrap();
                 assert!(inventory.candidates[&payload.path].blocker.is_none());
             }
             inventory.release(&manifest, &origin).unwrap();
-            inventory.expand(&budget, root.path()).await.unwrap();
+            inventory
+                .expand(&storage::Objects::Local, &budget, root.path())
+                .await
+                .unwrap();
             inventory.history(&manifest, &origin).unwrap();
-            inventory.expand(&budget, root.path()).await.unwrap();
+            inventory
+                .expand(&storage::Objects::Local, &budget, root.path())
+                .await
+                .unwrap();
             assert!(inventory.candidates[&payload.path].blocker.is_some());
             assert!(inventory.visited[&manifest.path].release_payloads);
             assert_eq!(
@@ -2469,7 +2498,10 @@ mod release_history_tests {
         let mut inventory = Inventory::new(std::slice::from_ref(&payload), 1 << 20).unwrap();
         inventory.history(&manifest, &origin).unwrap();
         inventory.release(&manifest, &origin).unwrap();
-        inventory.expand(&budget, root.path()).await.unwrap();
+        inventory
+            .expand(&storage::Objects::Local, &budget, root.path())
+            .await
+            .unwrap();
         assert!(inventory.candidates[&payload.path].blocker.is_some());
         assert_eq!(inventory.metadata_objects_read, 1);
     }

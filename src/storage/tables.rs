@@ -42,6 +42,13 @@ pub(crate) fn replacement_metadata(
     base: &TableMetadata,
     directory: &Path,
 ) -> Result<TableMetadata> {
+    replacement_metadata_at(base, &directory.to_string_lossy())
+}
+
+pub(crate) fn replacement_metadata_at(
+    base: &TableMetadata,
+    location: &str,
+) -> Result<TableMetadata> {
     if !matches!(base.format_version(), FormatVersion::V2 | FormatVersion::V3)
         || !base.default_partition_spec().is_unpartitioned()
         || !base.default_sort_order().is_unsorted()
@@ -60,7 +67,7 @@ pub(crate) fn replacement_metadata(
         .clone()
         .into_builder(None)
         .assign_uuid(uuid::Uuid::new_v4())
-        .set_location(directory.to_string_lossy().into_owned())
+        .set_location(location.to_owned())
         .remove_ref("main")
         .remove_snapshots(&snapshots)
         // These writer overrides would escape the new protected attempt directory.
@@ -87,10 +94,18 @@ pub(crate) fn replacement_metadata(
 pub(crate) enum CandidateWriter {
     Local,
     #[cfg(feature = "remote")]
-    Remote(super::remote::RemoteObjects, MetadataLocation),
+    Remote(super::remote::RemoteObjects, Option<MetadataLocation>),
 }
 
 impl CandidateWriter {
+    pub(crate) fn configured(objects: &super::Objects) -> Self {
+        match objects {
+            super::Objects::Local => Self::Local,
+            #[cfg(feature = "remote")]
+            super::Objects::Remote(objects) => Self::Remote(objects.clone(), None),
+        }
+    }
+
     fn metadata_path(&self, metadata: &TableMetadata) -> Result<String> {
         if metadata.metadata_compression_codec()? != iceberg::compression::CompressionCodec::None {
             return Err(Error::refusal(
@@ -103,13 +118,16 @@ impl CandidateWriter {
                 Ok(MetadataLocation::new_with_metadata(metadata.location(), metadata).to_string())
             }
             #[cfg(feature = "remote")]
-            Self::Remote(_, location) => {
+            Self::Remote(_, selected) => {
+                let location = selected.clone().unwrap_or_else(|| {
+                    MetadataLocation::new_with_metadata(metadata.location(), metadata)
+                });
                 let path = location.to_string();
                 let prefix = format!("{}/metadata/", metadata.location());
                 let filename = path.strip_prefix(&prefix);
                 let canonical = path
                     .parse::<MetadataLocation>()
-                    .is_ok_and(|parsed| parsed == *location && parsed.to_string() == path);
+                    .is_ok_and(|parsed| parsed == location && parsed.to_string() == path);
                 if location.compression_codec() != iceberg::compression::CompressionCodec::None
                     || filename.is_none_or(|name| name.is_empty() || name.contains('/'))
                     || !canonical

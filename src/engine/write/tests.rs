@@ -348,7 +348,7 @@ async fn renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_f
     let result = engine
         .replace_keys(Replacement {
             dataset: &owner,
-            directory: &directory,
+            directory: locations::Location::Local(directory.clone()),
             before: &before,
             keys: &["key".into()],
             scope,
@@ -762,7 +762,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     let added = engine
         .replace_keys(Replacement {
             dataset: &owner,
-            directory: &root.path().join("new-key"),
+            directory: locations::Location::Local(root.path().join("new-key")),
             before: &before,
             keys: &["key".into()],
             scope: context.sql("SELECT 1::BIGINT AS key").await.unwrap(),
@@ -785,7 +785,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     let deleted = engine
         .replace_keys(Replacement {
             dataset: &owner,
-            directory: &root.path().join("delete-null-key"),
+            directory: locations::Location::Local(root.path().join("delete-null-key")),
             before: &added.table,
             keys: &["key".into()],
             scope: context.sql("SELECT NULL::BIGINT AS key").await.unwrap(),
@@ -801,7 +801,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     let noop = engine
         .replace_keys(Replacement {
             dataset: &owner,
-            directory: &root.path().join("noop"),
+            directory: locations::Location::Local(root.path().join("noop")),
             before: &deleted.table,
             keys: &["key".into()],
             scope: context
@@ -819,7 +819,7 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
     let all = engine
         .replace_keys(Replacement {
             dataset: &owner,
-            directory: &root.path().join("delete-all"),
+            directory: locations::Location::Local(root.path().join("delete-all")),
             before: &noop.table,
             keys: &["key".into()],
             scope: context.sql("SELECT 1::BIGINT AS key").await.unwrap(),

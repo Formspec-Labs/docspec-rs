@@ -1,0 +1,11 @@
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/975583cb63a94f73827882306c7c27a0/data/data/81a4c275-0598-4ba7-baf9-991b41abcba8-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/975583cb63a94f73827882306c7c27a0/removed/data/fbe0d111-d29f-462e-9680-f6160503b8ac-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization

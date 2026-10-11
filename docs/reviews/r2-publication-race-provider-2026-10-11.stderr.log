@@ -1,0 +1,19 @@
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/publication-race/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/6104d4979fa240dcbcd2199ad1299ca6/data/880de68b-c244-419f-91a4-96f937dba262-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/publication-race/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/c9ef1b946e1140eaba226e9e6e01813b/data/data/5933225f-3d1c-43db-9e06-537497598d4a-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/publication-race/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/c9ef1b946e1140eaba226e9e6e01813b/data/data/bdf5af11-b507-4924-afb7-ca508e1bd231-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/publication-race/docspec-rs-qualification-a3cdfdb6-5868-4851-b3df-5a4fc48681fe/c9ef1b946e1140eaba226e9e6e01813b/removed/data/e791d6aa-0e8d-4115-881a-8ebf4b25b892-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-materialization

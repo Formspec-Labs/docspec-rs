@@ -121,6 +121,32 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
             .await
             .unwrap()
     );
+    let update = UpdateSpec {
+        dataset: dataset.clone(),
+        operation: Id::new("unknown-update").unwrap(),
+        definition: "v1".into(),
+        base: Id::new("missing").unwrap(),
+        keys: vec!["id".into()],
+        replacements: InputSpec {
+            path: "/missing-update.parquet".into(),
+            digest: "0".repeat(64),
+        },
+        deletions: None,
+    };
+    assert_eq!(
+        engine.plan_update(&update).await.unwrap_err().code(),
+        "no_release"
+    );
+    assert_eq!(
+        engine.update(&update).await.unwrap_err().code(),
+        "no_release"
+    );
+    assert!(
+        !catalog
+            .namespace_exists(crate::catalog::lifecycle_ident(&dataset).namespace())
+            .await
+            .unwrap()
+    );
     // Existing selections cannot enter the unqualified unbased rebuild path.
     let mut initial = build.clone();
     initial.base = None;
@@ -164,12 +190,24 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         .unwrap();
     refused(engine.plan(&initial).await.unwrap_err());
     refused(engine.run(&initial).await.unwrap_err());
+    // A present but unsupported source shape also refuses before retaining the request.
+    refused(engine.plan_update(&update).await.unwrap_err());
+    refused(engine.update(&update).await.unwrap_err());
     let view = engine.inner.lifecycle.open(&dataset).await.unwrap();
     assert!(
         engine
             .inner
             .lifecycle
             .get::<Operation>(&view, &format!("operation/{operation}"))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        engine
+            .inner
+            .lifecycle
+            .get::<Operation>(&view, "operation/unknown-update")
             .await
             .unwrap()
             .is_none()

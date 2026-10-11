@@ -3,6 +3,8 @@
 use super::*;
 
 mod exports;
+mod publication_race;
+mod updates;
 use arrow::{
     array::{Array, Int64Array, StringArray},
     datatypes::{DataType, Field, Schema},

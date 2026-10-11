@@ -313,7 +313,7 @@ impl Engine {
         let applied = self
             .replace_keys(Replacement {
                 dataset: &spec.dataset,
-                directory: &directory.join("replacement"),
+                directory: locations::Location::Local(directory.join("replacement")),
                 before: &write_before,
                 keys: &keys,
                 scope,
@@ -554,7 +554,7 @@ impl Engine {
         let applied = self
             .replace_keys(Replacement {
                 dataset: &spec.dataset,
-                directory,
+                directory: locations::Location::Local(directory.to_owned()),
                 before,
                 keys: &keys,
                 scope: context

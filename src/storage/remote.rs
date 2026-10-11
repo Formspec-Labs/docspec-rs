@@ -61,7 +61,7 @@ impl RemoteStorage {
         super::register_candidate(
             self.catalog.as_ref(),
             identifier,
-            super::CandidateWriter::Remote(self.objects.clone(), metadata_location),
+            super::CandidateWriter::Remote(self.objects.clone(), Some(metadata_location)),
             move || Ok(metadata),
             budget,
         )

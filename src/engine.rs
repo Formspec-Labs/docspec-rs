@@ -262,11 +262,13 @@ impl Engine {
     ///
     /// The host retains exclusive custody, bounded scratch and execution admission.
     /// The supplied catalog owns lifecycle placement; the supplied object prefix
-    /// owns immutable admitted inputs, native candidates and releases. Only initial
-    /// independent Build (`RunSpec::base` is `None`), its recovery and selected source-group reads
-    /// are qualified remotely for the first selection of a dataset. A completed retry
-    /// returns its original result; another Build after selection refuses before
-    /// source or lifecycle mutation. Other mutations also refuse before effects.
+    /// owns immutable admitted inputs, native candidates and releases. Supports an
+    /// initial independent Build (`RunSpec::base` is `None`), source-only updates,
+    /// export and selected source-group reads. A completed retry returns its original
+    /// result; another Build after selection and updates involving computed groups,
+    /// related inputs or receipts refuse before input transfer or processing.
+    /// An unacknowledged update restarts in a fresh protected attempt; its partial
+    /// objects remain retained. Remote retirement and removal remain unavailable.
     /// CLI and HTTP configuration remain separate from this library constructor.
     /// No ambient credentials are resolved here; use `remote_storage` at startup.
     ///
@@ -298,16 +300,38 @@ impl Engine {
         }
     }
 
-    fn check_initial_selection(&self, authority: &Authority) -> Result<()> {
-        if authority.selected.is_some() {
-            self.require_local()
+    fn check_backend_selection(
+        &self,
+        authority: &Authority,
+        request: &OperationRequest,
+    ) -> Result<()> {
+        if self.inner.retained.is_local() {
+            return Ok(());
+        }
+        match request {
+            OperationRequest::Build(_) if authority.selected.is_none() => Ok(()),
+            OperationRequest::Update(_)
+                if authority.selected.as_ref().is_some_and(remote_source_only) =>
+            {
+                Ok(())
+            }
+            _ => Err(locations::unsupported()),
+        }
+    }
+
+    async fn request_view(&self, request: &OperationRequest) -> Result<View> {
+        // Update requires an existing selected dataset; a remote refusal must
+        // not create a namespace or native lifecycle table for an unknown name.
+        if matches!(request, OperationRequest::Update(_)) {
+            self.read_view(request.dataset()).await
         } else {
-            Ok(())
+            self.inner.lifecycle.open(request.dataset()).await
         }
     }
 
     fn check_request_backend(&self, request: &OperationRequest) -> Result<()> {
-        if matches!(request, OperationRequest::Build(build) if build.base.is_none() && build.relationship.as_ref().is_none_or(|relationship| matches!(relationship, SourceRelationship::Independent)))
+        if matches!(request, OperationRequest::Update(_))
+            || matches!(request, OperationRequest::Build(build) if build.base.is_none() && build.relationship.as_ref().is_none_or(|relationship| matches!(relationship, SourceRelationship::Independent)))
         {
             Ok(())
         } else {
@@ -442,7 +466,7 @@ impl Engine {
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(spec.dataset()).await?;
+        let view = self.request_view(spec).await?;
         self.check_operation_available(&view, spec.operation())
             .await?;
         self.check_not_abandoned(&view, spec.operation()).await?;
@@ -460,7 +484,7 @@ impl Engine {
         let key = format!("result/{}", spec.operation());
         let completed = lifecycle.get::<ReleasePin>(&view, &key).await?.is_some();
         if !completed {
-            self.check_initial_selection(&authority)?;
+            self.check_backend_selection(&authority, spec)?;
             check_definition(&authority, spec)?;
             check_base(&authority, spec.base())?;
             check_update_eligibility(&authority, spec)?;
@@ -891,8 +915,13 @@ impl Engine {
         validate_request(spec)?;
         // Owned-host maintenance waits for this admitted worker. One check before
         // preparation and error reconciliation covers the complete operation.
-        self.check_operation_entry(spec.dataset(), spec.operation())
-            .await?;
+        {
+            let lock = self.lock(spec.dataset()).await;
+            let _guard = lock.lock().await;
+            let view = self.request_view(spec).await?;
+            self.check_operation_available(&view, spec.operation())
+                .await?;
+        }
         let request = fingerprint(spec)?;
         let result = self.prepare_and_select(spec, stop).await;
         if result
@@ -904,7 +933,7 @@ impl Engine {
             let lock = self.lock(spec.dataset()).await;
             let _guard = lock.lock().await;
             let lifecycle = &self.inner.lifecycle;
-            let view = lifecycle.open(spec.dataset()).await?;
+            let view = self.request_view(spec).await?;
             let operation: Option<Operation> = lifecycle
                 .get(&view, &format!("operation/{}", spec.operation()))
                 .await?;
@@ -1013,7 +1042,12 @@ impl Engine {
                         ));
                     }
                     let remote = !self.inner.retained.is_local();
-                    if remote && !matches!(spec, OperationRequest::Build(_)) {
+                    if remote
+                        && !matches!(
+                            spec,
+                            OperationRequest::Build(_) | OperationRequest::Update(_)
+                        )
+                    {
                         return Err(locations::unsupported());
                     }
                     let pending = if remote && captured.inputs.len() != inputs.len() {
@@ -1109,9 +1143,10 @@ impl Engine {
                                 None,
                             )
                         } else {
-                            // Remaining processing shapes preserve their local location APIs.
+                            // Unacknowledged work starts in a fresh protected attempt. Completed
+                            // processing resolves above before any writer or input query.
                             let directory =
-                                self.reserve_attempt(spec, operation, "processing").await?;
+                                self.reserve_location(spec, operation, "processing").await?;
                             let (_capture_memory, update_source) =
                                 if admission::captures_source(spec) {
                                     let view = lifecycle.open(spec.dataset()).await?;
@@ -1127,7 +1162,8 @@ impl Engine {
                                 };
                             let prepared = match spec {
                                 OperationRequest::Build(build) => {
-                                    self.process_build(build, &directory, &admission).await?
+                                    self.process_build(build, directory.local_path()?, &admission)
+                                        .await?
                                 }
                                 OperationRequest::Update(update) => {
                                     self.process_update(
@@ -1139,16 +1175,21 @@ impl Engine {
                                     .await?
                                 }
                                 OperationRequest::Schema(schema) => {
-                                    self.process_schema(schema, &directory, operation).await?
+                                    self.process_schema(schema, directory.local_path()?, operation)
+                                        .await?
                                 }
                                 OperationRequest::Evidence(evidence) => {
-                                    self.process_receipts(evidence, &directory, &admission)
-                                        .await?
+                                    self.process_receipts(
+                                        evidence,
+                                        directory.local_path()?,
+                                        &admission,
+                                    )
+                                    .await?
                                 }
                                 OperationRequest::Refresh(refresh) => {
                                     Box::pin(self.process_refresh(
                                         refresh,
-                                        &directory,
+                                        directory.local_path()?,
                                         &admission,
                                         operation,
                                         update_source.as_ref(),
@@ -1242,7 +1283,7 @@ impl Engine {
                     |prepared| prepared.datasets(spec.dataset()),
                 );
                 let guards = self.lock_inputs(datasets).await;
-                let view = lifecycle.open(spec.dataset()).await?;
+                let view = self.request_view(spec).await?;
                 self.check_continuous_operation_id(&view, spec.operation())
                     .await?;
                 let old: Option<Operation> = lifecycle
@@ -1280,7 +1321,7 @@ impl Engine {
                 };
                 let mut authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
-                self.check_initial_selection(&authority)?;
+                self.check_backend_selection(&authority, spec)?;
                 if authority.definition.is_empty() {
                     authority.definition = spec.definition().to_owned();
                 }
@@ -1963,7 +2004,7 @@ impl Engine {
                 return Ok(completed);
             }
             let authority = self.check(&view, operation, spec.operation()).await?;
-            self.check_initial_selection(&authority)?;
+            self.check_backend_selection(&authority, spec)?;
             if authority
                 .selected
                 .as_ref()
@@ -2283,6 +2324,17 @@ fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()
     }
     Ok(())
 }
+fn remote_source_only(dataset: &DatasetPin) -> bool {
+    matches!(dataset.relationship, SourceRelationship::Independent)
+        && dataset.groups.len() == 1
+        && dataset.groups.contains_key("source")
+        && dataset.computed.is_empty()
+        && dataset.related.is_none()
+        && dataset.evidence.is_none()
+        && (matches!(&dataset.request, OperationRequest::Build(build) if build.base.is_none())
+            || matches!(&dataset.request, OperationRequest::Update(_)))
+}
+
 fn check_update_eligibility(authority: &Authority, request: &OperationRequest) -> Result<()> {
     if matches!(
         request,

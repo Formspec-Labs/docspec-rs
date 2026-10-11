@@ -22,7 +22,7 @@ pub(super) struct Prepared {
 /// An explicit replacement scope, separate from potentially expensive new rows.
 pub(super) struct Replacement<'a> {
     pub dataset: &'a Id,
-    pub directory: &'a Path,
+    pub directory: locations::Location,
     pub before: &'a TablePin,
     pub keys: &'a [String],
     pub scope: DataFrame,
@@ -46,15 +46,24 @@ pub(super) async fn open_captured_source(
     source: &TablePin,
     budget: &Budget,
 ) -> Result<Table> {
+    open_captured_source_with_objects(&storage::Objects::Local, canonical, source, budget).await
+}
+
+async fn open_captured_source_with_objects(
+    objects: &storage::Objects,
+    canonical: &TablePin,
+    source: &TablePin,
+    budget: &Budget,
+) -> Result<Table> {
     if source.logical_metadata() != canonical.logical_metadata() || source.rows != canonical.rows {
         return Err(Error::refusal(
             "invalid_admission_dependencies",
             "captured source differs from its logical base",
         ));
     }
-    let native = storage::open_pin(source, budget).await?;
+    let native = objects.open_pin(source, budget).await?;
     if source.metadata != canonical.metadata {
-        let canonical = storage::open_pin(canonical, budget).await?;
+        let canonical = objects.open_pin(canonical, budget).await?;
         if !storage::identity::preserves_schema(
             canonical.metadata().current_schema(),
             native.metadata().current_schema(),
@@ -111,12 +120,31 @@ impl Engine {
         directory: &Path,
         schema: Schema,
     ) -> Result<Table> {
+        self.create_output_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            schema,
+        )
+        .await
+    }
+
+    async fn create_output_at(
+        &self,
+        dataset: &Id,
+        directory: &locations::Location,
+        schema: Schema,
+    ) -> Result<Table> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(dataset).await?;
-        let directory = directory.to_owned();
-        self.register_output(view.table.identifier().namespace(), move || {
-            storage::fresh_metadata(schema, &directory)
-        })
+        let directory = directory.clone();
+        self.register_output(
+            view.table.identifier().namespace(),
+            move || match directory {
+                locations::Location::Local(path) => storage::fresh_metadata(schema, &path),
+                #[cfg(feature = "remote")]
+                locations::Location::Remote(uri) => storage::fresh_metadata_at(schema, &uri),
+            },
+        )
         .await
     }
 
@@ -126,11 +154,25 @@ impl Engine {
         directory: &Path,
         source: &Table,
     ) -> Result<Table> {
+        self.replacement_output_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            source,
+        )
+        .await
+    }
+
+    async fn replacement_output_at(
+        &self,
+        dataset: &Id,
+        directory: &locations::Location,
+        source: &Table,
+    ) -> Result<Table> {
         let view = self.inner.lifecycle.open(dataset).await?;
         let source = source.clone();
-        let directory = directory.to_owned();
+        let location = directory.as_string()?;
         self.register_output(view.table.identifier().namespace(), move || {
-            storage::replacement_metadata(source.metadata(), &directory)
+            storage::replacement_metadata_at(source.metadata(), &location)
         })
         .await
     }
@@ -148,7 +190,7 @@ impl Engine {
         storage::register_candidate(
             lifecycle.catalog.as_ref(),
             &identifier,
-            storage::CandidateWriter::Local,
+            storage::CandidateWriter::configured(&self.inner.objects),
             prepare,
             &lifecycle.budget,
         )
@@ -245,7 +287,7 @@ impl Engine {
     pub(super) async fn process_update(
         &self,
         spec: &UpdateSpec,
-        directory: &Path,
+        directory: &locations::Location,
         admission: &PhaseResult,
         captured_source: Option<&TablePin>,
     ) -> Result<Prepared> {
@@ -258,7 +300,8 @@ impl Engine {
         // Older admissions consume their canonical source; retries never resolve
         // a newer physical representation after the request has been retained.
         let captured_before = captured_source.unwrap_or(canonical_before);
-        let captured_native = open_captured_source(
+        let captured_native = open_captured_source_with_objects(
+            &self.inner.objects,
             canonical_before,
             captured_before,
             &self.inner.lifecycle.budget,
@@ -271,14 +314,17 @@ impl Engine {
                 // receipts. Add optional origin fields through native metadata;
                 // the existing reader fills original file/row before filtering.
                 before_with_origins = self
-                    .source_with_origins(
+                    .source_with_origins_at(
                         &spec.dataset,
                         captured_before,
-                        &directory.join("source-origins"),
+                        &directory.child("source-origins")?,
                     )
                     .await?;
-                let native =
-                    storage::open_pin(&before_with_origins, &self.inner.lifecycle.budget).await?;
+                let native = self
+                    .inner
+                    .objects
+                    .open_pin(&before_with_origins, &self.inner.lifecycle.budget)
+                    .await?;
                 (&before_with_origins, native)
             } else {
                 (captured_before, captured_native)
@@ -390,7 +436,7 @@ impl Engine {
         let applied = self
             .replace_keys(Replacement {
                 dataset: &spec.dataset,
-                directory,
+                directory: directory.clone(),
                 before,
                 keys: &spec.keys,
                 scope,
@@ -409,7 +455,7 @@ impl Engine {
             added,
             metrics,
         } = self
-            .finish_source_replacement(&spec.dataset, directory, captured_before, applied)
+            .finish_source_replacement_at(&spec.dataset, directory, captured_before, applied)
             .await?;
         let changes = ChangePin {
             rules: super::changes::WRITE_RULES.into(),
@@ -435,6 +481,22 @@ impl Engine {
         dataset: &Id,
         directory: &Path,
         captured: &TablePin,
+        applied: Applied,
+    ) -> Result<Applied> {
+        self.finish_source_replacement_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            captured,
+            applied,
+        )
+        .await
+    }
+
+    async fn finish_source_replacement_at(
+        &self,
+        dataset: &Id,
+        directory: &locations::Location,
+        captured: &TablePin,
         mut applied: Applied,
     ) -> Result<Applied> {
         if applied.metrics.rows_removed == 0
@@ -445,9 +507,13 @@ impl Engine {
             // empty change relations use its schema too, as endpoint verification
             // requires the added and removed schemas to match the result.
             applied.table = captured.clone();
-            let native = storage::open_pin(captured, &self.inner.lifecycle.budget).await?;
+            let native = self
+                .inner
+                .objects
+                .open_pin(captured, &self.inner.lifecycle.budget)
+                .await?;
             let empty = self
-                .replacement_output(dataset, &directory.join("unchanged-changes"), &native)
+                .replacement_output_at(dataset, &directory.child("unchanged-changes")?, &native)
                 .await?;
             applied.removed = self.pin_output(dataset, &empty, 0, &[]).await?;
             applied.added = applied.removed.clone();
@@ -487,9 +553,9 @@ impl Engine {
             // Prepare distinct keys once. A logical view would rescan all input rows
             // and repeat DISTINCT for every source-file probe and rewrite.
             let scope_table = self
-                .create_output(
+                .create_output_at(
                     dataset,
-                    &directory.join("keys"),
+                    &directory.child("keys")?,
                     iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
                         scope.schema().as_arrow(),
                     )?,
@@ -579,10 +645,16 @@ impl Engine {
                 // need not accumulate across the file population.
                 context.deregister_table(&name)?;
             }
-            let required = rewrite_bytes
-                .saturating_mul(2)
-                .saturating_add(replacement_bytes.unwrap_or(0).saturating_mul(2))
-                .saturating_add(budget.limits.scratch_bytes);
+            // Remote output consumes retained object storage; host preflight
+            // covers scratch and bounded writer buffers, not those remote bytes.
+            let required = if directory.is_local() {
+                rewrite_bytes
+                    .saturating_mul(2)
+                    .saturating_add(replacement_bytes.unwrap_or(0).saturating_mul(2))
+            } else {
+                (budget.limits.max_batch_bytes as u64).saturating_mul(4)
+            }
+            .saturating_add(budget.limits.scratch_bytes);
             if fs2::available_space(&self.inner.root)? < required {
                 return Err(Error::refusal(
                     "disk_capacity",
@@ -590,13 +662,13 @@ impl Engine {
                 ));
             }
             let candidate = self
-                .replacement_output(dataset, &directory.join("data"), &native)
+                .replacement_output_at(dataset, &directory.child("data")?, &native)
                 .await?;
             let removed = self
-                .replacement_output(dataset, &directory.join("removed"), &native)
+                .replacement_output_at(dataset, &directory.child("removed")?, &native)
                 .await?;
             let added = self
-                .replacement_output(dataset, &directory.join("added"), &native)
+                .replacement_output_at(dataset, &directory.child("added")?, &native)
                 .await?;
             let mut metrics = WriteMetrics {
                 files_scanned: (scan.files().count() + changed.len()) as u64,

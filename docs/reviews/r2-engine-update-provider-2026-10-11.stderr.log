@@ -1,0 +1,20 @@
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/25eea80b02244ecc9f029d62fec91b0f/data/34df3a85-8212-4ab6-8516-203130f360ab-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/926e1c6b9b35496486382bb66367b038/data/data/43528d12-f18b-486d-9c02-f398994fadcb-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/926e1c6b9b35496486382bb66367b038/data/data/c3913e5e-f15c-4ec3-93f9-fd7d669b5809-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/926e1c6b9b35496486382bb66367b038/removed/data/a8bac1d7-799f-4aae-9dbe-01336ba1e083-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+{"code":"io","phase":"update_failed"}
+
+thread 'engine::remote_build_provider_tests::updates::native_remote_updates_export_and_read_from_a_fresh_host' (49122479) panicked at src/engine/remote_build_provider_tests/updates.rs:440:9:
+isolated update qualification failed; retain its references
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

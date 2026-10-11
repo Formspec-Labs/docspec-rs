@@ -1287,3 +1287,116 @@ mod compaction;
 
 #[path = "related_refresh/cardinality.rs"]
 mod cardinality;
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn material_null_matching_change_reuses_admission_but_recomputes_values_and_evidence() {
+    let root = TempDir::new().unwrap();
+    let (engine, left, right) = fixture(root.path()).await;
+    let original = recipe(&left, &right);
+    let old_expected = oracle(&left, &right, &join(&original).join).await;
+    let mut changed = original.clone();
+    changed.operation = id("never-match-nulls");
+    join_mut(&mut changed).join.nulls = NullMatching::Never;
+    let expected = oracle(&left, &right, &join(&changed).join).await;
+    assert_ne!(expected, old_expected);
+    assert_eq!(expected.len(), 7);
+    assert!(
+        old_expected
+            .iter()
+            .any(|row| row.3.as_deref() == Some("right-null"))
+    );
+    assert!(
+        old_expected
+            .iter()
+            .any(|row| row.3.as_deref() == Some("partial-null"))
+    );
+    assert!(
+        !expected
+            .iter()
+            .any(|row| matches!(row.3.as_deref(), Some("right-null" | "partial-null")))
+    );
+    // Only the matching configuration changes. These frozen producer captures
+    // include duplicate and partial-null keys with exact native occurrences.
+    assert_eq!(changed.inputs(), original.inputs());
+    assert_eq!(changed.definition, original.definition);
+    assert_eq!(changed.policy, original.policy);
+    std::fs::remove_file(root.path().join("comments-initial.parquet")).unwrap();
+    std::fs::remove_file(root.path().join("dockets-initial.parquet")).unwrap();
+    drop(engine);
+    assert_eq!(
+        support::kill_after_with_work(root.path(), &original, "refresh", "processing"),
+        ["admission", "processing"]
+    );
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let before = engine.inspect(&original.dataset).await.unwrap();
+    let (old_key, old_processing) = before
+        .iter()
+        .find_map(|(key, value)| {
+            let phase =
+                serde_json::from_value::<docspec::model::PhaseResult>(value.clone()).ok()?;
+            (phase.phase == "processing").then_some((key.clone(), phase))
+        })
+        .unwrap();
+    let original_plan = engine.plan_refresh(&original).await.unwrap();
+    let old_generation = original_plan.reusable_phase_origins["processing"].clone();
+    let plan = engine.plan_refresh(&changed).await.unwrap();
+    assert_eq!(
+        plan.reusable_phase_origins["admission"],
+        original_plan.reusable_phase_origins["admission"]
+    );
+    assert!(!plan.reusable_phase_origins.contains_key("processing"));
+    assert!(
+        plan.required_phases
+            .iter()
+            .any(|phase| phase == "processing")
+    );
+    assert_eq!(engine.inspect(&original.dataset).await.unwrap(), before);
+    drop(engine);
+    assert_eq!(
+        support::kill_after_with_work(root.path(), &changed, "refresh", "readback"),
+        ["processing", "evidence", "validation", "readback"]
+    );
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let after = engine.inspect(&original.dataset).await.unwrap();
+    let old_binding = format!(
+        "reference-binding/{}",
+        blake3::hash(old_key.as_bytes()).to_hex()
+    );
+    assert_eq!(after[&old_key], before[&old_key]);
+    assert_eq!(after[&old_binding], before[&old_binding]);
+    assert_eq!(
+        engine
+            .plan_refresh(&original)
+            .await
+            .unwrap()
+            .reusable_phase_origins["processing"],
+        old_generation
+    );
+    let retained: ReleasePin =
+        serde_json::from_value(after[&format!("readback/{}", changed.operation)].clone()).unwrap();
+    assert_ne!(
+        retained.dataset.groups["source"],
+        *old_processing.table.as_ref().unwrap()
+    );
+    assert_eq!(
+        retained.dataset.related.as_ref().unwrap().coverage.inputs,
+        changed.inputs()
+    );
+    assert_eq!(
+        engine.latest(&changed.dataset).await.unwrap_err().code(),
+        "no_release"
+    );
+    let selected = engine.refresh(&changed).await.unwrap();
+    assert_eq!(selected, retained);
+    check(&engine, &selected, &expected).await;
+    verify_release(&selected, limits()).await.unwrap();
+    assert_eq!(
+        engine.inspect(&original.dataset).await.unwrap()[&old_key],
+        before[&old_key]
+    );
+}

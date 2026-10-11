@@ -1,0 +1,20 @@
+{
+  "started_utc": "2026-10-11T08:22:31.279984+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "evidence_updates::optional_history::final_receipt_promises_end_before_exact_payload_reclamation",
+    "--",
+    "--nocapture"
+  ],
+  "free_before_bytes": 6080372736,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 5902303232,
+  "free_after_bytes": 5901324288,
+  "finished_utc": "2026-10-11T08:23:05.397622+00:00"
+}

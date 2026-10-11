@@ -186,8 +186,8 @@ pub(super) async fn verify_native_changes(
     if checks.deep() {
         checks.table(before_source, budget).await?;
     }
-    let native_before = storage::open_pin(before_source, budget).await?;
-    let native_after = storage::open_pin(source, budget).await?;
+    let native_before = checks.objects().open_pin(before_source, budget).await?;
+    let native_after = checks.objects().open_pin(source, budget).await?;
     let expected_ids: Option<Vec<_>> = keys
         .iter()
         .map(|name| {
@@ -239,7 +239,11 @@ pub(super) async fn verify_native_changes(
         if name == "removed" || name == "added" {
             checks.table(pin, budget).await?;
         }
-        let native = storage::open_pin(pin, budget).await?;
+        let native = match name {
+            "before" => native_before.clone(),
+            "after" => native_after.clone(),
+            _ => checks.objects().open_pin(pin, budget).await?,
+        };
         if name != "before"
             && native.metadata().current_schema() != native_after.metadata().current_schema()
         {

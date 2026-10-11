@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.91s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 7 tests
+test engine::remote_build_provider_tests::exports::native_remote_export_recovers_missing_stage_and_reads_from_a_fresh_host ... ignored, requires a separate fresh qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::native_remote_build_recovers_then_reads_from_a_fresh_host ... ignored, requires explicit fresh qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::publication_race::native_remote_clients_race_publication_and_read_pins_from_a_fresh_host ... ignored, requires a fresh qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::updates::native_remote_updates_export_and_read_from_a_fresh_host ... ignored, requires a fresh qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::updates::retained_remote_update_resumes_then_exports_and_reads_from_a_fresh_host ... ignored, requires the exact retained failed qualification UUID and isolated live R2/Basin configuration
+test engine::remote_build_provider_tests::publication_race::independent_clients_preserve_one_publication_winner_and_losing_completion ... ok
+test engine::remote_build_provider_tests::updates::source_update_location_path_reuses_processing_and_shares_files ... ok
+
+test result: ok. 2 passed; 0 failed; 5 ignored; 0 measured; 325 filtered out; finished in 2.77s
+

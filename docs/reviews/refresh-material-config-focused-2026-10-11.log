@@ -1,0 +1,27 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.74s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsfphVb/workspace/objects/comments/72059ca126ea4014ad0121a74586a965/data/75a6ef83-62fa-4a3a-a358-18a4817f073b-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpsfphVb/workspace/objects/dockets/19d3d02e922a46669b47b68bdb3460c7/data/babb3094-3a3e-40d2-80d9-0bc8fc62a09c-00000.parquet
+DOCSPEC_TEST_WORK readback
+killed refresh worker after processing; status=signal: 9 (SIGKILL)
+killed refresh worker after readback; status=signal: 9 (SIGKILL)
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+DOCSPEC_TEST_DEEP_TABLE
+test related_refresh::material_null_matching_change_reuses_admission_but_recomputes_values_and_evidence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 307 filtered out; finished in 7.23s
+

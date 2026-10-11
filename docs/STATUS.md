@@ -7,16 +7,17 @@ recovery, incremental joins/summaries, scalar backfills, schema operations and
 historical reads are implemented. The requirements table below records their
 specific limits. Remaining delivery includes broader dependency correction beyond
 the local scalar case and broader continuous-backfill qualification; remaining
-protection lifetimes, maintenance integration and broader failure qualification; remote
-updates, concurrent publication and provider maintenance; broader Dagster
+protection lifetimes, maintenance integration and broader failure qualification; remaining
+remote update/publication fault boundaries and provider maintenance; broader Dagster
 route/provider qualification; and the remaining
 Q1–Q8 and update/backfill/recovery performance qualification. The defined full
 local 10-million-Comments performance gate now **passes**: three fresh workspaces
 completed the entire workload and exact independent readback in **311.61, 346.31
 and 392.03 seconds** under the recorded controls. Native row statistics, larger
 export row groups and four active oracle threads resolved the observed failures.
-This does not complete the wider lifecycle plan. The small initial remote Build
-path has separate R2/Basin evidence below; remote performance remains unqualified.
+This does not complete the wider lifecycle plan. Initial remote Build, source-only correction/deletion, completed-processing recovery,
+export and cold readback have separate R2/Basin evidence below; remote performance
+remains unqualified.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
@@ -26,11 +27,11 @@ this summary and the requirements table for the current overall status.
 | Requirement | Implemented and scoped qualifications | Required work remaining |
 | --- | --- | --- |
 | R1 Durable data and commits | Retained input bytes; native tables and complete snapshot read inventories; shared-file source updates; guarded selection; stable retry identity; completed phase reuse; process-kill recovery after acknowledged build, update and scalar-backfill handoffs; protected initial native candidate recovery before processing acknowledgment | Qualify the declared durability/recovery profile at remaining commit, response-loss and external-effect boundaries; close specific source-observation, value and evidence identity cases in the accepted lifecycle matrix. |
-| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP; initial remote Build through public library and explicit CLI/loopback HTTP startup, protected source admission, S3 query, native candidate/append recovery, bounded routine inspection, recoverable release creation, readback and guarded selection; actual R2/Basin controlled-gap recovery and fresh-host exact source reads; primitive initial-source remote exports with separately retained staging/validation, conditional transfer, guarded channel selection and configured Arrow readers; actual R2/Basin missing-stage recovery after transfer, completed retry after channel advancement and fresh-host exact export reads; actual local SpicyRegs MCP BIGINT/text export reads across correction, deletion and evidence-only releases while an old reader retains its original immutable file | Complete the named application release/evidence admission and remaining promised type/disclosure scope; qualify the complete update-to-consumer path, including required distribution, transfer and interrupted readback. Deliver and qualify the corresponding R2/Basin update path and concurrent publication recovery. |
+| R2 Incremental publication | Immutable local manifest; native independent readback before catalog selection; retry reconciliation; original completed release reuse; authorized all-row primitive-column Parquet export with streaming digest, retained materialization/validation, guarded channel selection and CLI/HTTP; initial remote Build through public library and explicit CLI/loopback HTTP startup, protected source admission, S3 query, native candidate/append recovery, bounded routine inspection, recoverable release creation, readback and guarded selection; actual R2/Basin controlled-gap recovery and fresh-host exact source reads; primitive initial-source remote exports with separately retained staging/validation, conditional transfer, guarded channel selection and configured Arrow readers; actual R2/Basin missing-stage recovery after transfer, completed retry after channel advancement and fresh-host exact export reads; source-only remote correction/deletion with exact completed-processing reuse, unchanged-file sharing and cold update-to-export readback; two independent configured clients racing final publication from the same native metadata, with one winner and exact retained losing completion; actual local SpicyRegs MCP BIGINT/text export reads across correction, deletion and evidence-only releases while an old reader retains its original immutable file | Complete the named application release/evidence admission and remaining promised type/disclosure scope; qualify the complete update-to-consumer path, including required distribution, transfer and interrupted readback. Qualify remaining R2/Basin update and concurrent-publication failure boundaries, including process loss and unknown responses; source-only update-to-export/cold-read now has actual-provider evidence. |
 | R3 Schema evolution and backfill | Typed pinned schemas; logical field IDs mapped to native IDs; public root rename/reorder/hide and nullable scalar additions/defaults with atomic writer-definition cutover; durable supplied/omitted values; scalar computed groups; exact scalar input bindings and value verification; complete source-occurrence coverage; per-file progress and failures; retained computation, validation and readback; unchanged-file reuse keyed to consumed source fields; coordinated source/scalar-group updates and full rebuilds preserving retained field IDs, schema history and allocation high-water; source requalification; guarded source/target selection; combined reads; scoped omitted-field corrections with immutable supplemental qualification and guarded adoption; one retained local continuous scalar intent with exact source captures and bounded intake fencing; independently versioned scalar validation preserves prepared values and current readback after upstream retirement; correction, sibling backfill and compaction overlap with exact old/new readback and guarded catch-up | Complete remaining material dependency and policy/validator invalidation cases. Qualify continuous scalar backfill during concurrent ingestion, correction and compaction, including native-commit/live-fence failures, exact cutover and resource costs. |
 | R4 Verified changes | Shared count/stream comparison with exact endpoint descriptors, value/occurrence identity, retained source rename/reorder alignment, metadata effects, typed addressed members, unchanged-pin skip and explicit full path/reason; stable kept-row origins on source/related writes; typed removed/added tables from applied source, join and summary writes; exact endpoints and key field IDs; independent removed-row membership and multiset reconstruction; accepted-version succession independent of optional change files; occurrence-keyed receipt replacement/deletion with exact native changes; locally qualified versioned certificates co-committed with results; independent optional-history retirement and complete-state reconstruction after physical history removal; qualified local forward comparison with bounded planning and sequential delta readers; shared qualified history discovery for local R5 consumers under existing maintenance and processing protection | Qualify exact comparison and applied-change evidence across declared schema/identity cases, corruption, interruption and concurrency; measure fixed-size changes over growing data/history. Define and test cross-workspace admission with fallback or refusal for untrusted or unsupported accelerators. |
-| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage; same-consumer captured-to-latest policy change reuses exact processing while fresh selection still rejects an advanced producer | Complete evidence-dependent requalification and justified reuse under relevant processor, policy and validator changes. Qualify supported Comments/docket joins, summaries and enrichment reuse during concurrent input changes, sustained ingestion and recovery against full reconstruction. |
-| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation and compaction recovery, standalone generation-seal availability, and unused owner-grant retirement; actual obsolete intermediate-layout reclamation through native registration detachment and exact removal; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads, source updates and incremental join/summary outputs with exact captured-layout recovery; dependent refreshes capture and protect compacted producer source layouts; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore, including actual process death after object restoration and around catalog selection; withdrawn unselected qualification evidence remains protected until its last promise retires, followed by exact removal and cold readback; independent and coupled full rebuilds retain ancestor interpretation while permitting exact obsolete-payload reclamation after separate availability/recovery promises end, with historical inline-proof protection preserved; full Refresh results retain exact current dependencies separately from execution grants, and captured subsets retain unused cohort member interpretation without permanent payload retention; exact closed remote-export host-stage reclamation using durable remote completion, existing removal recovery and reader/owner-grant protection | Close remaining observation, receipt-bearing/incremental descendant and foreign qualification-root lifetimes: preserve remaining promises and reclaim exact objects after final protection ends. Complete accounting and justified retirement for protected partial or losing export attempts. Qualify typed compaction and necessary representation retirement, reader/removal races, remaining restore boundaries, and provider removal/restore with old destructive actors fenced. |
+| R5 Dependent refresh | Repeatable DataFusion query execution over one retained Parquet input; coverage regression refusal; bounded accepted-history proof; producer-declared coupled/independent inputs; fixed family membership and create-once exact generation seals; metadata-only related-input capture; native full equality joins with contributor evidence, captured/latest guarded selection, transitive eligibility checks and catalog-free reconstruction; complete-key source updates with coordinated scalar-group refresh; old/new-key affected-group join replacement; unchanged source/evidence file sharing and exact no-op adoption; typed grouped/global summaries with exact contributors and complete affected-group replacement; narrow raw old/new key discovery through qualified multi-hop history with conservative changed-file fallback and completed-processing reuse; receipt-only input succession with exact value/contributor reuse and new coverage; same-consumer captured-to-latest policy change reuses exact processing while fresh selection still rejects an advanced producer; changing null-match semantics reuses input admission but recomputes affected values/evidence after an actual interrupted completion | Complete evidence-dependent requalification and justified reuse under relevant processor, policy and validator changes. Qualify supported Comments/docket joins, summaries and enrichment reuse during concurrent input changes, sustained ingestion and recovery against full reconstruction. |
+| R6 Maintenance and retention | Retained native history; catalog-free pins; owner protection before reference admission and preparation; exact request/phase/result protection bindings; logical operation abandonment; exact-generation phase, result/readback availability, terminal-operation and compaction recovery, standalone generation-seal availability, and unused owner-grant retirement; actual obsolete intermediate-layout reclamation through native registration detachment and exact removal; shared-root inspection with bounded native expansion; owned caller-independent worker lifetime; Engine stream/compare admission and shutdown drain; explicit local Unix removal preview, durable reservation, native registration detachment, exact file effects and cold reconciliation; SIGKILL at acknowledged removal handoffs, controlled unlink/sync failures and independent local review; stable source occurrence identities and guarded equivalent-representation compaction for managed reads, source updates and incremental join/summary outputs with exact captured-layout recovery; dependent refreshes capture and protect compacted producer source layouts; same-workspace catalog restore points with exact native registration closure, backup reuse, explicit retirement and fenced fresh-catalog restore, including actual process death after object restoration and around catalog selection; withdrawn unselected qualification evidence remains protected until its last promise retires, followed by exact removal and cold readback; independent and coupled full rebuilds retain ancestor interpretation while permitting exact obsolete-payload reclamation after separate availability/recovery promises end, with historical inline-proof protection preserved; full Refresh results retain exact current dependencies separately from execution grants, and captured subsets retain unused cohort member interpretation without permanent payload retention; exact closed remote-export host-stage reclamation using durable remote completion, existing removal recovery and reader/owner-grant protection; authoritative old receipt payload removal after a new receipt-free material selection and explicit retirement of every old promise | Close remaining observation, receipt-bearing/incremental descendant and foreign qualification-root lifetimes: preserve remaining promises and reclaim exact objects after final protection ends. Complete accounting and justified retirement for protected partial or losing export attempts. Qualify typed compaction and necessary representation retirement, reader/removal races, remaining restore boundaries, and provider removal/restore with old destructive actors fenced. |
 | R7 Operations and qualification | Shared services; CLI and loopback HTTP with explicit remote startup; plan, run, inspect, resume, read, verify, compare/changes, schema edits, backfill and native join/summary refresh; exact-version native and combined HTTP Arrow streams; structured refusals; plans name pending selection, preserve completed older-operation status and distinguish absent completions from explicitly retired recovery; plans link reusable phases to their exact retained keys and native revisions; inspect exposes consumed references, runtime identity and partial writer counters, with documented retry/provenance lookup; fresh general Engine phases report elapsed work and shared native writers sample accepted rows/decoded bytes without extra scans or lifecycle-write noise; backfill plans expose committed file progress and selection refusal; configured budgets; fault harness; three fresh full 10-million-Comments local acceptance runs with exact readback; raw local experiments; bounded local Dagster scheduling with native completion-response loss, actual Python worker death, cold Rust host recovery after retained processing and replacement-worker reconciliation | Complete necessary-path observations for remaining expensive phases and measured process/scratch/I/O resources, with unknown totals explicit; qualify the operator sequence under interruption and resource refusal. Close uncovered lifecycle/Q1–Q8 cases; qualify unchanged, update, backfill and resumed costs across independent growth axes. Qualify promised Dagster routes and recovery boundaries, including the selected provider. |
 
 The CLI exposes implemented operations only. Source updates support complete key
@@ -78,7 +79,7 @@ durability and remaining application-consumer qualification remain open.
 
 The remaining gates cover concurrent updates/backfill, exact retention and restore
 transitions, the promised consumer path, and provider operation/recovery behavior.
-Configured R2/Basin initial Build and the local Dagster path have scoped evidence;
+Configured R2/Basin initial Build, source-only updates and exports, and the local Dagster path have scoped evidence;
 they do not establish the remaining hosted lifecycle or public deployment behavior.
 
 The defined full local performance gate **passes** on the frozen retained
@@ -179,6 +180,81 @@ a cold reopen. The [review](reviews/unused-cohort-lifetime-review-2026-10-11.md)
 records the initial `grant_in_use` failure and correction: initial full Refresh
 also needs exact result protections, and the consumer's separate execution recovery
 must end before its broader grants can retire. No existing binding is rewritten.
+
+## Remote source updates
+
+Configured remote engines now support complete-key replacement and deletion on
+independent source-only Build/Update selections. Shared files keep their exact
+identities, new output uses the existing protected attempt locations, and completed
+processing is resolved before querying inputs or creating native output again.
+Computed/related groups, receipts and based rebuilds still refuse on this path.
+Unknown remote datasets refuse without creating lifecycle state.
+
+The [local connected check](reviews/remote-update-local-focused-2026-10-11.log),
+[startup refusals](reviews/remote-update-startup-2026-10-11.log),
+[independent review](reviews/connected-remote-update-review-2026-10-11.md) and
+[actual R2/Basin continuation](reviews/r2-engine-update-resumed-provider-2026-10-11.json)
+cover correction/deletion, exact retained processing, a second update sharing an
+unchanged file, authorized primitive export, original/current pins and cold-host
+exact readback. Literal expectations preserve field IDs, types, duplicate rows,
+nulls and empty strings. The second update reused one **2,275-byte** data file;
+the observed pins reference **79,885 bytes**, excluding catalog history and
+unpinned attempts. These are small synthetic-fixture observations, not storage
+amplification or throughput qualification.
+
+The [initial provider attempt](reviews/r2-engine-update-provider-2026-10-11.json)
+failed after first-update validation: the receipt-absence check still opened its
+parent manifest with the local backend. It now uses the configured object reader
+while preserving the exact parent and no-discarded-receipt checks. The
+[reviewed continuation](reviews/remote-update-continuation-review-2026-10-11.md)
+reused the same namespace and exact acknowledged processing generation. Its
+[work log](reviews/r2-engine-update-resumed-provider-2026-10-11.stderr.log)
+resumed at readback before admitting the second update. No first-update payload
+processing or validation repeated. The failed run and all provider objects remain
+retained. Unacknowledged Update work may restart in a new protected prefix;
+unknown native-response and process-death boundaries remain separate tests.
+
+The [two-client R2/Basin publication race](reviews/r2-publication-race-provider-2026-10-11.json)
+also passes its [frozen protocol](reviews/publication-race-protocol-2026-10-11.md).
+Two independent Engine/catalog clients prepare distinct exports, then submit
+their original native commits from the same catalog metadata version. Exactly
+one wins. The loser retains its unchanged materialization and validation; retry
+with its stale expected channel refuses. Winner retry is exact, both clients
+resolve it, and a cold client reads the old and winning immutable exports against
+literal expectations. The [review](reviews/publication-race-review-2026-10-11.md)
+covers the test-only held-commit adapter and configured parent-read repair.
+Clients use separate execution-host directories in one OS process. This does not
+qualify separate-process failure, source-update races, unknown responses or Q6's
+destructive authority handoff. All provider objects, including the losing export,
+remain retained.
+
+Remote destructive maintenance and restore remain unavailable. The
+[implementation analysis](reviews/remote-maintenance-restore-seams-2026-10-11.md)
+identifies the missing provider-enforced old-worker fence and coherent catalog
+restore procedure. Existing filesystem host custody cannot supply those guarantees
+across remote hosts. Qualification needs isolated authority that can be expired or
+revoked without disrupting SpicyRegs; shared application credentials are not used
+for that destructive handoff experiment. Automatic expiration remains disabled.
+
+## Receipt payload retirement and material configuration changes
+
+The [receipt-lifetime check](reviews/receipt-lifetime-focused-2026-10-11.log)
+keeps predecessor receipt bytes protected while a receipt-bearing replacement
+still requires them. After a genuinely new receipt-free material selection, it
+explicitly ends old availability, optional changes, phases and operation recovery,
+then removes one exact authoritative receipt file. Cold current values, deep
+verification and removal reconciliation pass. The
+[review](reviews/receipt-lifetime-review-2026-10-11.md) keeps foreign qualification
+and still-required receipt ancestry outside this reclamation claim.
+
+The [material-configuration check](reviews/refresh-material-config-focused-2026-10-11.log)
+changes null matching for the same join consumer and exact producer captures.
+Retained admission is reused; processing, contributor evidence, validation and
+readback execute under the changed semantics. Original phase records and native
+revisions remain unchanged after actual worker death. A direct occurrence-based
+oracle checks duplicate and partial-null results. The
+[review](reviews/refresh-material-config-review-2026-10-11.md) qualifies this built-in
+configuration boundary, not arbitrary processor dependency inference.
 
 ## Remote primitive exports
 
@@ -394,7 +470,26 @@ or provider restore/fencing.
 
 ## Latest local verification
 
-The current checkpoint passes the [library suite](reviews/lifecycle-observer-library-2026-10-11.log)
+The [current complete repository gate](reviews/remote-update-lifecycle-full-check-2026-10-11.log)
+passes formatting, strict all-feature lint, library/integration tests, restore,
+worker initialization and the documentation-test command. It includes connected
+source-update/local publication-race checks, material-configuration invalidation
+and authoritative receipt retirement. Actual R2/Basin update and publication-race
+results are separately linked above; ignored provider cases are not counted as
+gate executions. The [resource receipt](reviews/remote-update-lifecycle-full-check-2026-10-11.resources.json)
+records at least **2,356,895,744 bytes** of free disk against the 1 GiB stop threshold.
+Other workspace activity shared the volume; its free-space change is not this
+task's storage footprint. The accepted Comments benchmark was not repeated.
+
+[Default-feature library/CLI lint](reviews/remote-update-default-clippy-2026-10-11.log)
+also passes. After the gate, [bounded cache cleanup](reviews/continuation-cache-prune-2026-10-11.json)
+removed **997,995,714 logical bytes** of inactive debug example files and the empty
+environment created by a failed offline dependency resolution. Open-handle checks
+preceded removal. Observed whole-volume free space increased **499,503,104 bytes**;
+that change is separate from logical file size and shared activity. Current
+executables, source corpora, retained results and qualification evidence remain.
+
+The preceding checkpoint passed the [library suite](reviews/lifecycle-observer-library-2026-10-11.log)
 and [integration, restore and worker-initialization suites](reviews/lifecycle-retention-recovery-integration-2026-10-11.log).
 These include retained scalar validation, overlapping correction/backfill/compaction,
 exact obsolete-payload removal, configured object reads and actual interrupted

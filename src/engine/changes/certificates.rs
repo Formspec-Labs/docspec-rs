@@ -267,11 +267,10 @@ impl Engine {
             }
             return Ok(());
         }
-        let directory = self.reserve_attempt(spec, operation, "changes").await?;
-        let path = directory.join("changes.json");
+        let directory = self.reserve_location(spec, operation, "changes").await?;
+        let path = directory.child("changes.json")?.as_string()?;
         inputs::metadata_size(&applied, lifecycle.budget.limits.max_metadata_bytes)?;
         let bytes = serde_json::to_vec(&applied)?;
-        storage::write_new(&path, &bytes)?;
         let prepared = PreparedChanges {
             format: CHANGE_FORMAT,
             rules: WRITE_RULES.into(),
@@ -279,13 +278,17 @@ impl Engine {
             before,
             descriptor: ObjectRef {
                 owner: spec.dataset().clone(),
-                path: path.to_string_lossy().into_owned(),
+                path,
                 digest: blake3::hash(&bytes).to_hex().to_string(),
                 bytes: bytes.len() as u64,
             },
         };
         check_prepared(&prepared, &key, spec.dataset())?;
         check_applied(&applied, &prepared)?;
+        self.inner
+            .objects
+            .create_candidate_metadata(&prepared.descriptor, bytes, &lifecycle.budget, false)
+            .await?;
         let lock = self.lock(spec.dataset()).await;
         let _guard = lock.lock().await;
         let view = lifecycle.open(spec.dataset()).await?;

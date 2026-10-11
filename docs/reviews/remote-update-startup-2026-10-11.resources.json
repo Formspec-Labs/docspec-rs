@@ -1,0 +1,17 @@
+{
+  "started_utc": "2026-10-11T08:16:31.405571+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "engine::remote_startup_tests::"
+  ],
+  "free_before_bytes": 6192619520,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 6192611328,
+  "free_after_bytes": 6192254976,
+  "finished_utc": "2026-10-11T08:16:33.418733+00:00"
+}

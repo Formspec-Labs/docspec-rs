@@ -171,9 +171,29 @@ impl Engine {
         directory: &'a Path,
     ) -> futures::future::BoxFuture<'a, Result<TablePin>> {
         Box::pin(async move {
-            let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
+            self.source_with_origins_at(
+                dataset,
+                source,
+                &locations::Location::Local(directory.to_owned()),
+            )
+            .await
+        })
+    }
+
+    pub(super) fn source_with_origins_at<'a>(
+        &'a self,
+        dataset: &'a Id,
+        source: &'a TablePin,
+        directory: &'a locations::Location,
+    ) -> futures::future::BoxFuture<'a, Result<TablePin>> {
+        Box::pin(async move {
+            let native = self
+                .inner
+                .objects
+                .open_pin(source, &self.inner.lifecycle.budget)
+                .await?;
             let previous = native.metadata_ref();
-            let directory = directory.to_owned();
+            let location = directory.as_string()?;
             let view = self.inner.lifecycle.open(dataset).await?;
             let output = self
                 .register_output(view.table.identifier().namespace(), move || {
@@ -183,7 +203,7 @@ impl Engine {
                         .clone()
                         .into_builder(None)
                         .assign_uuid(uuid::Uuid::new_v4())
-                        .set_location(directory.to_string_lossy().into_owned())
+                        .set_location(location)
                         .add_current_schema(schema)?
                         .build()?
                         .metadata)
@@ -331,7 +351,7 @@ impl Engine {
             let applied = self
                 .replace_keys(Replacement {
                     dataset: &spec.dataset,
-                    directory,
+                    directory: locations::Location::Local(directory.to_owned()),
                     before: &before,
                     keys: &keys(),
                     scope,
@@ -471,7 +491,7 @@ impl Engine {
                     } = self
                         .replace_keys(Replacement {
                             dataset: request.dataset(),
-                            directory: &directory,
+                            directory: locations::Location::Local(directory.clone()),
                             before: &previous.table,
                             keys: &keys(),
                             scope,
@@ -582,8 +602,7 @@ pub(super) fn verify<'a>(
         };
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
         let base: DatasetPin =
-            inputs::read_manifest(&storage::Objects::Local, parent, budget, &mut 0, &memory)
-                .await?;
+            inputs::read_manifest(checks.objects(), parent, budget, &mut 0, &memory).await?;
         if base.dataset != dataset.dataset
             || (!matches!(dataset.request, OperationRequest::Backfill(_))
                 && dataset.request.base() != Some(&base.version))

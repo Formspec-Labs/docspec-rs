@@ -18,8 +18,8 @@ pub(in crate::engine) async fn verify_update(
 ) -> Result<()> {
     let before = base.groups.get("source").ok_or_else(invalid)?;
     let after = dataset.groups.get("source").ok_or_else(invalid)?;
-    let native_before = storage::open_pin(before, budget).await?;
-    let native_after = storage::open_pin(after, budget).await?;
+    let native_before = checks.objects().open_pin(before, budget).await?;
+    let native_after = checks.objects().open_pin(after, budget).await?;
     if !storage::identity::preserves_schema(
         native_before.metadata().current_schema(),
         native_after.metadata().current_schema(),

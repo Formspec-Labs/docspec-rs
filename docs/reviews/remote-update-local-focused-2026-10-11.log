@@ -1,0 +1,37 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 29.97s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/a26c957588a24aa6abca36b28e7e1c81/data/e29fefff-210d-4910-a303-856f05bd08f2-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/c33d1895bd40488ab12a47236d78dfbe/data/data/2651af0a-ecc9-437e-a5bd-d8f0bf9fdc36-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/c33d1895bd40488ab12a47236d78dfbe/data/data/480a2e3a-b0e0-4928-9004-7f4cecd8ab23-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/c33d1895bd40488ab12a47236d78dfbe/removed/data/e6c35b31-b713-41b9-9597-6efc8651e1ce-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/063b87030df548bb83fc1bae8eea8403/data/data/5006576b-594f-455e-96f6-beac17f9b04c-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/063b87030df548bb83fc1bae8eea8403/removed/data/29fe7290-8306-4b4d-989f-68a8e9285ca5-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK export-materialization
+DOCSPEC_TEST_WORK export-validation
+{"dataset":"source-updates","export":{"bytes":824,"digest":"69af058e278ccdc4b896576b13b520fe9f74e108e6b3f463caef173c1997a952","owner":"source-updates","path":"/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/c6c45b3b02cb41f58430e18b0fa18b03/export.parquet"},"first":{"bytes":3950,"digest":"318b11efa9158bff39228b2b19440b9ef3675c95dbfe738b776ab189ceb084f6","owner":"source-updates","path":"/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/51f15b1354054921ac7719472d2cfa86/release.json"},"initial":{"bytes":2610,"digest":"a09c2cb5dcdd809beb4fc1fd35133e06f7d5999783b7df77cbe0f95fa184e520","owner":"source-updates","path":"/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/62d621b563f14340b6e3b668b3ec393a/release.json"},"known_retained_bytes":85292,"metrics":{"bytes_reused":2266,"bytes_written":5144,"data_files_written":3,"files_reused":1,"files_scanned":3,"rows_added":3,"rows_removed":3},"phase":"updates_prepared","remote_cleanup":false,"second":{"bytes":4092,"digest":"629b1055980f433482d0df27d390ecfe693985dfd66770ac493b22594a03f89a","owner":"source-updates","path":"/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp9txVKL/objects/source-updates/b8f5a12c73b642829a1f483fe3c2bb20/release.json"},"unlisted_attempt_and_catalog_bytes_excluded":true}
+test engine::remote_build_provider_tests::updates::source_update_location_path_reuses_processing_and_shares_files ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 328 filtered out; finished in 2.69s
+

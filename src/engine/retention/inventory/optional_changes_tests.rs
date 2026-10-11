@@ -95,7 +95,10 @@ async fn descriptor_expands_once_without_opening_or_retaining_whole_endpoints() 
     inventory
         .prepared_changes(prepared.clone(), &origin())
         .unwrap();
-    inventory.expand(&budget, root.path()).await.unwrap();
+    inventory
+        .expand(&storage::Objects::Local, &budget, root.path())
+        .await
+        .unwrap();
     assert_eq!(inventory.metadata_objects_read, 1);
     let references = inventory.into_references().unwrap();
     let changes = applied.source.unwrap();
@@ -143,5 +146,10 @@ async fn present_descriptor_must_match_its_exact_prepared_binding() {
     .unwrap();
     let mut inventory = Inventory::collecting(budget.limits.max_metadata_bytes).unwrap();
     inventory.prepared_changes(prepared, &origin()).unwrap();
-    assert!(inventory.expand(&budget, root.path()).await.is_err());
+    assert!(
+        inventory
+            .expand(&storage::Objects::Local, &budget, root.path())
+            .await
+            .is_err()
+    );
 }

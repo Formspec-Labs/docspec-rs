@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.88s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test engine::remote_startup_tests::remote_constructor_keeps_host_custody_and_refuses_before_catalog_effects ... ok
+test engine::remote_startup_tests::remote_selection_refuses_second_prepared_initial_but_reuses_completed_first ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 327 filtered out; finished in 1.04s
+

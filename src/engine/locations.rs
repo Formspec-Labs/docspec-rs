@@ -326,7 +326,7 @@ pub(super) fn invalid() -> Error {
 pub(super) fn unsupported() -> Error {
     Error::refusal(
         "remote_build_unavailable",
-        "this operation is not qualified for remote storage; use initial Build and selected source reads",
+        "this operation is not qualified for remote storage; use independent source Build, Update, export and selected source reads",
     )
 }
 

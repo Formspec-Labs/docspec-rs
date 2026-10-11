@@ -1,0 +1,14 @@
+{
+  "at_utc": "2026-10-11T08:34:29.723163+00:00",
+  "paths": [
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/examples",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/adapters/dagster/.venv"
+  ],
+  "scope": "Inactive rebuildable debug example binaries and empty environment created by failed offline resolution. No corpora, retained datasets, benchmark artifacts, current CLI/test binaries or reports removed. Full Rust gate finished; lsof found no example handles.",
+  "unique_regular_file_logical_bytes": 997995714,
+  "unique_regular_file_allocated_bytes": 998113280,
+  "free_before_bytes": 2342547456,
+  "free_after_bytes": 2842050560,
+  "observed_volume_free_change_bytes": 499503104,
+  "volume_change_not_attributed_exclusively": true
+}

@@ -30,7 +30,7 @@ pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_o
 pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
 pub(crate) use tables::{
     CandidateWriter, bounded_json, fresh_metadata, fresh_metadata_at, register_candidate,
-    replacement_metadata,
+    replacement_metadata, replacement_metadata_at,
 };
 
 use crate::{
