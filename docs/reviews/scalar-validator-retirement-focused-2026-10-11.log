@@ -1,0 +1,15 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.64s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 7 tests
+test phase_retirement::processing_recovers_after_admission_retirement_and_restart ... ok
+test phase_retirement::retained_readback_selects_after_upstream_retirement_without_source ... ok
+test phase_retirement::exact_generation_retries_do_not_retire_recomputed_work ... ok
+test phase_retirement::validation_requires_explicit_retirement_after_processing_replacement ... ok
+test phase_retirement::scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test phase_retirement::evidence_requires_explicit_retirement_after_source_replacement ... ok
+test phase_retirement::retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 299 filtered out; finished in 3.34s
+

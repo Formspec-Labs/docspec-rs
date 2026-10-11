@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-10-11T07:53:57.800143+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "restore",
+    "killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog"
+  ],
+  "free_before_bytes": 11620229120,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 11178147840,
+  "free_after_bytes": 11191803904,
+  "finished_utc": "2026-10-11T07:54:25.882518+00:00"
+}

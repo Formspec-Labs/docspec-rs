@@ -1,0 +1,10 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 22.59s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test engine::retention::grants::tests::unused_cohort_lifetime_tests::subset_coverage_reclaims_unused_member_after_standalone_promises_end ... ok
+test engine::retention::grants::tests::related_result_lifetime_tests::full_refresh_reclaims_old_exclusive_input_after_execution_promises_end ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 325 filtered out; finished in 9.33s
+

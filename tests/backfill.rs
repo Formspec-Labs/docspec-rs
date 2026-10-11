@@ -316,7 +316,9 @@ async fn killed_backfill_workers_resume_retained_files_validation_and_readback()
                 "{phase}: retained completion must be reused"
             );
             if key.starts_with("backfill-readback/") {
-                assert_eq!(value, &serde_json::to_value(&release).unwrap());
+                let public: ReleasePin = serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(public, release);
+                assert_eq!(value["scalar_validator"], "docspec.scalar-validation.v1");
             }
         }
         assert_eq!(engine.backfill(&request).await.unwrap(), release);

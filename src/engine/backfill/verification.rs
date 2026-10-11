@@ -12,7 +12,7 @@ pub(in crate::engine) async fn verify_binding_dependencies(
     if dataset.computed.is_empty() {
         return Ok(());
     }
-    let mut history = History::new(budget)?;
+    let mut history = History::new(budget, checks.objects().clone())?;
     let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
     for (name, binding) in &dataset.computed {
         verify_binding_history(dataset, name, &mut history, checks).await?;
@@ -41,7 +41,7 @@ pub(crate) async fn verify_groups(
     }
     check_names(dataset)?;
     let source = dataset.groups.get("source").ok_or_else(invalid_group)?;
-    let mut history = History::new(budget)?;
+    let mut history = History::new(budget, checks.objects().clone())?;
     match &dataset.request {
         OperationRequest::Build(spec) => {
             if dataset.related.is_some() || dataset.inputs.len() != dataset.request.inputs().len() {
@@ -360,14 +360,16 @@ struct History<'a> {
     bytes: usize,
     memory: Arc<tokio::sync::OwnedSemaphorePermit>,
     budget: &'a Budget,
+    objects: storage::Objects,
 }
 impl<'a> History<'a> {
-    fn new(budget: &'a Budget) -> Result<Self> {
+    fn new(budget: &'a Budget, objects: storage::Objects) -> Result<Self> {
         Ok(Self {
             entries: BTreeMap::new(),
             bytes: 0,
             memory: Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?),
             budget,
+            objects,
         })
     }
     async fn read(&mut self, object: &ObjectRef) -> Result<Arc<DatasetPin>> {
@@ -379,7 +381,7 @@ impl<'a> History<'a> {
             };
         }
         let dataset: DatasetPin = inputs::read_manifest(
-            &storage::Objects::Local,
+            &self.objects,
             object,
             self.budget,
             &mut self.bytes,
@@ -738,39 +740,43 @@ impl FileCoverage {
 mod tests {
     use super::*;
 
+    fn history_dataset(version: &str) -> DatasetPin {
+        let request = RunSpec {
+            dataset: Id::new("comments").unwrap(),
+            operation: Id::new(version).unwrap(),
+            base: None,
+            relationship: None,
+            input: "unused.parquet".into(),
+            expected_digest: "unused".into(),
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        };
+        DatasetPin {
+            format: FORMAT,
+            dataset: request.dataset.clone(),
+            version: request.operation.clone(),
+            groups: BTreeMap::new(),
+            computed: BTreeMap::new(),
+            inputs: BTreeMap::new(),
+            relationship: SourceRelationship::Independent,
+            related: None,
+            evidence: None,
+            definition: request.definition.clone(),
+            eligibility: 0,
+            boundary: 0,
+            request: OperationRequest::Build(request),
+            parent_manifest: None,
+            processor: "test".into(),
+            validation: VerificationLevel::Routine,
+        }
+    }
+
     #[tokio::test]
     async fn history_reuses_exact_manifests_and_bounds_combined_admission() {
         let root = tempfile::tempdir().unwrap();
         let mut objects = Vec::new();
         for version in ["first", "second"] {
-            let request = RunSpec {
-                dataset: Id::new("comments").unwrap(),
-                operation: Id::new(version).unwrap(),
-                base: None,
-                relationship: None,
-                input: "unused.parquet".into(),
-                expected_digest: "unused".into(),
-                sql: "SELECT * FROM input".into(),
-                definition: "v1".into(),
-            };
-            let dataset = DatasetPin {
-                format: FORMAT,
-                dataset: request.dataset.clone(),
-                version: request.operation.clone(),
-                groups: BTreeMap::new(),
-                computed: BTreeMap::new(),
-                inputs: BTreeMap::new(),
-                relationship: SourceRelationship::Independent,
-                related: None,
-                evidence: None,
-                definition: request.definition.clone(),
-                eligibility: 0,
-                boundary: 0,
-                request: OperationRequest::Build(request),
-                parent_manifest: None,
-                processor: "test".into(),
-                validation: VerificationLevel::Routine,
-            };
+            let dataset = history_dataset(version);
             let path = root.path().join(format!("{version}.json"));
             std::fs::write(&path, serde_json::to_vec(&dataset).unwrap()).unwrap();
             objects.push(storage::object(&dataset.version, &path).unwrap());
@@ -783,7 +789,7 @@ mod tests {
             ..Limits::default()
         })
         .unwrap();
-        let mut history = History::new(&budget).unwrap();
+        let mut history = History::new(&budget, storage::Objects::Local).unwrap();
         let first = history.read(&objects[0]).await.unwrap();
         std::fs::remove_file(&objects[0].path).unwrap();
         let cached = history.read(&objects[0]).await.unwrap();
@@ -804,6 +810,84 @@ mod tests {
         assert!(budget.reserve(budget.limits.memory_bytes / 2).is_err());
         drop((first, cached, history));
         assert!(budget.reserve(budget.limits.memory_bytes / 2).is_ok());
+    }
+
+    #[cfg(feature = "remote")]
+    #[tokio::test]
+    async fn configured_history_reuses_exact_parent_and_preserves_read_scope() {
+        use crate::storage::remote::objects::tests::ReadFixture;
+
+        let dataset = history_dataset("parent");
+        let payload = serde_json::to_vec(&dataset).unwrap();
+        let object = ObjectRef {
+            owner: dataset.dataset.clone(),
+            path: "s3://bucket/owned/parent.json".into(),
+            digest: blake3::hash(&payload).to_hex().to_string(),
+            bytes: payload.len() as u64,
+        };
+        let fixture = ReadFixture::inventory(std::collections::HashMap::from([(
+            object.path.clone(),
+            payload,
+        )]));
+        let checks = super::super::super::verification::Checks::routine(storage::Objects::Remote(
+            fixture.objects(),
+        ));
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 16 << 20,
+            max_metadata_bytes: 1 << 20,
+            ..Limits::default()
+        })
+        .unwrap();
+        let mut history = History::new(&budget, checks.objects().clone()).unwrap();
+        let first = history.read(&object).await.unwrap();
+        let cached = history.read(&object).await.unwrap();
+        assert_eq!(first.as_ref(), &dataset);
+        assert!(Arc::ptr_eq(&first, &cached));
+        assert_eq!(history.bytes as u64, object.bytes);
+        let mut conflicting = object.clone();
+        conflicting.digest = "different".into();
+        assert_eq!(
+            history.read(&conflicting).await.unwrap_err().code(),
+            "invalid_group"
+        );
+        let mut outside = object.clone();
+        outside.path = "s3://bucket/outside/parent.json".into();
+        assert_eq!(
+            history.read(&outside).await.unwrap_err().code(),
+            "remote_scope"
+        );
+        assert_eq!(
+            fixture.observed_paths(),
+            ["HEAD", "GET", "HEAD"].map(|method| (method.into(), object.path.clone()))
+        );
+
+        // The changes verifier uses the same configured single-read path, with
+        // its existing exact release identity checks rather than the cache.
+        let release = refresh::read_release_with_objects(
+            checks.objects(),
+            &VersionRef {
+                dataset: dataset.dataset.clone(),
+                version: dataset.version.clone(),
+                manifest: object.clone(),
+            },
+            &budget,
+            &mut 0,
+            &history.memory,
+        )
+        .await
+        .unwrap();
+        assert_eq!(release.dataset, dataset);
+        assert_eq!(release.manifest, object);
+        let requests = fixture.finish();
+        assert_eq!(requests.len(), 6);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _)| method == "GET")
+                .count(),
+            2
+        );
     }
 
     #[test]

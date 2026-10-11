@@ -373,37 +373,82 @@ impl Engine {
         )
         .await?;
         stop_after(stop, "processing")?;
-        let validation_key = format!("backfill-validation/{}/{digest}", operation.eligibility);
+        let validation_protections = self
+            .validate_scalar_group(
+                request,
+                operation,
+                source,
+                source_protections,
+                definition,
+                &expressions.input_fields,
+                &expressions.native_field_ids,
+                &prepared,
+                origins.as_ref(),
+                protections.as_ref(),
+                checks,
+            )
+            .await?;
+        ReferenceProtections::inherit(&mut protections, validation_protections.as_ref())?;
+        stop_after(stop, "validation")?;
+        Ok(PreparedGroup {
+            origins,
+            table: prepared,
+            native_field_ids: expressions.native_field_ids.clone(),
+            input_fields: expressions.input_fields.clone(),
+            protections,
+        })
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "One checker binds exact source, target interpretation and inherited protections"
+    )]
+    pub(super) async fn validate_scalar_group(
+        &self,
+        request: &OperationRequest,
+        operation: &Operation,
+        source: &TablePin,
+        source_protections: Option<&ReferenceProtections>,
+        definition: &GroupDefinition,
+        input_fields: &BTreeMap<String, i32>,
+        native_field_ids: &BTreeMap<i32, i32>,
+        output: &TablePin,
+        origins: Option<&ObjectRef>,
+        output_protections: Option<&ReferenceProtections>,
+        checks: &mut super::super::verification::Checks,
+    ) -> Result<Option<ReferenceProtections>> {
+        let lifecycle = &self.inner.lifecycle;
+        let validation_key =
+            scalar_validation_key(operation.eligibility, source, definition, input_fields)?;
         let view = lifecycle.open(request.dataset()).await?;
         let validated: Option<ValidationCompletion> =
             self.active_completion(&view, &validation_key).await?;
         let validation_protections = if let Some(validated) = validated {
-            check_validation(
-                &validation_key,
-                &validated,
-                source,
-                &prepared,
-                origins.as_ref(),
-            )?;
+            check_validation(&validation_key, &validated, source, output, origins)?;
             self.retained_protections(&view, &validation_key).await?
         } else {
-            let mut validation_protections = protections
-                .as_ref()
+            let mut validation_protections = output_protections
                 .map(ReferenceProtections::duplicate)
                 .transpose()?;
             ReferenceProtections::inherit(&mut validation_protections, source_protections)?;
             #[cfg(feature = "test-util")]
             work_started("backfill-validation");
+            // Composition-only readback checked interpretation, not native files.
+            // A new validator acknowledgment needs its own bounded routine check.
+            if !checks.inspects_tables() {
+                *checks = super::super::verification::Checks::routine(self.inner.objects.clone());
+            }
             verification::verify_group_data(
                 source,
-                &prepared,
+                output,
                 definition,
-                &expressions.input_fields,
-                &expressions.native_field_ids,
+                input_fields,
+                native_field_ids,
                 &lifecycle.budget,
                 checks,
             )
             .await?;
+            let lock = self.lock(request.dataset()).await;
             let _guard = lock.lock().await;
             let view = lifecycle.open(request.dataset()).await?;
             self.check_completion(&view, operation, request.operation())
@@ -411,22 +456,17 @@ impl Engine {
             let existing: Option<ValidationCompletion> =
                 self.active_completion(&view, &validation_key).await?;
             if let Some(existing) = existing {
-                check_validation(
-                    &validation_key,
-                    &existing,
-                    source,
-                    &prepared,
-                    origins.as_ref(),
-                )?;
+                check_validation(&validation_key, &existing, source, output, origins)?;
                 self.retained_protections(&view, &validation_key).await?
             } else {
                 let completed = ValidationCompletion {
-                    origins: origins.clone(),
-                    output: prepared.metadata.clone(),
+                    validator: Some(VALIDATOR.into()),
+                    origins: origins.cloned(),
+                    output: output.metadata.clone(),
                     dependencies: Some(GroupDependencies {
                         source: source.into(),
                         source_logical_metadata: source.logical_metadata.clone(),
-                        output: (&prepared).into(),
+                        output: output.into(),
                     }),
                 };
                 let records = completion_records(
@@ -440,15 +480,7 @@ impl Engine {
                 validation_protections
             }
         };
-        ReferenceProtections::inherit(&mut protections, validation_protections.as_ref())?;
-        stop_after(stop, "validation")?;
-        Ok(PreparedGroup {
-            origins,
-            table: prepared,
-            native_field_ids: expressions.native_field_ids.clone(),
-            input_fields: expressions.input_fields.clone(),
-            protections,
-        })
+        Ok(validation_protections)
     }
 
     pub(super) async fn reserve_group(
@@ -701,7 +733,10 @@ fn check_validation(
     output: &TablePin,
     origins: Option<&ObjectRef>,
 ) -> Result<()> {
-    if completion.output != output.metadata || completion.origins.as_ref() != origins {
+    if completion.validator.as_deref() != Some(VALIDATOR)
+        || completion.output != output.metadata
+        || completion.origins.as_ref() != origins
+    {
         return Err(generation_conflict(key));
     }
     check_group_dependencies(key, completion.dependencies.as_ref(), source, output)
@@ -712,4 +747,24 @@ fn generation_conflict(key: &str) -> Error {
         "phase_generation_conflict",
         format!("active completion {key} binds a different source or output generation"),
     )
+}
+
+/// Keeps validator changes out of material preparation and per-file execution keys.
+pub(super) fn scalar_validation_key(
+    eligibility: u64,
+    source: &TablePin,
+    definition: &GroupDefinition,
+    input_fields: &BTreeMap<String, i32>,
+) -> Result<String> {
+    let digest = storage::json_digest(&(
+        VALIDATOR,
+        PROCESSOR,
+        source.logical_metadata(),
+        definition,
+        input_fields,
+    ))?;
+    Ok(format!(
+        "backfill-validation/{eligibility}/{}",
+        digest.to_hex()
+    ))
 }

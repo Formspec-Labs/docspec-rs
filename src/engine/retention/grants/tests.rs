@@ -10,6 +10,9 @@ use arrow::{
 };
 use parquet::arrow::ArrowWriter;
 
+#[path = "unused_cohort_lifetime_tests.rs"]
+mod unused_cohort_lifetime_tests;
+
 fn id(value: &str) -> Id {
     Id::new(value).unwrap()
 }
@@ -1000,3 +1003,9 @@ async fn retired_seal_reclaims_exclusive_member_after_all_other_promises_end() {
 async fn retired_seal_preserves_selected_consumer_and_cold_readback() {
     exercise_seal_retirement(true).await;
 }
+
+#[path = "coupled_build_lifetime_tests.rs"]
+mod coupled_build_lifetime_tests;
+
+#[path = "related_result_lifetime_tests.rs"]
+mod related_result_lifetime_tests;

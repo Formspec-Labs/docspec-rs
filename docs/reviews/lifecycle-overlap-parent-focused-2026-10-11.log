@@ -1,0 +1,68 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.64s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+test engine::backfill::verification::tests::configured_history_reuses_exact_parent_and_preserves_read_scope ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 322 filtered out; finished in 0.25s
+
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 8 tests
+test phase_retirement::retained_readback_selects_after_upstream_retirement_without_source ... ok
+test phase_retirement::processing_recovers_after_admission_retirement_and_restart ... ok
+test phase_retirement::exact_generation_retries_do_not_retire_recomputed_work ... ok
+test phase_retirement::validation_requires_explicit_retirement_after_processing_replacement ... ok
+test phase_retirement::scalar_preparation_cannot_reuse_validation_from_a_retired_generation ... ok
+test phase_retirement::retained_scalar_readback_recomposes_with_a_new_sibling_after_retirement ... ok
+test phase_retirement::evidence_requires_explicit_retirement_after_source_replacement ... ok
+test continuous_backfill::retained_child_catches_up_correction_with_sibling_and_compaction_in_flight ... FAILED
+
+failures:
+
+---- continuous_backfill::retained_child_catches_up_correction_with_sibling_and_compaction_in_flight stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/189c19f570b84b128d6fd35b121a26f9/data/a9936591-b35c-4793-9925-967d74c2c6a7-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/189c19f570b84b128d6fd35b121a26f9/data/a9936591-b35c-4793-9925-967d74c2c6a7-00001.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/189c19f570b84b128d6fd35b121a26f9/data/a9936591-b35c-4793-9925-967d74c2c6a7-00002.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/e0210538d6b6415a984b9d2e5f29fcef/data/6c8a49d6-23db-4a25-ae04-155d4f11a934-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/e0210538d6b6415a984b9d2e5f29fcef/data/9fa20977-83d6-4891-bbd9-e622feb05151-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/e0210538d6b6415a984b9d2e5f29fcef/data/a0efa03a-957e-4c31-a9b3-9c80519d3813-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK compaction-rewrite
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK compaction-verification
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/0fd8570362ec4840a70da6b436fc710f/data/0df3f4a8-e117-479d-a84d-7a91f2908987-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/0fd8570362ec4840a70da6b436fc710f/data/44a0d419-408c-4df5-a4a6-b7f418893057-00000.parquet
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp2rHdTM/workspace/objects/comments/0fd8570362ec4840a70da6b436fc710f/data/f2e733e4-230d-43d8-8429-7a62c224f3b1-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'continuous_backfill::retained_child_catches_up_correction_with_sibling_and_compaction_in_flight' (48207360) panicked at tests/continuous_backfill.rs:331:27:
+called `Result::unwrap()` on an `Err` value: Error { code: "pending_source", message: "source admission is unresolved; select or explicitly abandon it before cutover", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    continuous_backfill::retained_child_catches_up_correction_with_sibling_and_compaction_in_flight
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 299 filtered out; finished in 3.72s
+
+error: test failed, to rerun pass `--test integration`

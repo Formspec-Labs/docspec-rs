@@ -275,6 +275,192 @@ async fn interrupted_parent_catches_up_replacements_deletions_and_insertions() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retained_child_catches_up_correction_with_sibling_and_compaction_in_flight() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, mut rows) = fixture(root.path(), false).await;
+    let request = continuous(&base);
+    let mut old_reader = engine.read_group(&base, "source").await.unwrap();
+    assert_eq!(
+        engine
+            .continuous_backfill_until(&request, "readback")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let before = completed_work(&engine.inspect(&base.dataset.dataset).await.unwrap());
+    let before_revisions = lifecycle_revisions(root.path()).await;
+    let replacements = vec![
+        (Some(1), Some("corrected é🎉".into())),
+        (Some(9000), Some(String::new())),
+    ];
+    let update = UpdateSpec {
+        dataset: base.dataset.dataset.clone(),
+        operation: id("overlap-source-edit"),
+        definition: "v1".into(),
+        base: base.id.clone(),
+        keys: vec!["id".into()],
+        replacements: input(&root.path().join("replacement.parquet"), &replacements),
+        deletions: Some(deletion_keys(
+            &root.path().join("deletions.parquet"),
+            vec![Some(9)],
+        )),
+    };
+    assert_eq!(
+        engine
+            .update_until(&update, "processing")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let prepared = engine.inspect(&base.dataset.dataset).await.unwrap();
+    let processing = prepared
+        .iter()
+        .find(|(key, value)| {
+            key.starts_with("phase/")
+                && value["operation"] == update.operation.as_str()
+                && value["phase"] == "processing"
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .unwrap();
+    let sibling_request = spec(&base, "sibling", "z_next", "next_id", "id + 1");
+    let compact = super::compaction::request(&base, "overlap-layout");
+    let (sibling, compacted) =
+        tokio::join!(engine.backfill(&sibling_request), engine.compact(&compact));
+    // A schema cutover cannot pass an accepted source update still in flight.
+    assert_eq!(sibling.unwrap_err().code(), "pending_source");
+    let compacted = compacted.unwrap();
+    assert!(compacted.input_files.len() > compacted.output_files.len());
+    assert_eq!(engine.latest(&base.dataset.dataset).await.unwrap(), base);
+    let sibling_work = completed_work(&engine.inspect(&base.dataset.dataset).await.unwrap());
+    assert!(
+        sibling_work
+            .keys()
+            .any(|key| key.starts_with("backfill-readback/sibling/"))
+    );
+    let source = engine.update(&update).await.unwrap();
+    assert_eq!(
+        engine.backfill(&sibling_request).await.unwrap_err().code(),
+        "stale_source_boundary"
+    );
+    assert_eq!(
+        engine.inspect(&base.dataset.dataset).await.unwrap()[&processing.0],
+        processing.1
+    );
+    let sibling = engine
+        .backfill(&spec(
+            &source,
+            "sibling-catchup",
+            "z_next",
+            "next_id",
+            "id + 1",
+        ))
+        .await
+        .unwrap();
+    assert_retained(
+        &sibling_work,
+        &engine.inspect(&base.dataset.dataset).await.unwrap(),
+    );
+    // Both enrichment and source maintenance overlap this retained child. Its
+    // old source must not win selection or lose the newly selected sibling.
+    let release = engine.continuous_backfill(&request).await.unwrap();
+    assert_eq!(release.dataset.boundary, source.dataset.boundary);
+    assert_eq!(
+        release.dataset.groups["source"],
+        source.dataset.groups["source"]
+    );
+    assert_eq!(
+        release.dataset.groups["z_next"],
+        sibling.dataset.groups["z_next"]
+    );
+    let after = engine.inspect(&base.dataset.dataset).await.unwrap();
+    assert_retained(&before, &after);
+    let after_revisions = lifecycle_revisions(root.path()).await;
+    for key in before.keys() {
+        assert_eq!(before_revisions[key], after_revisions[key], "rewrote {key}");
+    }
+    let mut original = Vec::new();
+    while let Some(batch) = old_reader.try_next().await.unwrap() {
+        let ids = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let text = batch
+            .column_by_name("text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        original.extend(
+            ids.iter()
+                .zip(text.iter())
+                .map(|(id, text)| (id, text.map(str::to_owned))),
+        );
+    }
+    original.sort();
+    rows.sort();
+    assert_eq!(original, rows);
+    rows.retain(|row| row.0 != Some(1) && row.0 != Some(9));
+    rows.extend(replacements);
+    let mut expected = rows
+        .into_iter()
+        .map(|(id, text)| {
+            let length = text.as_ref().map(|text| text.chars().count() as i64);
+            (id, text, length, id.map(|id| id + 1))
+        })
+        .collect::<Vec<_>>();
+    let mut stream = engine.read_combined(&release).await.unwrap();
+    let mut actual = Vec::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let ids = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let text = batch
+            .column_by_name("text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let lengths = arrow::compute::cast(
+            batch.column_by_name("text_length").unwrap(),
+            &DataType::Int64,
+        )
+        .unwrap();
+        let lengths = lengths.as_any().downcast_ref::<Int64Array>().unwrap();
+        let next = batch
+            .column_by_name("next_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        actual.extend(
+            ids.iter()
+                .zip(text.iter())
+                .zip(lengths.iter())
+                .zip(next.iter())
+                .map(|(((id, text), length), next)| (id, text.map(str::to_owned), length, next)),
+        );
+    }
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
+    assert_eq!(engine.continuous_backfill(&request).await.unwrap(), release);
+    assert!(
+        !engine
+            .plan_continuous_backfill(&request)
+            .await
+            .unwrap()
+            .fenced
+    );
+}
+
 #[tokio::test]
 async fn parent_identity_conflicts_and_public_child_entry_points_refuse() {
     let root = tempfile::tempdir().unwrap();

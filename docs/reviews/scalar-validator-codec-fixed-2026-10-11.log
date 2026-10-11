@@ -1,0 +1,18 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.16s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 10 tests
+test engine::retention::inventory::scalar_origins_tests::legacy_execution_absence_and_null_remain_unknown_with_strict_decoding ... ok
+test engine::retention::inventory::scalar_origins_tests::shallow_original_roots_keep_schema_as_a_leaf_and_do_not_queue_reads ... ok
+test engine::retention::inventory::scalar_readback_fields_tests::private_scalar_validator_is_typed_only_on_scalar_readback ... ok
+test engine::retention::inventory::scalar_origins_tests::typed_origins_expand_once_and_retain_original_file_closure ... ok
+test engine::backfill::validator_tests::prior_scalar_ack_cannot_hide_missing_current_check_inputs ... ok
+test engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse ... ok
+test engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact ... ok
+test engine::backfill::validator_tests::current_scalar_readback_retains_validation_after_phase_retirement ... ok
+test engine::backfill::validator_tests::current_scalar_validator_rechecks_legacy_and_new_operation_prepared_reuse ... ok
+test engine::backfill::protection_tests::scalar_completions_keep_foreign_scope_across_stops_reuse_and_reopen ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 313 filtered out; finished in 4.86s
+

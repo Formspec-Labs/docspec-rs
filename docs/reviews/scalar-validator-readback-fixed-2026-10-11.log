@@ -1,0 +1,80 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 24.77s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 5 tests
+test engine::backfill::validator_tests::prior_scalar_ack_cannot_hide_missing_current_check_inputs ... ok
+test engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact ... FAILED
+test engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse ... FAILED
+test engine::backfill::validator_tests::current_scalar_readback_retains_validation_after_phase_retirement ... FAILED
+test engine::backfill::validator_tests::current_scalar_validator_rechecks_legacy_and_new_operation_prepared_reuse ... ok
+
+failures:
+
+---- engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp36hYMl/workspace/objects/data/d3f0845ea71442f48dc63b7978eed2a4/data/e43f8753-5489-4307-a656-8823d7c5f877-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmp36hYMl/workspace/objects/data/40a0f538e36f4248acfc352de9d34601/data/6bb87458-79be-4fa9-bab0-7396aea7d528-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact' (48119945) panicked at src/engine/backfill/validator_tests.rs:186:70:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_json", message: "unsupported retention metadata fields", source: Some(Error("unsupported retention metadata fields", line: 0, column: 0)), backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFLowkR/workspace/objects/data/9429f1be144442ccbe0260ab4f466084/data/1ab84ff2-7ca5-4377-b8aa-c30f414a2ed8-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpFLowkR/workspace/objects/data/048bb16bfd8a4a17935ca7170aacbd75/data/6e11a356-568c-4bca-84c9-638b028b14f8-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse' (48119944) panicked at src/engine/backfill/validator_tests.rs:435:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_json", message: "unsupported retention metadata fields", source: Some(Error("unsupported retention metadata fields", line: 0, column: 0)), backtrace: <disabled> }
+
+---- engine::backfill::validator_tests::current_scalar_readback_retains_validation_after_phase_retirement stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSXTA5y/workspace/objects/data/aa355b4613ec4d1db574c4f628e6f459/data/c9cfbcba-42a1-425c-9e9b-90fe04b5739a-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSXTA5y/workspace/objects/data/864fe55b294e45ee9b883185d2d0a779/data/75de427d-d20d-47f0-86d9-3c87e5cf93ba-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpSXTA5y/workspace/objects/data/f40c3363d97a4ab99703de22c3aff9d8/data/6b7704a8-636e-418b-b268-8134731ef3eb-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+
+thread 'engine::backfill::validator_tests::current_scalar_readback_retains_validation_after_phase_retirement' (48119941) panicked at src/engine/backfill/validator_tests.rs:512:50:
+called `Result::unwrap()` on an `Err` value: Error { code: "invalid_json", message: "invalid type: string \"10\", expected i32 at line 1 column 5891", source: Some(Error("invalid type: string \"10\", expected i32", line: 1, column: 5891)), backtrace: <disabled> }
+
+
+failures:
+    engine::backfill::validator_tests::current_scalar_readback_retains_validation_after_phase_retirement
+    engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse
+    engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact
+
+test result: FAILED. 2 passed; 3 failed; 0 ignored; 0 measured; 316 filtered out; finished in 2.77s
+
+error: test failed, to rerun pass `--lib`

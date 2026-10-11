@@ -1,0 +1,61 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 23.97s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 1 test
+test engine::retention::grants::tests::unused_cohort_lifetime_tests::subset_coverage_reclaims_unused_member_after_standalone_promises_end ... FAILED
+
+failures:
+
+---- engine::retention::grants::tests::unused_cohort_lifetime_tests::subset_coverage_reclaims_unused_member_after_standalone_promises_end stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/owner/1a2bfe15caca4e259cf67c2b3a239a89/data/629b87d0-221a-4c03-b3e5-4f032a7cdb4f-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/comments/bacec5ea7c734536b4ddd9f831db66b7/data/82cc7034-d6c4-4b6c-a5ee-cd1e539105e0-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/dockets/45b09f265205410c937e150cb1924313/data/af00e0c4-0ab3-44f5-836e-3a7df4ab0097-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/unused/37e775579d4a4d6a893352581d9bc1e4/data/154b68f2-a75a-4b51-8b2f-b4feb4e49ac9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK evidence
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/consumer/fb5e49aca63849a09158662e3f2b3e0e/data/6f740dbd-1b00-4d8f-9dc9-9b67eff8edc8-00000.parquet
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/consumer/c65d5d98a038424f805ff85ace1324f3/data/10915e34-fcb0-4e75-84dd-1db10a39746c-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpvmQv0g/workspace/objects/unused/8fe1a13f07c8449f8a3c8761049851c5/data/51cc1645-811d-4fdd-91b6-a0040666d3ee-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'engine::retention::grants::tests::unused_cohort_lifetime_tests::subset_coverage_reclaims_unused_member_after_standalone_promises_end' (48573637) panicked at src/engine/retention/grants/unused_cohort_lifetime_tests.rs:188:10:
+called `Result::unwrap()` on an `Err` value: Error { code: "grant_in_use", message: "owner grant owner-protection/486c81a78c38bbc2e5b65642c6b996bbc4e8f4a063b9631b656da8cdffe7e90f still protects consumer/request-dependencies/initial", source: None, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::retention::grants::tests::unused_cohort_lifetime_tests::subset_coverage_reclaims_unused_member_after_standalone_promises_end
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 326 filtered out; finished in 3.50s
+
+error: test failed, to rerun pass `--lib`

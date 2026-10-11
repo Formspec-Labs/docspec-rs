@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-11T08:12:23.036822+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib"
+  ],
+  "free_before_bytes": 7406133248,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 7295623168,
+  "free_after_bytes": 7376412672,
+  "finished_utc": "2026-10-11T08:13:51.314217+00:00"
+}

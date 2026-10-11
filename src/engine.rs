@@ -1878,6 +1878,20 @@ impl Engine {
                         manifest,
                         verified: true,
                     };
+                    // Full refresh result availability owns its exact dependencies,
+                    // separately from execution's retained captured-base grants.
+                    // Acquire owner grants before taking the consumer commit lock.
+                    let readback_protections = if matches!(spec, OperationRequest::Refresh(refresh)
+                        if refresh.mode == RefreshMode::Full)
+                        && release.dataset.evidence.is_none()
+                    {
+                        Some(
+                            self.protect_releases(spec.dataset(), std::slice::from_ref(&release))
+                                .await?,
+                        )
+                    } else {
+                        readback_protections
+                    };
                     // Prepared tables were validated at their durable phase boundaries.
                     // Equality above verifies serialization without scanning them again.
                     let _guard = lock.lock().await;

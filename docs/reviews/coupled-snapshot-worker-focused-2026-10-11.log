@@ -1,0 +1,17 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 25.71s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 2 tests
+test storage::remote::objects::tests::pinning::configured_snapshot_reuses_inherited_files_without_payload_io ... ok
+test engine::retention::grants::tests::coupled_build_lifetime_tests::coupled_full_build_reclaims_old_payload_after_exact_promises_end ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 323 filtered out; finished in 5.98s
+
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+test backfill::killed_backfill_workers_resume_retained_files_validation_and_readback ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 306 filtered out; finished in 9.07s
+

@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T07:51:33.180990+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "--",
+    "subset_coverage_reclaims_unused_member_after_standalone_promises_end",
+    "full_refresh_reclaims_old_exclusive_input_after_execution_promises_end"
+  ],
+  "free_before_bytes": 11941486592,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 11855306752,
+  "free_after_bytes": 11870191616,
+  "finished_utc": "2026-10-11T07:52:07.269503+00:00"
+}

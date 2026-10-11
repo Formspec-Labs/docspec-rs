@@ -472,9 +472,7 @@ impl Engine {
                 replacement_bytes,
             } = request;
             let budget = &self.inner.lifecycle.budget;
-            let native = storage::open_pin(before, budget).await?;
-            let inventory = storage::snapshot_files(&native, budget).await?;
-            storage::check_inventory_files(before, &inventory)?;
+            let (native, inventory) = self.inner.objects.open_snapshot(before, budget).await?;
             let schema =
                 iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
             if !same_fields(&schema, replacement.schema().as_arrow())? {

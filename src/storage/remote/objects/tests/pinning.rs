@@ -15,6 +15,14 @@ async fn native_inventory(
     list_uri: &str,
     manifest_uri: &str,
 ) -> (TableMetadata, HashMap<String, Vec<u8>>) {
+    native_inventory_at(list_uri, manifest_uri, DATA).await
+}
+
+async fn native_inventory_at(
+    list_uri: &str,
+    manifest_uri: &str,
+    data_uri: &str,
+) -> (TableMetadata, HashMap<String, Vec<u8>>) {
     let temp = tempfile::tempdir().unwrap();
     let metadata = crate::storage::fresh_metadata(
         iceberg::spec::Schema::builder()
@@ -63,7 +71,7 @@ async fn native_inventory(
             DataFileBuilder::default()
                 .content(DataContentType::Data)
                 .file_format(DataFileFormat::Parquet)
-                .file_path(DATA.into())
+                .file_path(data_uri.into())
                 .file_size_in_bytes(payload.len() as u64)
                 .record_count(3)
                 .partition_spec_id(metadata.default_partition_spec_id())
@@ -106,7 +114,7 @@ async fn native_inventory(
         HashMap::from([
             (list_uri.into(), std::fs::read(list_path).unwrap()),
             (manifest_uri.into(), std::fs::read(manifest_path).unwrap()),
-            (DATA.into(), payload),
+            (data_uri.into(), payload),
         ]),
     )
 }
@@ -128,6 +136,90 @@ fn candidate_table(
         .readonly(true)
         .build()
         .unwrap()
+}
+
+#[tokio::test]
+async fn configured_snapshot_reuses_inherited_files_without_payload_io() {
+    let shared = "s3://bucket/owned/prior/data/shared.parquet";
+    let (metadata, mut contents) = native_inventory_at(LIST, MANIFEST, shared).await;
+    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
+    let identities = contents
+        .iter()
+        .map(|(path, bytes)| ObjectRef {
+            owner: Id::new(if path == shared {
+                "prior-owner"
+            } else {
+                "candidate-owner"
+            })
+            .unwrap(),
+            path: path.clone(),
+            digest: blake3::hash(bytes).to_hex().to_string(),
+            bytes: bytes.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let pin = crate::model::TablePin {
+        table: "candidate".into(),
+        metadata: identities
+            .iter()
+            .find(|object| object.path == location)
+            .unwrap()
+            .clone(),
+        snapshot: Some(1),
+        schema_id: metadata.current_schema_id(),
+        objects: identities,
+        rows: 3,
+        logical_metadata: None,
+    };
+    let fixture = ReadFixture::inventory(contents);
+    let objects = Objects::Remote(fixture.objects());
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        memory_bytes: 16 << 20,
+        max_metadata_bytes: 1 << 20,
+        ..Limits::default()
+    })
+    .unwrap();
+    let (table, inventory) = objects.open_snapshot(&pin, &budget).await.unwrap();
+    assert_eq!(
+        table.metadata().current_schema().as_struct().fields()[0].id,
+        7
+    );
+    assert_eq!(table.metadata().current_snapshot_id(), pin.snapshot);
+    assert_eq!(inventory.data.len(), 1);
+    assert_eq!(inventory.data[0].file_path(), shared);
+    assert_eq!(inventory.data[0].record_count(), 3);
+    assert_eq!(
+        inventory.paths,
+        std::collections::BTreeSet::from([
+            location.clone(),
+            LIST.into(),
+            MANIFEST.into(),
+            shared.into(),
+        ])
+    );
+    let paths = fixture.observed_paths();
+    for uri in [location.as_str(), LIST, MANIFEST] {
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|(method, path)| method == "GET" && path == uri)
+                .count(),
+            1,
+            "each native metadata object is read once"
+        );
+    }
+    assert!(
+        paths.iter().all(|(_, path)| path != shared),
+        "inventory never opens the inherited payload"
+    );
+    assert!(
+        budget.reserve(budget.limits.memory_bytes / 2).is_err(),
+        "returned inventory retains its admission"
+    );
+    drop((table, inventory));
+    assert!(budget.reserve(budget.limits.memory_bytes / 2).is_ok());
+    fixture.finish();
 }
 
 #[tokio::test]
@@ -777,6 +869,8 @@ async fn configured_inspection_refuses_manifest_scope_before_native_decode() {
         ..Limits::default()
     })
     .unwrap();
+    let error = objects.open_snapshot(&pin, &budget).await.err().unwrap();
+    assert_eq!(error.code(), "remote_scope");
     let error = crate::storage::inspect_table(
         &objects,
         &pin,

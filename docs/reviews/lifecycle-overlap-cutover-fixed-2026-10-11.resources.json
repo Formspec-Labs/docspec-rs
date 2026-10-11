@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-10-11T07:31:24.715820+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "retained_child_catches_up_correction_with_sibling_and_compaction_in_flight"
+  ],
+  "free_before_bytes": 14993543168,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 14583017472,
+  "free_after_bytes": 14823452672,
+  "finished_utc": "2026-10-11T07:31:44.785211+00:00"
+}

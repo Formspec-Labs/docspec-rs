@@ -384,6 +384,8 @@ impl Engine {
                 Ok((restored_bytes, reused_bytes))
             })
             .await?;
+        #[cfg(feature = "test-util")]
+        work_started("restore-local-objects");
         let generation = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
         let catalogs = root.join("catalogs");
         create_owned_directories(&root, &catalogs)?;
@@ -465,7 +467,11 @@ impl Engine {
         // database plus any journal remain beside this generation's unique file.
         File::open(&fresh_path)?.sync_all()?;
         File::open(&catalogs)?.sync_all()?;
+        #[cfg(feature = "test-util")]
+        work_started("restore-local-verified");
         restore::select_catalog(&root, &restored)?;
+        #[cfg(feature = "test-util")]
+        work_started("restore-local-selected");
         Ok(restored)
     }
 

@@ -75,18 +75,25 @@ impl Objects {
         self.validate_path(path)
     }
 
-    pub(crate) async fn export_scan(
+    // Return the same configured table and admitted inventory to consumers.
+    // The inventory owns its reservation until the final consumer releases it.
+    pub(crate) async fn open_snapshot(
         &self,
         pin: &crate::model::TablePin,
         budget: &crate::budget::Budget,
-    ) -> Result<super::OccurrenceScan> {
+    ) -> Result<(Table, super::SnapshotFiles)> {
         let table = self.open_pin(pin, budget).await?;
         let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
-        let inherited = pin
-            .objects
-            .iter()
-            .map(|object| (object.path.clone(), object.clone()))
-            .collect();
+        // Local reads need no remote scope map; avoid copying retained identities
+        // on the existing local update and trusted-file paths.
+        let inherited = if self.is_remote() {
+            pin.objects
+                .iter()
+                .map(|object| (object.path.clone(), object.clone()))
+                .collect()
+        } else {
+            std::collections::BTreeMap::new()
+        };
         let root = if self.is_remote() {
             Some(self.pin_root(table.metadata().location())?)
         } else {
@@ -100,6 +107,15 @@ impl Objects {
         let inventory =
             super::snapshot_files_guarded(&table, budget, guard.as_ref(), memory).await?;
         super::check_inventory_files(pin, &inventory)?;
+        Ok((table, inventory))
+    }
+
+    pub(crate) async fn export_scan(
+        &self,
+        pin: &crate::model::TablePin,
+        budget: &crate::budget::Budget,
+    ) -> Result<super::OccurrenceScan> {
+        let (table, inventory) = self.open_snapshot(pin, budget).await?;
         super::OccurrenceScan::values(&table, budget, inventory).await
     }
 

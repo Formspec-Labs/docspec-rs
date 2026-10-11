@@ -13,6 +13,8 @@ pub(in crate::engine) mod origins;
 mod preparation;
 #[cfg(all(test, feature = "test-util"))]
 mod protection_tests;
+#[cfg(all(test, feature = "test-util"))]
+mod validator_tests;
 mod verification;
 use expressions::Expressions;
 use origins::{FileOrigin, OriginalDeclaration, OriginalExecution, ScalarOrigins};
@@ -22,6 +24,9 @@ pub(super) use verification::{verify_binding_dependencies, verify_groups};
 // transaction per row/file. A crash may repeat only the unacknowledged bundle.
 const COMPLETION_BUNDLE: usize = 16;
 pub(in crate::engine) const PROCESSOR: &str = "docspec.scalar-backfill.v2";
+// Version the routine scalar checker independently from value computation.
+// Bump this when its schema/field mapping or native inspection rules change.
+const VALIDATOR: &str = "docspec.scalar-validation.v1";
 
 pub(super) struct PreparedGroup {
     pub origins: Option<ObjectRef>,
@@ -83,6 +88,9 @@ pub(in crate::engine) struct PreparedCompletion {
 /// A validation acknowledgment with the exact snapshots it checked.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::engine) struct ValidationCompletion {
+    /// Missing legacy identity is unknown; it cannot qualify the current checker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::engine) validator: Option<String>,
     /// Immutable canonical file executions; absence remains unknown.
     #[serde(default)]
     pub(in crate::engine) origins: Option<ObjectRef>,
@@ -92,6 +100,40 @@ pub(in crate::engine) struct ValidationCompletion {
     /// Absence on an older acknowledgment remains unknown to retention.
     #[serde(default)]
     pub(in crate::engine) dependencies: Option<GroupDependencies>,
+}
+
+/// Readback retains its qualification independently of upstream phase recovery.
+#[derive(Clone, Debug, Serialize)]
+pub(in crate::engine) struct ReadbackCompletion {
+    // Keep the public ReleasePin and its immutable manifest identity unchanged.
+    #[serde(flatten)]
+    pub(in crate::engine) release: ReleasePin,
+    /// Missing legacy identity remains unknown, requiring the current checker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scalar_validator: Option<String>,
+}
+
+// Flattened Serde Content does not support JSON's integer map keys inside the
+// native field-ID maps. Decode the unchanged public pin through the maintained
+// JSON Value deserializer instead, while typing the one private field explicitly.
+impl<'de> Deserialize<'de> for ReadbackCompletion {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let scalar_validator = serde_json::from_value(
+            value
+                .get("scalar_validator")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .map_err(serde::de::Error::custom)?;
+        let release = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            release,
+            scalar_validator,
+        })
+    }
 }
 
 /// Progress against a captured source; completed files remain usable after stale promotion.
@@ -365,7 +407,7 @@ impl Engine {
                 base_manifest: base.manifest.clone(),
                 related: base.dataset.related.clone(),
             });
-        let retained_readback = if old.is_some() {
+        let (retained_readback, _) = if old.is_some() {
             self.retained_backfill_readback(
                 spec,
                 &operation,
@@ -375,7 +417,7 @@ impl Engine {
             )
             .await?
         } else {
-            None
+            (None, false)
         };
         let retained_target = retained_readback.is_some();
         plan.promotion_refusal =
@@ -654,7 +696,7 @@ impl Engine {
         // Issued readbacks retain their qualified target even when earlier phase
         // promises retire. Resolve them before reopening those preparation paths.
         let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
-        let mut retained_readback = self
+        let (mut retained_readback, current_readback_validator) = self
             .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
             .await?;
         if let Some(readback) = &retained_readback {
@@ -662,66 +704,93 @@ impl Engine {
             self.guard_corrections(&view, &readback.dataset, None)
                 .await?;
         }
-        let (prepared, binding, prepared_protections) = if let Some(readback) = &retained_readback {
-            (
-                readback
-                    .dataset
-                    .groups
-                    .get(spec.group.as_str())
-                    .ok_or_else(invalid_group)?
-                    .clone(),
-                readback
-                    .dataset
-                    .computed
-                    .get(spec.group.as_str())
-                    .ok_or_else(invalid_group)?
-                    .clone(),
-                readback
-                    .protections
-                    .as_ref()
-                    .map(ReferenceProtections::duplicate)
-                    .transpose()?,
-            )
-        } else {
-            if base.manifest.bytes > lifecycle.budget.limits.max_metadata_bytes as u64 {
-                return Err(Error::refusal(
-                    "metadata_capacity",
-                    "source manifest exceeds metadata allowance",
-                ));
-            }
-            storage::verify_objects(vec![base.manifest.clone()], &lifecycle.budget).await?;
-            let decoded: DatasetPin =
-                serde_json::from_reader(std::fs::File::open(&base.manifest.path)?)?;
-            if decoded != base.dataset {
-                return Err(invalid_group());
-            }
-            let definition = spec.group_definition();
-            checks.trust(&base, &lifecycle.budget).await?;
-            let view = lifecycle.open(&spec.dataset).await?;
-            let source_protections = self.request_protections(&view, &spec.operation).await?;
-            let prepared = Box::pin(self.prepare_group(
-                &request,
-                &operation,
-                source,
-                source_protections.as_ref(),
-                &definition,
-                continuous.map(|attempt| &attempt.intent.input_fields),
-                stop,
-                &mut checks,
-            ))
-            .await?;
-            let binding = ComputedGroup {
-                origins: prepared.origins,
-                qualification: None,
-                definition,
-                input_fields: prepared.input_fields,
-                request: request.clone(),
-                native_field_ids: prepared.native_field_ids,
-                source_metadata: source.metadata.clone(),
-                base_manifest: capture.base_manifest.clone(),
+        let (prepared, binding, mut prepared_protections) =
+            if let Some(readback) = &retained_readback {
+                (
+                    readback
+                        .dataset
+                        .groups
+                        .get(spec.group.as_str())
+                        .ok_or_else(invalid_group)?
+                        .clone(),
+                    readback
+                        .dataset
+                        .computed
+                        .get(spec.group.as_str())
+                        .ok_or_else(invalid_group)?
+                        .clone(),
+                    readback
+                        .protections
+                        .as_ref()
+                        .map(ReferenceProtections::duplicate)
+                        .transpose()?,
+                )
+            } else {
+                if base.manifest.bytes > lifecycle.budget.limits.max_metadata_bytes as u64 {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "source manifest exceeds metadata allowance",
+                    ));
+                }
+                storage::verify_objects(vec![base.manifest.clone()], &lifecycle.budget).await?;
+                let decoded: DatasetPin =
+                    serde_json::from_reader(std::fs::File::open(&base.manifest.path)?)?;
+                if decoded != base.dataset {
+                    return Err(invalid_group());
+                }
+                let definition = spec.group_definition();
+                checks.trust(&base, &lifecycle.budget).await?;
+                let view = lifecycle.open(&spec.dataset).await?;
+                let source_protections = self.request_protections(&view, &spec.operation).await?;
+                let prepared = Box::pin(self.prepare_group(
+                    &request,
+                    &operation,
+                    source,
+                    source_protections.as_ref(),
+                    &definition,
+                    continuous.map(|attempt| &attempt.intent.input_fields),
+                    stop,
+                    &mut checks,
+                ))
+                .await?;
+                let binding = ComputedGroup {
+                    origins: prepared.origins,
+                    qualification: None,
+                    definition,
+                    input_fields: prepared.input_fields,
+                    request: request.clone(),
+                    native_field_ids: prepared.native_field_ids,
+                    source_metadata: source.metadata.clone(),
+                    base_manifest: capture.base_manifest.clone(),
+                };
+                (prepared.table, binding, prepared.protections)
             };
-            (prepared.table, binding, prepared.protections)
-        };
+        if retained_readback.is_some() {
+            if !current_readback_validator {
+                let view = lifecycle.open(&spec.dataset).await?;
+                let source_protections = self.request_protections(&view, &spec.operation).await?;
+                let validation_protections = self
+                    .validate_scalar_group(
+                        &request,
+                        &operation,
+                        source,
+                        source_protections.as_ref(),
+                        &binding.definition,
+                        &binding.input_fields,
+                        &binding.native_field_ids,
+                        &prepared,
+                        binding.origins.as_ref(),
+                        prepared_protections.as_ref(),
+                        &mut checks,
+                    )
+                    .await?;
+                ReferenceProtections::inherit(
+                    &mut prepared_protections,
+                    validation_protections.as_ref(),
+                )?;
+            }
+            stop_after(stop, "validation")?;
+        }
         checks.compose();
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
@@ -889,7 +958,10 @@ impl Engine {
                         &spec.dataset,
                         &view,
                         &readback_key,
-                        &release,
+                        &ReadbackCompletion {
+                            release: release.clone(),
+                            scalar_validator: Some(VALIDATOR.into()),
+                        },
                         readback_protections.as_ref(),
                     )?;
                     lifecycle.commit(&view, records).await?;
@@ -946,14 +1018,14 @@ impl Engine {
         capture: &Capture,
         base: &ReleasePin,
         checks: &mut super::verification::Checks,
-    ) -> Result<Option<Retained<ReleasePin>>> {
+    ) -> Result<(Option<Retained<ReleasePin>>, bool)> {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(&spec.dataset).await?;
         let rows = lifecycle.rows(&view).await?;
         let prefix = format!("backfill-readback/{}/", spec.operation);
         let mut readbacks = rows.prefix(&prefix).peekable();
         if readbacks.peek().is_none() {
-            return Ok(None);
+            return Ok((None, false));
         }
         checks.compose();
         let _memory = lifecycle
@@ -966,10 +1038,11 @@ impl Engine {
             .groups
             .get("source")
             .ok_or_else(invalid_group)?;
-        let mut retained: Option<(i64, &str, ReleasePin)> = None;
+        let mut retained: Option<(i64, &str, ReadbackCompletion)> = None;
         for (key, revision, json) in readbacks {
             tokio::task::consume_budget().await;
-            let readback: ReleasePin = serde_json::from_str(json)?;
+            let completed: ReadbackCompletion = serde_json::from_str(json)?;
+            let readback = &completed.release;
             let dataset = &readback.dataset;
             let table = dataset
                 .groups
@@ -1006,8 +1079,8 @@ impl Engine {
             verify_groups(dataset, &lifecycle.budget, checks).await?;
             super::evidence::verify(dataset, &lifecycle.budget, checks).await?;
             if let Some((_, _, previous)) = &retained
-                && (previous.dataset.groups.get(spec.group.as_str()) != Some(table)
-                    || previous.dataset.computed.get(spec.group.as_str()) != Some(binding))
+                && (previous.release.dataset.groups.get(spec.group.as_str()) != Some(table)
+                    || previous.release.dataset.computed.get(spec.group.as_str()) != Some(binding))
             {
                 return Err(Error::refusal(
                     "phase_generation_conflict",
@@ -1018,16 +1091,20 @@ impl Engine {
                 .as_ref()
                 .is_none_or(|(prior, _, _)| revision > *prior)
             {
-                retained = Some((revision, key, readback));
+                retained = Some((revision, key, completed));
             }
         }
-        if let Some((_, key, value)) = retained {
-            Ok(Some(Retained {
-                value,
-                protections: self.retained_protections(&view, key).await?,
-            }))
+        if let Some((_, key, completed)) = retained {
+            let current_validator = completed.scalar_validator.as_deref() == Some(VALIDATOR);
+            Ok((
+                Some(Retained {
+                    value: completed.release,
+                    protections: self.retained_protections(&view, key).await?,
+                }),
+                current_validator,
+            ))
         } else {
-            Ok(None)
+            Ok((None, false))
         }
     }
 

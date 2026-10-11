@@ -335,9 +335,13 @@ async fn closure_collects_history_computation_coverage_and_seals_without_payload
         },
         evidence: evidence.clone(),
     }));
-    let expected = [&base, &producer, &sibling, &selected]
+    let expected = [&base, &producer, &selected]
         .into_iter()
         .flat_map(direct_objects)
+        .chain([
+            sibling.manifest.clone(),
+            sibling.dataset.groups["source"].metadata.clone(),
+        ])
         .chain([schema_only])
         .chain(evidence.objects)
         .map(|object| (object.path.clone(), object))
@@ -345,12 +349,12 @@ async fn closure_collects_history_computation_coverage_and_seals_without_payload
     // Only release manifests exist. The supplied root and every native/payload
     // path are absent: collection must trust the anchored pins' inventories.
     let references = engine
-        .reference_objects(&[selected.clone(), selected])
+        .reference_objects(&[selected.clone(), selected.clone()])
         .await
         .unwrap();
     assert_eq!(
         references.objects,
-        expected.into_values().collect::<Vec<_>>()
+        expected.values().cloned().collect::<Vec<_>>()
     );
     let budget = &engine.inner.lifecycle.budget;
     let all = limits().memory_bytes / 2;
@@ -360,6 +364,23 @@ async fn closure_collects_history_computation_coverage_and_seals_without_payload
     );
     drop(references);
     drop(budget.reserve(all).unwrap());
+
+    // A separately retained sibling upgrades its coverage-only interpretation
+    // to full availability, regardless of which root is encountered first.
+    let full = expected
+        .into_iter()
+        .chain(
+            direct_objects(&sibling)
+                .into_iter()
+                .map(|object| (object.path.clone(), object)),
+        )
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect::<Vec<_>>();
+    for roots in [[selected.clone(), sibling.clone()], [sibling, selected]] {
+        let references = engine.reference_objects(&roots).await.unwrap();
+        assert_eq!(references.objects, full);
+    }
 }
 
 fn origin() -> RetentionBlocker {

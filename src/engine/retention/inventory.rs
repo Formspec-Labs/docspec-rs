@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::engine::backfill::{
-    Capture, FileCompletion, GroupDependencies, PreparedCompletion, ValidationCompletion,
+    Capture, FileCompletion, GroupDependencies, PreparedCompletion, ReadbackCompletion,
+    ValidationCompletion,
     origins::{OriginalDeclaration, ScalarOrigins},
 };
 use crate::engine::changes::PreparedChanges;
@@ -931,7 +932,11 @@ impl Inventory {
             self.release(&version.manifest, origin)?;
         }
         for seal in coverage.generations.values() {
-            self.seal(seal, origin)?;
+            // Coverage consumes its explicit inputs. Other cohort members prove
+            // exact generation membership, without promising their row payloads.
+            for version in seal.members.values() {
+                self.history(&version.manifest, origin)?;
+            }
         }
         Ok(())
     }
@@ -1048,12 +1053,13 @@ impl Inventory {
         if !supported_format(dataset.format) {
             return Err(invalid_inventory("unsupported release format"));
         }
-        // A complete independent Build computes fresh values and origins. Its
-        // predecessor establishes field/definition history, not availability
-        // of superseded inputs. Other operation modes keep their full closure.
-        let history = matches!(&dataset.request, OperationRequest::Build(spec) if spec.base.is_some())
-            && dataset.relationship == SourceRelationship::Independent
-            && dataset.related.is_none()
+        // Complete reconstruction owns fresh values/current contributors. Its
+        // predecessor establishes interpretation and ordering, while separate
+        // availability, recovery, seals and grants retain stronger payload roots.
+        let history = ((matches!(&dataset.request, OperationRequest::Build(spec) if spec.base.is_some())
+            && dataset.related.is_none())
+            || matches!(&dataset.request, OperationRequest::Refresh(spec)
+                if spec.base.is_some() && spec.mode == RefreshMode::Full && dataset.related.is_some()))
             && dataset.evidence.is_none();
         for table in dataset.groups.values() {
             self.table(table, origin)?;
@@ -1101,6 +1107,29 @@ impl Inventory {
                 self.qualification(proof, origin)?;
             }
             self.history(&computed.base_manifest, origin)?;
+        }
+        if let Some(related) = &dataset.related {
+            // Historical input identities and coupled membership remain exact;
+            // fresh full refresh does not reconstruct the prior join's values.
+            for version in related.coverage.inputs.values().chain(
+                related
+                    .coverage
+                    .generations
+                    .values()
+                    .flat_map(|seal| seal.members.values()),
+            ) {
+                self.history(&version.manifest, origin)?;
+            }
+            for table in related
+                .input_sources
+                .values()
+                .chain(std::iter::once(&related.evidence))
+            {
+                self.object(&table.metadata, origin)?;
+                if let Some(logical) = &table.logical_metadata {
+                    self.object(logical, origin)?;
+                }
+            }
         }
         if let Some(parent) = &dataset.parent_manifest {
             self.history(parent, origin)?;
@@ -1466,10 +1495,10 @@ impl Inventory {
             if let Some(related) = &capture.related {
                 self.related(related, origin)?;
             }
-        } else if key.starts_with("result/")
-            || key.starts_with("readback/")
-            || key.starts_with("backfill-readback/")
-        {
+        } else if key.starts_with("backfill-readback/") {
+            let completed: ReadbackCompletion = decode(json)?;
+            self.release_pin(&completed.release, origin)?;
+        } else if key.starts_with("result/") || key.starts_with("readback/") {
             self.release_pin(&decode(json)?, origin)?;
         } else if key == "authority" {
             let authority: Authority = decode(json)?;
@@ -1844,7 +1873,9 @@ fn normalize_legacy_state_fields<T: 'static>(
     // or arbitrary nested objects from inheriting this compatibility exception.
     if TypeId::of::<T>() == TypeId::of::<DatasetPin>() {
         normalize_legacy_dataset(original)?;
-    } else if TypeId::of::<T>() == TypeId::of::<ReleasePin>() {
+    } else if TypeId::of::<T>() == TypeId::of::<ReleasePin>()
+        || TypeId::of::<T>() == TypeId::of::<ReadbackCompletion>()
+    {
         if let Some(dataset) = original.get_mut("dataset") {
             normalize_legacy_dataset(dataset)?;
         }
@@ -2441,5 +2472,80 @@ mod release_history_tests {
         inventory.expand(&budget, root.path()).await.unwrap();
         assert!(inventory.candidates[&payload.path].blocker.is_some());
         assert_eq!(inventory.metadata_objects_read, 1);
+    }
+}
+
+#[cfg(test)]
+mod scalar_readback_fields_tests {
+    use super::*;
+
+    #[test]
+    fn private_scalar_validator_is_typed_only_on_scalar_readback() {
+        let owner = Id::new("owner").unwrap();
+        let object = ObjectRef {
+            owner: owner.clone(),
+            path: "/retained/input.parquet".into(),
+            digest: "0".repeat(64),
+            bytes: 17,
+        };
+        let release = ReleasePin {
+            id: Id::new("initial").unwrap(),
+            dataset: DatasetPin {
+                format: FORMAT,
+                dataset: owner.clone(),
+                version: Id::new("initial").unwrap(),
+                groups: BTreeMap::new(),
+                computed: BTreeMap::new(),
+                inputs: BTreeMap::new(),
+                relationship: SourceRelationship::Independent,
+                related: None,
+                evidence: None,
+                definition: "v1".into(),
+                eligibility: 0,
+                boundary: 1,
+                request: OperationRequest::Build(RunSpec {
+                    dataset: owner,
+                    operation: Id::new("initial").unwrap(),
+                    base: None,
+                    relationship: None,
+                    input: object.path.clone(),
+                    expected_digest: object.digest.clone(),
+                    sql: "SELECT * FROM input".into(),
+                    definition: "v1".into(),
+                }),
+                parent_manifest: None,
+                processor: "fixture".into(),
+                validation: VerificationLevel::Routine,
+            },
+            manifest: object,
+            verified: true,
+        };
+        let legacy = serde_json::to_value(&release).unwrap();
+        let legacy_decoded: Strict<ReadbackCompletion> =
+            serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(legacy_decoded.0.release, release);
+        let mut known = legacy.clone();
+        known["scalar_validator"] = serde_json::json!("docspec.scalar-validation.v1");
+        let completed: Strict<ReadbackCompletion> = serde_json::from_value(known.clone()).unwrap();
+        assert_eq!(completed.0.release, release);
+        assert!(
+            serde_json::from_value::<Strict<ReleasePin>>(known.clone()).is_err(),
+            "other release records do not accept the private field"
+        );
+        for top_level in [true, false] {
+            let mut unknown = known.clone();
+            if top_level {
+                unknown["unqualified_dependency"] = serde_json::json!("/hidden.parquet");
+            } else {
+                unknown["dataset"]["unqualified_dependency"] = serde_json::json!("/hidden.parquet");
+            }
+            assert!(serde_json::from_value::<Strict<ReadbackCompletion>>(unknown).is_err());
+        }
+        known["scalar_validator"] = serde_json::json!(17);
+        assert!(serde_json::from_value::<Strict<ReadbackCompletion>>(known).is_err());
+        let mut legacy_changes = legacy;
+        legacy_changes["dataset"]["changes"] = serde_json::Value::Null;
+        let completed: Strict<ReadbackCompletion> = serde_json::from_value(legacy_changes).unwrap();
+        assert_eq!(completed.0.release, release);
     }
 }

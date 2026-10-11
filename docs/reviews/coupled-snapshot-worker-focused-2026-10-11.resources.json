@@ -1,0 +1,22 @@
+{
+  "started_utc": "2026-10-11T07:40:21.575402+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--lib",
+    "--test",
+    "integration",
+    "--",
+    "coupled_full_build_reclaims_old_payload_after_exact_promises_end",
+    "configured_snapshot_reuses_inherited_files_without_payload_io",
+    "killed_backfill_workers_resume_retained_files_validation_and_readback"
+  ],
+  "free_before_bytes": 12845948928,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 12754403328,
+  "free_after_bytes": 12746723328,
+  "finished_utc": "2026-10-11T07:41:07.729238+00:00"
+}

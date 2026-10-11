@@ -37,6 +37,10 @@ impl Checks {
         }
     }
 
+    pub(super) fn objects(&self) -> &storage::Objects {
+        &self.objects
+    }
+
     /// Components already passed their durable validation; check only their assembly.
     pub fn composition() -> Self {
         Self {
@@ -157,7 +161,7 @@ impl Checks {
                     .map(|evidence| &evidence.table),
             )
         {
-            let table = storage::open_pin(pin, budget).await?;
+            let (table, inventory) = self.objects.open_snapshot(pin, budget).await?;
             let schemas = Arc::new(
                 table
                     .metadata()
@@ -165,7 +169,6 @@ impl Checks {
                     .map(|schema| storage::schema_identity(schema.as_struct()))
                     .collect::<Result<std::collections::BTreeSet<_>>>()?,
             );
-            let inventory = storage::snapshot_files(&table, budget).await?;
             let objects: BTreeMap<_, _> = pin
                 .objects
                 .iter()

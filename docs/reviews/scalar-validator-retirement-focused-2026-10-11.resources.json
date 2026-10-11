@@ -1,0 +1,19 @@
+{
+  "started_utc": "2026-10-11T07:18:19.388333+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "--",
+    "phase_retirement::"
+  ],
+  "free_before_bytes": 16529698816,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 16221409280,
+  "free_after_bytes": 16512663552,
+  "finished_utc": "2026-10-11T07:18:47.469572+00:00"
+}

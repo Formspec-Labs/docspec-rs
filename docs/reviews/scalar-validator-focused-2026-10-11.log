@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 20.45s
+     Running unittests src/lib.rs (target/debug/deps/docspec-f22faff8f24325f2)
+
+running 4 tests
+test engine::backfill::validator_tests::prior_scalar_ack_cannot_hide_missing_current_check_inputs ... ok
+test engine::backfill::validator_tests::scalar_readback_validator_inspects_once_before_current_ack_reuse ... ok
+test engine::backfill::validator_tests::unselected_scalar_readback_requires_current_ack_but_completed_result_stays_exact ... ok
+test engine::backfill::validator_tests::current_scalar_validator_rechecks_legacy_and_new_operation_prepared_reuse ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 316 filtered out; finished in 2.24s
+

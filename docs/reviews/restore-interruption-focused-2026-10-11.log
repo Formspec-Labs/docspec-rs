@@ -1,0 +1,43 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 21.77s
+     Running tests/restore.rs (target/debug/deps/restore-7c2717f0e8955e3c)
+
+running 1 test
+test killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog ... FAILED
+
+failures:
+
+---- killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmplvWNi9/workspace/objects/comments/db874b0863ba4b2a88433240d75e216e/data/1a812d7f-5630-4a59-9f82-1d0576b78ba9-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmplvWNi9/workspace/objects/comments/6d0ec6b6d98a411d9f64cc09cfcca60d/data/c55c9db4-6880-40eb-887e-5b845675a4c1-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmplvWNi9/workspace/objects/comments/eb9aa0aff2144834a54ef43fe07a5c1f/data/ecbf4421-1ff7-40b2-8dc9-ad7c59c0c124-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK restore-local-objects
+DOCSPEC_TEST_WORK restore-local-verified
+DOCSPEC_TEST_WORK restore-local-selected
+
+thread 'killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog' (48649816) panicked at tests/restore.rs:1100:18:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 3.32s
+
+error: test failed, to rerun pass `--test restore`

@@ -118,8 +118,53 @@ fn budget() -> Budget {
     .unwrap()
 }
 
+// tracing-core's single-dispatcher interest fast path consults the current
+// thread's dispatcher. Parallel writers without our subscriber can initialize
+// the same callsites as disabled. Exercise each real observer in its own process.
+fn run_isolated(name: &str) -> bool {
+    const CHILD: &str = "DOCSPEC_PROGRESS_OBSERVER_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(name) {
+        return false;
+    }
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = ChildGuard(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env(CHILD, name)
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(
+                status.success(),
+                "isolated progress observer {name} failed: {status}"
+            );
+            return true;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "isolated progress observer {name} timed out"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[tokio::test]
 async fn held_writer_reports_accepted_work_before_failure_or_abandonment() {
+    if run_isolated(
+        "progress::tests::held_writer_reports_accepted_work_before_failure_or_abandonment",
+    ) {
+        return;
+    }
     for fail in [true, false] {
         let root = tempfile::TempDir::new().unwrap();
         let input = batch();
@@ -211,6 +256,11 @@ async fn held_writer_reports_accepted_work_before_failure_or_abandonment() {
 
 #[tokio::test]
 async fn writer_close_reports_totals_without_committing_and_catalog_writes_stay_quiet() {
+    if run_isolated(
+        "progress::tests::writer_close_reports_totals_without_committing_and_catalog_writes_stay_quiet",
+    ) {
+        return;
+    }
     let root = tempfile::TempDir::new().unwrap();
     let input = batch();
     let table = table(root.path(), &input).await;

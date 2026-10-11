@@ -921,3 +921,210 @@ async fn independent_delayed_writer_must_finish_before_restore_can_select() {
     assert_eq!(engine.latest(&id("comments")).await.unwrap(), original);
     assert_eq!(rows(&engine, &original).await, vec![(Some(1), None)]);
 }
+
+#[cfg(feature = "test-util")]
+#[test]
+fn interrupted_restore_child() {
+    let Some(root) = std::env::var_os("DOCSPEC_RESTORE_INTERRUPTION_ROOT") else {
+        return;
+    };
+    let root = Path::new(&root);
+    let reference: RestorePointRef =
+        serde_json::from_reader(std::fs::File::open(root.join("restore-reference.json")).unwrap())
+            .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime
+        .block_on(Engine::restore_local(
+            root.join("workspace"),
+            &reference,
+            limits(),
+            false,
+        ))
+        .unwrap();
+}
+
+#[cfg(feature = "test-util")]
+#[tokio::test]
+async fn killed_actual_restore_reconciles_objects_verified_candidate_and_selected_catalog() {
+    // Process interruption only: this does not qualify power loss or remote restore.
+    for boundary in [
+        "restore-local-objects",
+        "restore-local-verified",
+        "restore-local-selected",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        let engine = Engine::open(&workspace, limits()).await.unwrap();
+        let expected = vec![
+            (Some(1), Some("same".into())),
+            (Some(1), Some("same".into())),
+            (None, None),
+            (Some(2), Some("é🎉".into())),
+        ];
+        let original = engine
+            .run(&spec(root.path(), "original", &expected))
+            .await
+            .unwrap();
+        let scalar_request = scalar::spec(
+            &original,
+            "lengths",
+            "length",
+            "text_length",
+            "length(text)",
+        );
+        let selected = engine.backfill(&scalar_request).await.unwrap();
+        let origins = selected.dataset.computed["length"]
+            .origins
+            .as_ref()
+            .unwrap()
+            .clone();
+        let origins_bytes = std::fs::read(&origins.path).unwrap();
+        let reference = engine
+            .create_restore_point(&id("comments"), &id("point"))
+            .await
+            .unwrap();
+        let captured = point(&reference);
+        let payload = selected.dataset.groups["source"]
+            .objects
+            .iter()
+            .find(|object| object.path.ends_with(".parquet"))
+            .unwrap()
+            .clone();
+        let missing = [payload, origins.clone()];
+        for required in &missing {
+            let backup = captured
+                .objects
+                .iter()
+                .find(|object| object.original == *required)
+                .unwrap();
+            storage::verify_object(&backup.backup).unwrap();
+        }
+        // Keep a later authoritative selection in the old catalog until the
+        // restored catalog's independently verified pointer is published.
+        let later = scalar::spec(
+            &selected,
+            "later",
+            "extra",
+            "extra_length",
+            "length(text) + 1",
+        );
+        let newer = engine.backfill(&later).await.unwrap();
+        assert_ne!(newer.id, selected.id);
+        std::fs::write(
+            root.path().join("restore-reference.json"),
+            serde_json::to_vec(&reference).unwrap(),
+        )
+        .unwrap();
+        drop(engine);
+        for object in &missing {
+            std::fs::remove_file(&object.path).unwrap();
+        }
+        let marker = root.path().join("paused");
+        let resume = root.path().join("resume");
+        struct ChildGuard(std::process::Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut child = ChildGuard(
+            Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "interrupted_restore_child", "--nocapture"])
+                .env("DOCSPEC_RESTORE_INTERRUPTION_ROOT", root.path())
+                .env("DOCSPEC_TEST_PAUSE_BEFORE", boundary)
+                .env("DOCSPEC_TEST_PAUSE_MARKER", &marker)
+                .env("DOCSPEC_TEST_RESUME_MARKER", &resume)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !marker.exists() {
+            assert!(
+                child.0.try_wait().unwrap().is_none(),
+                "restore child exited before {boundary}"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "restore child did not reach {boundary}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            workspace.join("catalog-current.json").exists(),
+            boundary == "restore-local-selected"
+        );
+        assert_eq!(
+            Engine::open(&workspace, limits()).await.unwrap_err().code(),
+            "workspace_busy"
+        );
+        for object in &missing {
+            storage::verify_object(object).unwrap();
+        }
+        let pointer_before_retry = std::fs::read(workspace.join("catalog-current.json")).ok();
+        child.0.kill().unwrap();
+        let status = child.0.wait().unwrap();
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(9));
+        assert_eq!(
+            std::fs::read(workspace.join("catalog-current.json")).ok(),
+            pointer_before_retry
+        );
+        // Read authority before retry: postselection death lost only the response;
+        // earlier death keeps the later selection in the original catalog.
+        let after_kill = Engine::open(&workspace, limits()).await.unwrap();
+        assert_eq!(
+            after_kill.latest(&id("comments")).await.unwrap(),
+            if boundary == "restore-local-selected" {
+                selected.clone()
+            } else {
+                newer.clone()
+            },
+        );
+        drop(after_kill);
+        let restored = Engine::restore_local(&workspace, &reference, limits(), false)
+            .await
+            .unwrap();
+        assert_eq!(restored.restored_bytes, 0);
+        assert!(restored.reused_bytes >= missing.iter().map(|object| object.bytes).sum::<u64>());
+        assert!(Path::new(&restored.path).exists());
+        let cold = Engine::open(&workspace, limits()).await.unwrap();
+        assert_eq!(cold.latest(&id("comments")).await.unwrap(), selected);
+        let mut actual = rows(&cold, &selected).await;
+        actual.sort();
+        let mut expected = expected;
+        expected.sort();
+        assert_eq!(actual, expected);
+        let mut values = cold.read_group(&selected, "length").await.unwrap();
+        let mut lengths = Vec::new();
+        while let Some(batch) = values.try_next().await.unwrap() {
+            let values = arrow::compute::cast(
+                batch.column_by_name("text_length").unwrap(),
+                &arrow::datatypes::DataType::Int64,
+            )
+            .unwrap();
+            let column = values.as_any().downcast_ref::<Int64Array>().unwrap();
+            lengths.extend(column.iter());
+        }
+        drop(values);
+        lengths.sort();
+        assert_eq!(lengths, vec![None, Some(2), Some(4), Some(4)]);
+        storage::verify_object(&origins).unwrap();
+        assert_eq!(std::fs::read(&origins.path).unwrap(), origins_bytes);
+        assert_eq!(
+            cold.create_restore_point(&id("comments"), &id("point"))
+                .await
+                .unwrap(),
+            reference
+        );
+        docspec::engine::verify_release(&selected, limits())
+            .await
+            .unwrap();
+    }
+}

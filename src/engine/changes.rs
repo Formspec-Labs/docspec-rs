@@ -124,7 +124,8 @@ pub(super) async fn verify_changes(
     };
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = 0;
-    let before = refresh::read_release(
+    let before = refresh::read_release_with_objects(
+        checks.objects(),
         &VersionRef {
             dataset: dataset.clone(),
             version: base.clone(),
