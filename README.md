@@ -61,7 +61,8 @@ The [Dagster adapter](adapters/dagster/README.md) submits bounded native request
 to one local Rust HTTP host. It preserves operation IDs across uncertain retries
 and leaves lifecycle decisions in Rust. Local tests cover completion-response
 loss, Python worker death and cold Rust-host recovery after retained processing.
-Wider route and provider qualification remain unfinished.
+Every advertised local route has successful native execution. Provider recovery
+qualification remains unfinished; see [current status](docs/STATUS.md).
 
 ## Qualify remote storage
 

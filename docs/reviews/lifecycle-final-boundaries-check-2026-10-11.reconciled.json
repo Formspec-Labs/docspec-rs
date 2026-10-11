@@ -1,0 +1,21 @@
+{
+  "reconciled_utc": "2026-10-11T13:05:15.025528+00:00",
+  "command": [
+    "./scripts/check"
+  ],
+  "log": "docs/reviews/lifecycle-final-boundaries-check-2026-10-11.log",
+  "log_sha256": "7b95af527c9adc22af8565854554a558d1e1c3075da48e8d7363d10b73d1a509",
+  "gate_stages": {
+    "format": "passed by sequential set-e continuation",
+    "clippy_all_targets_all_features": "passed",
+    "library": "passed",
+    "integration": "passed",
+    "restore": "passed",
+    "worker_initialization": "passed",
+    "doc_tests": "completed with no discovered cases"
+  },
+  "outer_process_exit_code": null,
+  "outer_resource_receipt": "not retained; supervision session unavailable",
+  "resource_peak": null,
+  "limitation": "Completed stage output is retained. The outer process exit and sampled disk minimum cannot be reconstructed. No workload rerun or performance inference."
+}

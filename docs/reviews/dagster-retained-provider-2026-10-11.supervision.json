@@ -1,0 +1,11 @@
+{
+  "started_utc": "2026-10-11T08:47:05.699359+00:00",
+  "command": [
+    "/Users/mikewolfd/.cache/uv/archive-v0/h1RKfXWViF4CHEhlYTQUF/bin/python",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/experiments/dagster-retained-provider.py",
+    "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/dagster-retained-provider-2026-10-11"
+  ],
+  "deadline_seconds": 260,
+  "exit_code": 0,
+  "finished_utc": "2026-10-11T08:47:16.806597+00:00"
+}

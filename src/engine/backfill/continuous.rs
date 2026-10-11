@@ -269,6 +269,8 @@ impl Engine {
                 }
                 if round == spec.optimistic_rounds {
                     fence = Some(self.acquire_continuous_fence(&intent).await?);
+                    #[cfg(feature = "test-util")]
+                    work_started("continuous-fence");
                     self.drain_continuous_source(fence.as_ref().expect("acquired fence"))
                         .await?;
                 }

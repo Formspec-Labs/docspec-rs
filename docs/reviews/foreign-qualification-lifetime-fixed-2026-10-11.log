@@ -1,0 +1,12 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 12.36s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 4 tests
+test qualification_roots::unselected_qualification_promise_ends_after_explicit_retirement ... ok
+test qualification_roots::sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+test qualification_roots::qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+test qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 307 filtered out; finished in 7.02s
+

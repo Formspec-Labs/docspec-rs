@@ -1,0 +1,58 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.64s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 4 tests
+test qualification_roots::unselected_qualification_promise_ends_after_explicit_retirement ... ok
+test qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends ... FAILED
+test qualification_roots::sole_qualification_root_protects_original_creations_and_target_native_closure ... ok
+test qualification_roots::qualification_only_owner_acquires_original_creations_without_direct_phase_rows ... ok
+
+failures:
+
+---- qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpL0d7dt/workspace/objects/comments/a0b8c53ec82545a8a46571d15973ba52/data/cfd71030-7ef7-4187-bccd-ab6d2949a17c-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpL0d7dt/workspace/objects/comments/986b8acd2a8c442e99912e8fb5e8ceb0/data/20fa9b4b-e2f5-4383-954b-a3ac0d650357-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpL0d7dt/workspace/objects/foreign-consumer/ceb5f9ea5a29465f8785c5ebfe941eb9/data/e038473c-e6c9-4390-9bec-1baae28d17c6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpL0d7dt/workspace/objects/comments/64b39c486bef4f998fd18589ff95efeb/data/fd70dc0b-2073-43db-addc-66446effff56-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends' (49681325) panicked at tests/qualification_roots.rs:560:5:
+assertion failed: protected.objects.iter().all(|entry|
+        {
+            entry.blocker.as_ref().is_some_and(|root|
+                    {
+                        root.key == qualification_key ||
+                            foreign.as_ref().is_some_and(|(witness, _, grants)|
+                                    { entry.object == *witness && grants.contains(&root.key) })
+                    })
+        })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 306 filtered out; finished in 5.91s
+
+error: test failed, to rerun pass `--test integration`

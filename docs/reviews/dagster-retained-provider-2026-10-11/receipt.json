@@ -1,0 +1,35 @@
+{
+  "runtime_deadline_seconds": 180,
+  "started_utc": "2026-10-11T08:47:06.206953+00:00",
+  "qualification": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+  "operation": "update-one",
+  "prior_receipt": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/docs/reviews/r2-engine-update-resumed-provider-2026-10-11.json",
+  "prior_receipt_sha256": "79b6e5a3f46bec5067745431c248e0720e2c2d2b61931d3cc05b193f1a5fea7d",
+  "executable": "/Users/mikewolfd/Work/spicy-stack/docspec-rs/target/debug/docspec",
+  "executable_sha256": "a027d51174cff9f9f34b07d1f78e5ae8fa5764bb9d3149e5881c777cec333a17",
+  "runner_sha256": "1f85f7f895fd13b4daf341bbefb427bb51495d6d50ad47ecd745c6b0d573c1be",
+  "helpers_sha256": "1ae6488f513c3caf44706e80eee021ccfb6ff6f375dbd6d804f0f87af8fe4051",
+  "scope": "Existing completed remote Update acknowledgment through fresh loopback Rust host and actual Dagster job; first completed reply lost, unchanged request retried. No new pipeline operation, payload validation, provider cleanup, or inflight recovery claim.",
+  "passed": true,
+  "stage": "completed",
+  "baseline_records_sha256": "6ea2d79a7a19b695219363dd71b5d28d8ad06c22c75c1b97ca12408af9150a4d",
+  "original_manifest": {
+    "bytes": 5548,
+    "digest": "823590123ee01f685f19d8d7e114021d76b5115fe8d8168151dd0bff054d7dde",
+    "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+    "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/f83fedc2e2ee4c6b971794a542673d22/release.json"
+  },
+  "latest_manifest": {
+    "bytes": 5840,
+    "digest": "7942b583c780e2b9e307d63e14d7f0b688a620ed97a2793eef749b4c78893492",
+    "owner": "docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00",
+    "path": "s3://spicy-regs/__r2_data_catalog/docspec-qualification/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/engine-update/docspec-rs-qualification-0e38b494-34a4-47e4-a96e-f8ae27822f00/60ff8b1abb8f4da39382034d44e14ee9/release.json"
+  },
+  "dagster_retries": 1,
+  "native_phase_work_events": 0,
+  "observed_records_unchanged": true,
+  "remote_request_counts_measured": false,
+  "remote_object_inventory_measured": false,
+  "host_exit_code": 0,
+  "finished_utc": "2026-10-11T08:47:16.611262+00:00"
+}

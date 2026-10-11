@@ -1,0 +1,150 @@
+   Compiling docspec v0.1.0 (/Users/mikewolfd/Work/spicy-stack/docspec-rs)
+    Finished `test` profile [unoptimized] target(s) in 10.97s
+     Running tests/integration.rs (target/debug/deps/integration-a050f1fac71db793)
+
+running 1 test
+test qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends ... FAILED
+
+failures:
+
+---- qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends stdout ----
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/c9fef0a4ace74ebcbee744d4ec28083d/data/59efbe7f-cc7b-4911-b7e7-39ad94a9cdc6-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-file
+DOCSPEC_TEST_WORK backfill-assembly
+DOCSPEC_TEST_WORK backfill-validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/4abd30342e1e443bac0178c29a1d9a6a/data/bf12536b-4a48-41a5-bbdf-3aa5880cb5cc-00000.parquet
+DOCSPEC_TEST_WORK backfill-readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/foreign-consumer/e6bf97f1ca8349bab834998520896a42/data/d20128f1-ad00-49ad-8db0-93395fdd30d5-00000.parquet
+DOCSPEC_TEST_WORK readback
+DOCSPEC_TEST_WORK admission
+DOCSPEC_TEST_WORK processing
+DOCSPEC_TEST_WORK validation
+DOCSPEC_TEST_INSPECT_TABLE
+DOCSPEC_TEST_INSPECT_FILE /private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/c25f89817d7b4ce7943bb102d21316a7/data/46962964-2ab3-4eff-956b-994f1441a068-00000.parquet
+DOCSPEC_TEST_WORK readback
+
+thread 'qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends' (49744326) panicked at tests/qualification_roots.rs:560:5:
+RetentionInspection {
+    boundaries: [
+        RetentionBoundary {
+            table: "d_comments_c4796b76a5de.lifecycle",
+            metadata: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/warehouse/d_comments_c4796b76a5de/lifecycle/metadata/00038-0e68f7f6-b768-4952-b628-6f341fdd42cc.metadata.json",
+            revision: 38,
+        },
+        RetentionBoundary {
+            table: "d_foreign_consumer_7d5e8553e5f8.lifecycle",
+            metadata: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/warehouse/d_foreign_consumer_7d5e8553e5f8/lifecycle/metadata/00008-3a499b31-296e-403b-9973-0108c22bd6ca.metadata.json",
+            revision: 8,
+        },
+    ],
+    objects: [
+        ObjectProtection {
+            object: ObjectRef {
+                owner: Id(
+                    "comments",
+                ),
+                path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/4abd30342e1e443bac0178c29a1d9a6a/3bfe2f474c7d48b2998d502798d18c8a.avro",
+                digest: "d2dcfc8fb56cd7064a31a3be931186736eb05dc6bcfea030ff8019a7e44007a2",
+                bytes: 3004,
+            },
+            blocker: Some(
+                RetentionBlocker {
+                    table: "d_comments_c4796b76a5de.lifecycle",
+                    key: "dependency-qualification/d2f1449a91881e7766ca1b1e5de40d5b1940d0cae3bb50ae6fac74907b6f3b77",
+                    revision: 18,
+                },
+            ),
+        },
+        ObjectProtection {
+            object: ObjectRef {
+                owner: Id(
+                    "comments",
+                ),
+                path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/4abd30342e1e443bac0178c29a1d9a6a/data/bf12536b-4a48-41a5-bbdf-3aa5880cb5cc-00000.parquet",
+                digest: "b70203cf390b8a029c12077c73b560a3d7e639775d67fca72e74316cd44453e0",
+                bytes: 1519,
+            },
+            blocker: Some(
+                RetentionBlocker {
+                    table: "d_foreign_consumer_7d5e8553e5f8.lifecycle",
+                    key: "authority",
+                    revision: 8,
+                },
+            ),
+        },
+        ObjectProtection {
+            object: ObjectRef {
+                owner: Id(
+                    "comments",
+                ),
+                path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/4abd30342e1e443bac0178c29a1d9a6a/declaration.json",
+                digest: "51e444d8154cc5a1b5a538183c577cce6f7fc22dcf346ed6209ceaadee2dc205",
+                bytes: 199,
+            },
+            blocker: Some(
+                RetentionBlocker {
+                    table: "d_comments_c4796b76a5de.lifecycle",
+                    key: "dependency-qualification/d2f1449a91881e7766ca1b1e5de40d5b1940d0cae3bb50ae6fac74907b6f3b77",
+                    revision: 18,
+                },
+            ),
+        },
+        ObjectProtection {
+            object: ObjectRef {
+                owner: Id(
+                    "comments",
+                ),
+                path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/60fba505ca304ba7aa400a1668adab8b/origins.json",
+                digest: "b011a4f73995eceeaab862cffb2737b0aae725de59803fbc4e08740819448261",
+                bytes: 2700,
+            },
+            blocker: Some(
+                RetentionBlocker {
+                    table: "d_comments_c4796b76a5de.lifecycle",
+                    key: "dependency-qualification/d2f1449a91881e7766ca1b1e5de40d5b1940d0cae3bb50ae6fac74907b6f3b77",
+                    revision: 18,
+                },
+            ),
+        },
+        ObjectProtection {
+            object: ObjectRef {
+                owner: Id(
+                    "comments",
+                ),
+                path: "/private/var/folders/g8/10vdwk2n07z85vqn_vlv2lfc0000gn/T/.tmpgLtfgy/workspace/objects/comments/c9fef0a4ace74ebcbee744d4ec28083d/metadata/00001-2c38bb49-90a2-49db-8c2c-6b52240c419e.metadata.json",
+                digest: "3f93bcdd692b54153140e35c0e7df4864fae1a5878d20c83c370bef421a31e0b",
+                bytes: 1794,
+            },
+            blocker: Some(
+                RetentionBlocker {
+                    table: "d_comments_c4796b76a5de.lifecycle",
+                    key: "dependency-qualification/d2f1449a91881e7766ca1b1e5de40d5b1940d0cae3bb50ae6fac74907b6f3b77",
+                    revision: 18,
+                },
+            ),
+        },
+    ],
+    protected_bytes: 9216,
+    unmatched_bytes: 0,
+    metadata_objects_read: 4,
+}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 310 filtered out; finished in 2.76s
+
+error: test failed, to rerun pass `--test integration`

@@ -290,6 +290,15 @@ async fn qualification_only_owner_acquires_original_creations_without_direct_pha
 
 #[tokio::test]
 async fn unselected_qualification_promise_ends_after_explicit_retirement() {
+    qualification_lifetime(false).await;
+}
+
+#[tokio::test]
+async fn foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends() {
+    qualification_lifetime(true).await;
+}
+
+async fn qualification_lifetime(foreign_consumer: bool) {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");
     let engine = Engine::open(&workspace, limits()).await.unwrap();
@@ -420,6 +429,51 @@ async fn unselected_qualification_promise_ends_after_explicit_retirement() {
             .all(|entry| entry.blocker.is_some())
     );
 
+    // A real foreign consumer acquires one exact scalar output through normal
+    // managed-input admission. No qualification or grant row is fabricated.
+    let foreign = if foreign_consumer {
+        let witness = candidates
+            .iter()
+            .find(|object| object.path.ends_with(".parquet"))
+            .unwrap()
+            .clone();
+        let request = RunSpec {
+            dataset: id("foreign-consumer"),
+            operation: id("foreign-original"),
+            base: None,
+            relationship: None,
+            input: witness.path.clone(),
+            expected_digest: witness.digest.clone(),
+            sql: "SELECT CAST(text_length AS BIGINT) AS value FROM input".into(),
+            definition: "v1".into(),
+        };
+        let consumer = engine.run(&request).await.unwrap();
+        assert_eq!(consumer.dataset.inputs["input"], witness);
+        assert_eq!(
+            foreign_values(&engine, &consumer).await,
+            vec![None, Some(8)]
+        );
+        let grants = engine
+            .inspect(&dataset)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|(key, value)| {
+                (key.starts_with("owner-protection/")
+                    && value["consumer"] == request.dataset.as_str()
+                    && value["objects"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&serde_json::to_value(&witness).unwrap()))
+                .then_some(key)
+            })
+            .collect::<Vec<_>>();
+        assert!(!grants.is_empty());
+        Some((witness, consumer, grants))
+    } else {
+        None
+    };
+
     // Withdraw the unselected derived operations. The selected source has no
     // computed descendants, so a new independent full Build is permitted.
     for operation in ["original", "qualified"] {
@@ -503,12 +557,24 @@ async fn unselected_qualification_promise_ends_after_explicit_retirement() {
     }
     let protected = engine.inspect_retention(&candidates).await.unwrap();
     assert_eq!(protected.unmatched_bytes, 0);
-    assert!(protected.objects.iter().all(|entry| {
-        entry
-            .blocker
-            .as_ref()
-            .is_some_and(|root| root.key == qualification_key)
-    }));
+    // Inventory reports the first valid root, so the selected foreign authority
+    // may precede the exact owner grant for this witness. Other objects must
+    // remain rooted by the owner's qualification completion.
+    assert!(
+        protected.objects.iter().all(|entry| {
+            entry.blocker.as_ref().is_some_and(|root| {
+                root.key == qualification_key
+                    || foreign.as_ref().is_some_and(|(witness, consumer, grants)| {
+                        entry.object == *witness
+                            && (grants.contains(&root.key)
+                                || (consumer.dataset.dataset == id("foreign-consumer")
+                                    && root.table == "d_foreign_consumer_7d5e8553e5f8.lifecycle"
+                                    && root.key == "authority"))
+                    })
+            })
+        }),
+        "{protected:#?}"
+    );
     assert_eq!(
         protected.protected_bytes,
         candidates.iter().map(|object| object.bytes).sum::<u64>()
@@ -529,6 +595,130 @@ async fn unselected_qualification_promise_ends_after_explicit_retirement() {
         engine.inspect(&dataset).await.unwrap()[&qualification_key],
         old[&qualification_key]
     );
+    let foreign_current = if let Some((witness, consumer, grants)) = &foreign {
+        // Retiring the owning proof cannot invalidate a still-live foreign
+        // result or admit retirement of its exact owner-side grant.
+        assert_eq!(
+            engine
+                .plan_grant_retirement(
+                    &dataset,
+                    &id("foreign-still-live"),
+                    grants,
+                    "foreign consumer still retains this exact witness"
+                )
+                .await
+                .unwrap_err()
+                .code(),
+            "grant_in_use"
+        );
+        let inspected = engine
+            .inspect_retention(std::slice::from_ref(witness))
+            .await
+            .unwrap();
+        assert!(inspected.objects[0].blocker.is_some());
+        assert!(Path::new(&witness.path).exists());
+        assert_eq!(foreign_values(&engine, consumer).await, vec![None, Some(8)]);
+        docspec::engine::verify_release(consumer, limits())
+            .await
+            .unwrap();
+        let input = input(&root.path().join("foreign-new.parquet"), &expected);
+        let current = engine
+            .run(&RunSpec {
+                dataset: consumer.dataset.dataset.clone(),
+                operation: id("foreign-new"),
+                base: None,
+                relationship: None,
+                input: input.path,
+                expected_digest: input.digest,
+                sql: "SELECT id + 100 AS value FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        assert!(current.dataset.parent_manifest.is_none());
+        assert!(current.dataset.computed.is_empty());
+        assert!(
+            !current
+                .dataset
+                .inputs
+                .values()
+                .any(|object| object == witness)
+        );
+        let availability = engine
+            .plan_availability_retirement(
+                &consumer.dataset.dataset,
+                &id("foreign-availability"),
+                &consumer.id,
+                "end old foreign result availability",
+            )
+            .await
+            .unwrap();
+        engine.retire_availability(&availability).await.unwrap();
+        let phases = engine
+            .inspect(&consumer.dataset.dataset)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|(key, value)| {
+                if !key.starts_with("phase/") {
+                    return None;
+                }
+                let phase: docspec::model::PhaseResult = serde_json::from_value(value).unwrap();
+                (phase.operation == consumer.id).then_some(key)
+            })
+            .collect::<Vec<_>>();
+        assert!(!phases.is_empty());
+        let phases = engine
+            .plan_phase_retirement(
+                &consumer.dataset.dataset,
+                &id("foreign-phases"),
+                &phases,
+                "end old foreign processing recovery",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&phases).await.unwrap();
+        let recovery = engine
+            .plan_operation_retirement(
+                &consumer.dataset.dataset,
+                &id("foreign-recovery"),
+                &consumer.id,
+                "end old foreign terminal recovery",
+            )
+            .await
+            .unwrap();
+        engine.retire_operation(&recovery).await.unwrap();
+        // Even now the grant is an independent promise until exactly retired.
+        assert!(
+            engine
+                .inspect_retention(std::slice::from_ref(witness))
+                .await
+                .unwrap()
+                .objects[0]
+                .blocker
+                .as_ref()
+                .is_some_and(|root| grants.contains(&root.key))
+        );
+        let plan = engine
+            .plan_grant_retirement(
+                &dataset,
+                &id("foreign-final-grants"),
+                grants,
+                "end the last exact foreign witness promises",
+            )
+            .await
+            .unwrap();
+        let retired = engine.retire_grants(&plan).await.unwrap();
+        assert_eq!(engine.retire_grants(&plan).await.unwrap(), retired);
+        assert_eq!(
+            foreign_values(&engine, &current).await,
+            vec![Some(109), Some(110)]
+        );
+        Some((current, plan, retired))
+    } else {
+        None
+    };
+
     let removal = engine
         .plan_removal(
             &dataset,
@@ -570,6 +760,20 @@ async fn unselected_qualification_promise_ends_after_explicit_retirement() {
     assert_eq!(engine.retire_phases(&plan).await.unwrap(), retired);
     assert_eq!(engine.remove_objects(&removal).await.unwrap(), removed);
     assert_eq!(engine.latest(&dataset).await.unwrap(), selected);
+    if let Some((current, plan, retired)) = &foreign_current {
+        assert_eq!(engine.retire_grants(plan).await.unwrap(), *retired);
+        assert_eq!(
+            engine.latest(&current.dataset.dataset).await.unwrap(),
+            *current
+        );
+        assert_eq!(
+            foreign_values(&engine, current).await,
+            vec![Some(109), Some(110)]
+        );
+        docspec::engine::verify_release(current, limits())
+            .await
+            .unwrap();
+    }
     let batches = engine
         .read_group(&selected, "source")
         .await
@@ -604,4 +808,20 @@ async fn unselected_qualification_promise_ends_after_explicit_retirement() {
     values.sort();
     assert_eq!(values, expected);
     assert_eq!(engine.run(&request).await.unwrap(), selected);
+}
+
+async fn foreign_values(engine: &Engine, release: &ReleasePin) -> Vec<Option<i64>> {
+    let mut stream = engine.read_group(release, "source").await.unwrap();
+    let mut values = Vec::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let value = batch
+            .column_by_name("value")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::Int64Array>()
+            .unwrap();
+        values.extend(value.iter());
+    }
+    values.sort();
+    values
 }

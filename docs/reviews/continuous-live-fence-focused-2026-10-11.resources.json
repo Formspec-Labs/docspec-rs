@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-10-11T08:44:34.236194+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "continuous_backfill_process::killed_live_fence_owner_recovers_exact_source_and_retained_sibling_work"
+  ],
+  "free_before_bytes": 19254685696,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 0,
+  "min_free_bytes": 18910519296,
+  "free_after_bytes": 19238027264,
+  "finished_utc": "2026-10-11T08:45:12.393903+00:00"
+}

@@ -369,3 +369,239 @@ async fn killed_parent_catches_up_source_edits_and_keeps_original_file_evidence(
         assert!(work.is_empty());
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn killed_live_fence_owner_recovers_exact_source_and_retained_sibling_work() {
+    let root = tempfile::tempdir().unwrap();
+    let (engine, base, rows) = fixture(root.path(), false).await;
+    let sibling = engine
+        .backfill(&scalar::spec(
+            &base,
+            "sibling",
+            "sibling",
+            "next_length",
+            "length(text) + 1",
+        ))
+        .await
+        .unwrap();
+    let replacements = vec![
+        (Some(0), Some("changed é🎉".into())),
+        (None, None),
+        (Some(9000), Some(String::new())),
+    ];
+    let accepted = UpdateSpec {
+        dataset: base.dataset.dataset.clone(),
+        operation: id("accepted-source"),
+        definition: "v1".into(),
+        base: sibling.id.clone(),
+        keys: vec!["id".into()],
+        replacements: input(&root.path().join("replacement.parquet"), &replacements),
+        deletions: None,
+    };
+    assert_eq!(
+        engine
+            .update_until(&accepted, "processing")
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let mut request = request(&sibling);
+    request.optimistic_rounds = 1;
+    // The marker/kill deadline is 30s, strictly inside the maximum native lease.
+    request.fence_millis = 300_000;
+    let workspace = root.path().join("workspace");
+    let request_path = root.path().join("request.json");
+    std::fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
+    std::fs::write(
+        root.path().join("limits.json"),
+        serde_json::to_vec(&limits()).unwrap(),
+    )
+    .unwrap();
+    let accepted_before = engine.inspect(&base.dataset.dataset).await.unwrap();
+    let accepted_phases = accepted_before
+        .iter()
+        .filter(|(key, value)| {
+            key.starts_with("phase/") && value["operation"] == accepted.operation.as_str()
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    assert!(!accepted_phases.is_empty());
+    drop(engine);
+    let marker = root.path().join("fence-live");
+    let log = root.path().join("fenced-worker.log");
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+            .args([
+                "--workspace",
+                workspace.to_str().unwrap(),
+                "--limits",
+                root.path().join("limits.json").to_str().unwrap(),
+                "continuous-backfill",
+                request_path.to_str().unwrap(),
+            ])
+            .env("DOCSPEC_TEST_PAUSE_BEFORE", "continuous-fence")
+            .env("DOCSPEC_TEST_PAUSE_MARKER", &marker)
+            .env(
+                "DOCSPEC_TEST_RESUME_MARKER",
+                root.path().join("never-resume"),
+            )
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::fs::File::create(&log).unwrap())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !marker.exists() {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "fenced controller exited: {}",
+            std::fs::read_to_string(&log).unwrap()
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "controller did not acquire its fence"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        Engine::open(&workspace, limits()).await.unwrap_err().code(),
+        "workspace_busy"
+    );
+    child.0.kill().unwrap();
+    let status = child.0.wait().unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(status.signal(), Some(9));
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    let plan = engine.plan_continuous_backfill(&request).await.unwrap();
+    assert!(
+        !plan.fenced,
+        "dead host cannot retain live intake authority"
+    );
+    assert!(plan.pending_source.contains(&accepted.operation));
+    let original_child = plan.child.unwrap();
+    let before = engine.inspect(&base.dataset.dataset).await.unwrap();
+    assert_child(&before, &original_child, &sibling);
+    assert_eq!(
+        before["source-fence"]["owner"],
+        request.backfill.operation.as_str()
+    );
+    assert_eq!(
+        before["source-fence"]["closed"], false,
+        "SIGKILL must bypass graceful fence cleanup"
+    );
+    let saved = completions(&before);
+    assert!(
+        saved.contains_key(&format!("backfill-readback/{original_child}"))
+            || saved
+                .keys()
+                .any(|key| key.starts_with(&format!("backfill-readback/{original_child}/")))
+    );
+    retained(&accepted_phases, &before);
+    assert_eq!(engine.latest(&base.dataset.dataset).await.unwrap(), sibling);
+    let preserved_keys = saved
+        .keys()
+        .filter(|key| !key.starts_with("backfill-readback/"))
+        .chain(accepted_phases.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let generations = engine
+        .plan_phase_retirement(
+            &base.dataset.dataset,
+            &id("observe-before-recovery"),
+            &preserved_keys,
+            "observe exact retained native generations before recovery",
+        )
+        .await
+        .unwrap()
+        .records;
+    drop(engine);
+    std::fs::remove_file(root.path().join("input.parquet")).unwrap();
+    std::fs::remove_file(root.path().join("replacement.parquet")).unwrap();
+    let accepted_path = root.path().join("accepted.json");
+    std::fs::write(&accepted_path, serde_json::to_vec(&accepted).unwrap()).unwrap();
+    let (source, source_work): (ReleasePin, _) =
+        support::run_cli(root.path(), &["update", accepted_path.to_str().unwrap()]);
+    assert!(
+        !source_work
+            .iter()
+            .any(|phase| phase == "admission" || phase == "processing")
+    );
+    let (selected, _) = support::resume(root.path(), "continuous-backfill");
+    assert_ne!(selected.id, original_child);
+    assert_eq!(
+        selected.dataset.groups["source"],
+        source.dataset.groups["source"]
+    );
+    assert_eq!(selected.dataset.boundary, source.dataset.boundary);
+    assert_eq!(
+        selected.dataset.computed["sibling"].definition,
+        sibling.dataset.computed["sibling"].definition
+    );
+    let mut expected = rows
+        .into_iter()
+        .filter(|row| row.0 != Some(0) && row.0.is_some())
+        .collect::<Vec<_>>();
+    expected.extend(replacements);
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+    assert_output(&engine, &selected, expected.clone()).await;
+    let mut expected_sibling = expected
+        .iter()
+        .map(|row| row.1.as_ref().map(|text| text.chars().count() as i64 + 1))
+        .collect::<Vec<_>>();
+    let mut sibling_values = engine.read_group(&selected, "sibling").await.unwrap();
+    let mut actual_sibling = Vec::new();
+    while let Some(batch) = sibling_values.try_next().await.unwrap() {
+        let values = arrow::compute::cast(
+            batch.column_by_name("next_length").unwrap(),
+            &DataType::Int64,
+        )
+        .unwrap();
+        actual_sibling.extend(values.as_any().downcast_ref::<Int64Array>().unwrap().iter());
+    }
+    drop(sibling_values);
+    expected_sibling.sort();
+    actual_sibling.sort();
+    assert_eq!(actual_sibling, expected_sibling);
+    docspec::engine::verify_release(&selected, limits())
+        .await
+        .unwrap();
+    let after = engine.inspect(&base.dataset.dataset).await.unwrap();
+    retained(&saved, &after);
+    retained(&accepted_phases, &after);
+    assert_eq!(
+        engine
+            .plan_phase_retirement(
+                &base.dataset.dataset,
+                &id("observe-after-recovery"),
+                &preserved_keys,
+                "observe unchanged retained native generations"
+            )
+            .await
+            .unwrap()
+            .records,
+        generations
+    );
+    assert_eq!(
+        engine.latest(&base.dataset.dataset).await.unwrap(),
+        selected
+    );
+    let plan = engine.plan_continuous_backfill(&request).await.unwrap();
+    assert_eq!(plan.completed, Some(selected.clone()));
+    assert!(!plan.fenced);
+    assert!(plan.pending_source.is_empty());
+    drop(engine);
+    let (retried, work) = support::resume(root.path(), "continuous-backfill");
+    assert_eq!(retried, selected);
+    assert!(work.is_empty());
+}

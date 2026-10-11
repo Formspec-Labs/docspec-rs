@@ -1,0 +1,18 @@
+{
+  "started_utc": "2026-10-11T08:45:53.660834+00:00",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--all-features",
+    "--test",
+    "integration",
+    "qualification_roots::foreign_qualification_witness_outlives_owner_recovery_until_last_consumer_grant_ends"
+  ],
+  "free_before_bytes": 19252199424,
+  "stop_below_bytes": 1073741824,
+  "exit_code": 101,
+  "min_free_bytes": 19225010176,
+  "free_after_bytes": 19236593664,
+  "finished_utc": "2026-10-11T08:46:09.698372+00:00"
+}
