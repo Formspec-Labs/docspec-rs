@@ -29,6 +29,9 @@ retention or failure matrices need a specific uncovered supported boundary.
 
 Earlier checkpoint notes retain the limitations known at their completion. Use
 this summary and the requirements table for the current overall status.
+The [revision and consumer evidence map](reviews/supported-scope-2026-10-18.md)
+reconciles the final implementation amendments with retained proof and separates
+the qualified local consumer route from unresolved production adoption decisions.
 
 The [provider recovery follow-up](reviews/dagster-provider-recovered-2026-10-11/receipt.json)
 now qualifies loss of the actual Dagster worker and Rust host after retained

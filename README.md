@@ -5,10 +5,13 @@ Parquet. It admits an exact Parquet input, executes a repeatable SQL query, reta
 completed phases, selects an immutable release, and reads that release without
 the producing catalog.
 
-This repository implements the local foundation and a recoverable Parquet path
-from the [accepted greenfield plan](docs/PLAN.md). **The complete dataset lifecycle
-remains unfinished; the defined full local 10-million-Comments gate passes.** See
-[implementation status](docs/STATUS.md) for the requirement and qualification map.
+The [accepted greenfield plan](docs/PLAN.md) is **complete for the supported v1
+scope**, including the defined full local Comments gate and scoped provider and
+SpicyRegs MCP qualification. This does not establish production adoption,
+public distribution or full-scale remote throughput. See
+[implementation status](docs/STATUS.md) for supported operations and limits, and
+the [revision and consumer evidence map](docs/reviews/supported-scope-2026-10-18.md)
+for the retained proof and remaining adoption decisions.
 
 ## Exports and local maintenance
 
@@ -24,7 +27,7 @@ the immutable file. `read-export export-pin.json output.arrow` streams that exac
 export through the configured Engine. HTTP offers the same reader at
 `GET /datasets/{dataset}/exports/{operation}/arrow`. Repeating an operation reuses
 completed work. Remote source exports use the configured object store; anonymous
-public hosting remains unfinished.
+public hosting is outside the supported scope.
 
 `compact compaction.json` accepts [CompactionSpec](src/model.rs): dataset,
 operation, version, group, exact file paths (an empty list selects all active
@@ -62,7 +65,9 @@ to one local Rust HTTP host. It preserves operation IDs across uncertain retries
 and leaves lifecycle decisions in Rust. Local tests cover completion-response
 loss, Python worker death and cold Rust-host recovery after retained processing.
 Every advertised local route has successful native execution. Provider recovery
-qualification remains unfinished; see [current status](docs/STATUS.md).
+also passes for worker and host loss after retained readback, before final
+publication, using separate processes on one computer. See
+[current status](docs/STATUS.md) for the exact boundary and retained evidence.
 
 ## Qualify remote storage
 
@@ -111,9 +116,10 @@ retaining its partial objects. Primitive-column exports of the selected source
 are implemented with protected host staging, conditional
 remote transfer and retained completion. A completed export can explicitly reclaim
 its exact original host stage after durable remote verification; unfinished
-transfers require the original host. Remote object maintenance, computed and
-related groups remain unqualified. See the status record
-for the exact recovery and resource limits. CLI and loopback HTTP startup accept the
+transfers require the original host. Quiescent, source-only remote deletion and
+catalog restore have [provider qualification](docs/remote-maintenance.md).
+Remote computed and related groups remain outside the supported profile. See the
+status record for the exact recovery and resource limits. CLI and loopback HTTP startup accept the
 same explicit remote configuration. See [current qualification](docs/STATUS.md).
 
 ```rust,ignore
@@ -280,7 +286,8 @@ they consumed. Reuse keeps those references even if a later admission stores an
 equivalent copy elsewhere. This records small metadata references during existing
 work, without another payload read. Older completions remain resumable; missing
 dependency information does not authorize cleanup. Explicit local removal requires
-qualified identities and fresh protection checks; broader maintenance remains unfinished.
+qualified identities and fresh protection checks. Remote maintenance requires the
+[qualified quiescent procedure](docs/remote-maintenance.md).
 
 For a specific provenance or reuse question, `inspect DATASET` exposes the saved
 records. A phase's `dependencies` names its actual admitted copies, related input
@@ -766,7 +773,7 @@ intent. This does not delete completed work.
 HTTP exposes `POST /continuous-backfill` and `POST /plan-continuous-backfill`
 with the same JSON. Ordinary backfill entry points refuse owned child IDs;
 operate through the parent. See [current qualification](docs/STATUS.md#one-recoverable-scalar-backfill-across-advancing-source-versions)
-for the supported local behavior and remaining lifecycle work.
+for the supported local behavior and qualification limits.
 
 Before schema or backfill selection, every accepted source request must have
 entered the selected history or been explicitly abandoned. A later full build
@@ -777,10 +784,13 @@ results. It does not reopen historical payloads or run during ordinary reads.
 
 The same `update` request works after group selection; `plan-update` includes group
 preparation. A no-op update preserves the exact source and group table pins while
-recording its new input coverage and empty source changes. Metadata-only schema
-changes, computed input groups and logical row identity across compaction remain
-unfinished. Explicit deep verification reads retained inputs and data; normal reads
-stream the requested result. Complete-path backfill latency remains unmeasured.
+recording its new input coverage and empty source changes. Supported source-schema
+changes use the `schema` operation described above. Computed groups as join inputs
+remain outside scope; compaction preserves source occurrence IDs without promising
+a broader logical row identity. Explicit deep verification reads retained inputs
+and data; normal reads stream the requested result. See the
+[bounded backfill measurements](docs/reviews/lifecycle-costs-2026-10-11.md);
+wider capacity remains unqualified.
 
 ```sh
 target/debug/docspec --workspace workspaces/comments latest comments
@@ -1149,16 +1159,17 @@ a spill-quota failure. The capability probe is retained in `src/budget.rs`. Thes
 admission controls, **not a qualified whole-process memory ceiling**. Native reads
 use serial file decoding and retain admission through stream consumption. Bulk
 copying and hashing use bounded blocking workers; canceling a caller keeps the
-reservation until its worker finishes. Decoders can
-allocate before a batch-size refusal; Q1 remains open.
+reservation until its worker finishes. Decoders can allocate before a batch-size
+refusal. The [bounded Q1 observations](docs/reviews/lifecycle-costs-2026-10-11.md)
+do not establish a whole-process memory ceiling.
 
 SQL is limited to a read-only query over retained `input`. Clock and random
 functions, limits, offsets, window functions and order-sensitive aggregates are
 refused until their repeatability is qualified. `EXCEPT ALL` and `INTERSECT ALL` are refused because the
 pinned engine's implementation does not preserve the required multiplicity. SQL
 relations have no promised physical row order. Source-file row positions are
-verified; durable logical identities, per-value evidence and broader transformation
-semantics still need qualification.
+verified; see the [supported change and evidence semantics](docs/STATUS.md#requirements)
+for qualification limits.
 
 ## Verification
 
