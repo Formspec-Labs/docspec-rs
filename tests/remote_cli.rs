@@ -60,6 +60,21 @@ fn independent_local_commands_refuse_remote_before_config_limits_and_output_effe
             "--group",
             "computed",
         ],
+        vec![
+            "compare",
+            "missing-before",
+            "missing-after",
+            "--group",
+            "computed",
+        ],
+        vec![
+            "changes",
+            "missing-before",
+            "missing-after",
+            "output.arrow",
+            "--group",
+            "computed",
+        ],
     ] {
         let mut invocation = vec!["--remote", "missing-config", "--limits", "missing-limits"];
         invocation.extend(args);
@@ -108,6 +123,21 @@ fn selected_source_read_and_loopback_serve_use_explicit_remote_configuration() {
         vec![
             "read",
             "missing-release",
+            "output.arrow",
+            "--remote",
+            "remote.json",
+        ],
+        vec![
+            "compare",
+            "missing-before",
+            "missing-after",
+            "--remote",
+            "remote.json",
+        ],
+        vec![
+            "changes",
+            "missing-before",
+            "missing-after",
             "output.arrow",
             "--remote",
             "remote.json",

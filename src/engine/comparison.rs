@@ -94,7 +94,9 @@ impl Engine {
         group: &str,
         options: &ComparisonOptions,
     ) -> Result<Comparison> {
-        self.require_local()?;
+        if group != "source" {
+            self.require_local()?;
+        }
         let memory = self.request_memory(&(before, after, group, options))?;
         let (before, after, group, options) = (
             before.clone(),
@@ -188,7 +190,9 @@ impl Engine {
         group: &str,
         options: &ComparisonOptions,
     ) -> Result<SendableRecordBatchStream> {
-        self.require_local()?;
+        if group != "source" {
+            self.require_local()?;
+        }
         let memory = self.request_memory(&(before, after, group, options))?;
         let (before, after, group, options) = (
             before.clone(),
@@ -220,9 +224,9 @@ impl Engine {
             self.check_read_release(after).await?
         };
         let budget = &self.inner.lifecycle.budget;
-        resolve_release(before, budget).await?;
+        resolve_release_with_objects(&self.inner.objects, before, budget).await?;
         if before != after {
-            resolve_release(after, budget).await?;
+            resolve_release_with_objects(&self.inner.objects, after, budget).await?;
         }
         let first = before.dataset.groups.get(group).ok_or_else(|| {
             Error::refusal(
@@ -260,11 +264,11 @@ impl Engine {
                 ));
             }
         }
-        let left = storage::open_pin(&first, &self.inner.lifecycle.budget).await?;
+        let left = self.inner.objects.open_pin(&first, budget).await?;
         let right = if first == second {
             left.clone()
         } else {
-            storage::open_pin(&second, &self.inner.lifecycle.budget).await?
+            self.inner.objects.open_pin(&second, budget).await?
         };
         storage::identity::has_origins(left.metadata().current_schema())?;
         storage::identity::has_origins(right.metadata().current_schema())?;
@@ -309,12 +313,15 @@ impl Engine {
             let canonical_left = if canonical_first == &first {
                 left.clone()
             } else {
-                storage::open_pin(canonical_first, &self.inner.lifecycle.budget).await?
+                self.inner.objects.open_pin(canonical_first, budget).await?
             };
             let canonical_right = if canonical_second == &second {
                 right.clone()
             } else {
-                storage::open_pin(canonical_second, &self.inner.lifecycle.budget).await?
+                self.inner
+                    .objects
+                    .open_pin(canonical_second, budget)
+                    .await?
             };
             retained_schema_boundary(canonical_left.metadata(), canonical_right.metadata())
         } else {

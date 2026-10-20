@@ -1014,7 +1014,7 @@ async fn main() -> anyhow::Result<()> {
                 } => {
                     let before = read_json::<ReleasePin>(before)?;
                     let after = read_json::<ReleasePin>(after)?;
-                    let mut stream = engine
+                    let stream = engine
                         .changes(
                             &before,
                             &after,
@@ -1029,18 +1029,8 @@ async fn main() -> anyhow::Result<()> {
                             },
                         )
                         .await?;
-                    let file = std::fs::OpenOptions::new()
-                        .create_new(true)
-                        .write(true)
-                        .open(output)?;
-                    let mut writer = arrow::ipc::writer::StreamWriter::try_new(
-                        BufWriter::new(file),
-                        &stream.schema(),
-                    )?;
-                    while let Some(batch) = stream.try_next().await? {
-                        writer.write(&batch)?;
-                    }
-                    writer.finish()?;
+                    write_stream(output, stream).await?;
+                    engine.shutdown().await?;
                 }
                 Command::Invalidate {
                     dataset,
@@ -1108,8 +1098,13 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
                 | Command::RestoreLocal { .. }
                 | Command::ReadEvidence { .. }
                 | Command::ReadReceipts { .. }
-        ) || matches!(&cli.command, Command::Read { group, .. } if group != "source")
-        {
+        ) || matches!(
+            &cli.command,
+            Command::Read { group, .. }
+                | Command::Compare { group, .. }
+                | Command::Changes { group, .. }
+                if group != "source"
+        ) {
             return Err(docspec::Error::refusal(
                 "remote_command_unavailable",
                 "this command uses unqualified independent local I/O; selected remote reads support the source group",

@@ -395,6 +395,137 @@ async fn read_back(engine: &Engine, prepared: &Prepared) -> Result<()> {
         values(engine.read_export(&prepared.export).await?, true).await?,
         final_values
     );
+    compare_versions(engine, prepared).await?;
+    Ok(())
+}
+
+async fn compare_versions(engine: &Engine, prepared: &Prepared) -> Result<()> {
+    let started = std::time::Instant::now();
+    let selected = engine.latest(&prepared.second.dataset.dataset).await?;
+    for identity in [ComparisonIdentity::Values, ComparisonIdentity::Occurrences] {
+        for (before, after, added, removed) in [
+            (&prepared.initial, &prepared.second, 3, 3),
+            (&prepared.second, &prepared.initial, 3, 3),
+            (
+                &prepared.first,
+                &prepared.second,
+                if identity == ComparisonIdentity::Values {
+                    2
+                } else {
+                    3
+                },
+                if identity == ComparisonIdentity::Values {
+                    2
+                } else {
+                    3
+                },
+            ),
+            (&prepared.second, &prepared.second, 0, 0),
+        ] {
+            let mut reference = None;
+            for force_full in [true, false] {
+                let options = ComparisonOptions {
+                    identity,
+                    force_full,
+                };
+                let counts = engine
+                    .compare_with_options(before, after, "source", &options)
+                    .await?;
+                assert_eq!(counts.added_rows, Some(added));
+                assert_eq!(counts.removed_rows, Some(removed));
+                let mut stream = engine.changes(before, after, "source", &options).await?;
+                let descriptor: ChangeDescriptor =
+                    serde_json::from_str(&stream.schema().metadata()["docspec.change"])?;
+                assert_eq!(descriptor, counts.descriptor);
+                let mut members = Vec::new();
+                while let Some(batch) = stream.try_next().await? {
+                    if members.len() + batch.num_rows() > 10 {
+                        return Err(Error::refusal(
+                            "provider_evidence",
+                            "comparison fixture exceeded ten changed occurrences",
+                        ));
+                    }
+                    let fields = batch
+                        .column_by_name("values")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow::array::StructArray>()
+                        .unwrap();
+                    let side = batch
+                        .column_by_name("side")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    let file = batch
+                        .column_by_name("file")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    let row = batch
+                        .column_by_name("row")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap();
+                    let key = fields
+                        .column_by_name("counter")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap();
+                    let text = fields
+                        .column_by_name("text")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    for index in 0..batch.num_rows() {
+                        members.push((
+                            side.value(index).to_owned(),
+                            file.value(index).to_owned(),
+                            row.value(index),
+                            key.value(index),
+                            (!text.is_null(index)).then(|| text.value(index).to_owned()),
+                        ));
+                    }
+                }
+                members.sort();
+                assert_eq!(members.len() as u64, added + removed);
+                if let Some(reference) = &reference {
+                    assert_eq!(&members, reference);
+                } else {
+                    reference = Some(members);
+                }
+                if !force_full {
+                    let expected = if before == after {
+                        ComparisonPath::Unchanged
+                    } else if before.id == prepared.second.id {
+                        ComparisonPath::Full
+                    } else {
+                        ComparisonPath::ForwardChanges
+                    };
+                    assert_eq!(descriptor.path, expected);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        engine.latest(&prepared.second.dataset.dataset).await?,
+        selected
+    );
+    println!(
+        "{}",
+        json!({
+            "phase": "source_comparisons_passed",
+            "seconds": started.elapsed().as_secs_f64(),
+            "exact_count_and_addressed_stream_agreement": true,
+            "duplicate_null_and_reverse_cases": true,
+            "request_counts_measured": false,
+            "selection_unchanged": true
+        })
+    );
     Ok(())
 }
 

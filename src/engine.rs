@@ -2868,10 +2868,25 @@ async fn check_release_available_with_checks(
 }
 
 async fn resolve_release(release: &ReleasePin, budget: &Budget) -> Result<()> {
+    resolve_release_with_objects(&storage::Objects::Local, release, budget).await
+}
+
+async fn resolve_release_with_objects(
+    objects: &storage::Objects,
+    release: &ReleasePin,
+    budget: &Budget,
+) -> Result<()> {
     // Resolve the immutable selection only. Payloads and dependencies are checked
     // at creation, or by explicit verification; a read opens its requested data.
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
-    let decoded = refresh::read_release(&release.version_ref(), budget, &mut 0, &memory).await?;
+    let decoded = refresh::read_release_with_objects(
+        objects,
+        &release.version_ref(),
+        budget,
+        &mut 0,
+        &memory,
+    )
+    .await?;
     if decoded.dataset != release.dataset || !release.verified {
         return Err(Error::refusal(
             "release_mismatch",
