@@ -222,7 +222,7 @@ fn cli_ready_record_names_the_owned_bound_listener_and_refuses_existing_paths() 
     assert_eq!(value["version"], 1);
     assert_eq!(
         value["capabilities"],
-        serde_json::json!(["request-deadline"])
+        serde_json::json!(["request-deadline", "owned-stdin-eof"])
     );
     let address: std::net::SocketAddr = value["address"].as_str().unwrap().parse().unwrap();
     assert!(address.ip().is_loopback());
@@ -257,4 +257,95 @@ fn cli_ready_record_names_the_owned_bound_listener_and_refuses_existing_paths() 
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(std::fs::read(&ready).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_stdin_shutdown_is_opt_in_and_sigint_does_not_wait_for_open_stdin() {
+    use std::{
+        fs::File,
+        io::Write,
+        os::unix::fs::PermissionsExt,
+        process::{Command, Stdio},
+        time::Instant,
+    };
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for (owned, close_stdin) in [(true, true), (true, false), (false, true)] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let limits = root.path().join("limits.json");
+        std::fs::write(&limits, serde_json::to_vec(&scalar::limits()).unwrap()).unwrap();
+        let ready = root.path().join("ready.json");
+        let stderr = root.path().join("stderr");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_docspec"));
+        command
+            .arg("--workspace")
+            .arg(root.path().join("workspace"))
+            .arg("--limits")
+            .arg(&limits)
+            .args(["serve", "--bind", "127.0.0.1:0", "--ready-file"])
+            .arg(&ready)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(File::create(&stderr).unwrap());
+        if owned {
+            command.arg("--shutdown-on-stdin-eof");
+        }
+        let mut child = Child(command.spawn().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(bytes) = std::fs::read(&ready)
+                && serde_json::from_slice::<serde_json::Value>(&bytes).is_ok()
+            {
+                break;
+            }
+            assert!(
+                child.0.try_wait().unwrap().is_none(),
+                "{}",
+                std::fs::read_to_string(&stderr).unwrap()
+            );
+            assert!(Instant::now() < deadline, "host did not publish readiness");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+            .0
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(b"still-owned")
+            .unwrap();
+        if close_stdin {
+            drop(child.0.stdin.take());
+        }
+        if !owned || !close_stdin {
+            // Manual serve ignores EOF; an owned reader must not block SIGINT exit.
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(child.0.try_wait().unwrap().is_none());
+            assert!(
+                Command::new("kill")
+                    .args(["-INT", &child.0.id().to_string()])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let status = loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "host shutdown did not finish");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            status.success(),
+            "{}",
+            std::fs::read_to_string(&stderr).unwrap()
+        );
+    }
 }

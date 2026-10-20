@@ -369,6 +369,9 @@ enum Command {
         /// Create a private readiness record after binding; never overwrite a path.
         #[arg(long)]
         ready_file: Option<PathBuf>,
+        /// Stop HTTP intake and drain owned work when the caller closes stdin.
+        #[arg(long)]
+        shutdown_on_stdin_eof: bool,
     },
 }
 
@@ -1058,14 +1061,47 @@ async fn main() -> anyhow::Result<()> {
                     write_stream(output, stream).await?;
                     engine.shutdown().await?;
                 }
-                Command::Serve { bind, ready_file } => {
+                Command::Serve {
+                    bind,
+                    ready_file,
+                    shutdown_on_stdin_eof,
+                } => {
                     let listener = tokio::net::TcpListener::bind(bind).await?;
+                    let stdin_closed = if shutdown_on_stdin_eof {
+                        let (finished, closed) = tokio::sync::oneshot::channel();
+                        // Tokio stdin uses an uncancelable blocking-runtime read.
+                        // A process-owned reader must not delay SIGINT shutdown.
+                        let _ = std::thread::Builder::new()
+                            .name("docspec-owner-stdin".into())
+                            .spawn(move || {
+                                let result = std::io::copy(
+                                    &mut std::io::stdin().lock(),
+                                    &mut std::io::sink(),
+                                );
+                                let _ = finished.send(result);
+                            })?;
+                        Some(closed)
+                    } else {
+                        None
+                    };
                     if let Some(path) = ready_file {
                         write_ready_file(&path, listener.local_addr()?)?;
                     }
                     let result = axum::serve(listener, docspec::http::router(engine.clone()))
-                        .with_graceful_shutdown(async {
-                            let _ = tokio::signal::ctrl_c().await;
+                        .with_graceful_shutdown(async move {
+                            let owner_closed = async move {
+                                if let Some(closed) = stdin_closed {
+                                    if let Ok(Err(error)) = closed.await {
+                                        tracing::warn!(name: "host.owner_stdin.failed", error = %error, "owner stdin read failed");
+                                    }
+                                } else {
+                                    std::future::pending::<()>().await;
+                                }
+                            };
+                            tokio::select! {
+                                _ = tokio::signal::ctrl_c() => {},
+                                _ = owner_closed => {},
+                            }
                         })
                         .await;
                     // Disconnected clients may leave owned service tasks finishing.
@@ -1228,7 +1264,8 @@ fn write_ready_file(path: &std::path::Path, address: SocketAddr) -> anyhow::Resu
         &mut output,
         &serde_json::json!({
             "protocol": "docspec-loopback", "version": docspec::http::PROTOCOL_VERSION,
-            "capabilities": ["request-deadline"], "pid": std::process::id(), "address": address,
+            "capabilities": ["request-deadline", "owned-stdin-eof"],
+            "pid": std::process::id(), "address": address,
         }),
     )?;
     output.flush()?;

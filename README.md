@@ -1034,9 +1034,21 @@ concurrent requests to that process.
 Automated local clients can run `serve --bind 127.0.0.1:0 --ready-file PATH`,
 where `PATH` is absent inside a private caller-owned directory. After binding,
 the child creates a private JSON record with `protocol: "docspec-loopback"`,
-`version: 1`, its PID, the actual bound address, and the `request-deadline`
-capability. Existing paths refuse. Check that record against the owned process;
-an arbitrary HTTP response on a previously reserved port does not prove readiness.
+`version: 1`, its PID, the actual bound address, and the `request-deadline` and
+`owned-stdin-eof` capabilities. Existing paths refuse. Check that record against
+the owned process; an arbitrary HTTP response on a previously reserved port does
+not prove readiness.
+
+Owned child hosts can additionally opt into `--shutdown-on-stdin-eof` and keep
+the child's stdin pipe open for the owner's lifetime. Closing the pipe, including
+on abrupt owner death, stops HTTP intake and drains Engine-owned work through
+the same shutdown path as SIGINT. Admitted work is not killed or rolled back.
+Manual `serve` without this flag continues to ignore stdin. The optional reader
+uses one process-owned thread and bounded standard-library buffering; SIGINT
+does not wait for stdin to close. An inherited extra write end delays EOF, so
+owners must keep this pipe private and close it when releasing their last host.
+This signal does not prove admission of a specific producer input; retain
+unknown producer inputs until their exact native state has been reconciled.
 
 An optional `docspec-timeout-ms` header supplies one positive integer millisecond
 budget for request-body extraction, the handler, and outgoing body chunks.
