@@ -62,7 +62,6 @@ use iceberg_catalog_sql::{SqlBindStyle, SqlCatalogBuilder};
 use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::{WriterProperties, WriterVersion},
-    schema::types::ColumnPath,
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -358,7 +357,7 @@ where
         // target and skew output file sizing. Level 3 is the recommended
         // production Zstandard default: smaller output than the crate level-1
         // default at still-modest CPU on hourly ingestion cadences.
-        let mut props = WriterProperties::builder()
+        let props = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
             .set_max_row_group_row_count(Some(budget.limits.batch_rows))
@@ -370,11 +369,8 @@ where
             .set_dictionary_enabled(true)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_statistics_truncate_length(Some(64))
-            .set_offset_index_disabled(true);
-        for column in ["resolution", "aboutness", "processor", "provider"] {
-            props = props.set_column_dictionary_enabled(ColumnPath::from(column), true);
-        }
-        let props = props.build();
+            .set_offset_index_disabled(true)
+            .build();
         let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
             .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
         let rolling = RollingFileWriterBuilder::new(
