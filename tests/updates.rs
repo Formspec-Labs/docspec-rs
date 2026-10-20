@@ -592,6 +592,30 @@ async fn paired_writer_refusal_retains_admission_and_can_resume() {
     let plan = engine.plan_update(&mutation).await.unwrap();
     assert!(plan.reusable_phases.contains(&"admission".into()));
     assert!(plan.required_phases.contains(&"processing".into()));
+    let records = engine.inspect(&mutation.dataset).await.unwrap();
+    let attempts = records
+        .iter()
+        .filter(|(key, _)| key.starts_with("protection/"))
+        .map(|(_, value)| {
+            serde_json::from_value::<docspec::model::Protection>(value.clone()).unwrap()
+        })
+        .filter(|protection| protection.purpose == "changed/processing")
+        .collect::<Vec<_>>();
+    assert_eq!(attempts.len(), 1);
+    let attempt = &attempts[0];
+    assert!(!attempt.retired);
+    assert_eq!(attempt.paths.len(), 1);
+    let keys = Path::new(&attempt.paths[0]).join("keys");
+    assert!(!keys.join("metadata").exists());
+    let retained_keys = std::fs::read_dir(keys.join("data"))
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let digest = storage::digest(&path).unwrap();
+            (path, digest)
+        })
+        .collect::<Vec<_>>();
+    assert!(!retained_keys.is_empty());
     drop(engine);
     std::fs::remove_file(&mutation.replacements.path).unwrap();
     std::fs::remove_file(&mutation.deletions.as_ref().unwrap().path).unwrap();
@@ -603,6 +627,9 @@ async fn paired_writer_refusal_retains_admission_and_can_resume() {
         read(&result.dataset.groups["source"]).await,
         reconstruction(&rows, &replacements, &deletions)
     );
+    for (path, digest) in retained_keys {
+        assert_eq!(storage::digest(&path).unwrap(), digest);
+    }
 }
 
 #[tokio::test]

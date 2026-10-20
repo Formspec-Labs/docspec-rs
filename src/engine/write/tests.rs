@@ -345,6 +345,14 @@ async fn renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_f
         .await
         .unwrap();
     let directory = root.path().join("replacement");
+    let registered_before = engine
+        .inner
+        .lifecycle
+        .catalog
+        .list_tables(table.identifier().namespace())
+        .await
+        .unwrap()
+        .len();
     let result = engine
         .replace_keys(Replacement {
             dataset: &owner,
@@ -357,6 +365,19 @@ async fn renamed_reordered_replacements_preserve_ids_highwater_rows_and_shared_f
         })
         .await
         .unwrap();
+    assert!(!directory.join("keys/metadata").exists());
+    assert_eq!(
+        engine
+            .inner
+            .lifecycle
+            .catalog
+            .list_tables(table.identifier().namespace())
+            .await
+            .unwrap()
+            .len(),
+        registered_before + 3,
+        "only result, removed and added tables need retained native metadata"
+    );
     let mut expected = original
         .iter()
         .filter(|r| !matches!(r.0, None | Some(1) | Some(3)))
@@ -843,3 +864,80 @@ async fn reused_key_name_with_new_id_matches_absence_and_empty_noop_results() {
 
 #[cfg(feature = "remote")]
 mod resources;
+
+#[tokio::test]
+#[ignore = "qualification-only observation of prepared-key scan work"]
+async fn prepared_scope_view_scan_observations() {
+    use datafusion::physical_plan::ExecutionPlan;
+    use parquet::arrow::ArrowWriter;
+
+    fn scanned(plan: &dyn ExecutionPlan) -> Option<usize> {
+        let mut bytes = plan
+            .metrics()
+            .and_then(|metrics| metrics.sum_by_name("bytes_scanned"))
+            .map(|value| value.as_usize());
+        for child in plan.children() {
+            if let Some(child) = scanned(child.as_ref()) {
+                bytes = Some(bytes.unwrap_or(0) + child);
+            }
+        }
+        bytes
+    }
+
+    let (root, engine, _, _, _, _, _) = fixture().await;
+    let context = engine.context();
+    let values = RecordBatch::try_from_iter([(
+        "key",
+        Arc::new(Int64Array::from(vec![Some(1), None])) as arrow::array::ArrayRef,
+    )])
+    .unwrap();
+    let path = root.path().join("prepared-scope.parquet");
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), values.schema(), None).unwrap();
+    writer.write(&values).unwrap();
+    writer.close().unwrap();
+    let prepared = context
+        .read_parquet(
+            path.to_string_lossy().as_ref(),
+            ParquetReadOptions::default(),
+        )
+        .await
+        .unwrap();
+    context
+        .register_table("affected_keys", prepared.into_view())
+        .unwrap();
+    for probes in [1, 10, 100] {
+        let mut bytes = 0;
+        let mut scans = 0;
+        for _ in 0..probes {
+            // Isolate the prepared-key side. The actual replacement loop creates
+            // one such plan per source-file probe and per changed-file rewrite.
+            let left = context.sql("SELECT 1::BIGINT AS key").await.unwrap();
+            let frame = key_join(
+                left,
+                context.table("affected_keys").await.unwrap(),
+                &["key".into()],
+                datafusion::logical_expr::JoinType::Inner,
+            )
+            .unwrap()
+            .select(vec![lit(1)])
+            .unwrap()
+            .limit(0, Some(1))
+            .unwrap();
+            let task = Arc::new(frame.task_ctx());
+            let plan = frame.create_physical_plan().await.unwrap();
+            let output = datafusion::physical_plan::collect(plan.clone(), task)
+                .await
+                .unwrap();
+            assert_eq!(output.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+            let observed = scanned(plan.as_ref()).expect("prepared key reader has scan metrics");
+            bytes += observed;
+            scans += usize::from(observed > 0);
+        }
+        eprintln!(
+            "DOCSPEC_SCOPE_PROBE {}",
+            serde_json::json!({"probes": probes, "scope_scan_executions": scans,
+                "requested_scope_bytes": bytes})
+        );
+    }
+}

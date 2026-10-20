@@ -549,15 +549,30 @@ impl Engine {
             let scope = scope.with_column(&marker, datafusion::prelude::lit(true))?;
             // Prepare distinct keys once. A logical view would rescan all input rows
             // and repeat DISTINCT for every source-file probe and rewrite.
-            let scope_table = self
-                .create_output_at(
-                    dataset,
-                    &directory.child("keys")?,
+            // Only the prepared Parquet files are consumed below; no key snapshot
+            // is selected or pinned. Keep the configured writer and protected
+            // attempt path without persisting/registering unused table metadata.
+            let scope_table = {
+                let _metadata =
+                    budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+                let metadata = storage::fresh_metadata_at(
                     iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
                         scope.schema().as_arrow(),
                     )?,
-                )
-                .await?;
+                    &directory.child("keys")?.as_string()?,
+                )?;
+                drop(storage::bounded_json(
+                    &metadata,
+                    budget.limits.max_metadata_bytes,
+                )?);
+                Table::builder()
+                    .metadata(metadata)
+                    .identifier(native.identifier().clone())
+                    .file_io(native.file_io().clone())
+                    .runtime(iceberg::Runtime::try_current()?)
+                    .readonly(true)
+                    .build()?
+            };
             let key_files =
                 storage::write_batches(&scope_table, execute(scope).await?, budget).await?;
             let key_files_written = key_files.len() as u64;
