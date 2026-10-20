@@ -4,8 +4,12 @@ use super::enriched;
 use super::scalar;
 #[cfg(feature = "test-util")]
 use super::support;
-use enriched::{check_values, enriched, forged};
-use scalar::{Row, fixture, id, input, limits, spec};
+use enriched::{enriched, forged};
+#[cfg(feature = "test-util")]
+use enriched::check_values;
+use scalar::{Row, id, input, limits};
+#[cfg(feature = "test-util")]
+use scalar::{fixture, spec};
 
 use arrow::{
     array::Int64Array,
@@ -13,13 +17,19 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use docspec::{
-    Engine,
     engine::verify_release,
-    model::{InputSpec, OperationRequest, PhaseResult, ReleasePin, TablePin, UpdateSpec},
+    model::{InputSpec, OperationRequest, ReleasePin, UpdateSpec},
     storage,
 };
+#[cfg(feature = "test-util")]
+use docspec::{
+    Engine,
+    model::{PhaseResult, TablePin},
+};
 use parquet::arrow::ArrowWriter;
-use std::{collections::BTreeSet, fs::File, path::Path, sync::Arc};
+#[cfg(feature = "test-util")]
+use std::collections::BTreeSet;
+use std::{fs::File, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 fn keys(path: &Path, values: impl Iterator<Item = Option<i64>>) -> InputSpec {
@@ -59,6 +69,7 @@ fn update(
     }
 }
 
+#[cfg(feature = "test-util")]
 fn data_paths(pin: &TablePin) -> BTreeSet<String> {
     pin.objects
         .iter()

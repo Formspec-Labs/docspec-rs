@@ -8,8 +8,10 @@ use super::support;
 use docspec::{
     Engine,
     engine::verify_release,
-    model::{OperationRequest, PhaseResult, ReleasePin, RunSpec, TablePin, UpdateSpec},
+    model::{OperationRequest, ReleasePin, RunSpec, UpdateSpec},
 };
+#[cfg(feature = "test-util")]
+use docspec::model::{PhaseResult, TablePin};
 use enriched::{check_values, enriched, forged};
 use scalar::{Row, id, input, limits, spec};
 use std::path::Path;

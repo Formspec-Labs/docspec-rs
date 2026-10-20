@@ -1,5 +1,6 @@
 //! A catalog epoch fences prepared work without changing immutable selections.
 // Rust guideline compliant 2026-02-21
+#![cfg(feature = "test-util")]
 
 use super::scalar::{fixture, id, input};
 use axum::{

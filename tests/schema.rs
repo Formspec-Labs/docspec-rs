@@ -8,12 +8,16 @@ use super::support;
 use arrow::array::{Int64Array, StringArray};
 use docspec::{
     engine::verify_release,
-    model::{OperationRequest, PhaseResult, ReleasePin, RunSpec, SchemaField, SchemaSpec},
+    model::{OperationRequest, ReleasePin, SchemaField, SchemaSpec},
     storage,
 };
+#[cfg(feature = "test-util")]
+use docspec::model::{PhaseResult, RunSpec};
 use futures::{StreamExt, TryStreamExt};
 use scalar::{fixture, id, limits};
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
+#[cfg(feature = "test-util")]
+use std::path::Path;
 
 fn request(base: &ReleasePin, operation: &str) -> SchemaSpec {
     SchemaSpec {

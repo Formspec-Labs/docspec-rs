@@ -12,10 +12,12 @@ use docspec::{
     model::{
         BackfillSpec, ComputedField, Id, JoinCardinality, JoinDefinition, JoinField, JoinKey,
         JoinKind, JoinSide, JoinTransform, NullMatching, ObjectRef, RefreshMode, RefreshPolicy,
-        RefreshSpec, RefreshTransform, ReleasePin, RunSpec, SuccessionProof,
+        RefreshSpec, RefreshTransform, ReleasePin, RunSpec,
     },
     storage,
 };
+#[cfg(feature = "test-util")]
+use docspec::model::SuccessionProof;
 use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::ArrowWriter;
 use std::{collections::BTreeMap, fs::File, path::Path, sync::Arc};
@@ -1035,6 +1037,7 @@ async fn offline_parent_rules_reject_related_conversion_and_role_rebinding() {
     );
 }
 
+#[cfg(feature = "test-util")]
 fn nested_recipe(joined: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
     let mut spec = recipe(joined, right);
     spec.dataset = id("nested");

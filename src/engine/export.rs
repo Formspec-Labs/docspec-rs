@@ -7,6 +7,7 @@ pub(in crate::engine) mod host;
 pub(super) mod remote;
 use crate::export::{ExportField, ExportPin, ExportPolicy, ExportSpec, ExportValidation};
 use arrow::{
+    array::Array,
     datatypes::{DataType, Field, Schema, SchemaRef},
     record_batch::RecordBatch,
 };
@@ -20,7 +21,6 @@ use parquet::{
         metadata::FooterTail,
         properties::{EnabledStatistics, WriterProperties, WriterVersion},
     },
-    schema::types::ColumnPath,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -572,6 +572,7 @@ impl Engine {
         });
         let initial_path = path.clone();
         let output_schema = schema.clone();
+        let max_row_group_bytes = budget.limits.max_batch_bytes.max(1);
         let (output, properties, memory, native) = budget
             .blocking(move || {
                 let _memory = memory;
@@ -583,26 +584,21 @@ impl Engine {
                 // per-page statistics stay disabled: page indexes would
                 // multiply the footer past the declared metadata allowance on
                 // wide or long exports. Level 3 matches the native writer.
-                // Row groups bound by encoded bytes rather than row count: the
-                // writer already flushes at `max_batch_bytes` of buffered
-                // memory, so the 128 MiB encoded cap only guards abnormal row
-                // widths. `parquet` 58 deprecates `set_max_row_group_size`;
-                // `set_max_row_group_bytes` flushes on estimated encoded size.
-                let mut properties = WriterProperties::builder()
+                // Row groups bound by encoded bytes rather than reader batch
+                // rows: the writer flushes at `max_batch_bytes` of buffered
+                // memory and enforces the same caller byte ceiling on encoded
+                // row-group size.
+                let properties = WriterProperties::builder()
                     .set_writer_version(WriterVersion::PARQUET_2_0)
                     .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
                     .set_max_row_group_row_count(None)
-                    .set_max_row_group_bytes(Some(128 * 1024 * 1024))
+                    .set_max_row_group_bytes(Some(max_row_group_bytes))
                     .set_data_page_size_limit(1024 * 1024)
                     .set_dictionary_enabled(true)
                     .set_statistics_enabled(EnabledStatistics::Chunk)
                     .set_statistics_truncate_length(Some(64))
-                    .set_offset_index_disabled(true);
-                for column in ["resolution", "aboutness", "processor", "provider"] {
-                    properties =
-                        properties.set_column_dictionary_enabled(ColumnPath::from(column), true);
-                }
-                let properties = properties.build();
+                    .set_offset_index_disabled(true)
+                    .build();
                 let native = if cfg!(unix) {
                     output.file.sync_all()?;
                     File::open(initial_path.parent().ok_or_else(invalid_export)?)?.sync_all()?;
@@ -633,17 +629,26 @@ impl Engine {
         #[cfg(feature = "test-util")]
         work_started("export-materialization");
         let mut rows = 0_u64;
-        // A conservative per-column allowance bounds accumulated footer records.
-        // Truncated chunk statistics, names, and type descriptions add their
-        // actual size. This is admission accounting, not a measured RSS claim.
-        let footer_group_bytes = fields.iter().fold(1024_usize, |size, field| {
-            size.saturating_add(1024 + field.name.len() + field.data_type.len())
-        });
+        // A conservative per-leaf-column allowance bounds accumulated footer
+        // records across both flat and nested schemas. Truncated chunk
+        // statistics, names, and type descriptions add their actual size. This
+        // is admission accounting, not a measured RSS claim.
+        let primitive_leaves = count_primitive_leaves(&schema);
+        let footer_group_bytes = fields.iter().fold(
+            1024_usize.saturating_add(primitive_leaves.saturating_mul(1024)),
+            |size, field| size.saturating_add(field.name.len() + field.data_type.len()),
+        );
         for file in scan.files() {
             let stream = scan.read_projected_file(file.file_path(), budget, Some(&indices))?;
             futures::pin_mut!(stream);
             while let Some(batch) = stream.try_next().await? {
-                let batch = RecordBatch::try_new(schema.clone(), batch.columns().to_vec())?;
+                let columns = batch
+                    .columns()
+                    .iter()
+                    .zip(schema.fields())
+                    .map(|(column, field)| sanitize_export_array(column, field.data_type()))
+                    .collect::<Result<Vec<_>>>()?;
+                let batch = RecordBatch::try_new(schema.clone(), columns)?;
                 rows = rows
                     .checked_add(batch.num_rows() as u64)
                     .ok_or_else(invalid_export)?;
@@ -847,6 +852,7 @@ fn authorized_schema(
 ) -> Result<(Vec<usize>, SchemaRef, Vec<ExportField>)> {
     let mut indices = Vec::with_capacity(policy.columns.len());
     let mut fields = Vec::with_capacity(policy.columns.len());
+    let mut seen_ids = BTreeSet::new();
     for name in &policy.columns {
         if name.to_ascii_lowercase().starts_with("__docspec_") {
             return Err(Error::refusal(
@@ -861,43 +867,7 @@ fn authorized_schema(
             )
         })?;
         let field = source.field(index);
-        if !matches!(
-            field.data_type(),
-            DataType::Boolean
-                | DataType::Int32
-                | DataType::Int64
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Utf8
-                | DataType::Binary
-                | DataType::LargeBinary
-                | DataType::FixedSizeBinary(_)
-                | DataType::Date32
-                | DataType::Time64(_)
-                | DataType::Timestamp(_, _)
-                | DataType::Decimal128(_, _)
-                | DataType::List(_)
-                | DataType::Struct(_)
-        ) {
-            return Err(Error::refusal(
-                "unsupported_export_type",
-                format!(
-                    "local flat export column {name} has unsupported type {}",
-                    field.data_type()
-                ),
-            ));
-        }
-        let id = field
-            .metadata()
-            .get(PARQUET_FIELD_ID_META_KEY)
-            .ok_or_else(invalid_export)?;
-        // Rebuild each field: source documentation/defaults and arbitrary metadata
-        // never reach the public Parquet footer or its encoded Arrow schema.
-        fields.push(
-            Field::new(name, field.data_type().clone(), field.is_nullable()).with_metadata(
-                HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), id.clone())]),
-            ),
-        );
+        fields.push(sanitize_export_field(name, field, &mut seen_ids)?);
         indices.push(index);
     }
     let schema = Arc::new(Schema::new(fields));
@@ -905,15 +875,147 @@ fn authorized_schema(
     Ok((indices, schema, fields))
 }
 
+fn sanitize_export_field(
+    root_name: &str,
+    field: &Field,
+    seen_ids: &mut BTreeSet<i32>,
+) -> Result<Field> {
+    if field.name().to_ascii_lowercase().starts_with("__docspec_") {
+        return Err(Error::refusal(
+            "export_disclosure",
+            "internal occurrence and evidence fields cannot be exported",
+        ));
+    }
+    let data_type = match field.data_type() {
+        DataType::Boolean
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::Float32
+        | DataType::Float64
+        | DataType::Utf8
+        | DataType::LargeUtf8
+        | DataType::Binary
+        | DataType::LargeBinary
+        | DataType::FixedSizeBinary(_)
+        | DataType::Date32
+        | DataType::Time64(_)
+        | DataType::Timestamp(_, _)
+        | DataType::Decimal128(_, _) => field.data_type().clone(),
+        DataType::List(item) => {
+            DataType::List(Arc::new(sanitize_export_field(root_name, item, seen_ids)?))
+        }
+        DataType::Struct(fields) if !fields.is_empty() => {
+            let mut sanitized = Vec::with_capacity(fields.len());
+            for child in fields {
+                sanitized.push(Arc::new(sanitize_export_field(
+                    root_name, child, seen_ids,
+                )?));
+            }
+            DataType::Struct(sanitized.into())
+        }
+        unsupported => {
+            return Err(Error::refusal(
+                "unsupported_export_type",
+                format!("local flat export column {root_name} has unsupported type {unsupported}"),
+            ));
+        }
+    };
+    let id = field
+        .metadata()
+        .get(PARQUET_FIELD_ID_META_KEY)
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|id| *id > 0)
+        .ok_or_else(invalid_export)?;
+    if !seen_ids.insert(id) {
+        return Err(invalid_export());
+    }
+    // Rebuild every root and descendant field: source documentation/defaults
+    // and arbitrary metadata never reach the public Parquet footer or its
+    // encoded Arrow schema.
+    Ok(
+        Field::new(field.name(), data_type, field.is_nullable()).with_metadata(HashMap::from([(
+            PARQUET_FIELD_ID_META_KEY.into(),
+            id.to_string(),
+        )])),
+    )
+}
+
+fn count_primitive_leaves(schema: &Schema) -> usize {
+    schema
+        .fields()
+        .iter()
+        .map(|field| data_type_primitive_leaves(field.data_type()))
+        .fold(0_usize, usize::saturating_add)
+}
+
+fn data_type_primitive_leaves(data_type: &DataType) -> usize {
+    match data_type {
+        DataType::List(item) => data_type_primitive_leaves(item.data_type()),
+        DataType::Struct(fields) => fields
+            .iter()
+            .map(|field| data_type_primitive_leaves(field.data_type()))
+            .fold(0_usize, usize::saturating_add),
+        _ => 1,
+    }
+}
+
+fn sanitize_export_array(
+    array: &arrow::array::ArrayRef,
+    data_type: &DataType,
+) -> Result<arrow::array::ArrayRef> {
+    if array.data_type() == data_type {
+        return Ok(array.clone());
+    }
+    match data_type {
+        DataType::List(item) => {
+            let list = array
+                .as_any()
+                .downcast_ref::<arrow::array::ListArray>()
+                .ok_or_else(invalid_export)?;
+            let values = sanitize_export_array(list.values(), item.data_type())?;
+            Ok(Arc::new(arrow::array::ListArray::try_new(
+                item.clone(),
+                list.offsets().clone(),
+                values,
+                list.nulls().cloned(),
+            )?))
+        }
+        DataType::Struct(fields) => {
+            let structure = array
+                .as_any()
+                .downcast_ref::<arrow::array::StructArray>()
+                .ok_or_else(invalid_export)?;
+            if structure.columns().len() != fields.len() {
+                return Err(invalid_export());
+            }
+            let columns = structure
+                .columns()
+                .iter()
+                .zip(fields.iter())
+                .map(|(child, field)| sanitize_export_array(child, field.data_type()))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Arc::new(arrow::array::StructArray::try_new(
+                fields.clone(),
+                columns,
+                structure.nulls().cloned(),
+            )?))
+        }
+        _ => Err(invalid_export()),
+    }
+}
+
 fn describe_schema(schema: &Schema) -> Result<Vec<ExportField>> {
     if !schema.metadata().is_empty() {
         return Err(invalid_export());
     }
+    let mut seen_ids = BTreeSet::new();
     schema
         .fields()
         .iter()
         .map(|field| {
-            if field.metadata().len() != 1 {
+            let sanitized = sanitize_export_field(field.name(), field, &mut seen_ids)
+                .map_err(|_| invalid_export())?;
+            if &sanitized != field.as_ref() {
                 return Err(invalid_export());
             }
             let id = field
@@ -1056,12 +1158,24 @@ mod tests {
         let field = |name, datatype, id: &str| {
             Field::new(name, datatype, true).with_metadata(HashMap::from([
                 (PARQUET_FIELD_ID_META_KEY.into(), id.into()),
+                ("doc".into(), "private-child-doc".into()),
                 (
                     "source_documentation".into(),
                     "undisclosed-metadata-canary".into(),
                 ),
             ]))
         };
+        let map_entries = Field::new(
+            "entries",
+            DataType::Struct(
+                vec![
+                    Field::new("keys", DataType::Utf8, false),
+                    Field::new("values", DataType::Int32, true),
+                ]
+                .into(),
+            ),
+            false,
+        );
         let source = Arc::new(Schema::new_with_metadata(
             vec![
                 field("public", DataType::Utf8, "7"),
@@ -1069,18 +1183,68 @@ mod tests {
                 field("__docspec_left_file", DataType::Utf8, "11"),
                 field(
                     "nested_list",
-                    DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                    DataType::List(Arc::new(field("item", DataType::Utf8, "14"))),
                     "13",
                 ),
                 field(
                     "nested_struct",
-                    DataType::Struct(vec![Field::new("start", DataType::Int32, true)].into()),
+                    DataType::Struct(
+                        vec![
+                            field("start", DataType::Int32, "16"),
+                            field("end", DataType::Int64, "18"),
+                        ]
+                        .into(),
+                    ),
                     "15",
                 ),
                 field(
                     "unsupported",
                     DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
                     "17",
+                ),
+                field(
+                    "nested_internal",
+                    DataType::Struct(vec![field("__docspec_row", DataType::Int64, "20")].into()),
+                    "19",
+                ),
+                field(
+                    "nested_unsupported_struct",
+                    DataType::Struct(
+                        vec![field(
+                            "bad_dict",
+                            DataType::Dictionary(
+                                Box::new(DataType::Int32),
+                                Box::new(DataType::Utf8),
+                            ),
+                            "22",
+                        )]
+                        .into(),
+                    ),
+                    "21",
+                ),
+                field(
+                    "nested_unsupported_list",
+                    DataType::List(Arc::new(field(
+                        "item",
+                        DataType::Map(Arc::new(map_entries), false),
+                        "24",
+                    ))),
+                    "23",
+                ),
+                field(
+                    "nested_empty_struct",
+                    DataType::Struct( Vec::<Field>::new().into()),
+                    "25",
+                ),
+                field(
+                    "nested_missing_id",
+                    DataType::Struct(vec![Field::new("untagged", DataType::Int32, true)].into()),
+                    "27",
+                ),
+                field(
+                    "nested_duplicate_id",
+                    DataType::Struct(vec![field("dup", DataType::Int32, "29")].into()),
+                    "29",
                 ),
             ],
             HashMap::from([("source_path".into(), "private-evidence-path".into())]),
@@ -1096,49 +1260,117 @@ mod tests {
         };
         let (indices, selected, fields) = authorized_schema(&source, &policy).unwrap();
         assert_eq!(indices, [0, 3, 4]);
+        assert_eq!(count_primitive_leaves(&selected), 4);
         assert!(selected.metadata().is_empty());
         assert_eq!(
             selected.field(0).metadata(),
             &HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), "7".into())])
         );
+        let DataType::List(list_item) = selected.field(1).data_type() else {
+            panic!("expected list data type");
+        };
+        assert_eq!(
+            list_item.metadata(),
+            &HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), "14".into())])
+        );
+        let DataType::Struct(struct_fields) = selected.field(2).data_type() else {
+            panic!("expected struct data type");
+        };
+        assert_eq!(
+            struct_fields[0].metadata(),
+            &HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), "16".into())])
+        );
+        assert_eq!(
+            struct_fields[1].metadata(),
+            &HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), "18".into())])
+        );
+        for exported in &fields {
+            assert!(!exported.data_type.contains("undisclosed-metadata-canary"));
+            assert!(!exported.data_type.contains("private-child-doc"));
+        }
         assert_eq!(fields[0].id, 7);
         assert_eq!(fields[1].id, 13);
         assert_eq!(fields[2].id, 15);
-        policy.columns = vec!["__docspec_left_file".into()];
-        assert_eq!(
-            authorized_schema(&source, &policy).unwrap_err().code(),
-            "export_disclosure"
-        );
-        policy.columns = vec!["unsupported".into()];
-        assert_eq!(
-            authorized_schema(&source, &policy).unwrap_err().code(),
-            "unsupported_export_type"
-        );
+        for internal in ["__docspec_left_file", "nested_internal"] {
+            policy.columns = vec![internal.into()];
+            assert_eq!(
+                authorized_schema(&source, &policy).unwrap_err().code(),
+                "export_disclosure"
+            );
+        }
+        for bad_type in [
+            "unsupported",
+            "nested_unsupported_struct",
+            "nested_unsupported_list",
+            "nested_empty_struct",
+        ] {
+            policy.columns = vec![bad_type.into()];
+            assert_eq!(
+                authorized_schema(&source, &policy).unwrap_err().code(),
+                "unsupported_export_type"
+            );
+        }
+        for bad_id in ["nested_missing_id", "nested_duplicate_id"] {
+            policy.columns = vec![bad_id.into()];
+            assert_eq!(
+                authorized_schema(&source, &policy).unwrap_err().code(),
+                "invalid_export"
+            );
+        }
     }
 
     #[tokio::test]
     async fn nested_list_and_struct_columns_export_and_read_back() {
-        use arrow::array::{
-            Array, Int32Array, Int32Builder, ListBuilder, StringBuilder, StructArray, StructBuilder,
+        use arrow::{
+            array::{
+                Int32Array, Int32Builder, ListBuilder, StringBuilder, StructArray, StructBuilder,
+            },
+            buffer::NullBuffer,
         };
         let root = tempfile::tempdir().unwrap();
         let input = root.path().join("nested.parquet");
+        let child_meta = |doc: &str| {
+            HashMap::from([
+                ("doc".into(), doc.into()),
+                (
+                    "custom_secret".into(),
+                    "private-descendant-custom-canary".into(),
+                ),
+            ])
+        };
         let span_fields: arrow::datatypes::Fields = vec![
-            Field::new("start", DataType::Int32, false),
-            Field::new("end", DataType::Int32, false),
+            Field::new("start", DataType::Int32, false)
+                .with_metadata(child_meta("private-descendant-doc-canary-start")),
+            Field::new("end", DataType::Int32, true)
+                .with_metadata(child_meta("private-descendant-doc-canary-end")),
         ]
         .into();
-        let mut aliases_builder = ListBuilder::new(StringBuilder::new());
+        let mut aliases_builder = ListBuilder::new(StringBuilder::new()).with_field(
+            Field::new("item", DataType::Utf8, true).with_metadata(HashMap::from([(
+                "custom_secret".into(),
+                "private-descendant-custom-canary".into(),
+            )])),
+        );
         aliases_builder.values().append_value("https://a.example");
+        aliases_builder.values().append_null();
         aliases_builder.values().append_value("https://b.example");
         aliases_builder.append(true);
         aliases_builder.append(false);
+        aliases_builder.append(true);
         let aliases = Arc::new(aliases_builder.finish());
 
         let mut spans_builder = ListBuilder::new(StructBuilder::new(
             span_fields.clone(),
             vec![Box::new(Int32Builder::new()), Box::new(Int32Builder::new())],
-        ));
+        ))
+        .with_field(
+            Field::new("item", DataType::Struct(span_fields.clone()), true).with_metadata(
+                HashMap::from([(
+                    "custom_secret".into(),
+                    "private-descendant-custom-canary".into(),
+                )]),
+            ),
+        );
         spans_builder
             .values()
             .field_builder::<Int32Builder>(0)
@@ -1150,31 +1382,43 @@ mod tests {
             .unwrap()
             .append_value(4);
         spans_builder.values().append(true);
+        spans_builder
+            .values()
+            .field_builder::<Int32Builder>(0)
+            .unwrap()
+            .append_value(5);
+        spans_builder
+            .values()
+            .field_builder::<Int32Builder>(1)
+            .unwrap()
+            .append_null();
+        spans_builder.values().append(true);
         spans_builder.append(true);
         spans_builder.append(true);
+        spans_builder.append(false);
         let spans = Arc::new(spans_builder.finish());
 
         let details = Arc::new(StructArray::new(
             span_fields.clone(),
             vec![
-                Arc::new(Int32Array::from(vec![0, 10])),
-                Arc::new(Int32Array::from(vec![5, 20])),
+                Arc::new(Int32Array::from(vec![0, 10, 20])),
+                Arc::new(Int32Array::from(vec![Some(5), None, Some(25)])),
             ],
-            None,
+            Some(NullBuffer::from(vec![true, false, true])),
         ));
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
             Field::new("url_aliases", aliases.data_type().clone(), true),
             Field::new("spans", spans.data_type().clone(), true),
-            Field::new("span", DataType::Struct(span_fields), false),
+            Field::new("span", DataType::Struct(span_fields), true),
         ]));
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![
-                Arc::new(arrow::array::Int64Array::from(vec![1, 2])),
-                aliases,
-                spans,
-                details,
+                Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3])),
+                aliases.clone(),
+                spans.clone(),
+                details.clone(),
             ],
         )
         .unwrap();
@@ -1223,13 +1467,252 @@ mod tests {
             },
         };
         let pin = engine.export(&spec).await.unwrap();
-        assert_eq!(pin.rows, 2);
+        assert_eq!(pin.rows, 3);
         assert_eq!(pin.fields.len(), 4);
+        for field in &pin.fields {
+            assert!(!field.data_type.contains("private-descendant-doc-canary"));
+            assert!(!field.data_type.contains("private-descendant-custom-canary"));
+        }
+        let raw_bytes = std::fs::read(&pin.object.path).unwrap();
+        assert!(
+            !raw_bytes
+                .windows(b"private-descendant".len())
+                .any(|window| window == b"private-descendant")
+        );
+        let builder =
+            ParquetRecordBatchReaderBuilder::try_new(File::open(&pin.object.path).unwrap())
+                .unwrap();
+        assert!(builder.schema().metadata().is_empty());
         let read = engine.read_export(&pin).await.unwrap();
         let batches = datafusion::physical_plan::common::collect(read)
             .await
             .unwrap();
-        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        let exported = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+        let ids = exported
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::Int64Array>()
+            .unwrap();
+        for row in 0..exported.num_rows() {
+            let source_row = usize::try_from(ids.value(row) - 1).unwrap();
+            for col in 0..4 {
+                let expected = sanitize_export_array(
+                    batch.column(col),
+                    exported.schema().field(col).data_type(),
+                )
+                .unwrap();
+                assert_eq!(
+                    exported.column(col).slice(row, 1).to_data(),
+                    expected.slice(source_row, 1).to_data()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wide_nested_struct_exceeding_metadata_budget_refuses_export() {
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("wide-nested.parquet");
+        let leaf_fields: arrow::datatypes::Fields = (0..40)
+            .map(|index| Field::new(format!("f{index}"), DataType::Int32, false))
+            .collect::<Vec<_>>()
+            .into();
+        let leaf_arrays = (0..40)
+            .map(|index| {
+                Arc::new(arrow::array::Int32Array::from(vec![index])) as arrow::array::ArrayRef
+            })
+            .collect::<Vec<_>>();
+        let wide_struct = Arc::new(arrow::array::StructArray::new(
+            leaf_fields.clone(),
+            leaf_arrays,
+            None,
+        ));
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("wide", DataType::Struct(leaf_fields), false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(arrow::array::Int64Array::from(vec![1_i64])),
+                wide_struct,
+            ],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(&input).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let id = |name| Id::new(name).unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        let release = engine
+            .run(&RunSpec {
+                dataset: id("wide"),
+                operation: id("initial"),
+                base: None,
+                relationship: None,
+                input: input.to_string_lossy().into_owned(),
+                expected_digest: storage::digest(&input).unwrap().0,
+                sql: "SELECT * FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        drop(engine);
+
+        // 41 primitive leaves (id + 40 struct children) require >42 KiB of
+        // per-row-group footer admission, whereas root-column counting would
+        // estimate <6 KiB and mistakenly admit under a 32 KiB metadata cap.
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                max_metadata_bytes: 32 << 10,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        let spec = ExportSpec {
+            dataset: id("wide"),
+            operation: id("wide-export"),
+            source: release.version_ref(),
+            channel: id("download"),
+            expected: None,
+            policy: ExportPolicy {
+                group: "source".into(),
+                rows: ExportRows::All,
+                columns: vec!["id".into(), "wide".into()],
+            },
+        };
+        let err = engine.export(&spec).await.unwrap_err();
+        assert_eq!(err.code(), "metadata_capacity");
+    }
+
+    #[tokio::test]
+    async fn caller_limits_bound_row_groups_and_preserve_global_dictionary_encoding() {
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("limits-input.parquet");
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("custom_category", DataType::Utf8, false),
+            Field::new("payload", DataType::Utf8, false),
+        ]));
+        let row_count = 160_i64;
+        let ids = (0..row_count).collect::<Vec<_>>();
+        let categories = (0..row_count)
+            .map(|index| if index % 2 == 0 { "alpha" } else { "beta" })
+            .collect::<Vec<_>>();
+        let payloads = (0..row_count)
+            .map(|index| format!("payload-{index:04}-{}", "x".repeat(64)))
+            .collect::<Vec<_>>();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(arrow::array::Int64Array::from(ids)),
+                Arc::new(arrow::array::StringArray::from(categories)),
+                Arc::new(arrow::array::StringArray::from(payloads)),
+            ],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(&input).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let id = |name| Id::new(name).unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                batch_rows: 64,
+                max_batch_bytes: 64 << 10,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        let release = engine
+            .run(&RunSpec {
+                dataset: id("bounded"),
+                operation: id("initial"),
+                base: None,
+                relationship: None,
+                input: input.to_string_lossy().into_owned(),
+                expected_digest: storage::digest(&input).unwrap().0,
+                sql: "SELECT * FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let native_parquet = release.dataset.groups["source"]
+            .objects
+            .iter()
+            .find(|object| object.path.ends_with(".parquet"))
+            .unwrap();
+        let native_reader =
+            ParquetRecordBatchReaderBuilder::try_new(File::open(&native_parquet.path).unwrap())
+                .unwrap();
+        assert!(native_reader.metadata().num_row_groups() >= 3);
+        for group in native_reader.metadata().row_groups() {
+            assert!(group.num_rows() <= 64);
+            let category_col = group
+                .columns()
+                .iter()
+                .find(|col| col.column_path().string() == "custom_category")
+                .unwrap();
+            assert!(category_col.dictionary_page_offset().is_some());
+        }
+        drop(engine);
+
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                batch_rows: 8,
+                max_batch_bytes: 16 << 10,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let pin = engine
+            .export(&ExportSpec {
+                dataset: id("bounded"),
+                operation: id("export-bounded"),
+                source: release.version_ref(),
+                channel: id("download"),
+                expected: None,
+                policy: ExportPolicy {
+                    group: "source".into(),
+                    rows: ExportRows::All,
+                    columns: vec!["id".into(), "custom_category".into(), "payload".into()],
+                },
+            })
+            .await
+            .unwrap();
+        let export_reader =
+            ParquetRecordBatchReaderBuilder::try_new(File::open(&pin.object.path).unwrap())
+                .unwrap();
+        assert!(export_reader.metadata().num_row_groups() >= 2);
+        for group in export_reader.metadata().row_groups() {
+            let category_col = group
+                .columns()
+                .iter()
+                .find(|col| col.column_path().string() == "custom_category")
+                .unwrap();
+            assert!(category_col.dictionary_page_offset().is_some());
+        }
     }
     #[tokio::test]
     async fn retained_lookup_binds_requested_identity_and_output_is_protected() {
@@ -1357,6 +1840,9 @@ mod tests {
             engine.export_pin(&spec.dataset, &pin.id).await.unwrap(),
             pin
         );
+        #[cfg(feature = "remote")]
         remote::test_retained_phase_revision_bindings(&engine, &spec, &pin).await;
+        #[cfg(not(feature = "remote"))]
+        let _ = remote::test_retained_phase_revision_bindings;
     }
 }

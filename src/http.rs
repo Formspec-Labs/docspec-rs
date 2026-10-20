@@ -685,6 +685,7 @@ impl IntoResponse for HttpError {
                 StatusCode::CONFLICT
             }
             "capacity" | "metadata_capacity" | "disk_capacity" => StatusCode::SERVICE_UNAVAILABLE,
+            "worker" => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         };
         (
@@ -1062,6 +1063,23 @@ mod tests {
             let refusal: serde_json::Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(refusal["code"], code);
         }
+    }
+
+    #[tokio::test]
+    async fn worker_termination_returns_internal_server_error() {
+        let handle = tokio::spawn(async {
+            panic!("simulated worker panic");
+        });
+        let join_error = handle.await.unwrap_err();
+        let error = Error::from(join_error);
+        assert_eq!(error.code(), "worker");
+        let response = HttpError::from(error).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["code"], "worker");
     }
 }
 
