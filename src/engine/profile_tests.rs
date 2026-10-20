@@ -158,3 +158,97 @@ async fn profile_hourly_polling_workspace() {
         })
     );
 }
+
+/// Captures the physical plan of the Date32 + COUNT DISTINCT aggregate.
+///
+/// Emulates the news_lake `coverage_daily` refresh over a projected native
+/// source and prints the rendered DataFusion physical plan for the
+/// optimization report. Predicate behavior at the native scan is recorded:
+/// projection composes into the scan, while filters remain a DataFusion
+/// `FilterExec` above `NativeScan` until row-group predicate pushdown lands.
+#[tokio::test]
+#[ignore = "manual plan capture; run explicitly with --ignored"]
+async fn capture_coverage_daily_aggregate_plan() {
+    let root = tempfile::tempdir().unwrap();
+    let id = |name: &str| Id::new(name).unwrap();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("day", DataType::Date32, true),
+        Field::new("author", DataType::Utf8, true),
+        Field::new("headline", DataType::Utf8, true),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from_iter_values(0..5)),
+            Arc::new(Date32Array::from_iter((0..5).map(|n| Some(19_000 + n)))),
+            Arc::new(arrow::array::StringArray::from_iter_values(
+                (0..5).map(|n| format!("author-{}", n % 3)),
+            )),
+            Arc::new(arrow::array::StringArray::from_iter_values(
+                (0..5).map(|n| format!("headline-{n}")),
+            )),
+        ],
+    )
+    .unwrap();
+    let input = root.path().join("input.parquet");
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&input).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), Limits::default())
+        .await
+        .unwrap();
+    let source = engine
+        .run(&RunSpec {
+            dataset: id("events"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: input.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&input).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+    let transform = AggregateTransform {
+        input: source.version_ref(),
+        grouping: AggregationDefinition {
+            keys: vec!["day".into()],
+            aggregates: vec![
+                AggregateField {
+                    name: "rows".into(),
+                    function: AggregateFunction::CountRows,
+                },
+                AggregateField {
+                    name: "distinct_authors".into(),
+                    function: AggregateFunction::CountDistinct {
+                        field: "author".into(),
+                    },
+                },
+            ],
+        },
+    };
+    let budget = &engine.inner.lifecycle.budget;
+    let context = engine.context();
+    let releases = BTreeMap::from([(id("events"), &source)]);
+    aggregation::register_input(&context, &transform, &releases, budget)
+        .await
+        .unwrap();
+    // A day-range predicate records how filters interact with the native scan.
+    let frame = context
+        .sql(
+            "SELECT day, COUNT(*) AS rows, COUNT(DISTINCT author) AS distinct_authors \
+             FROM aggregate_input WHERE day >= DATE '2022-01-01' GROUP BY day",
+        )
+        .await
+        .unwrap();
+    let plan = frame.create_physical_plan().await.unwrap();
+    println!(
+        "PHYSICAL_PLAN\n{}",
+        datafusion::physical_plan::displayable(plan.as_ref())
+            .indent(true)
+            .to_string()
+    );
+}
