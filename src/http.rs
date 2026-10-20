@@ -2,6 +2,7 @@
 //!
 //! This is a local host interface. Public authentication and hosted deployment are
 //! deliberately absent until the remote provider and disclosure gates are qualified.
+// Rust guideline compliant 2026-02-21
 
 use crate::{
     Engine, Error,

@@ -26,6 +26,8 @@ mod admission;
 mod authority;
 mod backfill;
 pub(crate) mod locations;
+#[cfg(all(test, feature = "test-util"))]
+mod profile_tests;
 #[cfg(all(test, feature = "remote"))]
 mod remote_startup_tests;
 #[doc(inline)]

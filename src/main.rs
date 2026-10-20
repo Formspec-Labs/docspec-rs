@@ -1,4 +1,5 @@
 //! Command-line startup for a local execution host with explicit storage configuration.
+// Rust guideline compliant 2026-02-21
 
 use clap::{Parser, Subcommand};
 use docspec::{
