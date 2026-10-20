@@ -3,6 +3,7 @@
 //! This ends an operation's permission to acknowledge work or select a result.
 //! Already-started I/O can finish under its existing protection. Abandonment is
 //! neither worker quiescence nor permission to delete a phase or attempt.
+// Rust guideline compliant 2026-02-21
 
 use super::*;
 use crate::catalog::View;
@@ -231,6 +232,147 @@ impl Engine {
         }
         Ok(())
     }
+
+    /// Compacts superseded lifecycle revisions and transient records behind the active release.
+    ///
+    /// Coalesces historical lifecycle appends into one native baseline snapshot while
+    /// preserving selected releases, retained results, active reader grants, exports,
+    /// restore points, retirement receipts, and unfinished operations.
+    ///
+    /// # Errors
+    /// Refuses remote-only engines without local authority, corrupt metadata, stale
+    /// catalog views, or exhausted metadata capacity.
+    pub async fn compact_lifecycle(
+        &self,
+        dataset: &Id,
+    ) -> Result<crate::catalog::LifecycleCompactionResult> {
+        let memory = self.request_memory(dataset)?;
+        let dataset = dataset.clone();
+        self.admit_work(memory, move |engine| async move {
+            engine.compact_lifecycle_admitted(&dataset).await
+        })
+        .await
+    }
+
+    async fn compact_lifecycle_admitted(
+        &self,
+        dataset: &Id,
+    ) -> Result<crate::catalog::LifecycleCompactionResult> {
+        self.require_local()?;
+        let lock = self.lock(dataset).await;
+        let _guard = lock.lock().await;
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(dataset).await?;
+        let rows = lifecycle.rows_for_compaction(&view).await?;
+        let remove_keys = collect_obsolete_lifecycle_keys(&rows)?;
+        drop(rows);
+        let (_, result) = lifecycle.compact_baseline(&view, &remove_keys).await?;
+        Ok(result)
+    }
+}
+
+fn collect_obsolete_lifecycle_keys(
+    rows: &crate::catalog::SnapshotRows,
+) -> Result<BTreeSet<String>> {
+    let authority: Authority = rows
+        .get_record("authority")?
+        .map(|(_, _, value)| value)
+        .unwrap_or_default();
+    let selected_id = authority.release.as_ref().map(|release| release.id.clone());
+
+    let mut protected_keys = BTreeSet::new();
+    for (_, _, json) in rows.prefix("retirement/") {
+        let receipt: Retirement = serde_json::from_str(json)?;
+        for generation in receipt.plan.records {
+            protected_keys.insert(generation.key);
+        }
+    }
+
+    let mut completed_non_selected = BTreeSet::new();
+    let mut incomplete_ops = BTreeSet::new();
+    let mut incomplete_digests = BTreeSet::new();
+    for (key, _, json) in rows.prefix("operation/") {
+        let Some(op_str) = key.strip_prefix("operation/") else {
+            continue;
+        };
+        let Ok(op) = Id::new(op_str) else {
+            continue;
+        };
+        if rows.contains_key(&format!("result/{op}")) {
+            if Some(&op) != selected_id.as_ref() {
+                completed_non_selected.insert(op);
+            }
+        } else if !rows.contains_key(&format!("abandoned/{op}")) {
+            if let Ok(admitted) = serde_json::from_str::<Operation>(json) {
+                incomplete_digests.insert(admitted.request_digest);
+            }
+            incomplete_ops.insert(op);
+        }
+    }
+
+    let mut candidate_keys = BTreeSet::new();
+    for op in &completed_non_selected {
+        for exact in [
+            format!("readback/{op}"),
+            format!("request-dependencies/{op}"),
+            format!("groups/{op}"),
+            format!("prepared-changes/{op}"),
+        ] {
+            if rows.contains_key(&exact) {
+                candidate_keys.insert(exact);
+            }
+        }
+        for prefix in [
+            format!("source-attempt/{op}/"),
+            format!("candidate-attempt/{op}/"),
+            format!("release-attempt/{op}/"),
+        ] {
+            for (key, _, _) in rows.prefix(&prefix) {
+                candidate_keys.insert(key.to_owned());
+            }
+        }
+    }
+
+    for (key, _, json) in rows.prefix("phase/") {
+        if key.starts_with("phase/backfill/") {
+            continue;
+        }
+        if !incomplete_ops.is_empty()
+            && (key.starts_with("phase/input/")
+                || key.starts_with("phase/build/")
+                || key.starts_with("phase/checked/"))
+        {
+            continue;
+        }
+        if incomplete_digests
+            .iter()
+            .any(|digest| key.starts_with(&format!("phase/{digest}/")))
+        {
+            continue;
+        }
+        if let Ok(phase) = serde_json::from_str::<PhaseResult>(json)
+            && completed_non_selected.contains(&phase.operation)
+            && !incomplete_ops.contains(&phase.operation)
+        {
+            candidate_keys.insert(key.to_owned());
+        }
+    }
+
+    let mut remove_keys = BTreeSet::new();
+    for key in candidate_keys {
+        if protected_keys.contains(&key) {
+            continue;
+        }
+        let bkey = owners::binding_key(&key);
+        if protected_keys.contains(&bkey) {
+            continue;
+        }
+        if rows.contains_key(&bkey) {
+            remove_keys.insert(bkey);
+        }
+        remove_keys.insert(key);
+    }
+    Ok(remove_keys)
 }
 
 fn invalid_gap() -> Error {
@@ -624,5 +766,342 @@ mod tests {
             .check_abandoned_gap(&view, &dataset, u64::MAX, u64::MAX)
             .await
             .unwrap();
+    }
+
+    fn write_parquet_input(path: &Path, ids: &[i64]) -> InputSpec {
+        use arrow::{
+            array::{Int64Array, StringArray},
+            datatypes::{DataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
+        use parquet::arrow::ArrowWriter;
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("val", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from_iter_values(ids.iter().copied())),
+                Arc::new(StringArray::from_iter_values(
+                    ids.iter().map(|id| format!("row-{id}")),
+                )),
+            ],
+        )
+        .unwrap();
+        let file = std::fs::File::create(path).unwrap();
+        let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        InputSpec {
+            path: path.to_string_lossy().into_owned(),
+            digest: storage::digest(path).unwrap().0,
+        }
+    }
+
+    #[tokio::test]
+    async fn compact_lifecycle_preserves_releases_exports_grants_incomplete_work_and_verification()
+    {
+        let root = tempfile::TempDir::new().unwrap();
+        let limits = Limits {
+            compute_threads: 2,
+            memory_bytes: 256 << 20,
+            scratch_bytes: 64 << 20,
+            batch_rows: 128,
+            max_batch_bytes: 1 << 20,
+            max_metadata_bytes: 4 << 20,
+        };
+        let engine = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let dataset = Id::new("events").unwrap();
+        let init_input = write_parquet_input(&root.path().join("init.parquet"), &[1, 2, 3]);
+        let r0 = engine
+            .run(&RunSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("op-0").unwrap(),
+                base: None,
+                relationship: None,
+                input: init_input.path,
+                expected_digest: init_input.digest,
+                sql: "SELECT id, val FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let mut latest = r0.clone();
+        for step in 1..=6 {
+            let upd = write_parquet_input(
+                &root.path().join(format!("upd-{step}.parquet")),
+                &[step * 10],
+            );
+            latest = engine
+                .update(&UpdateSpec {
+                    dataset: dataset.clone(),
+                    operation: Id::new(&format!("op-{step}")).unwrap(),
+                    base: latest.id.clone(),
+                    definition: "v1".into(),
+                    keys: vec!["id".into()],
+                    replacements: upd,
+                    deletions: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Materialize an ExportPin against the dataset.
+        let export_pin = engine
+            .export(&crate::export::ExportSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("exp-1").unwrap(),
+                source: latest.version_ref(),
+                channel: Id::new("feed").unwrap(),
+                expected: None,
+                policy: crate::export::ExportPolicy {
+                    group: "source".into(),
+                    rows: crate::export::ExportRows::All,
+                    columns: vec!["id".into(), "val".into()],
+                },
+            })
+            .await
+            .unwrap();
+
+        // Create a downstream dataset that consumes `events`, recording an `owner-protection/*` grant.
+        let consumer = Id::new("downstream").unwrap();
+        let _consumer_release = engine
+            .refresh(&RefreshSpec {
+                dataset: consumer.clone(),
+                operation: Id::new("sub-0").unwrap(),
+                base: None,
+                definition: "v1".into(),
+                transform: RefreshTransform::Aggregate(AggregateTransform {
+                    input: latest.version_ref(),
+                    grouping: AggregationDefinition {
+                        keys: vec!["id".into()],
+                        aggregates: vec![AggregateField {
+                            name: "rows".into(),
+                            function: AggregateFunction::CountRows,
+                        }],
+                    },
+                }),
+                policy: RefreshPolicy::default(),
+                mode: RefreshMode::default(),
+                relationship: None,
+            })
+            .await
+            .unwrap();
+
+        // Admit an unfinished operation on `events` (interrupted before completion).
+        let pending_view = engine.inner.lifecycle.open(&dataset).await.unwrap();
+        let (pending_req, pending_op) = admission(&engine, &dataset, "op-pending", 8);
+        let _ = engine
+            .inner
+            .lifecycle
+            .commit(&pending_view, admission_records(&pending_req, &pending_op))
+            .await
+            .unwrap();
+
+        let stats = engine.compact_lifecycle(&dataset).await.unwrap();
+        assert!(stats.revisions_before > 10);
+        assert_eq!(stats.revisions_after, 1);
+        assert!(stats.files_before > 10);
+        assert_eq!(stats.files_after, 1);
+        assert!(stats.rows_after < stats.rows_before);
+        assert!(stats.metadata_bytes_after < stats.metadata_bytes_before);
+
+        drop(engine);
+        let reopened = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let cold_view = reopened.inner.lifecycle.open(&dataset).await.unwrap();
+        assert_eq!(cold_view.revision, stats.current_revision);
+        assert_eq!(cold_view.table.metadata().snapshots().count(), 1);
+        let cold_rows = reopened.inner.lifecycle.rows(&cold_view).await.unwrap();
+        assert_eq!(cold_rows.history_bytes(), stats.metadata_bytes_after);
+        assert!(cold_rows.contains_key("operation/op-pending"));
+        assert!(cold_rows.contains_key("export-result/exp-1"));
+        assert!(
+            cold_rows
+                .prefix("owner-protection/")
+                .next()
+                .is_some(),
+            "active reader grant must remain preserved"
+        );
+
+        // Verify release, succession proof, export pin, and retention inspection after cold reopen.
+        verify_release_at(&latest, limits.clone(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+        let proof = reopened
+            .prove_succession(&r0.version_ref(), &latest.version_ref())
+            .await
+            .unwrap();
+        assert_eq!(proof.selections_advanced, 6);
+        let objects = latest.dataset.groups["source"].objects.clone();
+        let inspection = reopened.inspect_retention(&objects).await.unwrap();
+        assert_eq!(inspection.unmatched_bytes, 0);
+        assert!(inspection.protected_bytes > 0);
+        assert_eq!(export_pin.id, Id::new("exp-1").unwrap());
+
+        // Abandon the unfinished operation so subsequent cutovers can proceed cleanly.
+        reopened
+            .abandon(&dataset, &Id::new("op-pending").unwrap(), "test cleanup")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
+        let root = tempfile::TempDir::new().unwrap();
+        let limits = Limits {
+            max_metadata_bytes: 3 << 20,
+            ..Limits::default()
+        };
+        let engine = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let dataset = Id::new("hourly").unwrap();
+        let init_input = write_parquet_input(&root.path().join("init.parquet"), &[0, 1]);
+        let first = engine
+            .run(&RunSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("op-0").unwrap(),
+                base: None,
+                relationship: None,
+                input: init_input.path.clone(),
+                expected_digest: init_input.digest.clone(),
+                sql: "SELECT id, val FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let mut latest = first.clone();
+        let mut view = engine.inner.lifecycle.open(&dataset).await.unwrap();
+        for step in 1..260_u64 {
+            let name = format!("op-{step}");
+            let (mut req, mut op) = admission(&engine, &dataset, &name, step + 1);
+            req.input = init_input.path.clone();
+            req.expected_digest = init_input.digest.clone();
+            req.sql = format!("SELECT id, val FROM input WHERE id >= -{step}");
+            op.request_digest = fingerprint(&OperationRequest::Build(req.clone())).unwrap();
+            let phase = PhaseResult {
+                operation: req.operation.clone(),
+                phase: "processing".into(),
+                request_digest: op.request_digest.clone(),
+                eligibility: 0,
+                outputs: latest.dataset.groups["source"].objects.clone(),
+                table: Some(latest.dataset.groups["source"].clone()),
+                rows: latest.dataset.groups["source"].rows,
+                changes: None,
+                coverage: None,
+                metrics: WriteMetrics::default(),
+                dependencies: Some(PhaseDependencies::default()),
+            };
+            let mut validation = phase.clone();
+            validation.phase = "validation".into();
+            let mut next_pin = latest.clone();
+            next_pin.id = req.operation.clone();
+            next_pin.dataset.version = req.operation.clone();
+            next_pin.dataset.boundary = op.boundary;
+            next_pin.dataset.request = OperationRequest::Build(req.clone());
+            let link = crate::model::Succession {
+                selected: next_pin.version_ref(),
+                predecessor: Some(latest.version_ref()),
+                boundary: op.boundary,
+                eligibility: op.eligibility,
+            };
+            let authority = Authority {
+                definition: "v1".into(),
+                eligibility: 0,
+                epoch: 0,
+                boundary: op.boundary,
+                selected: Some(next_pin.dataset.clone()),
+                release: Some(next_pin.clone()),
+                selection_revision: Some(view.revision + 2),
+            };
+            view = engine
+                .inner
+                .lifecycle
+                .commit(
+                    &view,
+                    vec![
+                        record(format!("operation/{name}"), &op).unwrap(),
+                        record(
+                            format!("request/{name}"),
+                            OperationRequest::Build(req.clone()),
+                        )
+                        .unwrap(),
+                        record(
+                            format!("phase/{}/0/processing", op.request_digest),
+                            &phase,
+                        )
+                        .unwrap(),
+                        record(
+                            format!("phase/checked/{}/validation", op.request_digest),
+                            &validation,
+                        )
+                        .unwrap(),
+                        record(
+                            format!("readback/{name}"),
+                            ValidatedReadback::stamp(&next_pin),
+                        )
+                        .unwrap(),
+                    ],
+                )
+                .await
+                .unwrap();
+            view = engine
+                .inner
+                .lifecycle
+                .commit(
+                    &view,
+                    vec![
+                        record(format!("result/{name}"), &next_pin).unwrap(),
+                        record(format!("succession/{name}"), &link).unwrap(),
+                        record("authority", &authority).unwrap(),
+                    ],
+                )
+                .await
+                .unwrap();
+            latest = next_pin;
+            if step % 26 == 0 {
+                let stats = engine.compact_lifecycle(&dataset).await.unwrap();
+                assert_eq!(stats.revisions_after, 1);
+                assert_eq!(stats.files_after, 1);
+                view = engine.inner.lifecycle.open(&dataset).await.unwrap();
+            }
+        }
+        // Complete operation 260 via a real DataFusion build over the compacted lifecycle.
+        let upd_input = write_parquet_input(&root.path().join("upd-260.parquet"), &[1, 2]);
+        latest = engine
+            .run(&RunSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("op-260").unwrap(),
+                base: None,
+                relationship: None,
+                input: upd_input.path,
+                expected_digest: upd_input.digest,
+                sql: "SELECT id, val FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let final_stats = engine.compact_lifecycle(&dataset).await.unwrap();
+        assert_eq!(final_stats.revisions_after, 1);
+        assert_eq!(final_stats.files_after, 1);
+        assert!(
+            final_stats.metadata_bytes_after < limits.max_metadata_bytes,
+            "metadata_bytes_after={} must fit within 512 KiB budget",
+            final_stats.metadata_bytes_after
+        );
+
+        drop(engine);
+        let reopened = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let cold_view = reopened.inner.lifecycle.open(&dataset).await.unwrap();
+        let cold_rows = reopened.inner.lifecycle.rows(&cold_view).await.unwrap();
+        assert_eq!(cold_rows.history_bytes(), final_stats.metadata_bytes_after);
+        verify_release_at(&latest, limits, VerificationLevel::Deep)
+            .await
+            .unwrap();
+        let proof = reopened
+            .prove_succession(&first.version_ref(), &latest.version_ref())
+            .await
+            .unwrap();
+        assert_eq!(proof.selections_advanced, 260);
     }
 }

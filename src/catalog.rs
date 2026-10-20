@@ -2,6 +2,7 @@
 //!
 //! The initial layout appends bounded key/value changes. It is deliberately small;
 //! metadata-growth qualification must precede adopting it for large histories.
+// Rust guideline compliant 2026-02-21
 
 use crate::{
     Error, Result,
@@ -17,13 +18,39 @@ use arrow::{
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use iceberg::{
-    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, table::Table,
+    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+    spec::{DataFile, MAIN_BRANCH},
+    table::Table,
+    transaction::{ApplyTransactionAction, Transaction},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex},
 };
+
+/// Summary of a durable lifecycle baseline compaction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LifecycleCompactionResult {
+    /// Active native lifecycle snapshots before compaction.
+    pub revisions_before: usize,
+    /// Active native lifecycle snapshots after compaction.
+    pub revisions_after: usize,
+    /// Physical lifecycle rows across active manifests before compaction.
+    pub rows_before: usize,
+    /// Deduplicated lifecycle rows retained in the compacted baseline.
+    pub rows_after: usize,
+    /// Replayed lifecycle history byte charge before compaction.
+    pub metadata_bytes_before: usize,
+    /// Replayed lifecycle history byte charge after compaction.
+    pub metadata_bytes_after: usize,
+    /// Active lifecycle Parquet data files before compaction.
+    pub files_before: usize,
+    /// Active lifecycle Parquet data files after compaction.
+    pub files_after: usize,
+    /// Native catalog sequence number of the compacted lifecycle view.
+    pub current_revision: i64,
+}
 
 /// Lifecycle authority injected with a maintained catalog and shared budget.
 #[derive(Clone, Debug)]
@@ -39,7 +66,9 @@ pub struct Lifecycle {
 #[derive(Debug)]
 pub(crate) struct SnapshotRows {
     metadata: String,
-    values: BTreeMap<String, (i64, String)>,
+    values: BTreeMap<String, (i64, Arc<str>)>,
+    cache_bytes: usize,
+    history_rows: usize,
     history_bytes: usize,
     reserved_future_bytes: usize,
     _reservation: tokio::sync::OwnedSemaphorePermit,
@@ -68,7 +97,7 @@ impl SnapshotRows {
         self.values
             .range(prefix.to_owned()..)
             .take_while(move |(key, _)| key.starts_with(prefix))
-            .map(|(key, (revision, value))| (key.as_str(), *revision, value.as_str()))
+            .map(|(key, (revision, value))| (key.as_str(), *revision, value.as_ref()))
     }
 
     /// Checks a retained key without decoding a potentially large result or reason.
@@ -228,6 +257,19 @@ impl Lifecycle {
 
     /// Retains one immutable state and its byte reservation across cache replacement.
     pub(crate) async fn rows(&self, view: &View) -> Result<Arc<SnapshotRows>> {
+        self.rows_inner(view, true).await
+    }
+
+    /// Loads current records for baseline compaction, bounding memory by deduplicated live state.
+    pub(crate) async fn rows_for_compaction(&self, view: &View) -> Result<Arc<SnapshotRows>> {
+        self.rows_inner(view, false).await
+    }
+
+    async fn rows_inner(
+        &self,
+        view: &View,
+        enforce_history_budget: bool,
+    ) -> Result<Arc<SnapshotRows>> {
         let metadata = view.table.metadata_location_result()?.to_owned();
         if let Some(hit) = self
             .cache
@@ -240,11 +282,14 @@ impl Lifecycle {
             return Ok(hit);
         }
         let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
-        let mut current = BTreeMap::<String, (i64, String)>::new();
+        let mut current = BTreeMap::<String, (i64, Arc<str>)>::new();
+        let mut cache_bytes = 0_usize;
         if view.table.metadata().current_snapshot().is_none() {
             let entry = Arc::new(SnapshotRows {
                 metadata,
                 values: current,
+                cache_bytes,
+                history_rows: 0,
                 history_bytes: 0,
                 reserved_future_bytes: 0,
                 _reservation: reservation,
@@ -255,6 +300,7 @@ impl Lifecycle {
         let batches = storage::read_batches(&view.table, &self.budget).await?;
         futures::pin_mut!(batches);
         let mut bytes = 0_usize;
+        let mut history_rows = 0_usize;
         while let Some(batch) = batches.try_next().await? {
             let keys = strings(&batch, 0)?;
             let values = strings(&batch, 2)?;
@@ -264,17 +310,26 @@ impl Lifecycle {
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid revision column"))?;
             for i in 0..batch.num_rows() {
-                bytes = bytes.saturating_add(history_row_bytes(keys.value(i), values.value(i)));
-                check_history_size(bytes, self.budget.limits.max_metadata_bytes)?;
+                let key = keys.value(i);
+                let value = values.value(i);
+                let row_bytes = history_row_bytes(key, value);
+                history_rows = history_rows.saturating_add(1);
+                bytes = bytes.saturating_add(row_bytes);
+                if enforce_history_budget {
+                    check_history_size(bytes, self.budget.limits.max_metadata_bytes)?;
+                }
                 let revision = revisions.value(i);
                 if current
-                    .get(keys.value(i))
+                    .get(key)
                     .is_none_or(|(old, _)| *old < revision)
                 {
-                    current.insert(
-                        keys.value(i).to_owned(),
-                        (revision, values.value(i).to_owned()),
-                    );
+                    if let Some((_, old_value)) =
+                        current.insert(key.to_owned(), (revision, Arc::from(value)))
+                    {
+                        cache_bytes = cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+                    }
+                    cache_bytes = cache_bytes.saturating_add(row_bytes);
+                    check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
                 }
             }
         }
@@ -291,20 +346,32 @@ impl Lifecycle {
                 let reserved = removal_reservation(&current, key, *revision, value)?;
                 total.checked_add(reserved).ok_or_else(reservation_overflow)
             })?;
-        check_history_reservation(
+        let within_history_budget = check_history_reservation(
             bytes,
             reserved_future_bytes,
             self.budget.limits.max_metadata_bytes,
-        )?;
-        check_cache_size(&current, self.budget.limits.max_metadata_bytes)?;
+        )
+        .is_ok();
+        if enforce_history_budget && !within_history_budget {
+            check_history_reservation(
+                bytes,
+                reserved_future_bytes,
+                self.budget.limits.max_metadata_bytes,
+            )?;
+        }
+        check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
         let entry = Arc::new(SnapshotRows {
             metadata,
             values: current,
+            cache_bytes,
+            history_rows,
             history_bytes: bytes,
             reserved_future_bytes,
             _reservation: reservation,
         });
-        *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+        if within_history_budget {
+            *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+        }
         Ok(entry)
     }
 
@@ -323,7 +390,7 @@ impl Lifecycle {
                 "a lifecycle commit must change state",
             ));
         }
-        let unique: std::collections::BTreeSet<_> = changes.iter().map(|(key, _)| key).collect();
+        let unique: BTreeSet<_> = changes.iter().map(|(key, _)| key).collect();
         if unique.len() != changes.len() {
             return Err(Error::refusal(
                 "duplicate_key",
@@ -367,6 +434,7 @@ impl Lifecycle {
         // only after the guarded native commit succeeds; failed commits cannot leak it.
         let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
         let previous = self.rows(view).await?;
+        let history_rows = previous.history_rows.saturating_add(changes.len());
         let history_bytes = changes
             .iter()
             .zip(&values)
@@ -376,6 +444,7 @@ impl Lifecycle {
         // Warm and cold paths apply the same bound before acknowledging a commit.
         // Obsolete appended versions still count until compaction removes them.
         let mut next_values = previous.values.clone();
+        let mut cache_bytes = previous.cache_bytes;
         for ((key, _), value) in changes.iter().zip(values) {
             if let Some(id) = key.strip_prefix("removal-intent/") {
                 validate_removal_id(id)?;
@@ -386,7 +455,13 @@ impl Lifecycle {
                     ));
                 }
             }
-            next_values.insert(key.clone(), (revision, value));
+            let row_bytes = history_row_bytes(key, &value);
+            if let Some((_, old_value)) =
+                next_values.insert(key.clone(), (revision, Arc::from(value)))
+            {
+                cache_bytes = cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+            }
+            cache_bytes = cache_bytes.saturating_add(row_bytes);
         }
         let mut reserved_future_bytes = previous.reserved_future_bytes;
         for (key, _) in &changes {
@@ -417,7 +492,7 @@ impl Lifecycle {
             reserved_future_bytes,
             self.budget.limits.max_metadata_bytes,
         )?;
-        check_cache_size(&next_values, self.budget.limits.max_metadata_bytes)?;
+        check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
         let files = storage::write_catalog_batches(
             &view.table,
             futures::stream::iter(vec![Ok(batch)]),
@@ -438,6 +513,8 @@ impl Lifecycle {
         let entry = Arc::new(SnapshotRows {
             metadata: table.metadata_location_result()?.to_owned(),
             values: next_values,
+            cache_bytes,
+            history_rows,
             history_bytes,
             reserved_future_bytes,
             _reservation: reservation,
@@ -449,6 +526,243 @@ impl Lifecycle {
             logical_identifier: view.logical_identifier.clone(),
         })
     }
+
+    /// Rewrites the lifecycle table to one baseline snapshot of live, unpruned records.
+    ///
+    /// # Errors
+    /// Refuses stale views, empty compacted baselines, invalid removal reservations,
+    /// oversized live state, or catalog commit failures.
+    pub(crate) async fn compact_baseline(
+        &self,
+        view: &View,
+        remove_keys: &BTreeSet<String>,
+    ) -> Result<(View, LifecycleCompactionResult)> {
+        let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
+        guard.load_table(view.table.identifier()).await?;
+        if view.table.metadata().current_snapshot().is_none() {
+            return Ok((
+                view.clone(),
+                LifecycleCompactionResult {
+                    revisions_before: 0,
+                    revisions_after: 0,
+                    rows_before: 0,
+                    rows_after: 0,
+                    metadata_bytes_before: 0,
+                    metadata_bytes_after: 0,
+                    files_before: 0,
+                    files_after: 0,
+                    current_revision: view.revision,
+                },
+            ));
+        }
+        let _ = view
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| Error::refusal("revision_exhausted", "revision overflow"))?;
+        let revisions_before = view.table.metadata().snapshots().count();
+        let files_before = snapshot_data_file_count(&view.table);
+        let previous = self.rows_for_compaction(view).await?;
+        let rows_before = previous.history_rows;
+        let metadata_bytes_before = previous.history_bytes;
+        let mut next_values = BTreeMap::<String, (i64, Arc<str>)>::new();
+        let mut cache_bytes = 0_usize;
+        for (key, (rev, value)) in &previous.values {
+            if remove_keys.contains(key) {
+                continue;
+            }
+            cache_bytes = cache_bytes.saturating_add(history_row_bytes(key, value));
+            next_values.insert(key.clone(), (*rev, value.clone()));
+        }
+        drop(previous);
+        if next_values.is_empty() {
+            return Err(Error::refusal(
+                "empty_baseline",
+                "lifecycle baseline compaction must retain at least one record",
+            ));
+        }
+        for (key, _) in next_values
+            .range("removal-intent/".to_owned()..)
+            .take_while(|(key, _)| key.starts_with("removal-intent/"))
+        {
+            check_removal_state_exists(&next_values, key)?;
+        }
+        let reserved_future_bytes = next_values
+            .range("removal-state/".to_owned()..)
+            .take_while(|(key, _)| key.starts_with("removal-state/"))
+            .try_fold(0_usize, |total, (key, (revision, value))| {
+                let reserved = removal_reservation(&next_values, key, *revision, value)?;
+                total.checked_add(reserved).ok_or_else(reservation_overflow)
+            })?;
+        let history_rows = next_values.len();
+        let history_bytes = cache_bytes;
+        check_history_reservation(
+            history_bytes,
+            reserved_future_bytes,
+            self.budget.limits.max_metadata_bytes,
+        )?;
+        check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
+        let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
+        let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
+            view.table.metadata().current_schema(),
+        )?);
+        let batches = build_baseline_batches(
+            &schema,
+            &next_values,
+            self.budget.limits.batch_rows,
+            self.budget.limits.max_batch_bytes,
+        )?;
+        let files = storage::write_catalog_batches(
+            &view.table,
+            futures::stream::iter(batches),
+            &self.budget,
+        )
+        .await?;
+        let files_after = files.len();
+        let table = replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await?;
+        #[cfg(test)]
+        if self
+            .lose_commit_response
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Error::refusal(
+                "lost_commit_response",
+                "test interruption after native commit and before cache publication",
+            ));
+        }
+        let revisions_after = table.metadata().snapshots().count();
+        let current_revision = table.metadata().last_sequence_number();
+        let entry = Arc::new(SnapshotRows {
+            metadata: table.metadata_location_result()?.to_owned(),
+            values: next_values,
+            cache_bytes,
+            history_rows,
+            history_bytes,
+            reserved_future_bytes,
+            _reservation: reservation,
+        });
+        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+        Ok((
+            View {
+                revision: current_revision,
+                table,
+                logical_identifier: view.logical_identifier.clone(),
+            },
+            LifecycleCompactionResult {
+                revisions_before,
+                revisions_after,
+                rows_before,
+                rows_after: history_rows,
+                metadata_bytes_before,
+                metadata_bytes_after: history_bytes,
+                files_before,
+                files_after,
+                current_revision,
+            },
+        ))
+    }
+}
+
+fn snapshot_data_file_count(table: &Table) -> usize {
+    let Some(snapshot) = table.metadata().current_snapshot() else {
+        return 0;
+    };
+    snapshot
+        .summary()
+        .additional_properties
+        .get("total-data-files")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or_else(|| table.metadata().snapshots().count())
+}
+
+fn build_baseline_batches(
+    schema: &Arc<Schema>,
+    values: &BTreeMap<String, (i64, Arc<str>)>,
+    batch_rows: usize,
+    max_batch_bytes: usize,
+) -> Result<Vec<Result<RecordBatch>>> {
+    let max_rows = batch_rows.max(1);
+    let mut batches = Vec::new();
+    let mut keys = Vec::new();
+    let mut revs = Vec::new();
+    let mut vals = Vec::new();
+    let mut current_bytes = 256_usize;
+    for (key, (rev, value)) in values {
+        let row_bytes = key.len().saturating_add(value.len()).saturating_add(64);
+        if !keys.is_empty()
+            && (keys.len() >= max_rows
+                || current_bytes.saturating_add(row_bytes) > max_batch_bytes)
+        {
+            batches.push(Ok(RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(StringArray::from(std::mem::take(&mut keys))),
+                    Arc::new(Int64Array::from(std::mem::take(&mut revs))),
+                    Arc::new(StringArray::from(std::mem::take(&mut vals))),
+                ],
+            )?));
+            current_bytes = 256;
+        }
+        keys.push(key.as_str());
+        revs.push(*rev);
+        vals.push(value.as_ref());
+        current_bytes = current_bytes.saturating_add(row_bytes);
+    }
+    if !keys.is_empty() {
+        batches.push(Ok(RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(keys)),
+                Arc::new(Int64Array::from(revs)),
+                Arc::new(StringArray::from(vals)),
+            ],
+        )?));
+    }
+    Ok(batches)
+}
+
+async fn replace_baseline_snapshot(
+    table: &Table,
+    catalog: &dyn Catalog,
+    files: Vec<DataFile>,
+) -> Result<Table> {
+    let old_snapshot_ids: Vec<i64> = table
+        .metadata()
+        .snapshots()
+        .map(|snapshot| snapshot.snapshot_id())
+        .collect();
+    let detached_metadata = table
+        .metadata()
+        .clone()
+        .into_builder(table.metadata_location().map(str::to_owned))
+        .remove_ref(MAIN_BRANCH)
+        .set_properties(HashMap::from([("gc.enabled".into(), "true".into())]))?
+        .build()
+        .map_err(|err| Error::refusal("corrupt_metadata", err.to_string()))?
+        .metadata;
+    let mut builder = Table::builder()
+        .file_io(table.file_io().clone())
+        .metadata(detached_metadata)
+        .identifier(table.identifier().clone())
+        .runtime(iceberg::Runtime::try_current()?);
+    if let Some(location) = table.metadata_location() {
+        builder = builder.metadata_location(location);
+    }
+    let detached = builder.build()?;
+    let guard = CompactingCatalog {
+        inner: catalog,
+        expected: table.clone(),
+        detached: detached.clone(),
+    };
+    let tx = Transaction::new(&detached);
+    let tx = tx.fast_append().add_data_files(files).apply(tx)?;
+    let tx = if old_snapshot_ids.is_empty() {
+        tx
+    } else {
+        tx.expire_snapshots()
+            .expire_snapshot_ids(old_snapshot_ids)
+            .apply(tx)?
+    };
+    Ok(tx.commit(&guard).await?)
 }
 
 /// Returns the lifecycle history charge for one serialized row.
@@ -457,7 +771,7 @@ pub(crate) fn history_row_bytes(key: &str, value: &str) -> usize {
     key.len().saturating_add(value.len()).saturating_add(128)
 }
 
-fn check_removal_state_exists(rows: &BTreeMap<String, (i64, String)>, key: &str) -> Result<()> {
+fn check_removal_state_exists(rows: &BTreeMap<String, (i64, Arc<str>)>, key: &str) -> Result<()> {
     let id = key
         .strip_prefix("removal-intent/")
         .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid removal intent key"))?;
@@ -478,7 +792,7 @@ fn validate_removal_id(id: &str) -> Result<()> {
 }
 
 fn removal_reservation(
-    rows: &BTreeMap<String, (i64, String)>,
+    rows: &BTreeMap<String, (i64, Arc<str>)>,
     key: &str,
     revision: i64,
     json: &str,
@@ -543,12 +857,7 @@ fn cache_poisoned<T>(_: std::sync::PoisonError<T>) -> Error {
     )
 }
 
-fn check_cache_size(rows: &BTreeMap<String, (i64, String)>, limit: usize) -> Result<()> {
-    let bytes = rows.iter().fold(0usize, |size, (key, (_, value))| {
-        size.saturating_add(key.capacity())
-            .saturating_add(value.capacity())
-            .saturating_add(128)
-    });
+fn check_cache_bytes(bytes: usize, limit: usize) -> Result<()> {
     if bytes > limit {
         return Err(Error::refusal(
             "metadata_capacity",
@@ -612,6 +921,93 @@ impl Catalog for GuardedCatalog<'_> {
         self.load_table(commit.identifier()).await?;
         // FastAppend supplies the expected branch snapshot requirement. The maintained
         // SQL catalog also compare-and-swaps metadata_location after applying it.
+        self.inner
+            .update_table(commit)
+            .await
+            .map_err(|e| e.with_retryable(false))
+    }
+    async fn list_namespaces(
+        &self,
+        p: Option<&NamespaceIdent>,
+    ) -> iceberg::Result<Vec<NamespaceIdent>> {
+        self.inner.list_namespaces(p).await
+    }
+    async fn create_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<Namespace> {
+        self.inner.create_namespace(n, p).await
+    }
+    async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        self.inner.get_namespace(n).await
+    }
+    async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
+        self.inner.namespace_exists(n).await
+    }
+    async fn update_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<()> {
+        self.inner.update_namespace(n, p).await
+    }
+    async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
+        self.inner.drop_namespace(n).await
+    }
+    async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        self.inner.list_tables(n).await
+    }
+    async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
+        self.inner.create_table(n, c).await
+    }
+    async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.drop_table(t).await
+    }
+    async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.purge_table(t).await
+    }
+    async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
+        self.inner.table_exists(t).await
+    }
+    async fn rename_table(&self, s: &TableIdent, d: &TableIdent) -> iceberg::Result<()> {
+        self.inner.rename_table(s, d).await
+    }
+    async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
+        self.inner.register_table(t, m).await
+    }
+}
+
+/// Commits a detached single-manifest baseline while enforcing exact authority CAS.
+#[derive(Debug)]
+struct CompactingCatalog<'a> {
+    inner: &'a dyn Catalog,
+    expected: Table,
+    detached: Table,
+}
+
+#[async_trait]
+impl Catalog for CompactingCatalog<'_> {
+    async fn load_table(&self, ident: &TableIdent) -> iceberg::Result<Table> {
+        let current = self.inner.load_table(ident).await?;
+        if ident != self.expected.identifier()
+            || current.metadata_location() != self.expected.metadata_location()
+            || current.metadata() != self.expected.metadata()
+        {
+            return Err(iceberg::Error::new(
+                iceberg::ErrorKind::DataInvalid,
+                "stale_authority: reload and re-evaluate application guards",
+            ));
+        }
+        Ok(self.detached.clone())
+    }
+    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
+        let _ = self.load_table(commit.identifier()).await?;
+        // The detached transaction base generates a `RefSnapshotIdMatch { snapshot_id: None }`
+        // requirement so `FastAppend` writes a standalone manifest list without inheriting prior
+        // manifests. `load_table` above verified the exact expected metadata location and
+        // `SqlCatalog::update_table` performs an atomic compare-and-swap on `metadata_location`.
+        let _ = commit.take_requirements();
         self.inner
             .update_table(commit)
             .await
@@ -952,7 +1348,10 @@ mod tests {
         let mut rows = BTreeMap::new();
         rows.insert(
             "removal-intent/a".into(),
-            (1, serde_json::to_string(&removal_intent("a")).unwrap()),
+            (
+                1,
+                Arc::<str>::from(serde_json::to_string(&removal_intent("a")).unwrap()),
+            ),
         );
         let valid = serde_json::to_string(&removal_state(1, 1000)).unwrap();
         assert_eq!(removal_reservation(&rows, key, 2, &valid).unwrap(), 1000);
@@ -969,12 +1368,15 @@ mod tests {
         }
         assert!(removal_reservation(&rows, key, 0, &valid).is_err());
         assert!(removal_reservation(&rows, "removal-state/../a", 2, &valid).is_err());
-        rows.insert("removal-intent/a".into(), (2, "{}".into()));
+        rows.insert("removal-intent/a".into(), (2, Arc::from("{}")));
         assert!(removal_reservation(&rows, key, 2, &valid).is_err());
         rows.clear();
         rows.insert(
             "removal-intent/a".into(),
-            (1, serde_json::to_string(&removal_intent("a")).unwrap()),
+            (
+                1,
+                Arc::<str>::from(serde_json::to_string(&removal_intent("a")).unwrap()),
+            ),
         );
         assert!(check_removal_state_exists(&rows, "removal-intent/a").is_err());
         rows.clear();
@@ -985,6 +1387,106 @@ mod tests {
                 .code(),
             "metadata_capacity"
         );
+    }
+
+    #[tokio::test]
+    async fn warm_commit_shares_unchanged_values_and_tracks_cache_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(1 << 20));
+        let owner = Id::new("owner").unwrap();
+        let view = lifecycle.open(&owner).await.unwrap();
+        let view1 = lifecycle
+            .commit(
+                &view,
+                vec![
+                    record("untouched", "a".repeat(512)).unwrap(),
+                    record("mutable", "v1").unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+        let rows1 = lifecycle.rows(&view1).await.unwrap();
+        let view2 = lifecycle
+            .commit(&view1, vec![record("mutable", "v2-longer").unwrap()])
+            .await
+            .unwrap();
+        let rows2 = lifecycle.rows(&view2).await.unwrap();
+        // Unchanged values share the same Arc<str> allocation across commits.
+        assert!(Arc::ptr_eq(
+            &rows1.values["untouched"].1,
+            &rows2.values["untouched"].1
+        ));
+        let reopened = Lifecycle::new(catalog, test_budget(1 << 20));
+        let cold = reopened.rows(&view2).await.unwrap();
+        assert_eq!(rows2.cache_bytes, cold.cache_bytes);
+        assert_eq!(rows2.history_rows, cold.history_rows);
+        assert_eq!(rows2.history_bytes, cold.history_bytes);
+    }
+
+    #[tokio::test]
+    async fn compact_baseline_coalesces_superseded_revisions_and_reclaims_replay_budget() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let payload = "x".repeat(2048);
+        let single_row_charge =
+            history_row_bytes("authority", &serde_json::to_string(&payload).unwrap());
+        let obsolete_charge =
+            history_row_bytes("obsolete/1", &serde_json::to_string(&payload).unwrap());
+        // Budget allows 8 historical commits, after which a 9th ordinary commit is refused.
+        let budget = test_budget(7 * single_row_charge + obsolete_charge + 64);
+        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
+        let owner = Id::new("owner").unwrap();
+        let mut view = lifecycle.open(&owner).await.unwrap();
+        view = lifecycle
+            .commit(&view, vec![record("obsolete/1", &payload).unwrap()])
+            .await
+            .unwrap();
+        for _ in 0..7 {
+            view = lifecycle
+                .commit(&view, vec![record("authority", &payload).unwrap()])
+                .await
+                .unwrap();
+        }
+        let authority_rev = view.revision;
+        let refused = lifecycle
+            .commit(&view, vec![record("authority", &payload).unwrap()])
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), "metadata_capacity");
+
+        let remove = BTreeSet::from(["obsolete/1".to_owned()]);
+        let (compacted_view, stats) = lifecycle.compact_baseline(&view, &remove).await.unwrap();
+        assert_eq!(stats.revisions_before, 8);
+        assert_eq!(stats.revisions_after, 1);
+        assert_eq!(stats.rows_before, 8);
+        assert_eq!(stats.rows_after, 1);
+        assert_eq!(stats.files_before, 8);
+        assert_eq!(stats.files_after, 1);
+        assert_eq!(
+            stats.metadata_bytes_before,
+            7 * single_row_charge + obsolete_charge
+        );
+        assert_eq!(stats.metadata_bytes_after, single_row_charge);
+        assert_eq!(stats.current_revision, authority_rev + 1);
+
+        // Cold reopen sees 1 snapshot, 1 file, 1 row, and preserves the exact key revision.
+        let reopened = Lifecycle::new(catalog, budget);
+        let cold_view = reopened.open(&owner).await.unwrap();
+        assert_eq!(cold_view.revision, compacted_view.revision);
+        assert_eq!(cold_view.table.metadata().snapshots().count(), 1);
+        let cold_rows = reopened.rows(&cold_view).await.unwrap();
+        assert_eq!(cold_rows.history_bytes, single_row_charge);
+        assert_eq!(cold_rows.history_rows, 1);
+        assert_eq!(cold_rows.revision("authority"), Some(authority_rev));
+        assert!(!cold_rows.contains_key("obsolete/1"));
+
+        // Subsequent commits succeed again within the reclaimed budget.
+        let next = reopened
+            .commit(&cold_view, vec![record("authority", &payload).unwrap()])
+            .await
+            .unwrap();
+        assert_eq!(next.revision, compacted_view.revision + 1);
     }
 
     #[tokio::test]

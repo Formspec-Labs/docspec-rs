@@ -252,3 +252,242 @@ async fn capture_coverage_daily_aggregate_plan() {
             .to_string()
     );
 }
+
+/// Profiles lifecycle replay bytes, snapshot/file counts, cold-open latency, and warm-commit
+/// scaling across 0, 8, 32, and 250 operations before and after `compact_lifecycle`.
+///
+/// Run with:
+/// `cargo test --locked --all-features --lib engine::profile_tests::profile_lifecycle_compaction_and_warm_commit_scaling -- --ignored --nocapture`
+#[tokio::test]
+#[ignore = "manual profiling harness; run explicitly with --ignored"]
+async fn profile_lifecycle_compaction_and_warm_commit_scaling() {
+    let root = tempfile::tempdir().unwrap();
+    let id = |name: &str| Id::new(name).unwrap();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("val", DataType::Int64, false),
+    ]));
+    let path = root.path().join("init.parquet");
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from_iter_values(0..16)),
+            Arc::new(Int64Array::from_iter_values(0..16)),
+        ],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let input_path = path.to_string_lossy().into_owned();
+    let input_digest = storage::digest(&path).unwrap().0;
+
+    let engine = Engine::open(root.path().join("workspace"), Limits::default())
+        .await
+        .unwrap();
+
+    let checkpoints = [0_usize, 8, 32, 250];
+    let mut samples = Vec::new();
+
+    for &target in &checkpoints {
+        let dataset = id(&format!("events-{target}"));
+        let first = engine
+            .run(&RunSpec {
+                dataset: dataset.clone(),
+                operation: id("op-0"),
+                base: None,
+                relationship: None,
+                input: input_path.clone(),
+                expected_digest: input_digest.clone(),
+                sql: "SELECT id, val FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let mut latest = first.clone();
+        let mut view = engine.inner.lifecycle.open(&dataset).await.unwrap();
+
+        for step in 1..=target {
+            let name = format!("op-{step}");
+            let req = RunSpec {
+                dataset: dataset.clone(),
+                operation: id(&name),
+                base: Some(latest.id.clone()),
+                relationship: None,
+                input: input_path.clone(),
+                expected_digest: input_digest.clone(),
+                sql: format!("SELECT id, val FROM input WHERE id >= -{step}"),
+                definition: "v1".into(),
+            };
+            let request_digest = fingerprint(&OperationRequest::Build(req.clone())).unwrap();
+            let op = Operation {
+                request_digest: request_digest.clone(),
+                eligibility: 0,
+                epoch: 0,
+                boundary: (step + 1) as u64,
+                admission_fence: None,
+                result_format: FORMAT,
+                definition: "v1".into(),
+                base: Some(latest.id.clone()),
+                base_manifest: Some(latest.manifest.clone()),
+                schema_key: None,
+                require_current_boundary: false,
+            };
+            let phase = PhaseResult {
+                operation: req.operation.clone(),
+                phase: "processing".into(),
+                request_digest: request_digest.clone(),
+                eligibility: 0,
+                outputs: latest.dataset.groups["source"].objects.clone(),
+                table: Some(latest.dataset.groups["source"].clone()),
+                rows: latest.dataset.groups["source"].rows,
+                changes: None,
+                coverage: None,
+                metrics: WriteMetrics::default(),
+                dependencies: Some(PhaseDependencies::default()),
+            };
+            let mut validation = phase.clone();
+            validation.phase = "validation".into();
+            let mut next_pin = latest.clone();
+            next_pin.id = req.operation.clone();
+            next_pin.dataset.version = req.operation.clone();
+            next_pin.dataset.boundary = op.boundary;
+            next_pin.dataset.request = OperationRequest::Build(req.clone());
+            let link = crate::model::Succession {
+                selected: next_pin.version_ref(),
+                predecessor: Some(latest.version_ref()),
+                boundary: op.boundary,
+                eligibility: op.eligibility,
+            };
+            let authority = Authority {
+                definition: "v1".into(),
+                eligibility: 0,
+                epoch: 0,
+                boundary: op.boundary,
+                selected: Some(next_pin.dataset.clone()),
+                release: Some(next_pin.clone()),
+                selection_revision: Some(view.revision + 2),
+            };
+            view = engine
+                .inner
+                .lifecycle
+                .commit(
+                    &view,
+                    vec![
+                        crate::catalog::record(format!("operation/{name}"), &op).unwrap(),
+                        crate::catalog::record(
+                            format!("request/{name}"),
+                            OperationRequest::Build(req.clone()),
+                        )
+                        .unwrap(),
+                        crate::catalog::record(
+                            format!("phase/{request_digest}/0/processing"),
+                            &phase,
+                        )
+                        .unwrap(),
+                        crate::catalog::record(
+                            format!("phase/checked/{request_digest}/validation"),
+                            &validation,
+                        )
+                        .unwrap(),
+                        crate::catalog::record(
+                            format!("readback/{name}"),
+                            ValidatedReadback::stamp(&next_pin),
+                        )
+                        .unwrap(),
+                    ],
+                )
+                .await
+                .unwrap();
+            view = engine
+                .inner
+                .lifecycle
+                .commit(
+                    &view,
+                    vec![
+                        crate::catalog::record(format!("result/{name}"), &next_pin).unwrap(),
+                        crate::catalog::record(format!("succession/{name}"), &link).unwrap(),
+                        crate::catalog::record("authority", &authority).unwrap(),
+                    ],
+                )
+                .await
+                .unwrap();
+            latest = next_pin;
+        }
+
+        // Measure warm-commit latency at this operation count.
+        let t_warm = std::time::Instant::now();
+        let warm_view = engine
+            .inner
+            .lifecycle
+            .commit(
+                &view,
+                vec![crate::catalog::record(
+                    "invalidation/0",
+                    format!("probe-{target}"),
+                )
+                .unwrap()],
+            )
+            .await
+            .unwrap();
+        let warm_commit_us = t_warm.elapsed().as_micros() as u64;
+
+        // Measure cold-open replay latency before compaction.
+        let cold_before = crate::catalog::Lifecycle::new(
+            engine.inner.lifecycle.catalog.clone(),
+            engine.inner.lifecycle.budget.clone(),
+        );
+        let t0 = std::time::Instant::now();
+        let rows_before = cold_before.rows_for_compaction(&warm_view).await.unwrap();
+        let cold_open_before_us = t0.elapsed().as_micros() as u64;
+        let authority_bytes = rows_before.record_bytes("authority");
+        let history_bytes_before = rows_before.history_bytes();
+        drop(rows_before);
+
+        // Compact lifecycle baseline.
+        let t_compact = std::time::Instant::now();
+        let stats = engine.compact_lifecycle(&dataset).await.unwrap();
+        let compact_us = t_compact.elapsed().as_micros() as u64;
+
+        let view_after = engine.inner.lifecycle.open(&dataset).await.unwrap();
+        let cold_after = crate::catalog::Lifecycle::new(
+            engine.inner.lifecycle.catalog.clone(),
+            engine.inner.lifecycle.budget.clone(),
+        );
+        let t1 = std::time::Instant::now();
+        let rows_after = cold_after.rows(&view_after).await.unwrap();
+        let cold_open_after_us = t1.elapsed().as_micros() as u64;
+
+        let proof = engine
+            .prove_succession(&first.version_ref(), &latest.version_ref())
+            .await
+            .unwrap();
+        assert_eq!(proof.selections_advanced, target);
+
+        samples.push(serde_json::json!({
+            "operations": target,
+            "revisions_before": stats.revisions_before,
+            "revisions_after": stats.revisions_after,
+            "files_before": stats.files_before,
+            "files_after": stats.files_after,
+            "rows_before": stats.rows_before,
+            "rows_after": stats.rows_after,
+            "metadata_bytes_before": stats.metadata_bytes_before,
+            "metadata_bytes_after": stats.metadata_bytes_after,
+            "authority_json_bytes": authority_bytes,
+            "uncompacted_probe_history_bytes": history_bytes_before,
+            "cold_open_before_us": cold_open_before_us,
+            "cold_open_after_us": cold_open_after_us,
+            "warm_commit_us": warm_commit_us,
+            "compact_lifecycle_us": compact_us,
+            "current_revision": stats.current_revision,
+            "post_compact_history_bytes": rows_after.history_bytes(),
+        }));
+    }
+
+    println!(
+        "LIFECYCLE_COMPACTION_PROFILE_JSON {}",
+        serde_json::to_string_pretty(&samples).unwrap()
+    );
+}
