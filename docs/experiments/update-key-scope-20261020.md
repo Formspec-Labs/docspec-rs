@@ -156,3 +156,56 @@ filtered scan planner may help, but occurrence readers must retain original
 whole-file descriptors to preserve physical row locators. Large IN predicates
 also stop pruning conservatively beyond the dependency's 200-value threshold.
 No pruning or selection-policy change belongs in this metadata correction.
+
+## Completed scale qualification
+
+Application experiment commit `e4c2c25e` records 129 successful generated cases,
+258 old/new source checks and one retained seed-capacity refusal. The measured
+interval was 963.39 seconds with 3,350,363,091 retained fixture bytes, inside the
+combined original 1,800-second / 4 GiB allowance. The independent reviewer approved
+production checkpoint `62e8401` and the frozen experiment before measurements.
+
+Three matched repetitions show a workload crossover. At 10,000 rows candidate
+Update append/correction/deletion medians are 0.647 / 0.918 / 0.907 seconds versus
+Build 0.590 / 0.567 / 0.627. At 100,000 rows candidate Update is 0.783 / 1.027 /
+0.947 versus Build 2.309 / 2.113 / 2.095. Native writes at 100k are about 8 KiB
+for append and 1.48 MB for correction/deletion versus Build's 11.9 MB. Both old
+and new Update benefit from payload reuse; removing an unused registration is
+not the origin of that advantage and is not a universal speedup.
+
+Material Updates register five tables before versus four after, consistently
+retaining one fewer file. Empty Updates register six versus five while retaining
+the same source pin; application-guarded no-op makes no native calls. These
+acknowledgment/selection semantics remain distinct and unchanged.
+
+The history screen keeps each case's exact source pin unchanged through 0/8/32
+empty Updates. Candidate correction grows from 0.834 to 1.841 to 4.326 seconds;
+tracked observer time in the last interval is 0.404 seconds. Lifecycle cost stays
+C-minus pending separate `ct-wmtx` profiling. The payload-reuse grade is B-plus
+before/after; persistent ownership improves C to B; discovery stays C; local
+recovery remains A-minus. These grades describe this path and local evidence,
+not the whole repository or remote readiness.
+
+The 256 KiB file-layout seed correctly refused a 311,112-byte decoded batch.
+A preregistered 1 MiB seed produced the same sixteen files as 4 MiB because the
+writer's row-group/metadata guard also rolls files. Four-file versus sixteen-file
+layout observations also change row-group geometry, so they do not isolate file
+count alone. The 1 MiB correction outlier (candidate 2.489 seconds) is retained.
+Reported `files_scanned` counts plans; an empty key relation may optimize away
+physical reads. Physical backend totals are not exposed by this experiment.
+
+An external build superseded the primary executable before an initial protocol
+smoke. Explicit pre-screen verification caught the changed hash; an exact
+`817831...` baseline was recovered from isolated `debug/deps`, frozen as
+`output/update-efficiency-20261020/bin/docspec-baseline-817831`, and reverified.
+The primary executable and external dirty source were left untouched. Only the
+corrected pinned smoke and qualifying scale runs use the exact baseline; the old
+smoke is protocol-only. Initial Python editable imports differ only in unused
+paths for this experiment: exact schemas and all invoked adapter AST bodies
+match. Path/hash/mtime evidence is retained; later runs set explicit PYTHONPATH.
+
+Full results, provenance corrections, sampled-stop limits and resource/correctness
+evidence are retained under congressional-tech
+`output/docspec-reuse-20261020/updates/`, with the readable report at
+`docs/experiments/docspec-reuse/native-update-scale.md`. Application adoption and
+the prepare/selection composition question remain open in `ct-eipa`.
