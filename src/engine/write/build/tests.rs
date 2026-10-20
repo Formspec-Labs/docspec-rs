@@ -36,7 +36,7 @@ async fn initial_candidate_recovers_committed_snapshot_without_producer_or_secon
             compute_threads: 1,
             memory_bytes: 64 << 20,
             scratch_bytes: 16 << 20,
-            max_batch_bytes: 64 << 10,
+            max_batch_bytes: 256 << 10,
             max_metadata_bytes: 1 << 20,
             ..Limits::default()
         },
@@ -201,7 +201,7 @@ async fn stale_candidate_append_refuses_before_native_manifest_effects() {
             compute_threads: 1,
             memory_bytes: 64 << 20,
             scratch_bytes: 16 << 20,
-            max_batch_bytes: 64 << 10,
+            max_batch_bytes: 256 << 10,
             max_metadata_bytes: 1 << 20,
             ..Limits::default()
         },

@@ -1,4 +1,5 @@
 //! Shared byte admission and process-independent workspace ownership.
+// Rust guideline compliant 2026-02-21
 
 use crate::{Error, Result};
 use datafusion::{
@@ -33,11 +34,14 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         // Initial reference profile from the accepted implementation proposal.
+        // `batch_rows` sizes reader batches (kept in the 8,192-65,536 range
+        // recommended for streaming Parquet reads) and writer row groups, so
+        // it also bounds per-row-group writer buffering inside `max_batch_bytes`.
         Self {
             compute_threads: 12,
             memory_bytes: 24 << 30,
             scratch_bytes: 32 << 30,
-            batch_rows: 4096,
+            batch_rows: 8192,
             max_batch_bytes: 64 << 20,
             max_metadata_bytes: 32 << 20,
         }

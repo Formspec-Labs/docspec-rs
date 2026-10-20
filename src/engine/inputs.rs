@@ -1,4 +1,5 @@
 //! Exact producer generations and metadata-only related-input qualification.
+// Rust guideline compliant 2026-02-21
 
 use super::*;
 use std::collections::BTreeSet;
@@ -15,7 +16,7 @@ impl Engine {
     /// Refuses retired seals, conflicting reseals, missing history, stale eligibility, mismatched
     /// producer declarations, invalid identities, or exhausted metadata capacity.
     pub async fn seal_generation(&self, seal: &GenerationSeal) -> Result<GenerationSeal> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(seal)?;
         let seal = seal.clone();
         self.admit_work(memory, move |engine| async move {

@@ -1,4 +1,5 @@
 //! Native snapshot streams connected to maintained DataFusion execution.
+// Rust guideline compliant 2026-02-21
 
 mod sequence;
 #[doc(inline)]
@@ -270,7 +271,18 @@ impl DataSource for NativePartition {
     }
 
     fn fmt_as(&self, _kind: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NativeScan: rows={:?}", self.rows)
+        let projected = self
+            .schema
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>();
+        write!(
+            f,
+            "NativeScan: rows={:?}, projection=[{}]",
+            self.rows,
+            projected.join(", ")
+        )
     }
 
     fn output_partitioning(&self) -> Partitioning {

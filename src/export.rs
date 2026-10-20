@@ -14,7 +14,7 @@ pub enum ExportRows {
 
 /// Authorizes named columns from every active row of one retained field group.
 ///
-/// The first local format supports flat primitive columns. It does not copy
+/// The local format supports primitive, list, and struct columns. It does not copy
 /// source metadata, evidence files, hidden occurrence columns, or deleted files.
 /// Row filtering and combined field groups require a separately qualified policy.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

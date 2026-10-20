@@ -18,8 +18,9 @@ use parquet::{
     basic::{Compression, ZstdLevel},
     file::{
         metadata::FooterTail,
-        properties::{EnabledStatistics, WriterProperties},
+        properties::{EnabledStatistics, WriterProperties, WriterVersion},
     },
+    schema::types::ColumnPath,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -576,11 +577,32 @@ impl Engine {
                 let _memory = memory;
                 std::fs::create_dir_all(&directory)?;
                 let output = HashingFile::create(&initial_path)?;
-                let properties = WriterProperties::builder()
-                    .set_compression(Compression::ZSTD(ZstdLevel::default()))
-                    .set_statistics_enabled(EnabledStatistics::None)
-                    .set_offset_index_disabled(true)
-                    .build();
+                // Exports are consumed by foreign engines, so truncated
+                // chunk-level statistics give their readers row-group pruning
+                // while the admitted footer stays bounded. Offset indexes and
+                // per-page statistics stay disabled: page indexes would
+                // multiply the footer past the declared metadata allowance on
+                // wide or long exports. Level 3 matches the native writer.
+                // Row groups bound by encoded bytes rather than row count: the
+                // writer already flushes at `max_batch_bytes` of buffered
+                // memory, so the 128 MiB encoded cap only guards abnormal row
+                // widths. `parquet` 58 deprecates `set_max_row_group_size`;
+                // `set_max_row_group_bytes` flushes on estimated encoded size.
+                let mut properties = WriterProperties::builder()
+                    .set_writer_version(WriterVersion::PARQUET_2_0)
+                    .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
+                    .set_max_row_group_row_count(None)
+                    .set_max_row_group_bytes(Some(128 * 1024 * 1024))
+                    .set_data_page_size_limit(1024 * 1024)
+                    .set_dictionary_enabled(true)
+                    .set_statistics_enabled(EnabledStatistics::Chunk)
+                    .set_statistics_truncate_length(Some(64))
+                    .set_offset_index_disabled(true);
+                for column in ["resolution", "aboutness", "processor", "provider"] {
+                    properties =
+                        properties.set_column_dictionary_enabled(ColumnPath::from(column), true);
+                }
+                let properties = properties.build();
                 let native = if cfg!(unix) {
                     output.file.sync_all()?;
                     File::open(initial_path.parent().ok_or_else(invalid_export)?)?.sync_all()?;
@@ -612,7 +634,7 @@ impl Engine {
         work_started("export-materialization");
         let mut rows = 0_u64;
         // A conservative per-column allowance bounds accumulated footer records.
-        // Statistics/indexes are disabled; names and type descriptions add their
+        // Truncated chunk statistics, names, and type descriptions add their
         // actual size. This is admission accounting, not a measured RSS claim.
         let footer_group_bytes = fields.iter().fold(1024_usize, |size, field| {
             size.saturating_add(1024 + field.name.len() + field.data_type.len())
@@ -854,6 +876,8 @@ fn authorized_schema(
                 | DataType::Time64(_)
                 | DataType::Timestamp(_, _)
                 | DataType::Decimal128(_, _)
+                | DataType::List(_)
+                | DataType::Struct(_)
         ) {
             return Err(Error::refusal(
                 "unsupported_export_type",
@@ -1027,7 +1051,8 @@ mod tests {
     use crate::export::ExportRows;
 
     #[test]
-    fn schema_authorization_removes_metadata_and_refuses_internal_or_nested_columns() {
+    fn schema_authorization_removes_metadata_allows_nested_and_refuses_internal_or_unsupported_columns()
+     {
         let field = |name, datatype, id: &str| {
             Field::new(name, datatype, true).with_metadata(HashMap::from([
                 (PARQUET_FIELD_ID_META_KEY.into(), id.into()),
@@ -1043,9 +1068,19 @@ mod tests {
                 field("secret", DataType::Utf8, "9"),
                 field("__docspec_left_file", DataType::Utf8, "11"),
                 field(
-                    "nested",
+                    "nested_list",
                     DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
                     "13",
+                ),
+                field(
+                    "nested_struct",
+                    DataType::Struct(vec![Field::new("start", DataType::Int32, true)].into()),
+                    "15",
+                ),
+                field(
+                    "unsupported",
+                    DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+                    "17",
                 ),
             ],
             HashMap::from([("source_path".into(), "private-evidence-path".into())]),
@@ -1053,26 +1088,148 @@ mod tests {
         let mut policy = ExportPolicy {
             group: "source".into(),
             rows: ExportRows::All,
-            columns: vec!["public".into()],
+            columns: vec![
+                "public".into(),
+                "nested_list".into(),
+                "nested_struct".into(),
+            ],
         };
         let (indices, selected, fields) = authorized_schema(&source, &policy).unwrap();
-        assert_eq!(indices, [0]);
+        assert_eq!(indices, [0, 3, 4]);
         assert!(selected.metadata().is_empty());
         assert_eq!(
             selected.field(0).metadata(),
             &HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), "7".into())])
         );
         assert_eq!(fields[0].id, 7);
+        assert_eq!(fields[1].id, 13);
+        assert_eq!(fields[2].id, 15);
         policy.columns = vec!["__docspec_left_file".into()];
         assert_eq!(
             authorized_schema(&source, &policy).unwrap_err().code(),
             "export_disclosure"
         );
-        policy.columns = vec!["nested".into()];
+        policy.columns = vec!["unsupported".into()];
         assert_eq!(
             authorized_schema(&source, &policy).unwrap_err().code(),
             "unsupported_export_type"
         );
+    }
+
+    #[tokio::test]
+    async fn nested_list_and_struct_columns_export_and_read_back() {
+        use arrow::array::{
+            Array, Int32Array, Int32Builder, ListBuilder, StringBuilder, StructArray, StructBuilder,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("nested.parquet");
+        let span_fields: arrow::datatypes::Fields = vec![
+            Field::new("start", DataType::Int32, false),
+            Field::new("end", DataType::Int32, false),
+        ]
+        .into();
+        let mut aliases_builder = ListBuilder::new(StringBuilder::new());
+        aliases_builder.values().append_value("https://a.example");
+        aliases_builder.values().append_value("https://b.example");
+        aliases_builder.append(true);
+        aliases_builder.append(false);
+        let aliases = Arc::new(aliases_builder.finish());
+
+        let mut spans_builder = ListBuilder::new(StructBuilder::new(
+            span_fields.clone(),
+            vec![Box::new(Int32Builder::new()), Box::new(Int32Builder::new())],
+        ));
+        spans_builder
+            .values()
+            .field_builder::<Int32Builder>(0)
+            .unwrap()
+            .append_value(1);
+        spans_builder
+            .values()
+            .field_builder::<Int32Builder>(1)
+            .unwrap()
+            .append_value(4);
+        spans_builder.values().append(true);
+        spans_builder.append(true);
+        spans_builder.append(true);
+        let spans = Arc::new(spans_builder.finish());
+
+        let details = Arc::new(StructArray::new(
+            span_fields.clone(),
+            vec![
+                Arc::new(Int32Array::from(vec![0, 10])),
+                Arc::new(Int32Array::from(vec![5, 20])),
+            ],
+            None,
+        ));
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("url_aliases", aliases.data_type().clone(), true),
+            Field::new("spans", spans.data_type().clone(), true),
+            Field::new("span", DataType::Struct(span_fields), false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(arrow::array::Int64Array::from(vec![1, 2])),
+                aliases,
+                spans,
+                details,
+            ],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(&input).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let id = |name| Id::new(name).unwrap();
+        let engine = Engine::open(
+            root.path().join("workspace"),
+            Limits {
+                scratch_bytes: 16 << 20,
+                ..Limits::default()
+            },
+        )
+        .await
+        .unwrap();
+        let source = engine
+            .run(&RunSpec {
+                dataset: id("docs"),
+                operation: id("initial"),
+                base: None,
+                relationship: None,
+                input: input.to_string_lossy().into_owned(),
+                expected_digest: storage::digest(&input).unwrap().0,
+                sql: "SELECT * FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let spec = ExportSpec {
+            dataset: id("docs"),
+            operation: id("nested-export"),
+            source: source.version_ref(),
+            channel: id("download"),
+            expected: None,
+            policy: ExportPolicy {
+                group: "source".into(),
+                rows: ExportRows::All,
+                columns: vec![
+                    "id".into(),
+                    "url_aliases".into(),
+                    "spans".into(),
+                    "span".into(),
+                ],
+            },
+        };
+        let pin = engine.export(&spec).await.unwrap();
+        assert_eq!(pin.rows, 2);
+        assert_eq!(pin.fields.len(), 4);
+        let read = engine.read_export(&pin).await.unwrap();
+        let batches = datafusion::physical_plan::common::collect(read)
+            .await
+            .unwrap();
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
     }
     #[tokio::test]
     async fn retained_lookup_binds_requested_identity_and_output_is_protected() {

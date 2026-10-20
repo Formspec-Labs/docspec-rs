@@ -1,4 +1,5 @@
 //! Versioned identities and lifecycle records; no storage or execution dependencies.
+// Rust guideline compliant 2026-02-21
 
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -339,6 +340,7 @@ pub struct JoinTransform {
 pub enum AggregateFunction {
     CountRows,
     Count { field: String },
+    CountDistinct { field: String },
     Sum { field: String },
     Min { field: String },
     Max { field: String },

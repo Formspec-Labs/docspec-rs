@@ -31,7 +31,7 @@ async fn interrupted_release_reuses_exact_uri_and_completed_readback_without_sec
             compute_threads: 1,
             memory_bytes: 64 << 20,
             max_metadata_bytes: 1 << 20,
-            max_batch_bytes: 64 << 10,
+            max_batch_bytes: 256 << 10,
             scratch_bytes: 16 << 20,
             ..Limits::default()
         },
