@@ -341,6 +341,7 @@ pub enum AggregateFunction {
     CountRows,
     Count { field: String },
     CountDistinct { field: String },
+    CollectSet { field: String },
     Sum { field: String },
     Min { field: String },
     Max { field: String },

@@ -1400,3 +1400,963 @@ async fn material_null_matching_change_reuses_admission_but_recomputes_values_an
         before[&old_key]
     );
 }
+
+#[tokio::test]
+async fn collect_set_grouped_and_global_refresh_full_and_incrementally_with_refusals() {
+    use arrow::array::ListArray;
+    use docspec::{
+        engine::verify_applied_changes,
+        model::{
+            AggregateField, AggregateFunction as F, AggregateTransform, AggregationDefinition,
+        },
+    };
+    use std::collections::BTreeSet;
+
+    fn collect_set_spec(input: &ReleasePin, global: bool) -> RefreshSpec {
+        RefreshSpec {
+            dataset: id(if global {
+                "collect-global"
+            } else {
+                "collect-grouped"
+            }),
+            operation: id("initial"),
+            base: None,
+            definition: "collect-v1".into(),
+            policy: RefreshPolicy::Captured,
+            mode: RefreshMode::Full,
+            relationship: None,
+            transform: RefreshTransform::Aggregate(AggregateTransform {
+                input: input.version_ref(),
+                grouping: AggregationDefinition {
+                    keys: if global { vec![] } else { vec!["a".into()] },
+                    aggregates: vec![
+                        AggregateField {
+                            name: "rows".into(),
+                            function: F::CountRows,
+                        },
+                        AggregateField {
+                            name: "b_set".into(),
+                            function: F::CollectSet { field: "b".into() },
+                        },
+                        AggregateField {
+                            name: "text_set".into(),
+                            function: F::CollectSet {
+                                field: "text".into(),
+                            },
+                        },
+                    ],
+                },
+            }),
+        }
+    }
+
+    async fn check_collect_set(
+        engine: &Engine,
+        release: &ReleasePin,
+        input: &ReleasePin,
+        global: bool,
+    ) {
+        let mut expected: BTreeMap<Option<i64>, (i64, BTreeSet<i64>, BTreeSet<String>)> =
+            BTreeMap::new();
+        if global {
+            expected.insert(Some(0), (0, BTreeSet::new(), BTreeSet::new()));
+        }
+        for (_, row) in occurrences(input).await {
+            let key = if global { Some(0) } else { row.0 };
+            let entry = expected
+                .entry(key)
+                .or_insert_with(|| (0, BTreeSet::new(), BTreeSet::new()));
+            entry.0 += 1;
+            if let Some(b) = row.1 {
+                entry.1.insert(b);
+            }
+            if let Some(text) = row.2 {
+                entry.2.insert(text);
+            }
+        }
+        let expected_vec: BTreeMap<Option<i64>, (i64, Vec<i64>, Vec<String>)> = expected
+            .into_iter()
+            .map(|(k, (rows, b_set, text_set))| {
+                (
+                    k,
+                    (
+                        rows,
+                        b_set.into_iter().collect(),
+                        text_set.into_iter().collect(),
+                    ),
+                )
+            })
+            .collect();
+
+        let mut actual = BTreeMap::new();
+        let mut stream = engine.read_group(release, "source").await.unwrap();
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            let b_list = batch
+                .column_by_name("b_set")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .unwrap();
+            let text_list = batch
+                .column_by_name("text_set")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                assert!(!b_list.is_null(row));
+                assert!(!text_list.is_null(row));
+                let b_values = b_list.value(row);
+                let b_ints = b_values.as_any().downcast_ref::<Int64Array>().unwrap();
+                let b_vec: Vec<i64> = (0..b_ints.len())
+                    .map(|idx| {
+                        assert!(!b_ints.is_null(idx));
+                        b_ints.value(idx)
+                    })
+                    .collect();
+                let text_values = text_list.value(row);
+                let text_strs = text_values.as_any().downcast_ref::<StringArray>().unwrap();
+                let text_vec: Vec<String> = (0..text_strs.len())
+                    .map(|idx| {
+                        assert!(!text_strs.is_null(idx));
+                        text_strs.value(idx).to_owned()
+                    })
+                    .collect();
+                let key = number(&batch, if global { "__docspec_global" } else { "a" }, row);
+                assert!(
+                    actual
+                        .insert(key, (number(&batch, "rows", row).unwrap(), b_vec, text_vec))
+                        .is_none()
+                );
+            }
+        }
+        assert_eq!(actual, expected_vec);
+    }
+
+    let root = TempDir::new().unwrap();
+    let (engine, mut input, _) = fixture(root.path()).await;
+    let empty = source(&engine, root.path(), "empty-src", "initial", None, &[]).await;
+
+    for global in [false, true] {
+        let mut empty_spec = collect_set_spec(&empty, global);
+        empty_spec.dataset = id(if global {
+            "empty-collect-global"
+        } else {
+            "empty-collect-grouped"
+        });
+        let empty_release = engine.refresh(&empty_spec).await.unwrap();
+        verify_release(&empty_release, limits()).await.unwrap();
+        check_collect_set(&engine, &empty_release, &empty, global).await;
+
+        let spec = collect_set_spec(&input, global);
+        let wire = serde_json::to_vec(&spec).unwrap();
+        assert_eq!(serde_json::from_slice::<RefreshSpec>(&wire).unwrap(), spec);
+        let first = engine.refresh(&spec).await.unwrap();
+        verify_release(&first, limits()).await.unwrap();
+        check_collect_set(&engine, &first, &input, global).await;
+    }
+
+    let first_grouped = engine.latest(&id("collect-grouped")).await.unwrap();
+    let first_global = engine.latest(&id("collect-global")).await.unwrap();
+
+    input = incremental::update(
+        &engine,
+        root.path(),
+        &input,
+        "updated-1",
+        &[
+            (Some(1), Some(2), Some("alpha".into())),
+            (Some(1), Some(7), Some("zebra".into())),
+            (Some(4), None, None),
+        ],
+        &[(Some(9), Some(9), None)],
+    )
+    .await;
+
+    for (base, global, names) in [
+        (
+            &first_grouped,
+            false,
+            vec!["a", "rows", "b_set", "text_set"],
+        ),
+        (&first_global, true, vec!["rows", "b_set", "text_set"]),
+    ] {
+        let next_spec = aggregation::next(base, &input, "incremental-1");
+        let second = engine.refresh(&next_spec).await.unwrap();
+        verify_release(&second, limits()).await.unwrap();
+        let cert = engine
+            .change_certificate(&second.version_ref())
+            .await
+            .unwrap()
+            .unwrap();
+        verify_applied_changes(base, &second, &cert.changes, limits())
+            .await
+            .unwrap();
+        forward_changes::check_forward(&engine, base, &second, &names).await;
+        check_collect_set(&engine, &second, &input, global).await;
+    }
+
+    // Refusals: reserved names, key collisions, and nested/unqualified operand types.
+    for (agg_name, field_name) in [
+        ("__docspec_bad", "text"),
+        ("text_set", "__docspec_file"),
+        ("a", "text"),
+        ("text_set", "a"),
+        ("text_set", ""),
+    ] {
+        let mut bad = collect_set_spec(&input, false);
+        bad.dataset = id("bad-collect");
+        let RefreshTransform::Aggregate(agg) = &mut bad.transform else {
+            unreachable!()
+        };
+        agg.grouping.aggregates = vec![AggregateField {
+            name: agg_name.into(),
+            function: F::CollectSet {
+                field: field_name.into(),
+            },
+        }];
+        assert_eq!(
+            engine.refresh(&bad).await.unwrap_err().code(),
+            "invalid_refresh",
+            "expected invalid_refresh for ({agg_name}, {field_name})"
+        );
+    }
+
+    // Qualified scalar types (Boolean, Int32, Date32, Timestamp(Microsecond, UTC)) and Float64 refusal.
+    use arrow::{
+        array::{BooleanArray, Date32Array, Float64Array, Int32Array, TimestampMicrosecondArray},
+        datatypes::TimeUnit,
+    };
+    let typed_path = root.path().join("typed-collect.parquet");
+    let typed_schema = Arc::new(Schema::new(vec![
+        Field::new("grp", DataType::Int64, true),
+        Field::new("flag", DataType::Boolean, true),
+        Field::new("num32", DataType::Int32, true),
+        Field::new("day", DataType::Date32, true),
+        Field::new(
+            "ts",
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+            true,
+        ),
+        Field::new("flt", DataType::Float64, true),
+    ]));
+    let typed_batch = RecordBatch::try_new(
+        typed_schema.clone(),
+        vec![
+            Arc::new(Int64Array::from(vec![Some(1), Some(1), Some(2)])),
+            Arc::new(BooleanArray::from(vec![Some(true), Some(false), None])),
+            Arc::new(Int32Array::from(vec![Some(30), Some(10), None])),
+            Arc::new(Date32Array::from(vec![Some(19_500), Some(19_000), None])),
+            Arc::new(
+                TimestampMicrosecondArray::from(vec![Some(2_000_000), Some(1_000_000), None])
+                    .with_timezone("UTC"),
+            ),
+            Arc::new(Float64Array::from(vec![Some(1.5), Some(2.5), None])),
+        ],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(File::create(&typed_path).unwrap(), typed_schema, None).unwrap();
+    writer.write(&typed_batch).unwrap();
+    writer.close().unwrap();
+    let typed_src = engine
+        .run(&RunSpec {
+            dataset: id("typed-src"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: typed_path.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&typed_path).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+    let typed_spec = RefreshSpec {
+        dataset: id("typed-collect"),
+        operation: id("initial"),
+        base: None,
+        definition: "v1".into(),
+        policy: RefreshPolicy::Captured,
+        mode: RefreshMode::Full,
+        relationship: None,
+        transform: RefreshTransform::Aggregate(AggregateTransform {
+            input: typed_src.version_ref(),
+            grouping: AggregationDefinition {
+                keys: vec!["grp".into()],
+                aggregates: vec![
+                    AggregateField {
+                        name: "flags".into(),
+                        function: F::CollectSet {
+                            field: "flag".into(),
+                        },
+                    },
+                    AggregateField {
+                        name: "nums".into(),
+                        function: F::CollectSet {
+                            field: "num32".into(),
+                        },
+                    },
+                    AggregateField {
+                        name: "days".into(),
+                        function: F::CollectSet {
+                            field: "day".into(),
+                        },
+                    },
+                    AggregateField {
+                        name: "timestamps".into(),
+                        function: F::CollectSet { field: "ts".into() },
+                    },
+                ],
+            },
+        }),
+    };
+    let typed_release = engine.refresh(&typed_spec).await.unwrap();
+    verify_release(&typed_release, limits()).await.unwrap();
+
+    let mut bad_flt = typed_spec.clone();
+    bad_flt.dataset = id("bad-flt-collect");
+    let RefreshTransform::Aggregate(agg) = &mut bad_flt.transform else {
+        unreachable!()
+    };
+    agg.grouping.aggregates = vec![AggregateField {
+        name: "flts".into(),
+        function: F::CollectSet {
+            field: "flt".into(),
+        },
+    }];
+    assert_eq!(
+        engine.refresh(&bad_flt).await.unwrap_err().code(),
+        "aggregate_value_type"
+    );
+}
+
+#[tokio::test]
+async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementally() {
+    use arrow::{
+        array::{Int32Array, ListArray, StructArray},
+        buffer::{NullBuffer, OffsetBuffer},
+    };
+    use docspec::{
+        engine::verify_applied_changes,
+        model::{
+            AggregateField, AggregateFunction, AggregateTransform, AggregationDefinition,
+            InputSpec, UpdateSpec,
+        },
+    };
+
+    type Meta = Option<(Option<String>, i32)>;
+    type OccurrenceSpan = (Option<String>, i32, i32);
+    type Occurrences = Option<Vec<OccurrenceSpan>>;
+    type NestedRow = (Option<i64>, Option<i64>, Meta, Occurrences);
+
+    fn meta_fields() -> arrow::datatypes::Fields {
+        vec![
+            Arc::new(Field::new("source", DataType::Utf8, true)),
+            Arc::new(Field::new("priority", DataType::Int32, false)),
+        ]
+        .into()
+    }
+
+    fn span_fields() -> arrow::datatypes::Fields {
+        vec![
+            Arc::new(Field::new("field", DataType::Utf8, true)),
+            Arc::new(Field::new("start", DataType::Int32, false)),
+            Arc::new(Field::new("end", DataType::Int32, false)),
+        ]
+        .into()
+    }
+
+    fn write_nested_parquet(path: &Path, rows: &[NestedRow], keys_only: bool) -> InputSpec {
+        let mut fields = vec![
+            Field::new("a", DataType::Int64, true),
+            Field::new("b", DataType::Int64, true),
+        ];
+        let mut columns: Vec<arrow::array::ArrayRef> = vec![
+            Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.0))),
+            Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.1))),
+        ];
+        if !keys_only {
+            let m_fields = meta_fields();
+            let s_fields = span_fields();
+            let item_field = Arc::new(Field::new(
+                "item",
+                DataType::Struct(s_fields.clone()),
+                false,
+            ));
+            fields.push(Field::new("meta", DataType::Struct(m_fields.clone()), true));
+            fields.push(Field::new(
+                "occurrences",
+                DataType::List(item_field.clone()),
+                true,
+            ));
+
+            let meta_nulls =
+                NullBuffer::from(rows.iter().map(|r| r.2.is_some()).collect::<Vec<_>>());
+            let meta_sources = StringArray::from_iter(
+                rows.iter()
+                    .map(|r| r.2.as_ref().and_then(|m| m.0.as_deref())),
+            );
+            let meta_priorities =
+                Int32Array::from_iter_values(rows.iter().map(|r| r.2.as_ref().map_or(0, |m| m.1)));
+            let meta_array = StructArray::new(
+                m_fields,
+                vec![Arc::new(meta_sources), Arc::new(meta_priorities)],
+                Some(meta_nulls),
+            );
+
+            let mut offsets = Vec::with_capacity(rows.len() + 1);
+            offsets.push(0i32);
+            let mut list_valid = Vec::with_capacity(rows.len());
+            let mut span_field_vals: Vec<Option<&str>> = Vec::new();
+            let mut span_starts: Vec<i32> = Vec::new();
+            let mut span_ends: Vec<i32> = Vec::new();
+            for row in rows {
+                match &row.3 {
+                    Some(spans) => {
+                        list_valid.push(true);
+                        for (f, s, e) in spans {
+                            span_field_vals.push(f.as_deref());
+                            span_starts.push(*s);
+                            span_ends.push(*e);
+                        }
+                        offsets.push(span_starts.len() as i32);
+                    }
+                    None => {
+                        list_valid.push(false);
+                        offsets.push(span_starts.len() as i32);
+                    }
+                }
+            }
+            let span_struct = StructArray::new(
+                s_fields,
+                vec![
+                    Arc::new(StringArray::from(span_field_vals)),
+                    Arc::new(Int32Array::from(span_starts)),
+                    Arc::new(Int32Array::from(span_ends)),
+                ],
+                None,
+            );
+            let list_array = ListArray::new(
+                item_field,
+                OffsetBuffer::new(offsets.into()),
+                Arc::new(span_struct),
+                Some(NullBuffer::from(list_valid)),
+            );
+
+            columns.push(Arc::new(meta_array));
+            columns.push(Arc::new(list_array));
+        }
+        let schema = Arc::new(Schema::new(fields));
+        let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        InputSpec {
+            path: path.to_string_lossy().into_owned(),
+            digest: storage::digest(path).unwrap().0,
+        }
+    }
+
+    fn read_meta(batch: &RecordBatch, name: &str, row: usize) -> Meta {
+        let array = batch
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        if array.is_null(row) {
+            return None;
+        }
+        let sources = array
+            .column_by_name("source")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let priorities = array
+            .column_by_name("priority")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        Some((
+            (!sources.is_null(row)).then(|| sources.value(row).to_owned()),
+            priorities.value(row),
+        ))
+    }
+
+    fn read_occurrences_col(batch: &RecordBatch, name: &str, row: usize) -> Occurrences {
+        let array = batch
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+        if array.is_null(row) {
+            return None;
+        }
+        let values = array.value(row);
+        let structs = values.as_any().downcast_ref::<StructArray>().unwrap();
+        let fields = structs
+            .column_by_name("field")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let starts = structs
+            .column_by_name("start")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        let ends = structs
+            .column_by_name("end")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        Some(
+            (0..structs.len())
+                .map(|idx| {
+                    assert!(!structs.is_null(idx));
+                    (
+                        (!fields.is_null(idx)).then(|| fields.value(idx).to_owned()),
+                        starts.value(idx),
+                        ends.value(idx),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    async fn nested_source_occurrences(release: &ReleasePin) -> Vec<(Location, NestedRow)> {
+        let budget = Budget::new(limits()).unwrap();
+        let table = storage::open_pin(&release.dataset.groups["source"], &budget)
+            .await
+            .unwrap();
+        let mut stream = storage::read_occurrences(&table, &budget)
+            .await
+            .unwrap()
+            .boxed();
+        let mut out = Vec::new();
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            for row in 0..batch.num_rows() {
+                out.push((
+                    (
+                        text(&batch, storage::OCCURRENCE_FILE, row).unwrap(),
+                        number(&batch, storage::OCCURRENCE_ROW, row).unwrap(),
+                    ),
+                    (
+                        number(&batch, "a", row),
+                        number(&batch, "b", row),
+                        read_meta(&batch, "meta", row),
+                        read_occurrences_col(&batch, "occurrences", row),
+                    ),
+                ));
+            }
+        }
+        out
+    }
+
+    type NestedMatched = (
+        Option<Location>,
+        Option<Location>,
+        Meta,
+        Occurrences,
+        Meta,
+        Occurrences,
+    );
+
+    async fn nested_oracle(
+        left: &ReleasePin,
+        right: &ReleasePin,
+        join: &JoinDefinition,
+    ) -> Vec<NestedMatched> {
+        let left_rows = nested_source_occurrences(left).await;
+        let right_rows = nested_source_occurrences(right).await;
+        let mut matched_right = vec![false; right_rows.len()];
+        let mut expected = Vec::new();
+        for (left_at, l) in &left_rows {
+            let mut matched = false;
+            for (idx, (right_at, r)) in right_rows.iter().enumerate() {
+                let matches = l.0 == r.0
+                    && l.1 == r.1
+                    && (join.nulls == NullMatching::Equal || (l.0.is_some() && l.1.is_some()));
+                if matches {
+                    matched = true;
+                    matched_right[idx] = true;
+                    expected.push((
+                        Some(left_at.clone()),
+                        Some(right_at.clone()),
+                        l.2.clone(),
+                        l.3.clone(),
+                        r.2.clone(),
+                        r.3.clone(),
+                    ));
+                }
+            }
+            if !matched && join.kind != JoinKind::Inner {
+                expected.push((
+                    Some(left_at.clone()),
+                    None,
+                    l.2.clone(),
+                    l.3.clone(),
+                    None,
+                    None,
+                ));
+            }
+        }
+        if join.kind == JoinKind::Full {
+            for ((right_at, r), matched) in right_rows.into_iter().zip(matched_right) {
+                if !matched {
+                    expected.push((None, Some(right_at), None, None, r.2, r.3));
+                }
+            }
+        }
+        expected.sort();
+        expected
+    }
+
+    async fn check_nested_join(engine: &Engine, release: &ReleasePin, expected: &[NestedMatched]) {
+        let mut actual = Vec::new();
+        let mut stream = engine.read_group(release, "source").await.unwrap();
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            for row in 0..batch.num_rows() {
+                let location = |side: &str| {
+                    let file = text(&batch, &format!("__docspec_{side}_file"), row);
+                    let position = number(&batch, &format!("__docspec_{side}_row"), row);
+                    assert_eq!(file.is_some(), position.is_some());
+                    file.zip(position)
+                };
+                actual.push((
+                    location("left"),
+                    location("right"),
+                    read_meta(&batch, "left_meta", row),
+                    read_occurrences_col(&batch, "left_occurrences", row),
+                    read_meta(&batch, "right_meta", row),
+                    read_occurrences_col(&batch, "right_occurrences", row),
+                ));
+            }
+        }
+        actual.sort();
+        assert_eq!(actual, expected);
+
+        let mut combined = engine.read_combined(release).await.unwrap();
+        assert!(
+            combined
+                .schema()
+                .fields()
+                .iter()
+                .all(|field| !field.name().starts_with("__docspec_"))
+        );
+        let mut count = 0;
+        while let Some(batch) = combined.try_next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, expected.len());
+    }
+
+    let root = TempDir::new().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+
+    let left_initial_rows: Vec<NestedRow> = vec![
+        (
+            Some(1),
+            Some(2),
+            Some((Some("reg-a".into()), 10)),
+            Some(vec![(Some("title".into()), 0, 5), (None, 10, 20)]),
+        ),
+        (Some(1), Some(2), Some((None, 20)), Some(vec![])),
+        (
+            None,
+            Some(2),
+            None,
+            Some(vec![(Some("summary".into()), 1, 9)]),
+        ),
+        (
+            Some(9),
+            Some(9),
+            Some((Some("unmatched-left".into()), 99)),
+            None,
+        ),
+    ];
+    let right_initial_rows: Vec<NestedRow> = vec![
+        (
+            Some(1),
+            Some(2),
+            Some((Some("docket-1".into()), 1)),
+            Some(vec![(Some("docket_id".into()), 0, 12)]),
+        ),
+        (None, Some(2), Some((Some("docket-null".into()), 2)), None),
+        (
+            Some(8),
+            Some(8),
+            None,
+            Some(vec![
+                (Some("comment".into()), 3, 7),
+                (Some("body".into()), 8, 15),
+            ]),
+        ),
+    ];
+
+    let left_input = write_nested_parquet(
+        &root.path().join("left-initial.parquet"),
+        &left_initial_rows,
+        false,
+    );
+    let right_input = write_nested_parquet(
+        &root.path().join("right-initial.parquet"),
+        &right_initial_rows,
+        false,
+    );
+    let mut left = engine
+        .run(&RunSpec {
+            dataset: id("nested-left"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: left_input.path,
+            expected_digest: left_input.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+    let mut right = engine
+        .run(&RunSpec {
+            dataset: id("nested-right"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: right_input.path,
+            expected_digest: right_input.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+
+    // Nested columns must still be refused as join keys or CollectSet operands.
+    for bad_key in ["meta", "occurrences"] {
+        let bad_join = RefreshSpec {
+            dataset: id("bad-join-key"),
+            operation: id(&format!("bad-join-{bad_key}")),
+            base: None,
+            definition: "v1".into(),
+            policy: RefreshPolicy::Captured,
+            mode: RefreshMode::Full,
+            relationship: None,
+            transform: RefreshTransform::Join(JoinTransform {
+                left: left.version_ref(),
+                right: right.version_ref(),
+                join: JoinDefinition {
+                    keys: vec![JoinKey {
+                        left: bad_key.into(),
+                        right: bad_key.into(),
+                    }],
+                    kind: JoinKind::Inner,
+                    nulls: NullMatching::Equal,
+                    cardinality: JoinCardinality::ManyToMany,
+                    fields: vec![JoinField {
+                        side: JoinSide::Left,
+                        field: "a".into(),
+                        name: "left_a".into(),
+                    }],
+                },
+            }),
+        };
+        assert_eq!(
+            engine.refresh(&bad_join).await.unwrap_err().code(),
+            "join_key_type"
+        );
+
+        let bad_agg = RefreshSpec {
+            dataset: id("bad-collect-type"),
+            operation: id(&format!("bad-agg-{bad_key}")),
+            base: None,
+            definition: "v1".into(),
+            policy: RefreshPolicy::Captured,
+            mode: RefreshMode::Full,
+            relationship: None,
+            transform: RefreshTransform::Aggregate(AggregateTransform {
+                input: left.version_ref(),
+                grouping: AggregationDefinition {
+                    keys: vec!["a".into()],
+                    aggregates: vec![AggregateField {
+                        name: "collected".into(),
+                        function: AggregateFunction::CollectSet {
+                            field: bad_key.into(),
+                        },
+                    }],
+                },
+            }),
+        };
+        assert_eq!(
+            engine.refresh(&bad_agg).await.unwrap_err().code(),
+            "aggregate_value_type"
+        );
+    }
+
+    let make_join_spec =
+        |dataset: &str, left: &ReleasePin, right: &ReleasePin, kind: JoinKind| RefreshSpec {
+            dataset: id(dataset),
+            operation: id("initial"),
+            base: None,
+            definition: "v1".into(),
+            policy: RefreshPolicy::Captured,
+            mode: RefreshMode::Full,
+            relationship: None,
+            transform: RefreshTransform::Join(JoinTransform {
+                left: left.version_ref(),
+                right: right.version_ref(),
+                join: JoinDefinition {
+                    keys: ["a", "b"]
+                        .into_iter()
+                        .map(|name| JoinKey {
+                            left: name.into(),
+                            right: name.into(),
+                        })
+                        .collect(),
+                    kind,
+                    nulls: NullMatching::Equal,
+                    cardinality: if kind == JoinKind::Left {
+                        JoinCardinality::ManyToOne
+                    } else {
+                        JoinCardinality::ManyToMany
+                    },
+                    fields: vec![
+                        JoinField {
+                            side: JoinSide::Left,
+                            field: "meta".into(),
+                            name: "left_meta".into(),
+                        },
+                        JoinField {
+                            side: JoinSide::Left,
+                            field: "occurrences".into(),
+                            name: "left_occurrences".into(),
+                        },
+                        JoinField {
+                            side: JoinSide::Right,
+                            field: "meta".into(),
+                            name: "right_meta".into(),
+                        },
+                        JoinField {
+                            side: JoinSide::Right,
+                            field: "occurrences".into(),
+                            name: "right_occurrences".into(),
+                        },
+                    ],
+                },
+            }),
+        };
+
+    for kind in [JoinKind::Inner, JoinKind::Left, JoinKind::Full] {
+        let spec = make_join_spec(
+            &format!("nested-join-{kind:?}").to_lowercase(),
+            &left,
+            &right,
+            kind,
+        );
+        let release = engine.refresh(&spec).await.unwrap();
+        verify_release(&release, limits()).await.unwrap();
+        let expected = nested_oracle(&left, &right, &join(&spec).join).await;
+        check_nested_join(&engine, &release, &expected).await;
+    }
+
+    let base_full = engine.latest(&id("nested-join-full")).await.unwrap();
+
+    // Update both sides and run incremental refresh on the Full join with nested projections.
+    left = engine
+        .update(&UpdateSpec {
+            dataset: left.dataset.dataset.clone(),
+            operation: id("left-update-1"),
+            base: left.id.clone(),
+            definition: "v1".into(),
+            keys: vec!["a".into(), "b".into()],
+            replacements: write_nested_parquet(
+                &root.path().join("left-replace-1.parquet"),
+                &[
+                    (
+                        Some(1),
+                        Some(2),
+                        Some((Some("reg-a-updated".into()), 11)),
+                        Some(vec![(Some("heading".into()), 2, 14)]),
+                    ),
+                    (
+                        Some(5),
+                        Some(5),
+                        Some((Some("new-left".into()), 50)),
+                        Some(vec![
+                            (Some("clause".into()), 0, 4),
+                            (Some("body".into()), 5, 19),
+                        ]),
+                    ),
+                ],
+                false,
+            ),
+            deletions: Some(write_nested_parquet(
+                &root.path().join("left-delete-1.parquet"),
+                &[(Some(9), Some(9), None, None)],
+                true,
+            )),
+        })
+        .await
+        .unwrap();
+
+    right = engine
+        .update(&UpdateSpec {
+            dataset: right.dataset.dataset.clone(),
+            operation: id("right-update-1"),
+            base: right.id.clone(),
+            definition: "v1".into(),
+            keys: vec!["a".into(), "b".into()],
+            replacements: write_nested_parquet(
+                &root.path().join("right-replace-1.parquet"),
+                &[(
+                    Some(5),
+                    Some(5),
+                    Some((Some("docket-5".into()), 5)),
+                    Some(vec![(Some("docket_ref".into()), 1, 6)]),
+                )],
+                false,
+            ),
+            deletions: None,
+        })
+        .await
+        .unwrap();
+
+    let mut inc_spec = base_full.dataset.related.as_ref().unwrap().request.clone();
+    inc_spec.operation = id("incremental-1");
+    inc_spec.base = Some(base_full.id.clone());
+    inc_spec.mode = RefreshMode::Incremental;
+    join_mut(&mut inc_spec).left = left.version_ref();
+    join_mut(&mut inc_spec).right = right.version_ref();
+
+    let updated_full = engine.refresh(&inc_spec).await.unwrap();
+    verify_release(&updated_full, limits()).await.unwrap();
+    let cert = engine
+        .change_certificate(&updated_full.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    verify_applied_changes(&base_full, &updated_full, &cert.changes, limits())
+        .await
+        .unwrap();
+    forward_changes::check_forward(
+        &engine,
+        &base_full,
+        &updated_full,
+        &[
+            "left_meta",
+            "left_occurrences",
+            "right_meta",
+            "right_occurrences",
+        ],
+    )
+    .await;
+    let expected = nested_oracle(&left, &right, &join(&inc_spec).join).await;
+    check_nested_join(&engine, &updated_full, &expected).await;
+}
