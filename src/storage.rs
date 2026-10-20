@@ -30,9 +30,11 @@ pub use occurrences::read_occurrences_observed;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
 pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
+#[allow(unused_imports)]
 pub(crate) use tables::{
-    CandidateWriter, bounded_json, fresh_metadata, fresh_metadata_at, register_candidate,
-    replacement_metadata, replacement_metadata_at,
+    CandidateWriter, bounded_json, fresh_metadata, fresh_metadata_at, fresh_partitioned_metadata,
+    fresh_partitioned_metadata_at, register_candidate, replacement_metadata,
+    replacement_metadata_at, validate_partition_spec, validate_unbound_partition_spec,
 };
 
 use crate::{
@@ -323,6 +325,9 @@ where
                 "output file size must be positive",
             ));
         }
+        let partition_spec = table.metadata().default_partition_spec().clone();
+        tables::validate_partition_spec(table.metadata().current_schema(), &partition_spec)?;
+        let is_partitioned = !partition_spec.fields().is_empty();
         // Parquet and rolling-file buffers survive individual writes. Keep their
         // admission for the entire writer lifetime, including close and flush.
         let _reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(4))?;
@@ -376,14 +381,15 @@ where
             parquet,
             target_file_bytes,
             table.file_io().clone(),
-            DefaultLocationGenerator::new(table.metadata())?,
+            DataLocationGenerator(DefaultLocationGenerator::new(table.metadata())?),
             DefaultFileNameGenerator::new(
                 uuid::Uuid::new_v4().to_string(),
                 None,
                 DataFileFormat::Parquet,
             ),
         );
-        let new_writer = || UnpartitionedWriter::new(DataFileWriterBuilder::new(rolling.clone()));
+        let new_writer =
+            || ActiveWriter::new(DataFileWriterBuilder::new(rolling.clone()), is_partitioned);
         let mut writer = new_writer();
         let expected_arrow =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
@@ -414,41 +420,6 @@ where
                             "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
                             budget.limits.max_batch_bytes
                         ),
-                    ));
-                }
-                // A write can finish the preceding row group, create new groups, and
-                // roll a file. This conservative total also covers descriptors retained
-                // after the underlying file closes. It is admission, not an RSS estimate.
-                let units = batch
-                    .num_rows()
-                    .div_ceil(budget.limits.batch_rows)
-                    .saturating_add(1);
-                let incoming = units.saturating_mul(unit_metadata_bytes);
-                // Periodically finish the maintained writer, releasing its accumulated
-                // footers. Keep only bounded file descriptors, so this admission grows
-                // with output files instead of every row group in the entire population.
-                if metadata_bytes != 0
-                    && metadata_bytes.saturating_add(incoming) > budget.limits.max_metadata_bytes / 2
-                {
-                    let files = writer.close().await?;
-                    for file in &files {
-                        retained_bytes = retained_bytes
-                            .saturating_add(unit_metadata_bytes)
-                            .saturating_add(file.file_path().len().saturating_mul(4))
-                            .saturating_add(
-                                file.split_offsets()
-                                    .map_or(0, |offsets| offsets.len().saturating_mul(16)),
-                            );
-                    }
-                    completed.extend(files);
-                    writer = new_writer();
-                    metadata_bytes = 0;
-                }
-                metadata_bytes = metadata_bytes.saturating_add(incoming);
-                if retained_bytes.saturating_add(metadata_bytes) > budget.limits.max_metadata_bytes {
-                    return Err(Error::refusal(
-                        "metadata_capacity",
-                        "native writer file and row-group metadata exceed the declared allowance",
                     ));
                 }
                 // Literal expressions may be non-nullable even for optional native
@@ -488,7 +459,48 @@ where
                 let batch =
                     RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
                 let rows = batch.num_rows() as u64;
-                writer.write(batch).await?;
+                let slices = partition_batch(expected, &partition_spec, batch)?;
+                for (partition_key, sub_batch) in slices {
+                    // A write can finish the preceding row group, create new groups, and
+                    // roll a file. This conservative total also covers descriptors retained
+                    // after the underlying file closes. It is admission, not an RSS estimate.
+                    let units = sub_batch
+                        .num_rows()
+                        .div_ceil(budget.limits.batch_rows)
+                        .saturating_add(1);
+                    let incoming = units.saturating_mul(unit_metadata_bytes);
+                    // Periodically finish the maintained writer, releasing its accumulated
+                    // footers. Keep only bounded file descriptors, so this admission grows
+                    // with output files instead of every row group in the entire population.
+                    if metadata_bytes != 0
+                        && metadata_bytes.saturating_add(incoming)
+                            > budget.limits.max_metadata_bytes / 2
+                    {
+                        let files = writer.close().await?;
+                        for file in &files {
+                            retained_bytes = retained_bytes
+                                .saturating_add(unit_metadata_bytes)
+                                .saturating_add(file.file_path().len().saturating_mul(4))
+                                .saturating_add(
+                                    file.split_offsets()
+                                        .map_or(0, |offsets| offsets.len().saturating_mul(16)),
+                                );
+                        }
+                        completed.extend(files);
+                        writer = new_writer();
+                        metadata_bytes = 0;
+                    }
+                    metadata_bytes = metadata_bytes.saturating_add(incoming);
+                    if retained_bytes.saturating_add(metadata_bytes)
+                        > budget.limits.max_metadata_bytes
+                    {
+                        return Err(Error::refusal(
+                            "metadata_capacity",
+                            "native writer file and row-group metadata exceed the declared allowance",
+                        ));
+                    }
+                    writer.write(partition_key, sub_batch).await?;
+                }
                 if let Some(progress) = &mut progress {
                     progress.accepted(rows, bytes as u64);
                 }
@@ -501,6 +513,256 @@ where
         }
         result
     })
+}
+
+// Keep physical data file paths flat beneath `data/` while recording exact
+// partition tuples in each DataFile manifest descriptor. This preserves
+// canonical object locator and local removal path invariants for all values.
+#[derive(Clone, Debug)]
+struct DataLocationGenerator(DefaultLocationGenerator);
+
+impl iceberg::writer::file_writer::location_generator::LocationGenerator for DataLocationGenerator {
+    fn generate_location(
+        &self,
+        _partition_key: Option<&iceberg::spec::PartitionKey>,
+        file_name: &str,
+    ) -> String {
+        self.0.generate_location(None, file_name)
+    }
+}
+
+enum ActiveWriter<B: iceberg::writer::IcebergWriterBuilder> {
+    Unpartitioned(UnpartitionedWriter<B>),
+    Partitioned(iceberg::writer::partitioning::fanout_writer::FanoutWriter<B>),
+}
+
+impl<B: iceberg::writer::IcebergWriterBuilder> ActiveWriter<B> {
+    fn new(builder: B, partitioned: bool) -> Self {
+        if partitioned {
+            Self::Partitioned(
+                iceberg::writer::partitioning::fanout_writer::FanoutWriter::new(builder),
+            )
+        } else {
+            Self::Unpartitioned(UnpartitionedWriter::new(builder))
+        }
+    }
+
+    async fn write(
+        &mut self,
+        partition_key: Option<iceberg::spec::PartitionKey>,
+        batch: RecordBatch,
+    ) -> iceberg::Result<()> {
+        use iceberg::writer::partitioning::PartitioningWriter;
+        match (self, partition_key) {
+            (Self::Unpartitioned(writer), None) => writer.write(batch).await,
+            (Self::Partitioned(writer), Some(key)) => writer.write(key, batch).await,
+            _ => unreachable!("writer mode matches partition key presence"),
+        }
+    }
+
+    async fn close(self) -> iceberg::Result<Vec<DataFile>> {
+        use iceberg::writer::partitioning::PartitioningWriter;
+        match self {
+            Self::Unpartitioned(writer) => writer.close().await,
+            Self::Partitioned(writer) => writer.close().await,
+        }
+    }
+}
+
+fn partition_batch(
+    schema: &iceberg::spec::SchemaRef,
+    spec: &iceberg::spec::PartitionSpecRef,
+    batch: RecordBatch,
+) -> Result<Vec<(Option<iceberg::spec::PartitionKey>, RecordBatch)>> {
+    if spec.fields().is_empty() {
+        return Ok(vec![(None, batch)]);
+    }
+    let num_rows = batch.num_rows();
+    let mut field_values = Vec::with_capacity(spec.fields().len());
+    for field in spec.fields() {
+        let source = schema
+            .as_struct()
+            .field_by_id(field.source_id)
+            .ok_or_else(|| {
+                Error::refusal(
+                    "unsupported_write_layout",
+                    "partition spec references a missing top-level field",
+                )
+            })?;
+        let col_idx = batch.schema().index_of(&source.name).map_err(|_| {
+            Error::refusal(
+                "schema_mismatch",
+                "writer batch omits a required partition source column",
+            )
+        })?;
+        field_values.push(compute_partition_column(
+            field.transform,
+            batch.column(col_idx),
+        )?);
+    }
+    let mut groups: Vec<(iceberg::spec::Struct, Vec<u32>)> = Vec::new();
+    let mut group_index: HashMap<iceberg::spec::Struct, usize> = HashMap::new();
+    for row_idx in 0..num_rows {
+        let partition =
+            iceberg::spec::Struct::from_iter(field_values.iter().map(|col| col[row_idx].clone()));
+        let idx = u32::try_from(row_idx)
+            .map_err(|_| Error::refusal("oversized_batch", "batch row count exceeds u32 range"))?;
+        if let Some(&pos) = group_index.get(&partition) {
+            groups[pos].1.push(idx);
+        } else {
+            let pos = groups.len();
+            group_index.insert(partition.clone(), pos);
+            groups.push((partition, vec![idx]));
+        }
+    }
+    if groups.len() == 1 {
+        let (partition, _) = groups.pop().expect("single partition group");
+        let key =
+            iceberg::spec::PartitionKey::new(spec.as_ref().clone(), schema.clone(), partition);
+        return Ok(vec![(Some(key), batch)]);
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    for (partition, indices) in groups {
+        let indices = arrow::array::UInt32Array::from(indices);
+        let columns = batch
+            .columns()
+            .iter()
+            .map(|col| Ok(arrow::compute::take(col.as_ref(), &indices, None)?))
+            .collect::<Result<Vec<_>>>()?;
+        let sub_batch = RecordBatch::try_new(batch.schema(), columns)?;
+        let key =
+            iceberg::spec::PartitionKey::new(spec.as_ref().clone(), schema.clone(), partition);
+        out.push((Some(key), sub_batch));
+    }
+    Ok(out)
+}
+
+fn compute_partition_column(
+    transform: iceberg::spec::Transform,
+    column: &arrow::array::ArrayRef,
+) -> Result<Vec<Option<iceberg::spec::Literal>>> {
+    use arrow::{
+        array::{
+            Array, Date32Array, Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
+        },
+        datatypes::{DataType, TimeUnit},
+    };
+    use iceberg::spec::{Literal, Transform};
+
+    let rows = column.len();
+    let mut out = Vec::with_capacity(rows);
+    match (transform, column.data_type()) {
+        (Transform::Month, DataType::Date32) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<Date32Array>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push(
+                    (!arr.is_null(i))
+                        .then(|| Literal::int(days_to_months_since_epoch(arr.value(i)))),
+                );
+            }
+        }
+        (Transform::Month, DataType::Timestamp(TimeUnit::Microsecond, _)) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                if arr.is_null(i) {
+                    out.push(None);
+                } else {
+                    let days = i32::try_from(arr.value(i).div_euclid(86_400_000_000))
+                        .map_err(|_| unsupported_partition_column())?;
+                    out.push(Some(Literal::int(days_to_months_since_epoch(days))));
+                }
+            }
+        }
+        (Transform::Day, DataType::Date32) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<Date32Array>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push((!arr.is_null(i)).then(|| Literal::date(arr.value(i))));
+            }
+        }
+        (Transform::Day, DataType::Timestamp(TimeUnit::Microsecond, _)) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                if arr.is_null(i) {
+                    out.push(None);
+                } else {
+                    let days = i32::try_from(arr.value(i).div_euclid(86_400_000_000))
+                        .map_err(|_| unsupported_partition_column())?;
+                    out.push(Some(Literal::date(days)));
+                }
+            }
+        }
+        (Transform::Identity, DataType::Date32) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<Date32Array>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push((!arr.is_null(i)).then(|| Literal::date(arr.value(i))));
+            }
+        }
+        (Transform::Identity, DataType::Int32) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push((!arr.is_null(i)).then(|| Literal::int(arr.value(i))));
+            }
+        }
+        (Transform::Identity, DataType::Int64) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push((!arr.is_null(i)).then(|| Literal::long(arr.value(i))));
+            }
+        }
+        (Transform::Identity, DataType::Utf8) => {
+            let arr = column
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(unsupported_partition_column)?;
+            for i in 0..rows {
+                out.push((!arr.is_null(i)).then(|| Literal::string(arr.value(i))));
+            }
+        }
+        _ => return Err(unsupported_partition_column()),
+    }
+    Ok(out)
+}
+
+fn unsupported_partition_column() -> Error {
+    Error::refusal(
+        "unsupported_write_layout",
+        "partition source column type does not match a qualified Iceberg transform",
+    )
+}
+
+/// Converts proleptic Gregorian days since `1970-01-01` into months since `1970-01`.
+pub(crate) fn days_to_months_since_epoch(days: i32) -> i32 {
+    let z = i64::from(days) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    ((year - 1970) * 12 + (m - 1)) as i32
 }
 
 pub(crate) async fn append(
@@ -635,12 +897,125 @@ pub(crate) async fn snapshot_files(table: &Table, budget: &Budget) -> Result<Sna
     snapshot_files_guarded(table, budget, None, memory).await
 }
 
+pub(crate) async fn current_snapshot_files(
+    table: &Table,
+    budget: &Budget,
+) -> Result<SnapshotFiles> {
+    let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    snapshot_files_guarded_with_scope(table, budget, None, memory, false).await
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ManifestDecodeCount {
+    pub manifest_lists: u64,
+    pub manifests: u64,
+}
+
+#[cfg(test)]
+fn manifest_decode_tracker() -> &'static std::sync::Mutex<BTreeMap<uuid::Uuid, ManifestDecodeCount>>
+{
+    static TRACKER: std::sync::OnceLock<
+        std::sync::Mutex<BTreeMap<uuid::Uuid, ManifestDecodeCount>>,
+    > = std::sync::OnceLock::new();
+    TRACKER.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(test)]
+pub(crate) fn reset_manifest_decode_count(table_uuid: uuid::Uuid) {
+    manifest_decode_tracker()
+        .lock()
+        .expect("manifest decode tracker poisoned")
+        .insert(table_uuid, ManifestDecodeCount::default());
+}
+
+#[cfg(test)]
+pub(crate) fn manifest_decode_count(table_uuid: uuid::Uuid) -> ManifestDecodeCount {
+    manifest_decode_tracker()
+        .lock()
+        .expect("manifest decode tracker poisoned")
+        .get(&table_uuid)
+        .copied()
+        .unwrap_or_default()
+}
+
+/// Extracts the `Transform::Month` partition value (`months_since_epoch`) from a [`DataFile`].
+pub(crate) fn data_file_month_partition(
+    spec: &iceberg::spec::PartitionSpec,
+    file: &DataFile,
+) -> Result<Option<i32>> {
+    use iceberg::spec::{Literal, PrimitiveLiteral, Transform};
+    if file.partition().fields().len() != spec.fields().len() {
+        return Err(Error::refusal(
+            "unsupported_write_layout",
+            "snapshot data file partition tuple does not match its partition spec",
+        ));
+    }
+    for (idx, field) in spec.fields().iter().enumerate() {
+        if field.transform == Transform::Month {
+            return match &file.partition()[idx] {
+                None => Ok(None),
+                Some(Literal::Primitive(PrimitiveLiteral::Int(month))) => Ok(Some(*month)),
+                Some(_) => Err(Error::refusal(
+                    "unsupported_write_layout",
+                    "month partition field requires an integer partition literal",
+                )),
+            };
+        }
+    }
+    Ok(None)
+}
+
+/// Returns live current-snapshot [`DataFile`] descriptors pruned to `[min_month, max_month]`.
+#[allow(dead_code)]
+pub(crate) async fn snapshot_files_for_month_range(
+    table: &Table,
+    min_month: Option<i32>,
+    max_month: Option<i32>,
+    budget: &Budget,
+) -> Result<Vec<DataFile>> {
+    let inventory = current_snapshot_files(table, budget).await?;
+    let spec = table.metadata().default_partition_spec();
+    let mut matched = Vec::with_capacity(inventory.data.len());
+    for file in inventory.data {
+        match data_file_month_partition(spec, &file)? {
+            Some(month) => {
+                if min_month.is_none_or(|min| month >= min)
+                    && max_month.is_none_or(|max| month <= max)
+                {
+                    matched.push(file);
+                }
+            }
+            None => {
+                if min_month.is_none() && max_month.is_none() {
+                    matched.push(file);
+                }
+            }
+        }
+    }
+    Ok(matched)
+}
+
 async fn snapshot_files_guarded(
     table: &Table,
     budget: &Budget,
     guard: Option<&object_io::PinPaths<'_>>,
     reservation: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<SnapshotFiles> {
+    snapshot_files_guarded_with_scope(table, budget, guard, reservation, true).await
+}
+
+async fn snapshot_files_guarded_with_scope(
+    table: &Table,
+    budget: &Budget,
+    guard: Option<&object_io::PinPaths<'_>>,
+    reservation: tokio::sync::OwnedSemaphorePermit,
+    include_retained_history: bool,
+) -> Result<SnapshotFiles> {
+    tables::validate_partition_spec(
+        table.metadata().current_schema(),
+        table.metadata().default_partition_spec(),
+    )?;
     let check = |path: &str| -> Result<()> {
         if let Some(guard) = guard {
             guard.check(path)?;
@@ -660,15 +1035,17 @@ async fn snapshot_files_guarded(
         check(&statistics.statistics_path)?;
         paths.insert(statistics.statistics_path.clone());
     }
-    // Retain every snapshot referenced by this exact metadata file. Earlier
-    // metadata versions have their own pins; directory contents are not authority.
+    // Retain every snapshot referenced by this exact metadata file at creation
+    // and retention boundaries; current-snapshot occurrence capture inspects
+    // only the live current snapshot.
     let snapshots =
         table
             .metadata()
             .current_snapshot()
             .into_iter()
-            .chain(table.metadata().snapshots().filter(|snapshot| {
-                Some(snapshot.snapshot_id()) != table.metadata().current_snapshot_id()
+            .chain(table.metadata().snapshots().filter(move |snapshot| {
+                include_retained_history
+                    && Some(snapshot.snapshot_id()) != table.metadata().current_snapshot_id()
             }));
     for snapshot in snapshots {
         let is_current = Some(snapshot.snapshot_id()) == table.metadata().current_snapshot_id();
@@ -679,6 +1056,15 @@ async fn snapshot_files_guarded(
         check_inventory_size(&paths, metadata_bytes, budget)?;
         paths.insert(list_path.to_owned());
         let list = table.manifest_list_reader(snapshot).load().await?;
+        #[cfg(test)]
+        {
+            manifest_decode_tracker()
+                .lock()
+                .expect("manifest decode tracker poisoned")
+                .entry(table.metadata().uuid())
+                .or_default()
+                .manifest_lists += 1;
+        }
         for entry in list.entries() {
             check(&entry.manifest_path)?;
             if !visited_manifests.insert(entry.manifest_path.clone()) {
@@ -701,17 +1087,52 @@ async fn snapshot_files_guarded(
             check_inventory_size(&paths, metadata_bytes, budget)?;
             paths.insert(entry.manifest_path.clone());
             let manifest = entry.load_manifest(table.file_io()).await?;
+            #[cfg(test)]
+            {
+                manifest_decode_tracker()
+                    .lock()
+                    .expect("manifest decode tracker poisoned")
+                    .entry(table.metadata().uuid())
+                    .or_default()
+                    .manifests += 1;
+            }
+            let current_spec = if is_current {
+                let Some(spec) = table
+                    .metadata()
+                    .partition_spec_by_id(entry.partition_spec_id)
+                else {
+                    return Err(Error::refusal(
+                        "unsupported_write_layout",
+                        "snapshot manifest references an unknown partition spec",
+                    ));
+                };
+                tables::validate_partition_spec(table.metadata().current_schema(), spec)?;
+                tables::validate_partition_spec(
+                    manifest.metadata().schema(),
+                    manifest.metadata().partition_spec(),
+                )?;
+                Some(spec)
+            } else {
+                None
+            };
             for item in manifest.entries().iter().filter(|item| item.is_alive()) {
                 let file = item.data_file();
                 check(file.file_path())?;
                 paths.insert(file.file_path().to_owned());
-                if is_current {
+                if let Some(spec) = current_spec {
                     if file.content_type() != iceberg::spec::DataContentType::Data {
                         return Err(Error::refusal(
                             "unsupported_deletes",
                             "candidate file sharing requires materialized membership without native delete files",
                         ));
                     }
+                    if file.partition().fields().len() != spec.fields().len() {
+                        return Err(Error::refusal(
+                            "unsupported_write_layout",
+                            "snapshot data file partition tuple does not match its partition spec",
+                        ));
+                    }
+                    let _ = data_file_month_partition(spec, file)?;
                     if current_data
                         .insert(file.file_path().to_owned(), file.clone())
                         .is_some()
@@ -1381,5 +1802,419 @@ mod tests {
                 .code(),
             "incomplete_inventory"
         );
+    }
+
+    #[tokio::test]
+    async fn month_partitioned_batches_write_distinct_data_files_prune_by_month_and_preserve_occurrences()
+     {
+        use arrow::{
+            array::{Date32Array, StringArray, TimestampMicrosecondArray},
+            datatypes::TimeUnit,
+        };
+        use iceberg::{
+            TableIdent,
+            spec::{
+                Literal, NestedField, PrimitiveType, Struct, Transform, Type, UnboundPartitionSpec,
+            },
+        };
+
+        // Verify days_to_months_since_epoch across epoch, leap years, and negative dates.
+        assert_eq!(days_to_months_since_epoch(0), 0); // 1970-01-01
+        assert_eq!(days_to_months_since_epoch(-1), -1); // 1969-12-31
+        assert_eq!(days_to_months_since_epoch(19_723), 648); // 2024-01-01
+        assert_eq!(days_to_months_since_epoch(19_782), 649); // 2024-02-29 (leap day)
+        assert_eq!(days_to_months_since_epoch(19_783), 650); // 2024-03-01
+
+        let root = tempfile::TempDir::new().unwrap();
+        let catalog = local_catalog(root.path()).await.unwrap();
+        let namespace = iceberg::NamespaceIdent::new("news_lake".into());
+        catalog
+            .create_namespace(&namespace, HashMap::new())
+            .await
+            .unwrap();
+        let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+        let schema = iceberg::spec::Schema::builder()
+            .with_schema_id(1)
+            .with_fields([
+                Arc::new(NestedField::required(
+                    10,
+                    "article_id",
+                    Type::Primitive(PrimitiveType::Long),
+                )),
+                Arc::new(NestedField::required(
+                    20,
+                    "observed_at",
+                    Type::Primitive(PrimitiveType::Date),
+                )),
+                Arc::new(NestedField::optional(
+                    30,
+                    "recorded_at",
+                    Type::Primitive(PrimitiveType::Timestamptz),
+                )),
+                Arc::new(NestedField::optional(
+                    40,
+                    identity::ORIGIN_FILE,
+                    Type::Primitive(PrimitiveType::String),
+                )),
+                Arc::new(NestedField::optional(
+                    41,
+                    identity::ORIGIN_ROW,
+                    Type::Primitive(PrimitiveType::Long),
+                )),
+            ])
+            .build()
+            .unwrap();
+        let spec = UnboundPartitionSpec::builder()
+            .add_partition_field(20, "observed_at_month", Transform::Month)
+            .unwrap()
+            .build();
+        let table_dir = root.path().join("articles");
+        let schema_for_create = schema.clone();
+        let spec_for_create = spec.clone();
+        let dir_for_create = table_dir.clone();
+        let table = register_candidate(
+            catalog.as_ref(),
+            &TableIdent::new(namespace.clone(), "articles".into()),
+            CandidateWriter::Local,
+            move || {
+                fresh_partitioned_metadata(&schema_for_create, &dir_for_create, spec_for_create)
+            },
+            &budget,
+        )
+        .await
+        .unwrap();
+
+        let arrow_schema = Arc::new(Schema::new(vec![
+            Field::new("article_id", DataType::Int64, false),
+            Field::new("observed_at", DataType::Date32, false),
+            Field::new(
+                "recorded_at",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                true,
+            ),
+            Field::new(identity::ORIGIN_FILE, DataType::Utf8, true),
+            Field::new(identity::ORIGIN_ROW, DataType::Int64, true),
+        ]));
+        // Interleave rows from 2024-01 (days 19723, 19730 -> month 648),
+        // 2024-02 (day 19782 -> month 649), and 2024-03 (day 19783 -> month 650)
+        // in a single batch to exercise per-partition splitting and occurrence retention.
+        let mixed_batch = RecordBatch::try_new(
+            arrow_schema,
+            vec![
+                Arc::new(Int64Array::from(vec![101, 201, 102, 301])),
+                Arc::new(Date32Array::from(vec![19_723, 19_782, 19_730, 19_783])),
+                Arc::new(
+                    TimestampMicrosecondArray::from(vec![
+                        Some(19_723_i64 * 86_400_000_000),
+                        Some(19_782_i64 * 86_400_000_000),
+                        Some(19_730_i64 * 86_400_000_000),
+                        Some(19_783_i64 * 86_400_000_000),
+                    ])
+                    .with_timezone("UTC"),
+                ),
+                Arc::new(StringArray::from(vec![
+                    Some("origin:jan-0"),
+                    None,
+                    None,
+                    Some("origin:mar-0"),
+                ])),
+                Arc::new(Int64Array::from(vec![Some(7), None, None, Some(99)])),
+            ],
+        )
+        .unwrap();
+
+        let written = write_batches(&table, futures::stream::iter([Ok(mixed_batch)]), &budget)
+            .await
+            .unwrap();
+        assert_eq!(written.len(), 3);
+        let mut by_month = BTreeMap::new();
+        for file in &written {
+            let month = data_file_month_partition(table.metadata().default_partition_spec(), file)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                file.partition(),
+                &Struct::from_iter([Some(Literal::int(month))])
+            );
+            by_month.insert(month, file.record_count());
+        }
+        assert_eq!(by_month, BTreeMap::from([(648, 2), (649, 1), (650, 1)]));
+
+        let table = append(&table, catalog.as_ref(), written).await.unwrap();
+        let owner = Id::new("news_lake").unwrap();
+        let pinned = pin(&owner, &table, 4, &budget, &[]).await.unwrap();
+        assert_eq!(pinned.rows, 4);
+
+        // Verify month-range pruning returns only matching months.
+        let feb_only = snapshot_files_for_month_range(&table, Some(649), Some(649), &budget)
+            .await
+            .unwrap();
+        assert_eq!(feb_only.len(), 1);
+        assert_eq!(feb_only[0].record_count(), 1);
+        let jan_feb = snapshot_files_for_month_range(&table, Some(648), Some(649), &budget)
+            .await
+            .unwrap();
+        assert_eq!(jan_feb.len(), 2);
+
+        // Verify OccurrenceScan and read_occurrences preserve exact values and occurrence identities.
+        let scan = OccurrenceScan::open(&table, &budget).await.unwrap();
+        assert_eq!(scan.files().count(), 3);
+        let stream = read_occurrences(&table, &budget).await.unwrap();
+        futures::pin_mut!(stream);
+        let mut rows = BTreeMap::new();
+        while let Some(batch) = stream.try_next().await.unwrap() {
+            let ids = batch
+                .column_by_name("article_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            let dates = batch
+                .column_by_name("observed_at")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Date32Array>()
+                .unwrap();
+            let files = batch
+                .column_by_name(OCCURRENCE_FILE)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let positions = batch
+                .column_by_name(OCCURRENCE_ROW)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            for i in 0..batch.num_rows() {
+                rows.insert(
+                    ids.value(i),
+                    (
+                        dates.value(i),
+                        files.value(i).to_owned(),
+                        positions.value(i),
+                    ),
+                );
+            }
+        }
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[&101].0, 19_723);
+        assert_eq!(rows[&101].1, "origin:jan-0");
+        assert_eq!(rows[&101].2, 7);
+        assert_eq!(rows[&301].0, 19_783);
+        assert_eq!(rows[&301].1, "origin:mar-0");
+        assert_eq!(rows[&301].2, 99);
+        // Fallback rows 201 (input index 1) and 102 (input index 2) share the same generated
+        // writer origin and keep their exact pre-split input positions 1 and 2.
+        assert_eq!(rows[&201].0, 19_782);
+        assert_eq!(rows[&102].0, 19_730);
+        assert_eq!(rows[&201].1, rows[&102].1);
+        assert!(rows[&201].1.starts_with("docspec:"));
+        assert_eq!(rows[&201].2, 1);
+        assert_eq!(rows[&102].2, 2);
+
+        // Verify replacement candidate preserves the Month partition spec and shares unchanged month files.
+        let replacement_dir = root.path().join("articles_replacement");
+        let base_meta = table.metadata().clone();
+        let rep_dir = replacement_dir.clone();
+        let candidate = register_candidate(
+            catalog.as_ref(),
+            &TableIdent::new(namespace, "articles_replacement".into()),
+            CandidateWriter::Local,
+            move || replacement_metadata(&base_meta, &rep_dir),
+            &budget,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            candidate.metadata().default_partition_spec(),
+            table.metadata().default_partition_spec()
+        );
+        let candidate = append(&candidate, catalog.as_ref(), jan_feb).await.unwrap();
+        let candidate_pin = pin(&owner, &candidate, 3, &budget, &pinned.objects)
+            .await
+            .unwrap();
+        assert_eq!(candidate_pin.rows, 3);
+    }
+
+    #[tokio::test]
+    async fn occurrence_scan_reuses_admitted_current_snapshot_across_retained_history() {
+        let root = tempfile::TempDir::new().unwrap();
+        let catalog = local_catalog(root.path()).await.unwrap();
+        let namespace = iceberg::NamespaceIdent::new("planning_reuse".into());
+        catalog
+            .create_namespace(&namespace, HashMap::new())
+            .await
+            .unwrap();
+        let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+        let owner = Id::new("planning_reuse").unwrap();
+        let sample = batch(vec![Some(10), Some(20)]);
+        let native_schema =
+            iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(sample.schema().as_ref())
+                .unwrap();
+
+        for historical_snapshots in [0usize, 8, 32] {
+            let location = root.path().join(format!("history_{historical_snapshots}"));
+            let mut historical = Vec::with_capacity(historical_snapshots);
+            for index in 0..historical_snapshots {
+                let stage_meta = fresh_metadata(native_schema.clone(), &location).unwrap();
+                let stage = register_candidate(
+                    catalog.as_ref(),
+                    &iceberg::TableIdent::new(
+                        namespace.clone(),
+                        format!("stage_{historical_snapshots}_{index}"),
+                    ),
+                    CandidateWriter::Local,
+                    move || Ok(stage_meta),
+                    &budget,
+                )
+                .await
+                .unwrap();
+                let files = write_batches(
+                    &stage,
+                    futures::stream::iter([Ok(batch(vec![Some(index as i64)]))]),
+                    &budget,
+                )
+                .await
+                .unwrap();
+                let stage = append(&stage, catalog.as_ref(), files).await.unwrap();
+                let snap = stage.metadata().current_snapshot().unwrap();
+                historical.push(
+                    iceberg::spec::Snapshot::builder()
+                        .with_snapshot_id((index + 1) as i64)
+                        .with_sequence_number((index + 1) as i64)
+                        .with_timestamp_ms(snap.timestamp_ms() + index as i64)
+                        .with_manifest_list(snap.manifest_list().to_owned())
+                        .with_summary(snap.summary().clone())
+                        .with_schema_id(snap.schema_id().unwrap())
+                        .build(),
+                );
+            }
+
+            let base_meta = fresh_metadata(native_schema.clone(), &location).unwrap();
+            let mut builder = base_meta.into_builder(None);
+            for snap in historical {
+                builder = builder.add_snapshot(snap).unwrap();
+            }
+            let seeded_meta = builder.build().unwrap().metadata;
+            let table = register_candidate(
+                catalog.as_ref(),
+                &iceberg::TableIdent::new(
+                    namespace.clone(),
+                    format!("table_{historical_snapshots}"),
+                ),
+                CandidateWriter::Local,
+                move || Ok(seeded_meta),
+                &budget,
+            )
+            .await
+            .unwrap();
+
+            // Write 2 fixed current files (2 rows each = 4 rows total) in 1 current manifest.
+            let mut current_files = Vec::new();
+            for values in [vec![Some(1), Some(2)], vec![Some(3), None]] {
+                let files =
+                    write_batches(&table, futures::stream::iter([Ok(batch(values))]), &budget)
+                        .await
+                        .unwrap();
+                assert_eq!(files.len(), 1);
+                current_files.extend(files);
+            }
+            let table = append(&table, catalog.as_ref(), current_files)
+                .await
+                .unwrap();
+            assert_eq!(
+                table.metadata().snapshots().count(),
+                historical_snapshots + 1
+            );
+
+            // 1. Creation/pinning/retention boundary (`snapshot_files`) still verifies
+            // full object closure across all retained snapshots (1 + historical_snapshots).
+            reset_manifest_decode_count(table.metadata().uuid());
+            let closure_start = std::time::Instant::now();
+            let inventory = snapshot_files(&table, &budget).await.unwrap();
+            let closure_elapsed = closure_start.elapsed();
+            let closure_counts = manifest_decode_count(table.metadata().uuid());
+            assert_eq!(
+                closure_counts,
+                ManifestDecodeCount {
+                    manifest_lists: (historical_snapshots + 1) as u64,
+                    manifests: (historical_snapshots + 1) as u64,
+                }
+            );
+            assert_eq!(inventory.data.len(), 2);
+            let pinned = pin(&owner, &table, 4, &budget, &[]).await.unwrap();
+            assert_eq!(pinned.rows, 4);
+
+            // 2. OccurrenceScan::open decodes ONLY the current snapshot's manifest list (1)
+            // and manifest (1) once, regardless of retained snapshot history (0 / 8 / 32).
+            reset_manifest_decode_count(table.metadata().uuid());
+            let open_start = std::time::Instant::now();
+            let scan = OccurrenceScan::open(&table, &budget).await.unwrap();
+            let open_elapsed = open_start.elapsed();
+            let open_counts = manifest_decode_count(table.metadata().uuid());
+            assert_eq!(
+                open_counts,
+                ManifestDecodeCount {
+                    manifest_lists: 1,
+                    manifests: 1,
+                }
+            );
+            assert_eq!(scan.files().count(), 2);
+
+            // 3. read_occurrences also decodes only the current snapshot once (1 list, 1 manifest).
+            reset_manifest_decode_count(table.metadata().uuid());
+            let stream = read_occurrences(&table, &budget).await.unwrap();
+            futures::pin_mut!(stream);
+            let mut total_rows = 0usize;
+            while let Some(batch) = stream.try_next().await.unwrap() {
+                total_rows += batch.num_rows();
+            }
+            assert_eq!(total_rows, 4);
+            assert_eq!(
+                manifest_decode_count(table.metadata().uuid()),
+                ManifestDecodeCount {
+                    manifest_lists: 1,
+                    manifests: 1,
+                }
+            );
+
+            // 4. OccurrenceScan::values reuses an already-admitted SnapshotFiles with
+            // zero additional manifest-list or manifest decodes, even after the current
+            // snapshot's manifest list is removed from disk.
+            let current_manifest_list = table
+                .metadata()
+                .current_snapshot()
+                .unwrap()
+                .manifest_list()
+                .to_owned();
+            std::fs::remove_file(&current_manifest_list).unwrap();
+            reset_manifest_decode_count(table.metadata().uuid());
+            let values_start = std::time::Instant::now();
+            let values_scan = OccurrenceScan::values(&table, &budget, inventory)
+                .await
+                .unwrap();
+            let values_elapsed = values_start.elapsed();
+            assert_eq!(
+                manifest_decode_count(table.metadata().uuid()),
+                ManifestDecodeCount {
+                    manifest_lists: 0,
+                    manifests: 0,
+                }
+            );
+            let mut values_rows = 0usize;
+            for file in values_scan.files() {
+                let stream = values_scan.read_file(file.file_path(), &budget).unwrap();
+                futures::pin_mut!(stream);
+                while let Some(batch) = stream.try_next().await.unwrap() {
+                    values_rows += batch.num_rows();
+                }
+            }
+            assert_eq!(values_rows, 4);
+            eprintln!(
+                "history={historical_snapshots}: closure_counts={closure_counts:?} ({closure_elapsed:?}), open_counts={open_counts:?} ({open_elapsed:?}), values_elapsed={values_elapsed:?}"
+            );
+        }
     }
 }

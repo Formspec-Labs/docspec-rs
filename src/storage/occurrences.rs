@@ -1,4 +1,5 @@
 //! Stable source occurrences using stored origins or initial physical row locations.
+// Rust guideline compliant 2026-02-21
 
 use crate::{Error, Result, budget::Budget};
 use arrow::{
@@ -99,7 +100,7 @@ async fn read_projected_occurrences_inner(
     projection: Option<&[usize]>,
     observation: Option<super::scan_metrics::NativeScanObservation>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    let inventory = super::snapshot_files(table, budget).await?;
+    let inventory = super::current_snapshot_files(table, budget).await?;
     let mut state =
         Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
     state.observation = observation;
@@ -132,7 +133,7 @@ struct Occurrences {
 
 impl Occurrences {
     async fn open(table: &Table, budget: &Budget) -> Result<Self> {
-        let inventory = super::snapshot_files(table, budget).await?;
+        let inventory = super::current_snapshot_files(table, budget).await?;
         Self::capture(table, budget, inventory, true).await
     }
 
@@ -158,6 +159,9 @@ impl Occurrences {
         } else {
             super::schema::read_schema(table)?
         };
+        if let Some(snapshot) = table.metadata().current_snapshot() {
+            snapshot.schema(table.metadata())?;
+        }
         let native_schema = table.metadata().current_schema().clone();
         let selection = projection
             .map(|indices| {
@@ -172,18 +176,56 @@ impl Occurrences {
             })
             .transpose()?;
         let batches = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
+        let fields = match &selection {
+            Some(selection) => selection.fields.clone(),
+            None => {
+                let mut fields = native_schema
+                    .as_struct()
+                    .fields()
+                    .iter()
+                    .map(|field| field.id)
+                    .collect::<Vec<_>>();
+                fields.push(iceberg::metadata_columns::RESERVED_FIELD_ID_FILE);
+                fields
+            }
+        };
+        let name_mapping = table
+            .metadata()
+            .properties()
+            .get(iceberg::spec::DEFAULT_SCHEMA_NAME_MAPPING)
+            .map(|raw| serde_json::from_str::<iceberg::spec::NameMapping>(raw).map(Arc::new))
+            .transpose()?;
+        // Build scan tasks directly from the already-admitted current-snapshot
+        // descriptors instead of decoding the current snapshot's manifests again.
+        let tasks = futures::stream::iter(
+            inventory
+                .data
+                .iter()
+                .map(|file| {
+                    Ok(FileScanTask::builder()
+                        .with_file_size_in_bytes(file.file_size_in_bytes())
+                        .with_start(0)
+                        .with_length(file.file_size_in_bytes())
+                        .with_record_count(Some(file.record_count()))
+                        .with_data_file_path(file.file_path().to_owned())
+                        .with_data_file_format(file.file_format())
+                        .with_schema(native_schema.clone())
+                        .with_project_field_ids(fields.clone())
+                        .with_partition(Some(file.partition().clone()))
+                        .with_partition_spec(None)
+                        .with_name_mapping(name_mapping.clone())
+                        .with_case_sensitive(true)
+                        .build())
+                })
+                .collect::<Vec<_>>(),
+        )
+        .boxed();
         // Retain the existing inventory reservation while its live descriptors are used.
         let expected = inventory
             .data
             .into_iter()
             .map(|file| (file.file_path().to_owned(), file))
             .collect();
-        let tasks = match &selection {
-            Some(selection) => {
-                super::schema::plan_selected_files(table, selection.fields.clone()).await?
-            }
-            None => super::schema::plan_files(table).await?,
-        };
         let reader = table
             .reader_builder()
             .with_data_file_concurrency_limit(1)
