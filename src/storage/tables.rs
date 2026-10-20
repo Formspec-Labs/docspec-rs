@@ -1,39 +1,137 @@
 //! Candidate metadata preserving native field identity without copying value files.
+// Rust guideline compliant 2026-02-21
 
 use crate::{Error, Result, budget::Budget};
 use iceberg::{
     Catalog, MetadataLocation, TableIdent,
-    spec::{FormatVersion, PartitionSpec, Schema, SortOrder, TableMetadata, TableMetadataBuilder},
+    spec::{
+        FormatVersion, PartitionSpec, PrimitiveType, Schema, SortOrder, TableMetadata,
+        TableMetadataBuilder, Transform, Type, UnboundPartitionSpec,
+    },
     table::Table,
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
+
+pub(crate) fn validate_partition_spec(schema: &Schema, spec: &PartitionSpec) -> Result<()> {
+    if spec.fields().is_empty() {
+        return Ok(());
+    }
+    for field in spec.fields() {
+        let Some(source) = schema.as_struct().field_by_id(field.source_id) else {
+            return Err(unsupported_partition_spec(
+                "partition spec must reference a top-level schema field",
+            ));
+        };
+        if super::identity::hidden(&source.name) {
+            return Err(unsupported_partition_spec(
+                "partition spec cannot reference internal occurrence identity fields",
+            ));
+        }
+        let Type::Primitive(primitive) = source.field_type.as_ref() else {
+            return Err(unsupported_partition_spec(
+                "partition spec requires a primitive source field",
+            ));
+        };
+        let supported = matches!(
+            (field.transform, primitive),
+            (
+                Transform::Month | Transform::Day,
+                PrimitiveType::Date | PrimitiveType::Timestamptz | PrimitiveType::Timestamp
+            ) | (
+                Transform::Identity,
+                PrimitiveType::Date
+                    | PrimitiveType::Int
+                    | PrimitiveType::Long
+                    | PrimitiveType::String
+            )
+        );
+        if !supported {
+            return Err(unsupported_partition_spec(
+                "partition spec uses an unqualified transform or source type",
+            ));
+        }
+    }
+    spec.clone()
+        .into_unbound()
+        .bind(Arc::new(schema.clone()))
+        .map_err(|_| {
+            unsupported_partition_spec("partition spec is incompatible with table schema")
+        })?;
+    Ok(())
+}
+
+pub(crate) fn validate_unbound_partition_spec(
+    schema: &Schema,
+    spec: &UnboundPartitionSpec,
+) -> Result<()> {
+    if spec.fields().is_empty() {
+        return Ok(());
+    }
+    let bound = spec.clone().bind(Arc::new(schema.clone())).map_err(|_| {
+        unsupported_partition_spec("partition spec is incompatible with table schema")
+    })?;
+    validate_partition_spec(schema, &bound)
+}
+
+fn unsupported_partition_spec(message: &'static str) -> Error {
+    Error::refusal("unsupported_write_layout", message)
+}
 
 pub(crate) fn fresh_metadata(schema: Schema, directory: &Path) -> Result<TableMetadata> {
     fresh_metadata_at(schema, &directory.to_string_lossy())
 }
 
 pub(crate) fn fresh_metadata_at(schema: Schema, location: &str) -> Result<TableMetadata> {
+    fresh_partitioned_metadata_at(&schema, location, UnboundPartitionSpec::builder().build())
+}
+
+#[allow(dead_code)]
+pub(crate) fn fresh_partitioned_metadata(
+    schema: &Schema,
+    directory: &Path,
+    partition_spec: UnboundPartitionSpec,
+) -> Result<TableMetadata> {
+    fresh_partitioned_metadata_at(schema, directory.to_string_lossy(), partition_spec)
+}
+
+pub(crate) fn fresh_partitioned_metadata_at(
+    schema: &Schema,
+    location: impl AsRef<str>,
+    partition_spec: UnboundPartitionSpec,
+) -> Result<TableMetadata> {
+    validate_unbound_partition_spec(schema, &partition_spec)?;
     // Native creation reassigns IDs. Reinstall the supplied schema before any
-    // files exist, then discard only the unused provisional schema.
-    let metadata = TableMetadataBuilder::new(
+    // files exist, then bind any declared partition spec to those preserved IDs
+    // and discard only the unused provisional schema and partition spec.
+    let builder = TableMetadataBuilder::new(
         schema.clone(),
         PartitionSpec::unpartition_spec(),
         SortOrder::unsorted_order(),
-        location.to_owned(),
+        location.as_ref().to_owned(),
         FormatVersion::V2,
         super::table_properties(),
     )?
-    .add_current_schema(schema)?
-    .build()?
-    .metadata;
-    let unused = metadata
+    .add_current_schema(schema.clone())?;
+    let builder = if partition_spec.fields().is_empty() {
+        builder
+    } else {
+        builder.add_default_partition_spec(partition_spec)?
+    };
+    let metadata = builder.build()?.metadata;
+    let unused_schemas = metadata
         .schemas_iter()
         .map(|s| s.schema_id())
         .filter(|id| *id != metadata.current_schema_id())
         .collect::<Vec<_>>();
+    let unused_specs = metadata
+        .partition_specs_iter()
+        .map(|spec| spec.spec_id())
+        .filter(|id| *id != metadata.default_partition_spec_id())
+        .collect::<Vec<_>>();
     Ok(metadata
         .into_builder(None)
-        .remove_schemas(&unused)?
+        .remove_schemas(&unused_schemas)?
+        .remove_partition_specs(&unused_specs)?
         .build()?
         .metadata)
 }
@@ -50,15 +148,15 @@ pub(crate) fn replacement_metadata_at(
     location: &str,
 ) -> Result<TableMetadata> {
     if !matches!(base.format_version(), FormatVersion::V2 | FormatVersion::V3)
-        || !base.default_partition_spec().is_unpartitioned()
         || !base.default_sort_order().is_unsorted()
         || base.encryption_keys_iter().next().is_some()
     {
         return Err(Error::refusal(
             "unsupported_write_layout",
-            "replacement candidates require unpartitioned, unsorted, unencrypted Iceberg v2/v3 metadata",
+            "replacement candidates require unsorted, unencrypted Iceberg v2/v3 metadata",
         ));
     }
+    validate_partition_spec(base.current_schema(), base.default_partition_spec())?;
     let snapshots = base
         .snapshots()
         .map(|snapshot| snapshot.snapshot_id())
@@ -298,6 +396,7 @@ pub(super) fn sync_candidate_parent(expected: &crate::model::ObjectRef) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iceberg::spec::{NestedField, StructType, UnboundPartitionField};
     use std::io::Write;
 
     #[test]
@@ -324,6 +423,189 @@ mod tests {
         }
         assert!(output.write_all(b"b").is_err());
         assert_eq!(output.bytes.len(), 17);
+    }
+
+    #[test]
+    fn month_and_qualified_partition_specs_preserve_field_ids_through_fresh_and_replacement_metadata()
+     {
+        let schema = Schema::builder()
+            .with_schema_id(7)
+            .with_fields([
+                Arc::new(NestedField::required(
+                    10,
+                    "observed_at",
+                    Type::Primitive(PrimitiveType::Date),
+                )),
+                Arc::new(NestedField::optional(
+                    20,
+                    "recorded_at",
+                    Type::Primitive(PrimitiveType::Timestamptz),
+                )),
+                Arc::new(NestedField::optional(
+                    30,
+                    "source_feed",
+                    Type::Primitive(PrimitiveType::String),
+                )),
+            ])
+            .build()
+            .unwrap();
+        let spec = UnboundPartitionSpec::builder()
+            .add_partition_field(10, "observed_at_month", Transform::Month)
+            .unwrap()
+            .add_partition_field(20, "recorded_at_month", Transform::Month)
+            .unwrap()
+            .add_partition_field(30, "source_feed", Transform::Identity)
+            .unwrap()
+            .build();
+        let fresh = fresh_partitioned_metadata_at(&schema, "/tmp/news-lake-source", spec).unwrap();
+        assert_eq!(fresh.current_schema().as_struct(), schema.as_struct());
+        assert_eq!(fresh.current_schema().highest_field_id(), 30);
+        assert_eq!(fresh.schemas_iter().count(), 1);
+        assert_eq!(fresh.partition_specs_iter().count(), 1);
+        let bound = fresh.default_partition_spec();
+        assert_eq!(bound.fields().len(), 3);
+        assert_eq!(bound.fields()[0].source_id, 10);
+        assert_eq!(bound.fields()[0].name, "observed_at_month");
+        assert_eq!(bound.fields()[0].transform, Transform::Month);
+        assert_eq!(bound.fields()[1].source_id, 20);
+        assert_eq!(bound.fields()[1].name, "recorded_at_month");
+        assert_eq!(bound.fields()[1].transform, Transform::Month);
+        assert_eq!(bound.fields()[2].source_id, 30);
+        assert_eq!(bound.fields()[2].name, "source_feed");
+        assert_eq!(bound.fields()[2].transform, Transform::Identity);
+
+        let replaced = replacement_metadata_at(&fresh, "/tmp/news-lake-replacement").unwrap();
+        assert_eq!(replaced.current_schema(), fresh.current_schema());
+        assert_eq!(
+            replaced.default_partition_spec(),
+            fresh.default_partition_spec()
+        );
+        assert_eq!(replaced.location(), "/tmp/news-lake-replacement");
+    }
+
+    #[test]
+    fn unqualified_transforms_and_source_types_are_refused_with_unsupported_write_layout() {
+        let nested_child = Arc::new(NestedField::optional(
+            99,
+            "nested_date",
+            Type::Primitive(PrimitiveType::Date),
+        ));
+        let schema = Schema::builder()
+            .with_fields([
+                Arc::new(NestedField::required(
+                    10,
+                    "observed_at",
+                    Type::Primitive(PrimitiveType::Date),
+                )),
+                Arc::new(NestedField::optional(
+                    20,
+                    "title",
+                    Type::Primitive(PrimitiveType::String),
+                )),
+                Arc::new(NestedField::optional(
+                    30,
+                    "weight",
+                    Type::Primitive(PrimitiveType::Double),
+                )),
+                Arc::new(NestedField::optional(
+                    40,
+                    "nested",
+                    Type::Struct(StructType::new(vec![nested_child])),
+                )),
+                Arc::new(NestedField::optional(
+                    50,
+                    super::super::identity::ORIGIN_FILE,
+                    Type::Primitive(PrimitiveType::String),
+                )),
+            ])
+            .build()
+            .unwrap();
+
+        for invalid in [
+            // Bucket transform is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(10, "observed_bucket", Transform::Bucket(16))
+                .unwrap()
+                .build(),
+            // Truncate transform is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(20, "title_trunc", Transform::Truncate(4))
+                .unwrap()
+                .build(),
+            // Void transform must be rejected even though Iceberg treats all-void as is_unpartitioned().
+            UnboundPartitionSpec::builder()
+                .add_partition_field(10, "observed_void", Transform::Void)
+                .unwrap()
+                .build(),
+            // Month on a String column is invalid.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(20, "title_month", Transform::Month)
+                .unwrap()
+                .build(),
+            // Identity on a Double column is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(30, "weight", Transform::Identity)
+                .unwrap()
+                .build(),
+            // Nested field source_id is not a top-level field.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(99, "nested_month", Transform::Month)
+                .unwrap()
+                .build(),
+            // Internal occurrence identity field cannot be partitioned on.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(50, super::super::identity::ORIGIN_FILE, Transform::Identity)
+                .unwrap()
+                .build(),
+        ] {
+            assert_eq!(
+                validate_unbound_partition_spec(&schema, &invalid)
+                    .unwrap_err()
+                    .code(),
+                "unsupported_write_layout"
+            );
+            assert_eq!(
+                fresh_partitioned_metadata_at(&schema, "/tmp/rejected", invalid)
+                    .unwrap_err()
+                    .code(),
+                "unsupported_write_layout"
+            );
+        }
+
+        // Also verify replacement_metadata_at rejects a bound Bucket or Void partition spec.
+        for bad_transform in [Transform::Bucket(8), Transform::Void] {
+            let unvalidated = TableMetadataBuilder::new(
+                schema.clone(),
+                PartitionSpec::unpartition_spec(),
+                SortOrder::unsorted_order(),
+                "/tmp/bad-base".to_owned(),
+                FormatVersion::V2,
+                super::super::table_properties(),
+            )
+            .unwrap()
+            .add_current_schema(schema.clone())
+            .unwrap()
+            .add_default_partition_spec(
+                UnboundPartitionSpec::builder()
+                    .add_partition_fields([UnboundPartitionField::builder()
+                        .source_id(10)
+                        .name("bad_part".to_owned())
+                        .transform(bad_transform)
+                        .build()])
+                    .unwrap()
+                    .build(),
+            )
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+            assert_eq!(
+                replacement_metadata_at(&unvalidated, "/tmp/bad-replacement")
+                    .unwrap_err()
+                    .code(),
+                "unsupported_write_layout"
+            );
+        }
     }
 }
 
