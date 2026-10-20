@@ -18,8 +18,8 @@ use docspec::{
 };
 use futures::TryStreamExt;
 use std::{
-    fs::File,
-    io::{BufReader, BufWriter},
+    fs::{File, OpenOptions},
+    io::{BufReader, BufWriter, Write},
     net::SocketAddr,
     path::PathBuf,
 };
@@ -366,6 +366,9 @@ enum Command {
     Serve {
         #[arg(long, default_value = "127.0.0.1:7391")]
         bind: SocketAddr,
+        /// Create a private readiness record after binding; never overwrite a path.
+        #[arg(long)]
+        ready_file: Option<PathBuf>,
     },
 }
 
@@ -1055,8 +1058,11 @@ async fn main() -> anyhow::Result<()> {
                     write_stream(output, stream).await?;
                     engine.shutdown().await?;
                 }
-                Command::Serve { bind } => {
+                Command::Serve { bind, ready_file } => {
                     let listener = tokio::net::TcpListener::bind(bind).await?;
+                    if let Some(path) = ready_file {
+                        write_ready_file(&path, listener.local_addr()?)?;
+                    }
                     let result = axum::serve(listener, docspec::http::router(engine.clone()))
                         .with_graceful_shutdown(async {
                             let _ = tokio::signal::ctrl_c().await;
@@ -1111,7 +1117,7 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
             ));
         }
     }
-    if let Command::Serve { bind } = &cli.command
+    if let Command::Serve { bind, .. } = &cli.command
         && !bind.ip().is_loopback()
     {
         return Err(docspec::Error::refusal(
@@ -1199,5 +1205,32 @@ fn read_json<T: serde::de::DeserializeOwned>(path: PathBuf) -> anyhow::Result<T>
 fn print_json(value: &impl serde::Serialize) -> anyhow::Result<()> {
     serde_json::to_writer_pretty(std::io::stdout(), value)?;
     println!();
+    Ok(())
+}
+
+fn write_ready_file(path: &std::path::Path, address: SocketAddr) -> anyhow::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("ready file needs a private parent directory"))?;
+        anyhow::ensure!(
+            std::fs::metadata(parent)?.permissions().mode() & 0o077 == 0,
+            "ready file needs a private parent directory"
+        );
+        options.mode(0o600);
+    }
+    let mut output = BufWriter::new(options.open(path)?);
+    serde_json::to_writer(
+        &mut output,
+        &serde_json::json!({
+            "protocol": "docspec-loopback", "version": docspec::http::PROTOCOL_VERSION,
+            "capabilities": ["request-deadline"], "pid": std::process::id(), "address": address,
+        }),
+    )?;
+    output.flush()?;
     Ok(())
 }

@@ -26,7 +26,11 @@ use axum::{
 };
 use futures::StreamExt;
 
+mod deadline;
 mod ipc;
+
+/// Loopback protocol version with request deadlines and bound-listener readiness.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Builds a bounded local API over an existing execution host.
 pub fn router(engine: Engine) -> Router {
@@ -164,6 +168,7 @@ pub fn router(engine: Engine) -> Router {
     let router = router.route("/restore-remote", post(restore_remote));
     router
         .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(axum::middleware::from_fn(deadline::apply))
         .with_state(engine)
 }
 
@@ -628,6 +633,8 @@ impl From<Error> for HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = match self.0.code() {
+            "invalid_request_timeout" => StatusCode::BAD_REQUEST,
+            "request_timeout" => StatusCode::GATEWAY_TIMEOUT,
             "availability_retired" => StatusCode::GONE,
             "no_release" | "no_export" | "no_operation" | "no_compaction" | "no_phase"
             | "no_removal" | "no_changes" | "missing_group" | "missing_evidence" => {

@@ -1031,6 +1031,29 @@ CLI and HTTP call the same application services. HTTP accepts bounded JSON and
 streams Arrow IPC for bulk reads. One process owns a workspace; use HTTP to submit
 concurrent requests to that process.
 
+Automated local clients can run `serve --bind 127.0.0.1:0 --ready-file PATH`,
+where `PATH` is absent inside a private caller-owned directory. After binding,
+the child creates a private JSON record with `protocol: "docspec-loopback"`,
+`version: 1`, its PID, the actual bound address, and the `request-deadline`
+capability. Existing paths refuse. Check that record against the owned process;
+an arbitrary HTTP response on a previously reserved port does not prove readiness.
+
+An optional `docspec-timeout-ms` header supplies one positive integer millisecond
+budget for request-body extraction, the handler, and outgoing body chunks.
+Malformed, zero, duplicated, and unrepresentable budgets return HTTP 400 with
+`invalid_request_timeout`. Expiry before response headers returns HTTP 504 with
+`request_timeout`; expiry after headers aborts the body without a successful
+Arrow terminator. This uses Tokio's cooperative timers, rather than a hard
+real-time guarantee under a stalled process or operating system. Clients should
+also bound socket reads by the remaining request budget and reject late success.
+Requests without the header retain their existing behavior.
+
+An expired caller does not roll back Engine-owned work already admitted. Resolve
+its exact operation identity through the existing plan/release services before
+resubmitting or removing producer inputs. Producer files whose admission remains
+unknown must survive caller timeout and host exit; a successful process exit
+alone does not prove a particular input was retained.
+
 With `serve` running, read an exact version through either route:
 
 ```sh
