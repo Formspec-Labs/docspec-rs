@@ -292,9 +292,18 @@ impl Engine {
             }
             Err(err) => {
                 if let Some(plan) = checkpoint_plan {
-                    let _ = std::fs::remove_file(&plan.new_archive_path);
-                    if let Some(parent) = Path::new(&plan.new_archive_path).parent() {
-                        let _ = std::fs::remove_dir(parent);
+                    let uncommitted = lifecycle
+                        .catalog
+                        .load_table(view.table.identifier())
+                        .await
+                        .ok()
+                        .and_then(|t| t.metadata_location().map(str::to_owned))
+                        == view.table.metadata_location().map(str::to_owned);
+                    if uncommitted {
+                        let _ = std::fs::remove_file(&plan.new_archive_path);
+                        if let Some(parent) = Path::new(&plan.new_archive_path).parent() {
+                            let _ = std::fs::remove_dir(parent);
+                        }
                     }
                 }
                 Err(err)
@@ -303,7 +312,8 @@ impl Engine {
     }
 
     async fn reclaim_superseded_dataset_objects(&self, dataset: &Id) -> Result<()> {
-        let (live_paths, protected_prefixes) = self.live_retained_closure().await?;
+        let (live_paths, live_native_metadata, protected_prefixes) =
+            self.live_retained_closure().await?;
         let ident = crate::catalog::lifecycle_ident(dataset);
         let tables = self
             .inner
@@ -319,27 +329,12 @@ impl Engine {
                 continue;
             };
             let Ok(metadata_loc) = native.metadata_location_result() else {
-                continue;
-            };
-            if live_paths.contains(metadata_loc)
-                || is_protected_path(metadata_loc, &protected_prefixes)
-            {
-                continue;
-            }
-            let Ok(files) = self
-                .inner
-                .objects
-                .snapshot_files(&native, &self.inner.lifecycle.budget)
-                .await
-            else {
                 let _ = self.inner.lifecycle.catalog.drop_table(&native_ident).await;
                 continue;
             };
-            let all_live = !files.paths.is_empty()
-                && files.paths.iter().all(|path| {
-                    live_paths.contains(path) || is_protected_path(path, &protected_prefixes)
-                });
-            if !all_live {
+            if !live_native_metadata.contains(metadata_loc)
+                && !is_protected_path(metadata_loc, &protected_prefixes)
+            {
                 let _ = self.inner.lifecycle.catalog.drop_table(&native_ident).await;
             }
         }
@@ -1524,6 +1519,94 @@ mod tests {
             .unwrap();
         let inspection = reopened.inspect_retention(&objects).await.unwrap();
         assert_eq!(inspection.unmatched_bytes, 0);
+        reopened
+            .create_restore_point(&dataset, &Id::new("rp-after-compact").unwrap())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn compact_lifecycle_survives_lost_commit_response_with_succession_checkpoint() {
+        let root = tempfile::TempDir::new().unwrap();
+        let limits = Limits {
+            compute_threads: 2,
+            memory_bytes: 256 << 20,
+            scratch_bytes: 64 << 20,
+            batch_rows: 128,
+            max_batch_bytes: 1 << 20,
+            max_metadata_bytes: 4 << 20,
+        };
+        let engine = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let dataset = Id::new("checkpoint_lost_reply").unwrap();
+        let init_input = write_parquet_input(&root.path().join("init.parquet"), &[1, 2]);
+        let r0 = engine
+            .run(&RunSpec {
+                dataset: dataset.clone(),
+                operation: Id::new("op-0").unwrap(),
+                base: None,
+                relationship: None,
+                input: init_input.path,
+                expected_digest: init_input.digest,
+                sql: "SELECT id, val FROM input".into(),
+                definition: "v1".into(),
+            })
+            .await
+            .unwrap();
+        let mut latest = r0.clone();
+        for step in 1..=3 {
+            let upd = write_parquet_input(
+                &root.path().join(format!("upd-{step}.parquet")),
+                &[step * 10],
+            );
+            latest = engine
+                .update(&UpdateSpec {
+                    dataset: dataset.clone(),
+                    operation: Id::new(format!("op-{step}")).unwrap(),
+                    base: latest.id.clone(),
+                    definition: "v1".into(),
+                    keys: vec!["id".into()],
+                    replacements: upd,
+                    deletions: None,
+                    relationship: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        engine
+            .inner
+            .lifecycle
+            .lose_commit_response
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let err = engine.compact_lifecycle(&dataset).await.unwrap_err();
+        assert_eq!(err.code(), "lost_commit_response");
+
+        drop(engine);
+        let reopened = Engine::open(root.path(), limits.clone()).await.unwrap();
+        let proof = reopened
+            .prove_succession(&r0.version_ref(), &latest.version_ref())
+            .await
+            .unwrap();
+        assert_eq!(proof.selections_advanced, 3);
+        verify_release_at(&latest, limits.clone(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+
+        let retry_stats = reopened.compact_lifecycle(&dataset).await.unwrap();
+        assert_eq!(retry_stats.revisions_after, 1);
+        assert_eq!(retry_stats.files_after, 1);
+        assert!(
+            !Path::new(&r0.manifest.path).exists(),
+            "checkpointed release manifest should be reclaimed on retry after lost commit response"
+        );
+        let proof_after = reopened
+            .prove_succession(&r0.version_ref(), &latest.version_ref())
+            .await
+            .unwrap();
+        assert_eq!(proof_after.selections_advanced, 3);
+        verify_release_at(&latest, limits, VerificationLevel::Deep)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

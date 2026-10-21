@@ -177,7 +177,7 @@ impl Engine {
 
     pub(in crate::engine) async fn live_retained_closure(
         &self,
-    ) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
+    ) -> Result<(BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> {
         let budget = &self.inner.lifecycle.budget;
         let limit = budget.limits.max_metadata_bytes;
         let _memory = budget.reserve(limit)?;
@@ -185,8 +185,18 @@ impl Engine {
         self.collect_inventory(&mut inventory, None).await?;
         let mut live_paths = inventory.required_paths.unwrap_or_default();
         live_paths.extend(inventory.candidates.into_keys());
-        live_paths.extend(inventory.visited.into_keys());
-        Ok((live_paths, inventory.protected_prefixes))
+        let mut live_native_metadata = BTreeSet::new();
+        for (path, entry) in inventory.visited {
+            if entry.kind == MetadataKind::Native {
+                live_native_metadata.insert(path.clone());
+            }
+            live_paths.insert(path);
+        }
+        Ok((
+            live_paths,
+            live_native_metadata,
+            inventory.protected_prefixes,
+        ))
     }
 
     async fn collect_inventory(

@@ -347,9 +347,12 @@ pub enum AggregateFunction {
     },
     /// Collects sorted distinct non-null values into a single list row per group.
     ///
-    /// Materializes `O(distinct)` values per group within a single output row
-    /// (bounded by `Limits::max_batch_bytes`), unlike [`Self::CountDistinct`],
-    /// which emits only a scalar count.
+    /// Materializes one group's set in a single output row (`O(distinct)` per
+    /// group), unlike [`Self::CountDistinct`], which emits only a scalar count.
+    /// Unbounded-cardinality groups whose materialized row or state exceeds the
+    /// configured batch or memory allowance (`Limits::max_batch_bytes` /
+    /// `Limits::memory_bytes`) refuse with `capacity`, `query`, or
+    /// `oversized_batch`.
     CollectSet {
         field: String,
     },
