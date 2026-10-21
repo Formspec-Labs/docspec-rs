@@ -228,6 +228,31 @@ fn supported_format(format: u32) -> bool {
     matches!(format, PREVIOUS_FORMAT | 11 | FORMAT)
 }
 
+/// Backend capability classes decided by one execution-host authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendCapability {
+    /// Exact source-group reads, independent Build, and source-only Update.
+    SourceGroup,
+    /// Computed/related/evidence groups, receipts, schema, backfill, capture and corrections.
+    LocalOnly,
+}
+
+impl BackendCapability {
+    /// Returns the capability required to read one retained field group.
+    pub fn for_group(group: &str) -> Self {
+        if group == "source" {
+            Self::SourceGroup
+        } else {
+            Self::LocalOnly
+        }
+    }
+
+    /// Returns whether this capability requires a local workspace.
+    pub fn local_only(self) -> bool {
+        matches!(self, Self::LocalOnly)
+    }
+}
+
 impl Engine {
     /// Opens an exclusively owned local workspace with a maintained catalog.
     ///
@@ -356,11 +381,29 @@ impl Engine {
     }
 
     fn require_local(&self) -> Result<()> {
-        if self.inner.retained.is_local() {
+        self.require_capability(BackendCapability::LocalOnly)
+    }
+
+    /// Returns whether this host's configured backend supports one capability class.
+    ///
+    /// This is the single authority for backend capability decisions. CLI, HTTP and
+    /// library entry points must route their checks here rather than testing object
+    /// storage or field-group names independently.
+    pub(crate) fn supports_capability(&self, capability: BackendCapability) -> bool {
+        self.inner.retained.is_local() || matches!(capability, BackendCapability::SourceGroup)
+    }
+
+    pub(crate) fn require_capability(&self, capability: BackendCapability) -> Result<()> {
+        if self.supports_capability(capability) {
             Ok(())
         } else {
             Err(locations::unsupported())
         }
+    }
+
+    /// Refuses a non-source field group unless the backend supports local work.
+    pub(crate) fn require_group(&self, group: &str) -> Result<()> {
+        self.require_capability(BackendCapability::for_group(group))
     }
 
     fn check_backend_selection(
@@ -2489,7 +2532,7 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base, "relationship": spec.relationship}})
         }
         OperationRequest::Update(spec) => {
-            serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition}})
+            serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition, "relationship": spec.relationship}})
         }
         OperationRequest::Backfill(spec) => {
             serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})

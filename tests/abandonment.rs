@@ -205,6 +205,7 @@ async fn abandonment_fences_updates_and_schema_without_rewinding_source_admissio
             keys: vec!["id".into()],
             replacements: input(&root.path().join("update.parquet"), &[(Some(9000), None)]),
             deletions: None,
+            relationship: None,
         };
         let stopped = if is_schema {
             engine.schema_until(&schema_request, "readback").await

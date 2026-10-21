@@ -6,13 +6,13 @@ use super::scalar;
 #[cfg(feature = "test-util")]
 use super::support;
 use arrow::array::{Int64Array, StringArray};
+#[cfg(feature = "test-util")]
+use docspec::model::{PhaseResult, RunSpec};
 use docspec::{
     engine::verify_release,
     model::{OperationRequest, ReleasePin, SchemaField, SchemaSpec},
     storage,
 };
-#[cfg(feature = "test-util")]
-use docspec::model::{PhaseResult, RunSpec};
 use futures::{StreamExt, TryStreamExt};
 use scalar::{fixture, id, limits};
 use std::collections::BTreeMap;
@@ -318,6 +318,7 @@ async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() 
             digest: storage::digest(&path).unwrap().0,
         },
         deletions: None,
+        relationship: None,
     };
     let updated = engine.update(&update).await.unwrap();
     let mut stream = engine.read_combined(&updated).await.unwrap();

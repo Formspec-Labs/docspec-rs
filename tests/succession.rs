@@ -97,6 +97,7 @@ async fn every_selection_records_actual_predecessor_in_the_same_native_commit() 
             &[(Some(1), Some("new".into()))],
         ),
         deletions: None,
+        relationship: None,
     };
     let updated = engine.update(&update).await.unwrap();
     let mut request = build(&updated, "rebuilt");

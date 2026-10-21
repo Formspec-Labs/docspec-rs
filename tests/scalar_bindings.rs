@@ -243,6 +243,7 @@ async fn redirected_rehashed_ancestor_does_not_change_an_authored_expression() {
                     digest: first_request.expected_digest.clone(),
                 },
                 deletions: None,
+                relationship: None,
             });
         }
         let wrong_parent = rehash(root.path(), "wrong_parent", wrong_parent);

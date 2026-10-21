@@ -5,6 +5,8 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
+#[cfg(feature = "test-util")]
+use docspec::model::SuccessionProof;
 use docspec::{
     Engine,
     budget::{Budget, Limits},
@@ -16,8 +18,6 @@ use docspec::{
     },
     storage,
 };
-#[cfg(feature = "test-util")]
-use docspec::model::SuccessionProof;
 use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::ArrowWriter;
 use std::{collections::BTreeMap, fs::File, path::Path, sync::Arc};
@@ -992,6 +992,7 @@ async fn offline_parent_rules_reject_related_conversion_and_role_rebinding() {
             digest: raw.expected_digest.clone(),
         },
         deletions: None,
+        relationship: None,
     };
     assert_eq!(
         engine.update(&updated).await.unwrap_err().code(),
@@ -2305,6 +2306,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                 &[(Some(9), Some(9), None, None)],
                 true,
             )),
+            relationship: None,
         })
         .await
         .unwrap();
@@ -2327,6 +2329,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                 false,
             ),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();

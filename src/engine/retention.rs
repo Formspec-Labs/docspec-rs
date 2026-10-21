@@ -843,6 +843,7 @@ mod tests {
                     keys: vec!["id".into()],
                     replacements: upd,
                     deletions: None,
+                    relationship: None,
                 })
                 .await
                 .unwrap();
@@ -918,10 +919,7 @@ mod tests {
         assert!(cold_rows.contains_key("operation/op-pending"));
         assert!(cold_rows.contains_key("export-result/exp-1"));
         assert!(
-            cold_rows
-                .prefix("owner-protection/")
-                .next()
-                .is_some(),
+            cold_rows.prefix("owner-protection/").next().is_some(),
             "active reader grant must remain preserved"
         );
 
@@ -1026,11 +1024,8 @@ mod tests {
                             OperationRequest::Build(req.clone()),
                         )
                         .unwrap(),
-                        record(
-                            format!("phase/{}/0/processing", op.request_digest),
-                            &phase,
-                        )
-                        .unwrap(),
+                        record(format!("phase/{}/0/processing", op.request_digest), &phase)
+                            .unwrap(),
                         record(
                             format!("phase/checked/{}/validation", op.request_digest),
                             &validation,

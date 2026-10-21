@@ -137,6 +137,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
             digest: "0".repeat(64),
         },
         deletions: None,
+        relationship: None,
     };
     assert_eq!(
         engine.plan_update(&update).await.unwrap_err().code(),

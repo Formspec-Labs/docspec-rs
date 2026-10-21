@@ -141,6 +141,7 @@ fn update(
             deletions,
             true,
         )),
+        relationship: None,
     }
 }
 async fn read(pin: &TablePin) -> Vec<Row> {
@@ -684,6 +685,7 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
             false,
             names,
         )),
+        relationship: None,
     };
     let result = engine.update(&spec).await.unwrap();
     let mut expected: Vec<_> = rows
@@ -828,6 +830,7 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
         keys: vec!["id".into()],
         replacements: replacement,
         deletions: None,
+        relationship: None,
     };
     let result = engine.update(&spec).await.unwrap();
     let budget = Budget::new(limits()).unwrap();

@@ -5,13 +5,13 @@ use super::scalar;
 #[cfg(feature = "test-util")]
 use super::support;
 
+#[cfg(feature = "test-util")]
+use docspec::model::{PhaseResult, TablePin};
 use docspec::{
     Engine,
     engine::verify_release,
     model::{OperationRequest, ReleasePin, RunSpec, UpdateSpec},
 };
-#[cfg(feature = "test-util")]
-use docspec::model::{PhaseResult, TablePin};
 use enriched::{check_values, enriched, forged};
 use scalar::{Row, id, input, limits, spec};
 use std::path::Path;
@@ -215,6 +215,7 @@ async fn full_rebuild_requalifies_source_and_every_group_without_changing_histor
         keys: vec!["id".into()],
         replacements: input(&root.path().join("update.parquet"), &[]),
         deletions: None,
+        relationship: None,
     };
     let refreshed = engine.update(&update).await.unwrap();
     assert_eq!(refreshed.dataset.groups, extended.dataset.groups);
@@ -313,6 +314,7 @@ async fn later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work()
                 &[(Some(1999), Some("existing origin".into()))],
             ),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
@@ -353,6 +355,7 @@ async fn later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work()
             &[(Some(2000), Some("newly accepted".into()))],
         ),
         deletions: None,
+        relationship: None,
     };
     assert_eq!(
         engine
@@ -828,6 +831,7 @@ async fn based_rebuild_recomputes_only_when_retained_schema_history_changes() {
                 &[(Some(2000), Some("newly observed".into()))],
             ),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();

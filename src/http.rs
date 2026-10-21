@@ -55,6 +55,10 @@ pub fn router(engine: Engine) -> Router {
         .route("/refreshes/run", post(refresh))
         .route("/exports/run", post(export))
         .route("/compactions/run", post(compact))
+        .route(
+            "/datasets/{dataset}/lifecycle/compact",
+            post(compact_lifecycle),
+        )
         .route("/restore-points", post(create_restore_point))
         .route("/succession", post(succession))
         .route("/generations/seal", post(seal_generation))
@@ -762,6 +766,13 @@ async fn compact(
     Json(spec): Json<CompactionSpec>,
 ) -> Result<Json<CompactionResult>, HttpError> {
     Ok(Json(engine.compact(&spec).await?))
+}
+
+async fn compact_lifecycle(
+    State(engine): State<Engine>,
+    Path(dataset): Path<String>,
+) -> Result<Json<crate::LifecycleCompactionResult>, HttpError> {
+    Ok(Json(engine.compact_lifecycle(&Id::new(dataset)?).await?))
 }
 
 #[derive(serde::Deserialize)]

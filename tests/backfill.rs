@@ -351,6 +351,7 @@ async fn stale_source_retains_files_and_catchup_reuses_unchanged_objects() {
         keys: vec!["id".into()],
         replacements: input(&root.path().join("replacement.parquet"), &replacement),
         deletions: None,
+        relationship: None,
     };
     let latest = engine.update(&update).await.unwrap();
     assert_eq!(
@@ -998,6 +999,7 @@ async fn failed_files_remain_distinct_from_successful_nulls_and_completed_files_
             keys: vec!["id".into()],
             replacements: correction,
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();

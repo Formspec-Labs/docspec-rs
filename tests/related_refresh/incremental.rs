@@ -75,6 +75,7 @@ pub(super) async fn update(
                 deletions,
                 true,
             )),
+            relationship: None,
         })
         .await
         .unwrap();

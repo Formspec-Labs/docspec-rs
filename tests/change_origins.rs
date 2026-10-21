@@ -32,6 +32,7 @@ fn update(
         keys: vec!["id".into()],
         replacements: scalar::input(&root.join(format!("{operation}.parquet")), rows),
         deletions: None,
+        relationship: None,
     }
 }
 

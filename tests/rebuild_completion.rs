@@ -396,6 +396,7 @@ async fn newer_admission_preserves_finished_source_before_acknowledgment_and_reb
                 &[(Some(9000), Some("initial origin".into()))],
             ),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
@@ -469,6 +470,7 @@ async fn newer_admission_preserves_finished_source_before_acknowledgment_and_reb
             )],
         ),
         deletions: None,
+        relationship: None,
     };
     let admission =
         tokio::time::timeout(HANDOFF_DEADLINE, engine.update_until(&newer, "admission"))

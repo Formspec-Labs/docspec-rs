@@ -43,6 +43,7 @@ async fn processing_keeps_its_consumed_input_when_an_admission_key_is_rebound() 
             keys: vec!["id".into()],
             replacements: incoming,
             deletions: None,
+            relationship: None,
         };
         let stopped = if update {
             engine.update_until(&change, "processing").await

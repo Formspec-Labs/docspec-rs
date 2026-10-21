@@ -689,6 +689,7 @@ async fn replacements_deletions_and_old_downloads_follow_their_exact_snapshots()
                 &deletions,
                 true,
             )),
+            relationship: None,
         })
         .await
         .unwrap();

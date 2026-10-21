@@ -152,6 +152,7 @@ async fn reversed_nonleading_keys_refresh_joins_and_summaries_with_exact_evidenc
                 ],
             ),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();

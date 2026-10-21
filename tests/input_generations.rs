@@ -311,6 +311,7 @@ async fn updates_and_backfills_inherit_but_resealing_requires_exact_new_members(
             keys: vec!["id".into()],
             replacements,
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();

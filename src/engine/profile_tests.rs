@@ -100,6 +100,7 @@ async fn profile_hourly_polling_workspace() {
                 keys: vec!["id".into()],
                 replacements: update_input,
                 deletions: None,
+                relationship: None,
             })
             .await
             .unwrap();
@@ -423,11 +424,7 @@ async fn profile_lifecycle_compaction_and_warm_commit_scaling() {
             .lifecycle
             .commit(
                 &view,
-                vec![crate::catalog::record(
-                    "invalidation/0",
-                    format!("probe-{target}"),
-                )
-                .unwrap()],
+                vec![crate::catalog::record("invalidation/0", format!("probe-{target}")).unwrap()],
             )
             .await
             .unwrap();

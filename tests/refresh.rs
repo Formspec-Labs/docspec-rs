@@ -4,9 +4,9 @@ use super::enriched;
 use super::scalar;
 #[cfg(feature = "test-util")]
 use super::support;
-use enriched::{enriched, forged};
 #[cfg(feature = "test-util")]
 use enriched::check_values;
+use enriched::{enriched, forged};
 use scalar::{Row, id, input, limits};
 #[cfg(feature = "test-util")]
 use scalar::{fixture, spec};
@@ -16,15 +16,15 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use docspec::{
-    engine::verify_release,
-    model::{InputSpec, OperationRequest, ReleasePin, UpdateSpec},
-    storage,
-};
 #[cfg(feature = "test-util")]
 use docspec::{
     Engine,
     model::{PhaseResult, TablePin},
+};
+use docspec::{
+    engine::verify_release,
+    model::{InputSpec, OperationRequest, ReleasePin, UpdateSpec},
+    storage,
 };
 use parquet::arrow::ArrowWriter;
 #[cfg(feature = "test-util")]
@@ -66,6 +66,7 @@ fn update(
             &root.join(format!("{operation}-keys.parquet")),
             deleted.iter().copied(),
         )),
+        relationship: None,
     }
 }
 

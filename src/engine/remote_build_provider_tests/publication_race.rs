@@ -337,6 +337,7 @@ async fn race(
             keys: vec!["counter".into()],
             replacements: replacement.clone(),
             deletions: None,
+            relationship: None,
         })
         .await?;
     std::fs::remove_file(&replacement.path)?;

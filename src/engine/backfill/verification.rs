@@ -100,7 +100,7 @@ pub(crate) async fn verify_groups(
             }
             if inherited_inputs != base.inputs
                 || base.related.is_some()
-                || dataset.relationship != base.relationship
+                || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
                 || base.eligibility != dataset.eligibility
                 || dataset.boundary <= base.boundary
                 || dataset.definition != base.definition

@@ -36,6 +36,7 @@ async fn fence_preserves_selection_and_completions_and_reconciles_exact_retry() 
             &[(Some(1), Some("corrected".into()))],
         ),
         deletions: None,
+        relationship: None,
     };
     assert_eq!(
         engine
@@ -75,6 +76,7 @@ async fn fence_preserves_selection_and_completions_and_reconciles_exact_retry() 
     );
     let replacement = UpdateSpec {
         operation: id("new-worker"),
+        relationship: None,
         ..request.clone()
     };
     let selected = engine.update(&replacement).await.unwrap();

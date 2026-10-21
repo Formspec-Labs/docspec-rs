@@ -52,6 +52,7 @@ async fn updated(root: &std::path::Path) -> (Engine, ReleasePin, ReleasePin) {
                 &[(Some(0), Some("changed".into())), (Some(2048), None)],
             ),
             deletions: Some(deletions),
+            relationship: None,
         })
         .await
         .unwrap();

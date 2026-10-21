@@ -219,6 +219,7 @@ async fn interrupted_parent_catches_up_replacements_deletions_and_insertions() {
                     &root.path().join("deletions.parquet"),
                     vec![Some(1)],
                 )),
+                relationship: None,
             })
             .await
             .unwrap();
@@ -306,6 +307,7 @@ async fn retained_child_catches_up_correction_with_sibling_and_compaction_in_fli
             &root.path().join("deletions.parquet"),
             vec![Some(9)],
         )),
+        relationship: None,
     };
     assert_eq!(
         engine
@@ -494,6 +496,7 @@ async fn repeated_corrections_preserve_one_backfill_intent_during_compaction() {
                     std::slice::from_ref(&replacement),
                 ),
                 deletions: None,
+                relationship: None,
             })
             .await
             .unwrap();

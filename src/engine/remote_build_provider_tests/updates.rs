@@ -173,6 +173,7 @@ async fn prepare(engine: &Engine, dataset: &Id, producer: &Path) -> Result<Prepa
             &[(2, None)],
             true,
         )?),
+        relationship: None,
     };
     let stopped = engine
         .update_until(&first_request, "processing")
@@ -267,6 +268,7 @@ async fn prepare(engine: &Engine, dataset: &Id, producer: &Path) -> Result<Prepa
             false,
         )?,
         deletions: None,
+        relationship: None,
         ..first_request.clone()
     };
     let second = engine.update(&second_request).await?;

@@ -255,6 +255,8 @@ enum Command {
     ReadExport { pin: PathBuf, output: PathBuf },
     /// Rewrite selected files while preserving their exact logical values.
     Compact { spec: PathBuf },
+    /// Rewrite superseded lifecycle revisions behind the active protected release.
+    CompactLifecycle { dataset: String },
     /// Retain a configured catalog image and its required immutable objects.
     CreateRestorePoint { dataset: String, point: String },
     /// Restore catalog registrations into an explicitly quiescent fresh remote generation.
@@ -933,6 +935,9 @@ async fn main() -> anyhow::Result<()> {
                 Command::Compact { spec } => {
                     print_json(&engine.compact(&read_json::<CompactionSpec>(spec)?).await?)?
                 }
+                Command::CompactLifecycle { dataset } => {
+                    print_json(&engine.compact_lifecycle(&Id::new(dataset)?).await?)?
+                }
                 Command::CreateRestorePoint { dataset, point } => print_json(
                     &engine
                         .create_restore_point(&Id::new(dataset)?, &Id::new(point)?)
@@ -1146,7 +1151,7 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
             Command::Read { group, .. }
                 | Command::Compare { group, .. }
                 | Command::Changes { group, .. }
-                if group != "source"
+                if docspec::BackendCapability::for_group(group).local_only()
         ) {
             return Err(docspec::Error::refusal(
                 "remote_command_unavailable",

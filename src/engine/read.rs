@@ -15,9 +15,7 @@ impl Engine {
         release: &ReleasePin,
         group: &str,
     ) -> Result<SendableRecordBatchStream> {
-        if group != "source" {
-            self.require_local()?;
-        }
+        self.require_group(group)?;
         let memory = self.request_memory(&(release, group))?;
         let release = release.clone();
         let group = group.to_owned();

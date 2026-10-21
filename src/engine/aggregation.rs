@@ -619,6 +619,7 @@ mod tests {
                     ],
                 ),
                 deletions: None,
+                relationship: None,
             })
             .await
             .unwrap();
@@ -916,6 +917,7 @@ mod tests {
                     ],
                 ),
                 deletions: None,
+                relationship: None,
             })
             .await
             .unwrap();

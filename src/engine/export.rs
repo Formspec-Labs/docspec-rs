@@ -73,9 +73,7 @@ impl Engine {
 
     async fn export_request(&self, spec: &ExportSpec, stop: Option<String>) -> Result<ExportPin> {
         self.require_data_work()?;
-        if spec.policy.group != "source" {
-            self.require_local()?;
-        }
+        self.require_group(&spec.policy.group)?;
         let memory = self.request_memory(&(spec, &stop))?;
         validate_request(spec)?;
         let spec = spec.clone();
@@ -500,7 +498,8 @@ impl Engine {
 
     fn check_export_backend(&self, source: &ReleasePin, policy: &ExportPolicy) -> Result<()> {
         if !self.inner.retained.is_local()
-            && (policy.group != "source" || !remote_source_only(&source.dataset))
+            && (BackendCapability::for_group(&policy.group).local_only()
+                || !remote_source_only(&source.dataset))
         {
             return Err(locations::unsupported());
         }
@@ -907,9 +906,7 @@ fn sanitize_export_field(
         DataType::Struct(fields) if !fields.is_empty() => {
             let mut sanitized = Vec::with_capacity(fields.len());
             for child in fields {
-                sanitized.push(Arc::new(sanitize_export_field(
-                    root_name, child, seen_ids,
-                )?));
+                sanitized.push(Arc::new(sanitize_export_field(root_name, child, seen_ids)?));
             }
             DataType::Struct(sanitized.into())
         }
@@ -1233,7 +1230,7 @@ mod tests {
                 ),
                 field(
                     "nested_empty_struct",
-                    DataType::Struct( Vec::<Field>::new().into()),
+                    DataType::Struct(Vec::<Field>::new().into()),
                     "25",
                 ),
                 field(

@@ -518,6 +518,7 @@ pub(super) fn relationship(
 ) -> SourceRelationship {
     let explicit = match request {
         OperationRequest::Build(spec) => spec.relationship.as_ref(),
+        OperationRequest::Update(spec) => spec.relationship.as_ref(),
         OperationRequest::Refresh(spec) => spec.relationship.as_ref(),
         _ => None,
     };

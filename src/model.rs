@@ -847,6 +847,7 @@ pub struct Comparison {
 
 /// A reproducible local run, with trusted expected digests for supplied inputs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunSpec {
     pub dataset: Id,
     pub operation: OperationId,
@@ -865,6 +866,7 @@ pub struct RunSpec {
 
 /// A selected local input with an expected immutable byte identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InputSpec {
     pub path: String,
     pub digest: String,
@@ -872,6 +874,7 @@ pub struct InputSpec {
 
 /// Complete replacement rows and deletion keys against an exact selected version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateSpec {
     pub dataset: Id,
     pub operation: OperationId,
@@ -879,6 +882,9 @@ pub struct UpdateSpec {
     pub base: Id,
     pub keys: Vec<String>,
     pub replacements: InputSpec,
+    /// Omission retains the base relationship; a supplied value replaces it.
+    #[serde(default)]
+    pub relationship: Option<SourceRelationship>,
     pub deletions: Option<InputSpec>,
 }
 
@@ -936,6 +942,7 @@ pub struct SchemaSpec {
 
 /// A stable field identity and a row-local SQL expression over source values.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ComputedField {
     /// Stable logical field ID within its group, independent of native table numbering.
     pub id: i32,
@@ -945,6 +952,7 @@ pub struct ComputedField {
 
 /// Independently computes a field group against a retained source version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BackfillSpec {
     pub dataset: Id,
     pub operation: OperationId,
@@ -980,6 +988,7 @@ pub struct ContinuousBackfillPlan {
 
 /// Material scalar computation, independent of its adoption operation and captured source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GroupDefinition {
     pub group: Id,
     pub definition: String,
@@ -1223,4 +1232,61 @@ pub struct WriteMetrics {
     pub bytes_written: u64,
     pub rows_removed: u64,
     pub rows_added: u64,
+}
+
+#[cfg(test)]
+mod unknown_field_tests {
+    use super::*;
+
+    fn update() -> serde_json::Value {
+        serde_json::json!({
+            "dataset": "news_captures",
+            "operation": "append-1",
+            "definition": "news-v1",
+            "base": "admit-1",
+            "keys": ["id"],
+            "replacements": {"path": "replacements.parquet", "digest": "a".repeat(64)},
+        })
+    }
+
+    #[test]
+    fn update_rejects_unknown_fields_instead_of_dropping_them() {
+        let mut value = update();
+        value["unacknowledged"] = serde_json::json!("must refuse");
+        let error = serde_json::from_value::<UpdateSpec>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
+
+    #[test]
+    fn update_relationship_is_an_explicit_optional_field() {
+        let spec: UpdateSpec = serde_json::from_value(update()).unwrap();
+        assert!(spec.relationship.is_none());
+
+        let mut value = update();
+        value["relationship"] = serde_json::json!({
+            "kind": "coupled", "family": "news", "generation": "g2"
+        });
+        let spec: UpdateSpec = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            spec.relationship,
+            Some(SourceRelationship::Coupled {
+                family: Id::new("news").unwrap(),
+                generation: Id::new("g2").unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn run_spec_rejects_unknown_fields() {
+        let value = serde_json::json!({
+            "dataset": "news_captures",
+            "operation": "admit-1",
+            "input": "source.parquet",
+            "expected_digest": "a".repeat(64),
+            "sql": "SELECT * FROM input",
+            "definition": "news-v1",
+            "unexpected": true,
+        });
+        assert!(serde_json::from_value::<RunSpec>(value).is_err());
+    }
 }

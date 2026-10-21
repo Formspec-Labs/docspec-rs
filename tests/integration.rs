@@ -57,4 +57,5 @@ mod scalar_bindings;
 mod scalar_dependency_reads;
 mod schema;
 mod succession;
+mod update_relationship;
 mod updates;

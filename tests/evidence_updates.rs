@@ -328,6 +328,7 @@ async fn first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_fi
         keys: vec!["id".into()],
         replacements: values(&root.path().join("correction.parquet"), &[(1, Some("new"))]),
         deletions: None,
+        relationship: None,
     };
     let changed = engine.update(&update).await.unwrap();
     let after = locations(&engine, &changed).await;
@@ -787,6 +788,7 @@ async fn one_receipt_on_many_origin_files_uses_a_fixed_reader_budget() {
             keys: vec!["id".into()],
             replacements: values(&root.path().join("append.parquet"), &[(999, Some("new"))]),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
@@ -854,6 +856,7 @@ async fn adopted_receipts_do_not_appear_as_pending_after_cold_validation_recover
         keys: vec!["id".into()],
         replacements: values(&root.path().join("append.parquet"), &[(4, Some("new"))]),
         deletions: None,
+        relationship: None,
     };
     engine.shutdown().await.unwrap();
     drop(engine);
@@ -918,6 +921,7 @@ async fn inherited_receipt_deletions_survive_process_loss_without_repeating_work
             &[(1, Some("corrected"))],
         ),
         deletions: None,
+        relationship: None,
     };
     engine.shutdown().await.unwrap();
     drop(engine);

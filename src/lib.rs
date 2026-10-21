@@ -19,6 +19,8 @@ pub mod storage;
 #[doc(inline)]
 pub use catalog::LifecycleCompactionResult;
 #[doc(inline)]
+pub use engine::BackendCapability;
+#[doc(inline)]
 pub use engine::Engine;
 #[doc(inline)]
 pub use error::{Error, Result};

@@ -378,6 +378,7 @@ async fn stable_source_ids_compare_actual_changes_after_rename_and_reorder() {
             keys: vec!["id".into()],
             replacements: scalar::input(&root.path().join("replacements.parquet"), &replacements),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
@@ -431,6 +432,7 @@ async fn streaming_values_and_occurrences_match_independent_bags_in_both_directi
             keys: vec!["id".into()],
             replacements: scalar::input(&root.path().join("replacements.parquet"), &replacements),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
@@ -628,6 +630,7 @@ async fn computed_groups_use_retained_addresses_and_report_added_definitions() {
             keys: vec!["id".into()],
             replacements: scalar::input(&root.path().join("same.parquet"), &[replacement]),
             deletions: None,
+            relationship: None,
         })
         .await
         .unwrap();
