@@ -142,12 +142,32 @@ fn unprovable_cases_keep_the_file() {
     assert!(keeps(col("id").not_eq(lit(15_i64))));
     assert!(keeps(col("id").is_null()));
     assert!(keeps((col("id") + lit(1_i64)).eq(lit(99_i64))));
-    // Strings at or beyond the 64-byte statistics truncation length.
-    let long = "z".repeat(64);
+    // 64-byte SHA-256 hex digests and 74-byte `body_key` locators are strictly shorter
+    // than `STATISTICS_TRUNCATE_BYTES` (128) and therefore prune disjoint files.
+    let sha_file = file(
+        vec![(NAME, Datum::string("a".repeat(64)))],
+        vec![(NAME, Datum::string("f".repeat(64)))],
+    );
+    assert!(!file_matches_inexact_filters(
+        &schema(),
+        &sha_file,
+        &[col("name").eq(lit("0".repeat(64)))],
+    ));
+    let body_key_file = file(
+        vec![(NAME, Datum::string(format!("text/plain{}", "a".repeat(64))))],
+        vec![(NAME, Datum::string(format!("text/plain{}", "f".repeat(64))))],
+    );
+    assert!(!file_matches_inexact_filters(
+        &schema(),
+        &body_key_file,
+        &[col("name").eq(lit(format!("text/plain{}", "0".repeat(64))))],
+    ));
+    // Strings at or beyond the 128-byte statistics truncation length are kept conservatively.
+    let long = "z".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES);
     assert!(keeps(col("name").eq(lit(long.clone()))));
     let truncated = file(
-        vec![(NAME, Datum::string("a".repeat(64)))],
-        vec![(NAME, Datum::string("a".repeat(64)))],
+        vec![(NAME, Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)))],
+        vec![(NAME, Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)))],
     );
     assert!(file_matches_inexact_filters(
         &schema(),

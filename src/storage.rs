@@ -71,6 +71,14 @@ use std::{
     sync::Arc,
 };
 
+/// Maximum byte length written into Parquet column chunk min/max statistics.
+///
+/// Variable-width bounds strictly shorter than this threshold are guaranteed
+/// untruncated and can be used as exact interval endpoints for file pruning
+/// (including 36-byte UUIDs, 64-byte SHA-256 hex digests, and 74-byte `body_key`
+/// locators).
+pub(crate) const STATISTICS_TRUNCATE_BYTES: usize = 128;
+
 /// Hashes the exact compact JSON serialization without retaining its bytes.
 ///
 /// # Errors
@@ -380,7 +388,7 @@ where
             // writer falls back transparently once its page budget is exceeded.
             .set_dictionary_enabled(true)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
-            .set_statistics_truncate_length(Some(64))
+            .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
             .set_offset_index_disabled(true)
             .build();
         let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())

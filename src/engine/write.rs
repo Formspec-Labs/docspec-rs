@@ -910,10 +910,10 @@ pub(super) fn untruncated_bound(
     use iceberg::spec::PrimitiveLiteral;
     let lit = PrimitiveLiteral::from(datum.clone());
     match &lit {
-        // Chunk statistics truncate variable-width bounds at 64 bytes. Only treat
-        // bounds strictly shorter than 64 bytes as exact interval endpoints.
-        PrimitiveLiteral::String(s) if s.len() >= 64 => None,
-        PrimitiveLiteral::Binary(b) if b.len() >= 64 => None,
+        // Chunk statistics truncate variable-width bounds at `STATISTICS_TRUNCATE_BYTES`.
+        // Only treat bounds strictly shorter than that limit as exact interval endpoints.
+        PrimitiveLiteral::String(s) if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
+        PrimitiveLiteral::Binary(b) if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
         PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => None,
         _ if lit.is_nan() => None,
         _ => Some(lit),

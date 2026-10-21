@@ -595,7 +595,7 @@ impl Engine {
                     .set_data_page_size_limit(1024 * 1024)
                     .set_dictionary_enabled(true)
                     .set_statistics_enabled(EnabledStatistics::Chunk)
-                    .set_statistics_truncate_length(Some(64))
+                    .set_statistics_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
                     .set_offset_index_disabled(true)
                     .build();
                 let native = if cfg!(unix) {

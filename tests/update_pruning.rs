@@ -273,3 +273,112 @@ async fn null_affected_keys_keep_files_that_may_hold_null_keys() {
     assert_eq!(actual[&Some(100)], vec!["hundred".to_owned()]);
     assert_eq!(actual.len(), 5);
 }
+
+#[tokio::test]
+async fn sha256_string_keys_prune_disjoint_files_on_update() {
+    let root = TempDir::new().unwrap();
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let write_str_input = |path: &Path, rows: &[(&str, &str)]| -> InputSpec {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("source_id", DataType::Utf8, false),
+            Field::new("text", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(
+                    rows.iter().map(|row| row.0).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|row| row.1).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        InputSpec {
+            path: path.to_string_lossy().into_owned(),
+            digest: storage::digest(path).unwrap().0,
+        }
+    };
+    let make_sha = |prefix: char, idx: usize| -> String {
+        format!("{}{:063x}", prefix, idx)
+    };
+    let file_a = [
+        (make_sha('1', 0), "a0"),
+        (make_sha('1', 1), "a1"),
+    ];
+    let file_b = [
+        (make_sha('5', 0), "b0"),
+        (make_sha('5', 1), "b1"),
+    ];
+    let file_c = [
+        (make_sha('9', 0), "c0"),
+        (make_sha('9', 1), "c1"),
+    ];
+    assert_eq!(file_a[0].0.len(), 64);
+
+    let initial = write_str_input(
+        &root.path().join("file_a.parquet"),
+        &[(file_a[0].0.as_str(), file_a[0].1), (file_a[1].0.as_str(), file_a[1].1)],
+    );
+    let mut release = engine
+        .run(&RunSpec {
+            dataset: id("captures"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: initial.path,
+            expected_digest: initial.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "captures-v1".into(),
+        })
+        .await
+        .unwrap();
+    for (name, chunk) in [("append-b", &file_b), ("append-c", &file_c)] {
+        let repl = write_str_input(
+            &root.path().join(format!("{name}.parquet")),
+            &[(chunk[0].0.as_str(), chunk[0].1), (chunk[1].0.as_str(), chunk[1].1)],
+        );
+        release = engine
+            .update(&UpdateSpec {
+                dataset: id("captures"),
+                operation: id(name),
+                definition: "captures-v1".into(),
+                base: release.id.clone(),
+                keys: vec!["source_id".into()],
+                replacements: repl,
+                deletions: None,
+                relationship: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    // Touch only a key in `file_c` ('9' prefix); `file_a` and `file_b` must be reused without scanning.
+    let touch = write_str_input(
+        &root.path().join("touch-c.parquet"),
+        &[(file_c[0].0.as_str(), "c0-updated")],
+    );
+    let updated = engine
+        .update(&UpdateSpec {
+            dataset: id("captures"),
+            operation: id("touch-c"),
+            definition: "captures-v1".into(),
+            base: release.id.clone(),
+            keys: vec!["source_id".into()],
+            replacements: touch,
+            deletions: None,
+            relationship: None,
+        })
+        .await
+        .unwrap();
+    let metrics = processing(&engine, &updated).await.metrics;
+    assert_eq!(metrics.files_reused, 2, "{metrics:?}");
+    // 1 retained file (`file_c`) + 1 replacement input file = 2 files scanned.
+    assert_eq!(metrics.files_scanned, 2, "{metrics:?}");
+}

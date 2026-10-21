@@ -496,8 +496,16 @@ fn untruncated_file_bounds(
     let high = PrimitiveLiteral::from(file.upper_bounds().get(&field_id)?.clone());
     for bound in [&low, &high] {
         match bound {
-            PrimitiveLiteral::String(s) if s.len() >= 64 => return None,
-            PrimitiveLiteral::Binary(b) if b.len() >= 64 => return None,
+            PrimitiveLiteral::String(s)
+                if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES =>
+            {
+                return None;
+            }
+            PrimitiveLiteral::Binary(b)
+                if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES =>
+            {
+                return None;
+            }
             PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => return None,
             _ if bound.is_nan() => return None,
             _ => {}
@@ -517,7 +525,7 @@ fn scalar_to_primitive_literal(
     };
     match (scalar, prim) {
         (ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)), PrimitiveType::String)
-            if s.len() < 64 =>
+            if s.len() < crate::storage::STATISTICS_TRUNCATE_BYTES =>
         {
             Some(PrimitiveLiteral::String(s.clone()))
         }
