@@ -148,6 +148,10 @@ pub fn router(engine: Engine) -> Router {
             get(read_group),
         )
         .route(
+            "/datasets/{dataset}/versions/{version}/keys",
+            post(read_keys),
+        )
+        .route(
             "/datasets/{dataset}/versions/{version}/evidence",
             get(read_evidence),
         )
@@ -981,6 +985,14 @@ async fn read_group(
     read(engine, dataset, version, ReadKind::Group(group)).await
 }
 
+async fn read_keys(
+    State(engine): State<Engine>,
+    Path((dataset, version)): Path<(String, String)>,
+    Json(spec): Json<crate::model::KeyReadSpec>,
+) -> Result<Response, HttpError> {
+    read(engine, dataset, version, ReadKind::Keys(spec)).await
+}
+
 async fn read_evidence(
     State(engine): State<Engine>,
     Path((dataset, version)): Path<(String, String)>,
@@ -991,6 +1003,7 @@ async fn read_evidence(
 enum ReadKind {
     Combined,
     Group(String),
+    Keys(crate::model::KeyReadSpec),
     Evidence,
     Receipts,
     Occurrences,
@@ -1020,6 +1033,7 @@ async fn read(
         .await?;
     let batches = match kind {
         ReadKind::Group(group) => engine.read_group(&release, &group).await?,
+        ReadKind::Keys(spec) => engine.read_keys(&release, &spec).await?,
         ReadKind::Combined => engine.read_combined(&release).await?,
         ReadKind::Evidence => engine.read_evidence(&release).await?,
         ReadKind::Receipts => engine.read_receipts(&release).await?,

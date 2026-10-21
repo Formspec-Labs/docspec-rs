@@ -1,7 +1,9 @@
 //! Verified native field-group reads through the execution host's shared budget.
 
 use super::*;
+use arrow::record_batch::RecordBatch;
 use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter};
+use std::collections::BTreeSet;
 
 impl Engine {
     /// Streams one retained field group from an exact release.
@@ -48,6 +50,41 @@ impl Engine {
                 Error::refusal("missing_evidence", "release has no contributor relation")
             })?;
             read_pin(&related.evidence, &engine.inner.lifecycle.budget).await
+        })
+        .await
+    }
+
+    /// Streams source rows matching a bounded set of scalar keys from an exact release.
+    ///
+    /// Resolves this host's available result once, prunes non-overlapping files via
+    /// Iceberg manifest bounds on values-only scans, and projects/filters matching rows.
+    ///
+    /// # Errors
+    /// Refuses unknown keys/columns, invalid retained releases, or exhausted reader capacity.
+    pub async fn read_keys(
+        &self,
+        release: &ReleasePin,
+        spec: &crate::model::KeyReadSpec,
+    ) -> Result<SendableRecordBatchStream> {
+        self.require_group("source")?;
+        let memory = self.request_memory(&(release, spec))?;
+        let release = release.clone();
+        let spec = spec.clone();
+        self.admit_stream(memory, move |engine| async move {
+            let view = engine.check_read_release(&release).await?;
+            let canonical = release.dataset.groups.get("source").ok_or_else(|| {
+                Error::refusal("missing_group", "release lacks the requested field group")
+            })?;
+            let pin = engine
+                .representation_pin(&view, &release.id, "source", canonical)
+                .await?;
+            read_keys_with_objects(
+                &engine.inner.objects,
+                &pin,
+                &spec,
+                &engine.inner.lifecycle.budget,
+            )
+            .await
         })
         .await
     }
@@ -172,4 +209,204 @@ pub async fn read_compaction(
         ));
     }
     read_pin(&result.replacement, budget).await
+}
+
+/// Streams source rows matching `spec` without requiring the producing catalog.
+///
+/// # Errors
+/// Refuses invalid releases, unknown keys/columns, or exhausted reader capacity.
+pub async fn read_keys(
+    release: &ReleasePin,
+    spec: &crate::model::KeyReadSpec,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    let pin = release.dataset.groups.get("source").ok_or_else(|| {
+        Error::refusal("missing_group", "release lacks the requested field group")
+    })?;
+    resolve_release(release, budget).await?;
+    read_keys_with_objects(&storage::Objects::Local, pin, spec, budget).await
+}
+
+pub(super) async fn read_keys_with_objects(
+    objects: &storage::Objects,
+    pin: &TablePin,
+    spec: &crate::model::KeyReadSpec,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    if spec.key.is_empty() || spec.key.to_ascii_lowercase().starts_with("__docspec_") {
+        return Err(Error::refusal(
+            "invalid_key_read",
+            "key read requires a public source key column",
+        ));
+    }
+    let table = objects.open_pin(pin, budget).await?;
+    let public_schema = storage::identity::public_schema(&table)?;
+    let key_public_idx = public_schema.index_of(&spec.key).map_err(|_| {
+        Error::refusal(
+            "invalid_key_read",
+            "requested key column is absent from the source schema",
+        )
+    })?;
+    if !matches!(
+        public_schema.field(key_public_idx).data_type(),
+        arrow::datatypes::DataType::Utf8
+            | arrow::datatypes::DataType::LargeUtf8
+            | arrow::datatypes::DataType::Int32
+            | arrow::datatypes::DataType::Int64
+    ) {
+        return Err(Error::refusal(
+            "invalid_key_read",
+            "key read requires a scalar Utf8, Int32, or Int64 key column",
+        ));
+    }
+    let out_indices: Vec<usize> = match &spec.columns {
+        Some(cols) => {
+            if cols.is_empty()
+                || cols
+                    .iter()
+                    .any(|c| c.is_empty() || c.to_ascii_lowercase().starts_with("__docspec_"))
+                || cols.iter().collect::<BTreeSet<_>>().len() != cols.len()
+            {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "requested columns must be distinct public source columns",
+                ));
+            }
+            cols.iter()
+                .map(|name| {
+                    public_schema.index_of(name).map_err(|_| {
+                        Error::refusal(
+                            "invalid_key_read",
+                            "requested column is absent from the source schema",
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?
+        }
+        None => (0..public_schema.fields().len()).collect(),
+    };
+    let out_schema = Arc::new(public_schema.project(&out_indices)?);
+    if spec.values.is_empty() || pin.snapshot.is_none() || pin.rows == 0 {
+        return Ok(Box::pin(RecordBatchStreamAdapter::new(
+            out_schema,
+            futures::stream::empty(),
+        )));
+    }
+    let inventory = storage::current_snapshot_files(&table, budget).await?;
+    let scan = Arc::new(storage::OccurrenceScan::values(&table, budget, inventory).await?);
+    let scan_schema = scan.schema();
+    let mut scan_indices = Vec::with_capacity(out_indices.len() + 1);
+    for &pub_idx in &out_indices {
+        let name = public_schema.field(pub_idx).name();
+        let idx = scan_schema.index_of(name)?;
+        if !scan_indices.contains(&idx) {
+            scan_indices.push(idx);
+        }
+    }
+    let key_scan_idx = scan_schema.index_of(&spec.key)?;
+    if !scan_indices.contains(&key_scan_idx) {
+        scan_indices.push(key_scan_idx);
+    }
+    let projected_schema = Arc::new(scan_schema.project(&scan_indices)?);
+    let key_in_projected = projected_schema.index_of(&spec.key)?;
+    let out_in_projected: Vec<usize> = out_schema
+        .fields()
+        .iter()
+        .map(|f| projected_schema.index_of(f.name()))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let key_field_id = table
+        .metadata()
+        .current_schema()
+        .field_by_name(&spec.key)
+        .map(|f| f.id);
+    let target_set: Arc<BTreeSet<String>> = Arc::new(spec.values.iter().cloned().collect());
+    let candidate_paths: Vec<String> = scan
+        .files()
+        .filter(|file| file_may_contain_string_keys(file, key_field_id, &target_set))
+        .map(|file| file.file_path().to_owned())
+        .collect();
+
+    let budget_clone = budget.clone();
+    let stream =
+        futures::stream::iter(candidate_paths)
+            .map(move |path| scan.read_projected_file(&path, &budget_clone, Some(&scan_indices)))
+            .try_flatten()
+            .and_then(move |batch| {
+                let target_set = target_set.clone();
+                let out_in_projected = out_in_projected.clone();
+                async move {
+                    filter_batch_by_keys(&batch, key_in_projected, &target_set, &out_in_projected)
+                }
+            })
+            .try_filter(|batch| futures::future::ready(batch.num_rows() > 0))
+            .map_err(|error| datafusion::error::DataFusionError::External(Box::new(error)));
+
+    Ok(Box::pin(RecordBatchStreamAdapter::new(out_schema, stream)))
+}
+
+fn file_may_contain_string_keys(
+    file: &iceberg::spec::DataFile,
+    key_field_id: Option<i32>,
+    target_set: &BTreeSet<String>,
+) -> bool {
+    let Some(field_id) = key_field_id else {
+        return true;
+    };
+    let (Some(low), Some(high)) = (
+        file.lower_bounds().get(&field_id),
+        file.upper_bounds().get(&field_id),
+    ) else {
+        return true;
+    };
+    let (
+        iceberg::spec::PrimitiveLiteral::String(low_str),
+        iceberg::spec::PrimitiveLiteral::String(high_str),
+    ) = (
+        iceberg::spec::PrimitiveLiteral::from(low.clone()),
+        iceberg::spec::PrimitiveLiteral::from(high.clone()),
+    )
+    else {
+        return true;
+    };
+    if low_str.len() >= 64 || high_str.len() >= 64 || low_str > high_str {
+        return true;
+    }
+    target_set.range(low_str..=high_str).next().is_some()
+}
+
+fn filter_batch_by_keys(
+    batch: &RecordBatch,
+    key_idx: usize,
+    target_set: &BTreeSet<String>,
+    out_indices: &[usize],
+) -> Result<RecordBatch> {
+    use arrow::array::{
+        Array, BooleanArray, Int32Array, Int64Array, LargeStringArray, StringArray,
+    };
+    let col = batch.column(key_idx);
+    let mask: BooleanArray = if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+        (0..arr.len())
+            .map(|i| Some(!arr.is_null(i) && target_set.contains(arr.value(i))))
+            .collect()
+    } else if let Some(arr) = col.as_any().downcast_ref::<LargeStringArray>() {
+        (0..arr.len())
+            .map(|i| Some(!arr.is_null(i) && target_set.contains(arr.value(i))))
+            .collect()
+    } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
+        (0..arr.len())
+            .map(|i| Some(!arr.is_null(i) && target_set.contains(&arr.value(i).to_string())))
+            .collect()
+    } else if let Some(arr) = col.as_any().downcast_ref::<Int32Array>() {
+        (0..arr.len())
+            .map(|i| Some(!arr.is_null(i) && target_set.contains(&arr.value(i).to_string())))
+            .collect()
+    } else {
+        return Err(Error::refusal(
+            "invalid_key_read",
+            "unsupported physical array type for key column",
+        ));
+    };
+    let projected = batch.project(out_indices)?;
+    Ok(arrow::compute::filter_record_batch(&projected, &mask)?)
 }

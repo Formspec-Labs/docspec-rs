@@ -197,3 +197,70 @@ async fn omitting_update_relationship_retains_the_base_declaration() {
     let second = engine.update(&update).await.unwrap();
     assert_eq!(second.dataset.relationship, coupled("g1"));
 }
+
+#[tokio::test]
+async fn read_keys_and_update_prune_non_overlapping_files_and_project_columns() {
+    use futures::TryStreamExt;
+    let root = TempDir::new().unwrap();
+    let workspace = root.path().join("workspace");
+    let engine = Engine::open(&workspace, limits()).await.unwrap();
+
+    let batch1: Vec<Row> = (0_i64..4)
+        .map(|v| (Some(v), Some(format!("payload-{v}"))))
+        .collect();
+    let source1 = input(&root.path().join("b1.parquet"), &batch1, false);
+    let r1 = engine
+        .run(&RunSpec {
+            dataset: id("news"),
+            operation: id("b1"),
+            base: None,
+            relationship: None,
+            input: source1.path,
+            expected_digest: source1.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "news-v1".into(),
+        })
+        .await
+        .unwrap();
+
+    let batch2: Vec<Row> = (100_i64..104)
+        .map(|v| (Some(v), Some(format!("payload-{v}"))))
+        .collect();
+    let source2 = input(&root.path().join("b2.parquet"), &batch2, false);
+    let r2 = engine
+        .update(&UpdateSpec {
+            dataset: id("news"),
+            operation: id("b2"),
+            definition: "news-v1".into(),
+            base: r1.id.clone(),
+            keys: vec!["id".into()],
+            replacements: source2,
+            deletions: None,
+            relationship: None,
+        })
+        .await
+        .unwrap();
+
+    // Lookup only id=102 with projected columns=["id"]:
+    let stream = engine
+        .read_keys(
+            &r2,
+            &docspec::model::KeyReadSpec {
+                key: "id".into(),
+                values: vec!["102".into()],
+                columns: Some(vec!["id".into()]),
+            },
+        )
+        .await
+        .unwrap();
+    let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+    let total_rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
+    assert_eq!(total_rows, 1);
+    assert_eq!(batches[0].num_columns(), 1);
+    let col = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    assert_eq!(col.value(0), 102);
+}

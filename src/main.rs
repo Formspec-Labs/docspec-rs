@@ -317,6 +317,12 @@ enum Command {
     ReadReceipts { release: PathBuf, output: PathBuf },
     /// Stream source values and stable occurrence keys from the local host.
     ReadOccurrences { release: PathBuf, output: PathBuf },
+    /// Stream source rows matching a bounded set of scalar keys as Arrow IPC.
+    ReadKeys {
+        release: PathBuf,
+        spec: PathBuf,
+        output: PathBuf,
+    },
     /// Compare complete pinned results, preserving duplicate row counts.
     Compare {
         before: PathBuf,
@@ -1058,6 +1064,17 @@ async fn main() -> anyhow::Result<()> {
                 } => {
                     let release: ReleasePin = read_json(release)?;
                     let stream = engine.read_group(&release, &group).await?;
+                    write_stream(output, stream).await?;
+                    engine.shutdown().await?;
+                }
+                Command::ReadKeys {
+                    release,
+                    spec,
+                    output,
+                } => {
+                    let release: ReleasePin = read_json(release)?;
+                    let spec: docspec::model::KeyReadSpec = read_json(spec)?;
+                    let stream = engine.read_keys(&release, &spec).await?;
                     write_stream(output, stream).await?;
                     engine.shutdown().await?;
                 }

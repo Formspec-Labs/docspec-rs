@@ -377,6 +377,14 @@ impl OccurrenceScan {
         &self.schema
     }
 
+    pub fn native_schema(&self) -> &iceberg::spec::SchemaRef {
+        &self.native_schema
+    }
+
+    pub fn is_located(&self) -> bool {
+        self.located
+    }
+
     async fn capture(mut state: Occurrences, metadata_limit: usize) -> Result<Self> {
         let mut tasks = BTreeMap::new();
         let mut bytes = 0usize;

@@ -319,14 +319,12 @@ impl Lifecycle {
                     check_history_size(bytes, self.budget.limits.max_metadata_bytes)?;
                 }
                 let revision = revisions.value(i);
-                if current
-                    .get(key)
-                    .is_none_or(|(old, _)| *old < revision)
-                {
+                if current.get(key).is_none_or(|(old, _)| *old < revision) {
                     if let Some((_, old_value)) =
                         current.insert(key.to_owned(), (revision, Arc::from(value)))
                     {
-                        cache_bytes = cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+                        cache_bytes =
+                            cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
                     }
                     cache_bytes = cache_bytes.saturating_add(row_bytes);
                     check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
@@ -689,8 +687,7 @@ fn build_baseline_batches(
     for (key, (rev, value)) in values {
         let row_bytes = key.len().saturating_add(value.len()).saturating_add(64);
         if !keys.is_empty()
-            && (keys.len() >= max_rows
-                || current_bytes.saturating_add(row_bytes) > max_batch_bytes)
+            && (keys.len() >= max_rows || current_bytes.saturating_add(row_bytes) > max_batch_bytes)
         {
             batches.push(Ok(RecordBatch::try_new(
                 schema.clone(),

@@ -65,6 +65,7 @@ fn provider(
         schema: schema.clone(),
         budget,
         rows: rows.and_then(|rows| usize::try_from(rows).ok()),
+        filters: Vec::new(),
     };
     Ok(Arc::new(NativeTable(Arc::new(partition))))
 }
@@ -138,6 +139,7 @@ fn projected_files(
         schema: schema.clone(),
         budget,
         rows,
+        filters: Vec::new(),
     };
     Ok(Arc::new(NativeTable(Arc::new(partition))))
 }
@@ -159,11 +161,25 @@ impl TableProvider for NativeTable {
         TableType::View
     }
 
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>>
+    {
+        use datafusion::logical_expr::TableProviderFilterPushDown;
+        let status = if self.0.is_located() {
+            TableProviderFilterPushDown::Unsupported
+        } else {
+            TableProviderFilterPushDown::Inexact
+        };
+        Ok(vec![status; filters.len()])
+    }
+
     async fn scan(
         &self,
         _state: &dyn Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
+        filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         // DataFusion applies residual filters before query limits. Compose its
@@ -171,6 +187,11 @@ impl TableProvider for NativeTable {
         let partition = match projection {
             Some(indices) => Arc::new(self.0.project(indices).map_err(external)?),
             None => self.0.clone(),
+        };
+        let partition = if !partition.is_located() && !filters.is_empty() {
+            Arc::new(partition.with_filters(filters))
+        } else {
+            partition
         };
         let mut plan: Arc<dyn ExecutionPlan> = Arc::new(DataSourceExec::new(partition));
         if limit.is_some() {
@@ -203,9 +224,29 @@ struct NativePartition {
     budget: Budget,
     /// A count from the selected pin or captured files, never a payload estimate.
     rows: Option<usize>,
+    filters: Vec<Expr>,
 }
 
 impl NativePartition {
+    fn is_located(&self) -> bool {
+        match self.source.as_ref() {
+            NativeSource::Table { located, .. } => *located,
+            NativeSource::File { scan, .. } => scan.is_located(),
+        }
+    }
+
+    fn with_filters(&self, filters: &[Expr]) -> Self {
+        let mut next = self.filters.clone();
+        next.extend(filters.iter().cloned());
+        Self {
+            source: self.source.clone(),
+            schema: self.schema.clone(),
+            budget: self.budget.clone(),
+            rows: self.rows,
+            filters: next,
+        }
+    }
+
     fn project(&self, indices: &[usize]) -> Result<Self> {
         let memory = storage::reserve_projection(
             &self.budget,
@@ -248,6 +289,7 @@ impl NativePartition {
             schema,
             budget: self.budget.clone(),
             rows: self.rows,
+            filters: self.filters.clone(),
         })
     }
 }
@@ -333,6 +375,7 @@ impl PartitionStream for NativePartition {
     fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
         let source = self.source.clone();
         let budget = self.budget.clone();
+        let filters = self.filters.clone();
         let prepare = async move {
             let stream = match source.as_ref() {
                 NativeSource::Table {
@@ -356,9 +399,18 @@ impl PartitionStream for NativePartition {
                     path: Some(path),
                     projection,
                     ..
-                } => scan
-                    .read_projected_file(path, &budget, projection.as_deref())?
-                    .boxed(),
+                } => {
+                    if !scan.is_located()
+                        && !filters.is_empty()
+                        && let Some(file) = scan.files().find(|f| f.file_path() == path)
+                        && !file_matches_inexact_filters(scan.native_schema(), file, &filters)
+                    {
+                        futures::stream::empty().boxed()
+                    } else {
+                        scan.read_projected_file(path, &budget, projection.as_deref())?
+                            .boxed()
+                    }
+                }
                 NativeSource::File {
                     scan, path: None, ..
                 } => {
@@ -376,6 +428,15 @@ impl PartitionStream for NativePartition {
                     let memory = budget.reserve(bytes)?;
                     let paths = scan
                         .files()
+                        .filter(|file| {
+                            scan.is_located()
+                                || filters.is_empty()
+                                || file_matches_inexact_filters(
+                                    scan.native_schema(),
+                                    file,
+                                    &filters,
+                                )
+                        })
                         .map(|file| file.file_path().to_owned())
                         .collect::<Vec<_>>();
                     // The next reader opens only after the preceding stream reaches
@@ -419,6 +480,135 @@ impl PartitionStream for NativePartition {
 
 fn external(error: crate::Error) -> DataFusionError {
     DataFusionError::External(Box::new(error))
+}
+
+fn untruncated_file_bounds(
+    file: &iceberg::spec::DataFile,
+    field_id: i32,
+) -> Option<(
+    iceberg::spec::PrimitiveLiteral,
+    iceberg::spec::PrimitiveLiteral,
+)> {
+    use iceberg::spec::PrimitiveLiteral;
+    let low = PrimitiveLiteral::from(file.lower_bounds().get(&field_id)?.clone());
+    let high = PrimitiveLiteral::from(file.upper_bounds().get(&field_id)?.clone());
+    for bound in [&low, &high] {
+        match bound {
+            PrimitiveLiteral::String(s) if s.len() >= 64 => return None,
+            PrimitiveLiteral::Binary(b) if b.len() >= 64 => return None,
+            PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => return None,
+            _ if bound.is_nan() => return None,
+            _ => {}
+        }
+    }
+    (low <= high).then_some((low, high))
+}
+
+fn scalar_to_primitive_literal(
+    scalar: &datafusion::common::ScalarValue,
+    expected_type: &iceberg::spec::Type,
+) -> Option<iceberg::spec::PrimitiveLiteral> {
+    use datafusion::common::ScalarValue;
+    use iceberg::spec::{PrimitiveLiteral, PrimitiveType, Type};
+    let Type::Primitive(prim) = expected_type else {
+        return None;
+    };
+    match (scalar, prim) {
+        (ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)), PrimitiveType::String)
+            if s.len() < 64 =>
+        {
+            Some(PrimitiveLiteral::String(s.clone()))
+        }
+        (ScalarValue::Int32(Some(v)), PrimitiveType::Int) => Some(PrimitiveLiteral::Int(*v)),
+        (ScalarValue::Int64(Some(v)), PrimitiveType::Long) => Some(PrimitiveLiteral::Long(*v)),
+        (ScalarValue::Date32(Some(v)), PrimitiveType::Date) => Some(PrimitiveLiteral::Int(*v)),
+        (ScalarValue::Boolean(Some(v)), PrimitiveType::Boolean) => {
+            Some(PrimitiveLiteral::Boolean(*v))
+        }
+        _ => None,
+    }
+}
+
+fn file_matches_inexact_filters(
+    native_schema: &iceberg::spec::Schema,
+    file: &iceberg::spec::DataFile,
+    filters: &[Expr],
+) -> bool {
+    filters
+        .iter()
+        .all(|expr| file_matches_inexact_expr(native_schema, file, expr))
+}
+
+fn file_matches_inexact_expr(
+    native_schema: &iceberg::spec::Schema,
+    file: &iceberg::spec::DataFile,
+    expr: &Expr,
+) -> bool {
+    use datafusion::logical_expr::{BinaryExpr, Operator};
+    match expr {
+        Expr::BinaryExpr(BinaryExpr { left, op, right }) => match op {
+            Operator::And => {
+                file_matches_inexact_expr(native_schema, file, left)
+                    && file_matches_inexact_expr(native_schema, file, right)
+            }
+            Operator::Or => {
+                file_matches_inexact_expr(native_schema, file, left)
+                    || file_matches_inexact_expr(native_schema, file, right)
+            }
+            Operator::Eq | Operator::Lt | Operator::LtEq | Operator::Gt | Operator::GtEq => {
+                let (col, scalar, effective_op) = match (left.as_ref(), right.as_ref()) {
+                    (Expr::Column(col), Expr::Literal(scalar, _)) => (col, scalar, *op),
+                    (Expr::Literal(scalar, _), Expr::Column(col)) if *op == Operator::Eq => {
+                        (col, scalar, Operator::Eq)
+                    }
+                    _ => return true,
+                };
+                let Some(field) = native_schema.field_by_name(col.name()) else {
+                    return true;
+                };
+                let Some((low, high)) = untruncated_file_bounds(file, field.id) else {
+                    return true;
+                };
+                let Some(val) = scalar_to_primitive_literal(scalar, &field.field_type) else {
+                    return true;
+                };
+                match effective_op {
+                    Operator::Eq => val >= low && val <= high,
+                    Operator::Lt => low < val,
+                    Operator::LtEq => low <= val,
+                    Operator::Gt => high > val,
+                    Operator::GtEq => high >= val,
+                    _ => true,
+                }
+            }
+            _ => true,
+        },
+        Expr::InList(in_list)
+            if !in_list.negated && !in_list.list.is_empty() && in_list.list.len() <= 200 =>
+        {
+            let Expr::Column(col) = in_list.expr.as_ref() else {
+                return true;
+            };
+            let Some(field) = native_schema.field_by_name(col.name()) else {
+                return true;
+            };
+            let Some((low, high)) = untruncated_file_bounds(file, field.id) else {
+                return true;
+            };
+            let mut candidates = Vec::with_capacity(in_list.list.len());
+            for item in &in_list.list {
+                let Expr::Literal(scalar, _) = item else {
+                    return true;
+                };
+                let Some(val) = scalar_to_primitive_literal(scalar, &field.field_type) else {
+                    return true;
+                };
+                candidates.push(val);
+            }
+            candidates.into_iter().any(|val| val >= low && val <= high)
+        }
+        _ => true,
+    }
 }
 
 /// Applies final consumer admission after joins combine independently bounded inputs.
@@ -550,6 +740,7 @@ mod tests {
             schema,
             budget: budget.clone(),
             rows: Some(7),
+            filters: Vec::new(),
         };
         let context = SessionContext::new();
         let mut stream = partition.execute(context.task_ctx());

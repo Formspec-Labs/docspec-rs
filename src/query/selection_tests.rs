@@ -275,6 +275,7 @@ async fn projected_mapping_admission_is_owned_by_plan_and_stream() {
         schema: source.schema(),
         budget: tiny,
         rows: Some(3),
+        filters: Vec::new(),
     };
     assert_eq!(
         partition.project(&[2, 0, 2]).unwrap_err().code(),
@@ -300,6 +301,7 @@ async fn empty_projection_admits_cloned_schema_metadata_before_allocation() {
         schema: source.schema(),
         budget: small.clone(),
         rows: Some(3),
+        filters: Vec::new(),
     };
     drop(repeated.project(&[0]).unwrap());
     // Repetition shares Field values but still needs result-schema handles.
@@ -313,6 +315,7 @@ async fn empty_projection_admits_cloned_schema_metadata_before_allocation() {
         schema: schema.clone(),
         budget: small.clone(),
         rows: Some(3),
+        filters: Vec::new(),
     };
     assert_eq!(
         partition.project(&[]).unwrap_err().code(),

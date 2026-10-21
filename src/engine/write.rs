@@ -603,59 +603,77 @@ impl Engine {
             let mut shared = Vec::new();
             let mut changed = Vec::new();
             let mut rewrite_bytes = 0_u64;
-            for (index, file) in scan.files().enumerate() {
-                let name = format!("chunk_{index}");
-                context.register_table(
-                    name.as_str(),
-                    crate::query::file(
-                        scan.clone(),
-                        file.file_path().to_owned(),
-                        Some(keys),
-                        budget.clone(),
-                    )?,
-                )?;
-                if any_rows(key_join(
-                    context.table(&name).await?,
-                    context.table("affected_keys").await?,
-                    keys,
-                    datafusion::logical_expr::JoinType::Inner,
-                )?)
-                .await?
-                {
-                    rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
-                    // Replace the key-only probe with the complete selected native schema.
-                    context.deregister_table(&name)?;
+            let mut files_probed = 0_u64;
+            if key_files.is_empty() {
+                shared.extend(scan.files().cloned());
+            } else {
+                let native_schema = native.metadata().current_schema();
+                let key_table_schema = scope_table.metadata().current_schema();
+                for (index, file) in scan.files().enumerate() {
+                    if !file_may_overlap_key_files(
+                        native_schema,
+                        key_table_schema,
+                        keys,
+                        &key_files,
+                        file,
+                    ) {
+                        shared.push(file.clone());
+                        continue;
+                    }
+                    files_probed = files_probed.saturating_add(1);
+                    let name = format!("chunk_{index}");
                     context.register_table(
                         name.as_str(),
                         crate::query::file(
                             scan.clone(),
                             file.file_path().to_owned(),
-                            None,
+                            Some(keys),
                             budget.clone(),
                         )?,
                     )?;
-                    // One joined decode supplies both kept rows and actual removed rows.
-                    let mut columns = schema
-                        .fields()
-                        .iter()
-                        .map(|field| qualified("l", field.name()))
-                        .collect::<Vec<_>>();
-                    columns.push(qualified("r", &marker).is_not_null().alias(&marker));
-                    changed.push(
-                        key_join(
-                            context.table(&name).await?,
-                            context.table("affected_keys").await?,
-                            keys,
-                            datafusion::logical_expr::JoinType::Left,
-                        )?
-                        .select(columns)?,
-                    );
-                } else {
-                    shared.push(file.clone());
+                    if any_rows(key_join(
+                        context.table(&name).await?,
+                        context.table("affected_keys").await?,
+                        keys,
+                        datafusion::logical_expr::JoinType::Inner,
+                    )?)
+                    .await?
+                    {
+                        rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
+                        // Replace the key-only probe with the complete selected native schema.
+                        context.deregister_table(&name)?;
+                        context.register_table(
+                            name.as_str(),
+                            crate::query::file(
+                                scan.clone(),
+                                file.file_path().to_owned(),
+                                None,
+                                budget.clone(),
+                            )?,
+                        )?;
+                        // One joined decode supplies both kept rows and actual removed rows.
+                        let mut columns = schema
+                            .fields()
+                            .iter()
+                            .map(|field| qualified("l", field.name()))
+                            .collect::<Vec<_>>();
+                        columns.push(qualified("r", &marker).is_not_null().alias(&marker));
+                        changed.push(
+                            key_join(
+                                context.table(&name).await?,
+                                context.table("affected_keys").await?,
+                                keys,
+                                datafusion::logical_expr::JoinType::Left,
+                            )?
+                            .select(columns)?,
+                        );
+                    } else {
+                        shared.push(file.clone());
+                    }
+                    // Retained changed-file plans own their provider; idle catalog entries
+                    // need not accumulate across the file population.
+                    context.deregister_table(&name)?;
                 }
-                // Retained changed-file plans own their provider; idle catalog entries
-                // need not accumulate across the file population.
-                context.deregister_table(&name)?;
             }
             // Remote output consumes retained object storage; host preflight
             // covers scratch and bounded writer buffers, not those remote bytes.
@@ -683,7 +701,7 @@ impl Engine {
                 .replacement_output_at(dataset, &directory.child("added")?, &native)
                 .await?;
             let mut metrics = WriteMetrics {
-                files_scanned: (scan.files().count() + changed.len()) as u64,
+                files_scanned: files_probed.saturating_add(changed.len() as u64),
                 files_reused: shared.len() as u64,
                 bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
                 ..WriteMetrics::default()
@@ -878,6 +896,80 @@ async fn execute(
         .await?
         .map(|batch| batch.map_err(Error::from))
         .boxed())
+}
+
+fn untruncated_bound(datum: &iceberg::spec::Datum) -> Option<iceberg::spec::PrimitiveLiteral> {
+    use iceberg::spec::PrimitiveLiteral;
+    let lit = PrimitiveLiteral::from(datum.clone());
+    match &lit {
+        // Chunk statistics truncate variable-width bounds at 64 bytes. Only treat
+        // bounds strictly shorter than 64 bytes as exact interval endpoints.
+        PrimitiveLiteral::String(s) if s.len() >= 64 => None,
+        PrimitiveLiteral::Binary(b) if b.len() >= 64 => None,
+        PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => None,
+        _ if lit.is_nan() => None,
+        _ => Some(lit),
+    }
+}
+
+fn file_may_overlap_key_files(
+    native_schema: &iceberg::spec::Schema,
+    scope_schema: &iceberg::spec::Schema,
+    keys: &[String],
+    key_files: &[iceberg::spec::DataFile],
+    file: &iceberg::spec::DataFile,
+) -> bool {
+    if key_files.is_empty() {
+        return false;
+    }
+    for key in keys {
+        let (Some(native_field), Some(scope_field)) = (
+            native_schema.field_by_name(key),
+            scope_schema.field_by_name(key),
+        ) else {
+            continue;
+        };
+        let (native_id, scope_id) = (native_field.id, scope_field.id);
+        let file_may_have_null = file
+            .null_value_counts()
+            .get(&native_id)
+            .copied()
+            .unwrap_or(1)
+            > 0;
+        let keys_may_have_null = key_files
+            .iter()
+            .any(|kf| kf.null_value_counts().get(&scope_id).copied().unwrap_or(1) > 0);
+        // `key_join` uses `IsNotDistinctFrom`, so a possible NULL on both sides can match.
+        if file_may_have_null && keys_may_have_null {
+            continue;
+        }
+        let (Some(file_low), Some(file_high)) = (
+            file.lower_bounds()
+                .get(&native_id)
+                .and_then(untruncated_bound),
+            file.upper_bounds()
+                .get(&native_id)
+                .and_then(untruncated_bound),
+        ) else {
+            continue;
+        };
+        if file_low > file_high {
+            continue;
+        }
+        let all_disjoint = key_files.iter().all(|kf| {
+            let (Some(kf_low), Some(kf_high)) = (
+                kf.lower_bounds().get(&scope_id).and_then(untruncated_bound),
+                kf.upper_bounds().get(&scope_id).and_then(untruncated_bound),
+            ) else {
+                return false;
+            };
+            kf_low <= kf_high && (kf_high < file_low || kf_low > file_high)
+        });
+        if all_disjoint {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]

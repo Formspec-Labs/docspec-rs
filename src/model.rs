@@ -754,6 +754,16 @@ pub enum ComparisonIdentity {
     Occurrences,
 }
 
+/// Exact-release values-only lookup for a bounded set of scalar keys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyReadSpec {
+    pub key: String,
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+}
+
 /// Selects comparison identity and an explicit full reconstruction.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

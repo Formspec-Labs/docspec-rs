@@ -51,7 +51,7 @@ mod intake;
 pub use inputs::verify_input_coverage;
 mod read;
 #[doc(inline)]
-pub use read::{read_compaction, read_evidence, read_group};
+pub use read::{read_compaction, read_evidence, read_group, read_keys};
 mod aggregation;
 mod incremental;
 mod refresh;
