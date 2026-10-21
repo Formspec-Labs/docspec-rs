@@ -653,6 +653,23 @@ impl Engine {
             })
             .await?;
         }
+        if found.is_none() && rows.contains_key("succession-checkpoint") {
+            let mut observe = |object: &ObjectRef| {
+                if object.path == path {
+                    if object.owner != *owner
+                        || object.digest != digest
+                        || found.as_ref().is_some_and(|previous| previous != object)
+                    {
+                        return Err(invalid());
+                    }
+                    if found.is_none() {
+                        found = Some(object.clone());
+                    }
+                }
+                Ok(())
+            };
+            visit_checkpointed_ancestors(&rows, limit, &mut observe)?;
+        }
         let object = found.ok_or_else(unqualified)?;
         super::inventory::validate_object(&object)?;
         self.check_object_owner(&rows, owner, &object)?;
@@ -836,6 +853,17 @@ pub(super) async fn confirm_creation(
             Ok(missing.is_empty())
         })
         .await?;
+    }
+    if !missing.is_empty() && rows.contains_key("succession-checkpoint") {
+        visit_checkpointed_ancestors(rows, limit, |object: &ObjectRef| -> Result<()> {
+            if let Some(expected) = expected.get(object.path.as_str()) {
+                if **expected != *object {
+                    return Err(invalid());
+                }
+                missing.remove(object.path.as_str());
+            }
+            Ok(())
+        })?;
     }
     if !missing.is_empty() {
         return Err(unqualified());
@@ -1063,8 +1091,21 @@ async fn visit_creation(
                 )?;
             }
             observe(&output.object)?;
-        } else if key.starts_with("compaction-prepared/") {
+        } else if key.starts_with("compaction-prepared/")
+            || key.starts_with("representation/")
+        {
             let result: CompactionResult = serde_json::from_str(json)?;
+            observe(&result.source.metadata)?;
+            if let Some(logical) = &result.source.logical_metadata {
+                observe(logical)?;
+            }
+            for object in &result.source.objects {
+                observe(object)?;
+            }
+            observe(&result.replacement.metadata)?;
+            if let Some(logical) = &result.replacement.logical_metadata {
+                observe(logical)?;
+            }
             for object in &result.replacement.objects {
                 observe(object)?;
             }
@@ -1104,6 +1145,7 @@ async fn visit_creation(
             for object in release_objects(&release) {
                 observe(&object)?;
             }
+            observe_dataset_pin(&release.dataset, &mut observe)?;
         } else if key == "succession-checkpoint" {
             let checkpoint: crate::engine::history::SuccessionCheckpoint =
                 serde_json::from_str(json)?;
@@ -1115,6 +1157,118 @@ async fn visit_creation(
             for object in &grant.objects {
                 observe(object)?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn observe_dataset_pin(
+    dataset: &DatasetPin,
+    observe: &mut impl FnMut(&ObjectRef) -> Result<()>,
+) -> Result<()> {
+    if let Some(parent) = &dataset.parent_manifest {
+        observe(parent)?;
+    }
+    for input in dataset.inputs.values() {
+        observe(input)?;
+    }
+    for pin in dataset.groups.values() {
+        observe(&pin.metadata)?;
+        if let Some(logical) = &pin.logical_metadata {
+            observe(logical)?;
+        }
+        for object in &pin.objects {
+            observe(object)?;
+        }
+    }
+    for group in dataset.computed.values() {
+        observe(&group.source_metadata)?;
+        observe(&group.base_manifest)?;
+        if let Some(origins) = &group.origins {
+            observe(origins)?;
+        }
+    }
+    if let Some(evidence) = &dataset.evidence {
+        observe(&evidence.source.metadata)?;
+        observe(&evidence.table.metadata)?;
+        if let Some(logical) = &evidence.table.logical_metadata {
+            observe(logical)?;
+        }
+        for object in &evidence.table.objects {
+            observe(object)?;
+        }
+    }
+    if let Some(related) = &dataset.related {
+        for version in related.coverage.inputs.values() {
+            observe(&version.manifest)?;
+        }
+        observe(&related.evidence.metadata)?;
+        if let Some(logical) = &related.evidence.logical_metadata {
+            observe(logical)?;
+        }
+        for object in &related.evidence.objects {
+            observe(object)?;
+        }
+        for source in related.input_sources.values() {
+            observe(&source.metadata)?;
+            if let Some(logical) = &source.logical_metadata {
+                observe(logical)?;
+            }
+            for object in &source.objects {
+                observe(object)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn visit_checkpointed_ancestors(
+    rows: &SnapshotRows,
+    limit: usize,
+    mut observe: impl FnMut(&ObjectRef) -> Result<()>,
+) -> Result<()> {
+    let mut queue = Vec::new();
+    let mut visited = BTreeSet::new();
+    for (key, _, json) in rows.prefix("result/") {
+        if json.len() > limit {
+            return Err(capacity());
+        }
+        if key.starts_with("result/")
+            && let Ok(release) = serde_json::from_str::<ReleasePin>(json)
+        {
+            if let Some(parent) = release.dataset.parent_manifest {
+                queue.push(parent);
+            }
+            for group in release.dataset.computed.values() {
+                queue.push(group.base_manifest.clone());
+            }
+        }
+    }
+    if let Some((_, _, cp)) =
+        rows.get_record::<crate::engine::history::SuccessionCheckpoint>("succession-checkpoint")?
+    {
+        queue.push(cp.head.manifest);
+    }
+    while let Some(manifest) = queue.pop() {
+        if !visited.insert(manifest.path.clone()) {
+            continue;
+        }
+        observe(&manifest)?;
+        let Ok(bytes) = std::fs::read(&manifest.path) else {
+            continue;
+        };
+        if bytes.len() > limit {
+            return Err(capacity());
+        }
+        let Ok(dataset) = serde_json::from_slice::<DatasetPin>(&bytes) else {
+            continue;
+        };
+        observe_dataset_pin(&dataset, &mut observe)?;
+        if let Some(parent) = dataset.parent_manifest {
+            queue.push(parent);
+        }
+        for group in dataset.computed.into_values() {
+            queue.push(group.base_manifest);
         }
     }
     Ok(())

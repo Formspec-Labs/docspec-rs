@@ -268,6 +268,18 @@ impl Engine {
         let checkpoint_plan = self
             .plan_succession_checkpoint(dataset, &view, &rows, &mut remove_keys)
             .await?;
+        let head_ref_paths: BTreeSet<String> = if let Some((_, _, authority)) =
+            rows.get_record::<Authority>("authority")?
+            && let Some(head_release) = authority.release
+        {
+            self.reference_objects(std::slice::from_ref(&head_release))
+                .await
+                .map(|refs| refs.objects.into_iter().map(|o| o.path).collect())
+                .unwrap_or_default()
+        } else {
+            BTreeSet::new()
+        };
+        prune_obsolete_protections(&rows, &head_ref_paths, &mut remove_keys)?;
         drop(rows);
         let upserts = checkpoint_plan
             .as_ref()
@@ -866,6 +878,70 @@ fn collect_obsolete_lifecycle_keys(
         remove_keys.insert(key);
     }
 
+    Ok(remove_keys)
+}
+
+fn prune_obsolete_protections(
+    rows: &crate::catalog::SnapshotRows,
+    head_ref_paths: &BTreeSet<String>,
+    remove_keys: &mut BTreeSet<String>,
+) -> Result<()> {
+    let authority: Authority = rows
+        .get_record("authority")?
+        .map(|(_, _, value)| value)
+        .unwrap_or_default();
+    let selected_id = authority.release.as_ref().map(|release| release.id.clone());
+
+    let mut protected_keys = BTreeSet::new();
+    for (_, _, json) in rows.prefix("retirement/") {
+        let receipt: Retirement = serde_json::from_str(json)?;
+        for generation in receipt.plan.records {
+            protected_keys.insert(generation.key);
+        }
+    }
+
+    let mut completed_non_selected = BTreeSet::new();
+    let mut incomplete_ops = BTreeSet::new();
+    for (key, _, _) in rows.prefix("operation/") {
+        let Some(op_str) = key.strip_prefix("operation/") else {
+            continue;
+        };
+        let Ok(op) = Id::new(op_str) else {
+            continue;
+        };
+        if rows.contains_key(&format!("result/{op}")) {
+            if Some(&op) != selected_id.as_ref()
+                && !rows.contains_key(&format!("availability-retired/{op}"))
+                && !rows.contains_key(&format!("operation-retired/{op}"))
+            {
+                completed_non_selected.insert(op);
+            }
+        } else if !rows.contains_key(&format!("abandoned/{op}")) {
+            incomplete_ops.insert(op);
+        }
+    }
+
+    let is_obsolete_op = |op: &Id| -> bool {
+        if Some(op) == selected_id.as_ref()
+            || incomplete_ops.contains(op)
+            || rows.contains_key(&format!("availability-retired/{op}"))
+            || rows.contains_key(&format!("operation-retired/{op}"))
+        {
+            return false;
+        }
+        completed_non_selected.contains(op) || !rows.contains_key(&format!("operation/{op}"))
+    };
+
+    let kept_jsons: Vec<&str> = rows
+        .prefix("")
+        .filter(|(k, _, _)| {
+            !remove_keys.contains(*k)
+                && !k.starts_with("protection/")
+                && !k.starts_with("reference-binding/")
+        })
+        .map(|(_, _, json)| json)
+        .collect();
+
     for (key, _, json) in rows.prefix("protection/") {
         if protected_keys.contains(key) {
             continue;
@@ -877,6 +953,12 @@ fn collect_obsolete_lifecycle_keys(
         let Ok(protection) = serde_json::from_str::<Protection>(json) else {
             continue;
         };
+        let needle = format!("/{}/", protection.id.as_str());
+        if head_ref_paths.iter().any(|p| p.contains(&needle))
+            || kept_jsons.iter().any(|j| j.contains(&needle))
+        {
+            continue;
+        }
         let Some((op_str, kind)) = protection.purpose.split_once('/') else {
             continue;
         };
@@ -922,7 +1004,7 @@ fn collect_obsolete_lifecycle_keys(
             remove_keys.insert(key.to_owned());
         }
     }
-    Ok(remove_keys)
+    Ok(())
 }
 
 fn is_protected_path(path: &str, protected_prefixes: &BTreeSet<String>) -> bool {
