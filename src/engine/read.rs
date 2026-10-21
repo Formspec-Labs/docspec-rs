@@ -320,10 +320,22 @@ pub(super) async fn read_keys_with_objects(
         .current_schema()
         .field_by_name(&spec.key)
         .map(|f| f.id);
-    let target_set: Arc<BTreeSet<String>> = Arc::new(spec.values.iter().cloned().collect());
+    // Parse requested values once into the key column's own domain. Integer keys
+    // compare as integers: no per-row string formatting, and values that cannot
+    // occur in the column (non-numeric, out of range) are dropped up front.
+    let target = Arc::new(KeyTargets::parse(
+        public_schema.field(key_public_idx).data_type(),
+        &spec.values,
+    ));
+    if target.is_empty() {
+        return Ok(Box::pin(RecordBatchStreamAdapter::new(
+            out_schema,
+            futures::stream::empty(),
+        )));
+    }
     let candidate_paths: Vec<String> = scan
         .files()
-        .filter(|file| file_may_contain_string_keys(file, key_field_id, &target_set))
+        .filter(|file| target.file_may_contain(file, key_field_id))
         .map(|file| file.file_path().to_owned())
         .collect();
 
@@ -333,10 +345,10 @@ pub(super) async fn read_keys_with_objects(
             .map(move |path| scan.read_projected_file(&path, &budget_clone, Some(&scan_indices)))
             .try_flatten()
             .and_then(move |batch| {
-                let target_set = target_set.clone();
+                let target = target.clone();
                 let out_in_projected = out_in_projected.clone();
                 async move {
-                    filter_batch_by_keys(&batch, key_in_projected, &target_set, &out_in_projected)
+                    filter_batch_by_keys(&batch, key_in_projected, &target, &out_in_projected)
                 }
             })
             .try_filter(|batch| futures::future::ready(batch.num_rows() > 0))
@@ -345,67 +357,117 @@ pub(super) async fn read_keys_with_objects(
     Ok(Box::pin(RecordBatchStreamAdapter::new(out_schema, stream)))
 }
 
-fn file_may_contain_string_keys(
-    file: &iceberg::spec::DataFile,
-    key_field_id: Option<i32>,
-    target_set: &BTreeSet<String>,
-) -> bool {
-    let Some(field_id) = key_field_id else {
-        return true;
-    };
-    let (Some(low), Some(high)) = (
-        file.lower_bounds().get(&field_id),
-        file.upper_bounds().get(&field_id),
-    ) else {
-        return true;
-    };
-    let (
-        iceberg::spec::PrimitiveLiteral::String(low_str),
-        iceberg::spec::PrimitiveLiteral::String(high_str),
-    ) = (
-        iceberg::spec::PrimitiveLiteral::from(low.clone()),
-        iceberg::spec::PrimitiveLiteral::from(high.clone()),
-    )
-    else {
-        return true;
-    };
-    if low_str.len() >= 64 || high_str.len() >= 64 || low_str > high_str {
-        return true;
+/// Requested key values in the key column's comparison domain.
+#[derive(Debug)]
+enum KeyTargets {
+    Strings(BTreeSet<String>),
+    Ints(BTreeSet<i64>),
+}
+
+impl KeyTargets {
+    fn parse(data_type: &arrow::datatypes::DataType, values: &[String]) -> Self {
+        use arrow::datatypes::DataType;
+        match data_type {
+            DataType::Int64 => Self::Ints(values.iter().filter_map(|v| v.parse().ok()).collect()),
+            DataType::Int32 => Self::Ints(
+                values
+                    .iter()
+                    .filter_map(|v| v.parse::<i32>().ok())
+                    .map(i64::from)
+                    .collect(),
+            ),
+            _ => Self::Strings(values.iter().cloned().collect()),
+        }
     }
-    target_set.range(low_str..=high_str).next().is_some()
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Strings(set) => set.is_empty(),
+            Self::Ints(set) => set.is_empty(),
+        }
+    }
+
+    /// Returns `false` only when exact (untruncated) manifest bounds prove that no
+    /// requested value lies inside the file's key range.
+    fn file_may_contain(&self, file: &iceberg::spec::DataFile, key_field_id: Option<i32>) -> bool {
+        use iceberg::spec::PrimitiveLiteral;
+        let Some(field_id) = key_field_id else {
+            return true;
+        };
+        let (Some(low), Some(high)) = (
+            file.lower_bounds()
+                .get(&field_id)
+                .and_then(super::write::untruncated_bound),
+            file.upper_bounds()
+                .get(&field_id)
+                .and_then(super::write::untruncated_bound),
+        ) else {
+            return true;
+        };
+        match (self, low, high) {
+            (Self::Strings(set), PrimitiveLiteral::String(low), PrimitiveLiteral::String(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
+            (Self::Ints(set), low, high) => {
+                let as_i64 = |lit| match lit {
+                    PrimitiveLiteral::Int(v) => Some(i64::from(v)),
+                    PrimitiveLiteral::Long(v) => Some(v),
+                    _ => None,
+                };
+                match (as_i64(low), as_i64(high)) {
+                    (Some(low), Some(high)) => low > high || set.range(low..=high).next().is_some(),
+                    _ => true,
+                }
+            }
+            _ => true,
+        }
+    }
 }
 
 fn filter_batch_by_keys(
     batch: &RecordBatch,
     key_idx: usize,
-    target_set: &BTreeSet<String>,
+    target: &KeyTargets,
     out_indices: &[usize],
 ) -> Result<RecordBatch> {
     use arrow::array::{
         Array, BooleanArray, Int32Array, Int64Array, LargeStringArray, StringArray,
     };
     let col = batch.column(key_idx);
-    let mask: BooleanArray = if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-        (0..arr.len())
-            .map(|i| Some(!arr.is_null(i) && target_set.contains(arr.value(i))))
-            .collect()
-    } else if let Some(arr) = col.as_any().downcast_ref::<LargeStringArray>() {
-        (0..arr.len())
-            .map(|i| Some(!arr.is_null(i) && target_set.contains(arr.value(i))))
-            .collect()
-    } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-        (0..arr.len())
-            .map(|i| Some(!arr.is_null(i) && target_set.contains(&arr.value(i).to_string())))
-            .collect()
-    } else if let Some(arr) = col.as_any().downcast_ref::<Int32Array>() {
-        (0..arr.len())
-            .map(|i| Some(!arr.is_null(i) && target_set.contains(&arr.value(i).to_string())))
-            .collect()
-    } else {
-        return Err(Error::refusal(
-            "invalid_key_read",
-            "unsupported physical array type for key column",
-        ));
+    let any = col.as_any();
+    let mask: BooleanArray = match target {
+        KeyTargets::Strings(set) => {
+            if let Some(arr) = any.downcast_ref::<StringArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<LargeStringArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Ints(set) => {
+            if let Some(arr) = any.downcast_ref::<Int64Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<Int32Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&i64::from(v)))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
     };
     let projected = batch.project(out_indices)?;
     Ok(arrow::compute::filter_record_batch(&projected, &mask)?)

@@ -408,3 +408,78 @@ async fn rebound_catalog_results_cannot_change_an_exact_version_url() {
         assert_eq!(error["code"], "release_mismatch");
     }
 }
+
+#[tokio::test]
+async fn http_key_reads_stream_only_requested_integer_keys_with_projection() {
+    let root = TempDir::new().unwrap();
+    let (engine, base, expected) = fixture(root.path(), false).await;
+    let mut ids: Vec<i64> = expected.iter().filter_map(|(id, _)| *id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert!(ids.len() >= 2, "fixture must carry at least two keyed rows");
+    let wanted = [ids[0], ids[ids.len() - 1]];
+    let missing = ids[ids.len() - 1] + 1_000;
+    let body = serde_json::json!({
+        "key": "id",
+        // Non-numeric and absent values can never match an integer key.
+        "values": [wanted[0].to_string(), wanted[1].to_string(), missing.to_string(), "abc"],
+        "columns": ["text", "id"],
+    });
+    let response = docspec::http::router(engine)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/datasets/comments/versions/{}/keys", base.id))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/vnd.apache.arrow.stream"
+    );
+    let reader = StreamReader::try_new(
+        Cursor::new(to_bytes(response.into_body(), 1 << 20).await.unwrap()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        reader
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+        vec!["text", "id"]
+    );
+    let mut actual = Vec::new();
+    for batch in reader {
+        let batch = batch.unwrap();
+        let texts = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        for i in 0..batch.num_rows() {
+            actual.push((
+                Some(ids.value(i)),
+                (!texts.is_null(i)).then(|| texts.value(i).to_owned()),
+            ));
+        }
+    }
+    let mut oracle: Vec<_> = expected
+        .into_iter()
+        .filter(|(id, _)| id.is_some_and(|id| wanted.contains(&id)))
+        .collect();
+    actual.sort();
+    oracle.sort();
+    assert_eq!(actual, oracle);
+}

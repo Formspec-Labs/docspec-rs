@@ -348,6 +348,18 @@ where
         let mut metadata_bytes = 0usize;
         let mut retained_bytes = 0usize;
         let mut completed = Vec::new();
+        // `FanoutWriter` keeps one open Parquet writer, with its in-progress row
+        // group, per partition touched since the last close. The reservation above
+        // covers a bounded number of buffered batches, not one row group per
+        // partition: a Day/Identity backfill over unsorted input could otherwise
+        // buffer thousands of row groups. Close (finishing files) once more than
+        // one partition is open and the bytes accepted since the last close exceed
+        // two batch allowances. A single open partition is already bounded by its
+        // row-group limit, so sorted or single-partition input never closes early.
+        let fanout_bytes_limit = budget.limits.max_batch_bytes.saturating_mul(2);
+        let mut open_partitions: std::collections::HashSet<iceberg::spec::Struct> =
+            std::collections::HashSet::new();
+        let mut open_bytes = 0usize;
         // Row groups track `batch_rows` so writer buffering stays inside the batch
         // admission reserved above; the 1,048,576-row writer default would buffer a
         // whole row group far beyond `max_batch_bytes`. One admitted batch is at
@@ -468,9 +480,16 @@ where
                     // Periodically finish the maintained writer, releasing its accumulated
                     // footers. Keep only bounded file descriptors, so this admission grows
                     // with output files instead of every row group in the entire population.
+                    let slice_bytes = sub_batch.get_array_memory_size();
+                    let fanout_pressure = partition_key.as_ref().is_some_and(|key| {
+                        !open_partitions.is_empty()
+                            && (open_partitions.len() > 1 || !open_partitions.contains(key.data()))
+                            && open_bytes.saturating_add(slice_bytes) > fanout_bytes_limit
+                    });
                     if metadata_bytes != 0
-                        && metadata_bytes.saturating_add(incoming)
-                            > budget.limits.max_metadata_bytes / 2
+                        && (fanout_pressure
+                            || metadata_bytes.saturating_add(incoming)
+                                > budget.limits.max_metadata_bytes / 2)
                     {
                         let files = writer.close().await?;
                         for file in &files {
@@ -485,6 +504,12 @@ where
                         completed.extend(files);
                         writer = new_writer();
                         metadata_bytes = 0;
+                        open_partitions.clear();
+                        open_bytes = 0;
+                    }
+                    if let Some(key) = &partition_key {
+                        open_partitions.insert(key.data().clone());
+                        open_bytes = open_bytes.saturating_add(slice_bytes);
                     }
                     metadata_bytes = metadata_bytes.saturating_add(incoming);
                     if retained_bytes.saturating_add(metadata_bytes)
@@ -935,11 +960,14 @@ pub(crate) fn manifest_decode_count(table_uuid: uuid::Uuid) -> ManifestDecodeCou
         .unwrap_or_default()
 }
 
-/// Extracts the `Transform::Month` partition value (`months_since_epoch`) from a [`DataFile`].
-pub(crate) fn data_file_month_partition(
+/// Verifies every partition literal of a [`DataFile`] against its qualified transform.
+///
+/// Month and Day transforms store integer ordinals; Identity stores a primitive
+/// value. Every field is checked, not only the first month field.
+pub(crate) fn validate_partition_tuple(
     spec: &iceberg::spec::PartitionSpec,
     file: &DataFile,
-) -> Result<Option<i32>> {
+) -> Result<()> {
     use iceberg::spec::{Literal, PrimitiveLiteral, Transform};
     if file.partition().fields().len() != spec.fields().len() {
         return Err(Error::refusal(
@@ -948,21 +976,59 @@ pub(crate) fn data_file_month_partition(
         ));
     }
     for (idx, field) in spec.fields().iter().enumerate() {
-        if field.transform == Transform::Month {
-            return match &file.partition()[idx] {
-                None => Ok(None),
-                Some(Literal::Primitive(PrimitiveLiteral::Int(month))) => Ok(Some(*month)),
-                Some(_) => Err(Error::refusal(
-                    "unsupported_write_layout",
-                    "month partition field requires an integer partition literal",
-                )),
-            };
+        let valid = matches!(
+            (&field.transform, &file.partition()[idx]),
+            (_, None)
+                | (
+                    Transform::Month | Transform::Day,
+                    Some(Literal::Primitive(PrimitiveLiteral::Int(_))),
+                )
+                | (Transform::Identity, Some(Literal::Primitive(_)))
+        );
+        if !valid {
+            return Err(Error::refusal(
+                "unsupported_write_layout",
+                "partition literal does not match its qualified transform",
+            ));
         }
     }
-    Ok(None)
+    Ok(())
+}
+
+/// Extracts the single `Transform::Month` partition value (`months_since_epoch`).
+///
+/// Refuses specs with more than one month field: choosing the first would prune
+/// by an arbitrary column.
+pub(crate) fn data_file_month_partition(
+    spec: &iceberg::spec::PartitionSpec,
+    file: &DataFile,
+) -> Result<Option<i32>> {
+    use iceberg::spec::{Literal, PrimitiveLiteral, Transform};
+    validate_partition_tuple(spec, file)?;
+    let mut months = spec
+        .fields()
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.transform == Transform::Month);
+    let Some((idx, _)) = months.next() else {
+        return Ok(None);
+    };
+    if months.next().is_some() {
+        return Err(Error::refusal(
+            "unsupported_write_layout",
+            "month pruning requires exactly one month partition field",
+        ));
+    }
+    Ok(match &file.partition()[idx] {
+        Some(Literal::Primitive(PrimitiveLiteral::Int(month))) => Some(*month),
+        _ => None,
+    })
 }
 
 /// Returns live current-snapshot [`DataFile`] descriptors pruned to `[min_month, max_month]`.
+///
+/// A bounded range on a table without exactly one month partition field is refused
+/// rather than answered with an empty (and therefore misleading) file set.
 #[allow(dead_code)]
 pub(crate) async fn snapshot_files_for_month_range(
     table: &Table,
@@ -970,8 +1036,22 @@ pub(crate) async fn snapshot_files_for_month_range(
     max_month: Option<i32>,
     budget: &Budget,
 ) -> Result<Vec<DataFile>> {
-    let inventory = current_snapshot_files(table, budget).await?;
     let spec = table.metadata().default_partition_spec();
+    let bounded = min_month.is_some() || max_month.is_some();
+    if bounded
+        && spec
+            .fields()
+            .iter()
+            .filter(|field| field.transform == iceberg::spec::Transform::Month)
+            .count()
+            != 1
+    {
+        return Err(Error::refusal(
+            "unsupported_write_layout",
+            "month range pruning requires exactly one month partition field",
+        ));
+    }
+    let inventory = current_snapshot_files(table, budget).await?;
     let mut matched = Vec::with_capacity(inventory.data.len());
     for file in inventory.data {
         match data_file_month_partition(spec, &file)? {
@@ -983,7 +1063,7 @@ pub(crate) async fn snapshot_files_for_month_range(
                 }
             }
             None => {
-                if min_month.is_none() && max_month.is_none() {
+                if !bounded {
                     matched.push(file);
                 }
             }
@@ -1128,7 +1208,7 @@ async fn snapshot_files_guarded_with_scope(
                             "snapshot data file partition tuple does not match its partition spec",
                         ));
                     }
-                    let _ = data_file_month_partition(spec, file)?;
+                    validate_partition_tuple(spec, file)?;
                     if current_data
                         .insert(file.file_path().to_owned(), file.clone())
                         .is_some()
@@ -1798,6 +1878,184 @@ mod tests {
                 .code(),
             "incomplete_inventory"
         );
+    }
+
+    #[test]
+    fn month_pruning_refuses_ambiguous_specs_and_validates_every_partition_field() {
+        use iceberg::spec::{
+            DataContentType, DataFileBuilder, DataFileFormat, Literal, NestedField, PartitionSpec,
+            PrimitiveType, Struct, Transform, Type,
+        };
+        let schema = Arc::new(
+            iceberg::spec::Schema::builder()
+                .with_fields([
+                    Arc::new(NestedField::required(
+                        1,
+                        "a",
+                        Type::Primitive(PrimitiveType::Date),
+                    )),
+                    Arc::new(NestedField::required(
+                        2,
+                        "b",
+                        Type::Primitive(PrimitiveType::Date),
+                    )),
+                ])
+                .build()
+                .unwrap(),
+        );
+        let two_months = PartitionSpec::builder(schema.clone())
+            .add_partition_field("a", "a_month", Transform::Month)
+            .unwrap()
+            .add_partition_field("b", "b_month", Transform::Month)
+            .unwrap()
+            .build()
+            .unwrap();
+        let file = |partition: Struct| {
+            DataFileBuilder::default()
+                .content(DataContentType::Data)
+                .file_format(DataFileFormat::Parquet)
+                .file_path("memory://f.parquet".into())
+                .file_size_in_bytes(1)
+                .record_count(1)
+                .partition(partition)
+                .build()
+                .unwrap()
+        };
+        let valid = file(Struct::from_iter([
+            Some(Literal::int(648)),
+            Some(Literal::int(649)),
+        ]));
+        validate_partition_tuple(&two_months, &valid).unwrap();
+        // Choosing the first month field would prune by an arbitrary column.
+        assert_eq!(
+            data_file_month_partition(&two_months, &valid)
+                .unwrap_err()
+                .code(),
+            "unsupported_write_layout"
+        );
+        // The second month literal was previously never inspected.
+        let malformed = file(Struct::from_iter([
+            Some(Literal::int(648)),
+            Some(Literal::string("x")),
+        ]));
+        assert_eq!(
+            validate_partition_tuple(&two_months, &malformed)
+                .unwrap_err()
+                .code(),
+            "unsupported_write_layout"
+        );
+        let one_month = PartitionSpec::builder(schema)
+            .add_partition_field("a", "a_month", Transform::Month)
+            .unwrap()
+            .build()
+            .unwrap();
+        let single = file(Struct::from_iter([Some(Literal::int(648))]));
+        assert_eq!(
+            data_file_month_partition(&one_month, &single).unwrap(),
+            Some(648)
+        );
+    }
+
+    #[tokio::test]
+    async fn interleaved_partitions_close_open_writers_within_fanout_allowance() {
+        use arrow::array::{Date32Array, StringArray};
+        use iceberg::{
+            TableIdent,
+            spec::{NestedField, PrimitiveType, Transform, Type, UnboundPartitionSpec},
+        };
+
+        let root = tempfile::TempDir::new().unwrap();
+        let catalog = local_catalog(root.path()).await.unwrap();
+        let namespace = iceberg::NamespaceIdent::new("fanout".into());
+        catalog
+            .create_namespace(&namespace, HashMap::new())
+            .await
+            .unwrap();
+        let limits = crate::budget::Limits {
+            max_batch_bytes: 256 << 10,
+            ..crate::budget::Limits::default()
+        };
+        let budget = Budget::new(limits).unwrap();
+        let schema = iceberg::spec::Schema::builder()
+            .with_schema_id(1)
+            .with_fields([
+                Arc::new(NestedField::required(
+                    10,
+                    "observed_at",
+                    Type::Primitive(PrimitiveType::Date),
+                )),
+                Arc::new(NestedField::optional(
+                    20,
+                    "payload",
+                    Type::Primitive(PrimitiveType::String),
+                )),
+                Arc::new(NestedField::optional(
+                    40,
+                    identity::ORIGIN_FILE,
+                    Type::Primitive(PrimitiveType::String),
+                )),
+                Arc::new(NestedField::optional(
+                    41,
+                    identity::ORIGIN_ROW,
+                    Type::Primitive(PrimitiveType::Long),
+                )),
+            ])
+            .build()
+            .unwrap();
+        let spec = UnboundPartitionSpec::builder()
+            .add_partition_field(10, "observed_at_day", Transform::Day)
+            .unwrap()
+            .build();
+        let table_dir = root.path().join("events");
+        let table = register_candidate(
+            catalog.as_ref(),
+            &TableIdent::new(namespace.clone(), "events".into()),
+            CandidateWriter::Local,
+            move || fresh_partitioned_metadata(&schema, &table_dir, spec),
+            &budget,
+        )
+        .await
+        .unwrap();
+        let arrow_schema = Arc::new(Schema::new(vec![
+            Field::new("observed_at", DataType::Date32, false),
+            Field::new("payload", DataType::Utf8, true),
+            Field::new(identity::ORIGIN_FILE, DataType::Utf8, true),
+            Field::new(identity::ORIGIN_ROW, DataType::Int64, true),
+        ]));
+        // Every batch interleaves two days, so both partition writers stay open.
+        // Eight ~110 KiB batches exceed the 512 KiB (2 x batch) fanout allowance.
+        let rows_per_batch = 1000;
+        let batches = (0..8)
+            .map(|_| {
+                let days = (0..rows_per_batch)
+                    .map(|row| 19_723 + (row % 2) as i32)
+                    .collect::<Vec<_>>();
+                let payload = (0..rows_per_batch)
+                    .map(|row| format!("{row:0>100}"))
+                    .collect::<Vec<_>>();
+                Ok(RecordBatch::try_new(
+                    arrow_schema.clone(),
+                    vec![
+                        Arc::new(Date32Array::from(days)),
+                        Arc::new(StringArray::from(payload)),
+                        Arc::new(StringArray::new_null(rows_per_batch)),
+                        Arc::new(arrow::array::Int64Array::new_null(rows_per_batch)),
+                    ],
+                )
+                .unwrap())
+            })
+            .collect::<Vec<_>>();
+        let files = write_batches(&table, futures::stream::iter(batches), &budget)
+            .await
+            .unwrap();
+        let rows: u64 = files.iter().map(DataFile::record_count).sum();
+        assert_eq!(rows, 8 * rows_per_batch as u64);
+        // Without the allowance one writer per day stays open for the whole stream
+        // (exactly two files). Bounded fanout finishes files part-way through.
+        assert!(files.len() > 2, "{} files", files.len());
+        for file in &files {
+            assert_eq!(file.partition().fields().len(), 1);
+        }
     }
 
     #[tokio::test]

@@ -443,6 +443,11 @@ impl OccurrenceScan {
         self.tasks.values().map(|(_, file)| file)
     }
 
+    /// Looks up one captured file descriptor without walking the population.
+    pub fn file(&self, path: &str) -> Option<&DataFile> {
+        self.tasks.get(path).map(|(_, file)| file)
+    }
+
     pub fn read_file(
         &self,
         path: &str,

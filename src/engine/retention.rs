@@ -837,7 +837,7 @@ mod tests {
             latest = engine
                 .update(&UpdateSpec {
                     dataset: dataset.clone(),
-                    operation: Id::new(&format!("op-{step}")).unwrap(),
+                    operation: Id::new(format!("op-{step}")).unwrap(),
                     base: latest.id.clone(),
                     definition: "v1".into(),
                     keys: vec!["id".into()],
@@ -1081,7 +1081,7 @@ mod tests {
         assert_eq!(final_stats.files_after, 1);
         assert!(
             final_stats.metadata_bytes_after < limits.max_metadata_bytes,
-            "metadata_bytes_after={} must fit within 512 KiB budget",
+            "metadata_bytes_after={} must fit within the declared 3 MiB metadata budget",
             final_stats.metadata_bytes_after
         );
 

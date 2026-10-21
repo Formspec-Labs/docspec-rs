@@ -609,6 +609,9 @@ impl Engine {
             } else {
                 let native_schema = native.metadata().current_schema();
                 let key_table_schema = scope_table.metadata().current_schema();
+                // Exact affected points when they fit one batch allowance; otherwise
+                // only the coarser affected-interval test below applies.
+                let points = key_points::KeyPoints::collect(&context, keys, budget).await?;
                 for (index, file) in scan.files().enumerate() {
                     if !file_may_overlap_key_files(
                         native_schema,
@@ -616,7 +619,10 @@ impl Engine {
                         keys,
                         &key_files,
                         file,
-                    ) {
+                    ) || points
+                        .as_ref()
+                        .is_some_and(|points| !points.may_contain(native_schema, keys, file))
+                    {
                         shared.push(file.clone());
                         continue;
                     }
@@ -898,7 +904,9 @@ async fn execute(
         .boxed())
 }
 
-fn untruncated_bound(datum: &iceberg::spec::Datum) -> Option<iceberg::spec::PrimitiveLiteral> {
+pub(super) fn untruncated_bound(
+    datum: &iceberg::spec::Datum,
+) -> Option<iceberg::spec::PrimitiveLiteral> {
     use iceberg::spec::PrimitiveLiteral;
     let lit = PrimitiveLiteral::from(datum.clone());
     match &lit {
@@ -971,6 +979,8 @@ fn file_may_overlap_key_files(
     }
     true
 }
+
+mod key_points;
 
 #[cfg(test)]
 mod tests;

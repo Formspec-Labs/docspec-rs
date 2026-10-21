@@ -248,9 +248,7 @@ async fn capture_coverage_daily_aggregate_plan() {
     let plan = frame.create_physical_plan().await.unwrap();
     println!(
         "PHYSICAL_PLAN\n{}",
-        datafusion::physical_plan::displayable(plan.as_ref())
-            .indent(true)
-            .to_string()
+        datafusion::physical_plan::displayable(plan.as_ref()).indent(true)
     );
 }
 

@@ -400,9 +400,11 @@ impl PartitionStream for NativePartition {
                     projection,
                     ..
                 } => {
+                    // Keyed lookup: one probe per registered file must not walk the
+                    // whole captured population (O(files^2) across an Update).
                     if !scan.is_located()
                         && !filters.is_empty()
-                        && let Some(file) = scan.files().find(|f| f.file_path() == path)
+                        && let Some(file) = scan.file(path)
                         && !file_matches_inexact_filters(scan.native_schema(), file, &filters)
                     {
                         futures::stream::empty().boxed()
@@ -973,5 +975,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod pruning_tests;
 #[cfg(test)]
 mod selection_tests;
