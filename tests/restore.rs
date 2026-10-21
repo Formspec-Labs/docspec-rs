@@ -27,6 +27,7 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "test-util")]
 fn capture_files(
     directory: &Path,
 ) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {
