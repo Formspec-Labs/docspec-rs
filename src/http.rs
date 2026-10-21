@@ -54,6 +54,7 @@ pub fn router(engine: Engine) -> Router {
         .route("/refreshes/plan", post(plan_refresh))
         .route("/refreshes/run", post(refresh))
         .route("/exports/run", post(export))
+        .route("/compact", post(compact))
         .route("/compactions/run", post(compact))
         .route(
             "/datasets/{dataset}/lifecycle/compact",

@@ -268,6 +268,12 @@ impl Engine {
         let checkpoint_plan = self
             .plan_succession_checkpoint(dataset, &view, &rows, &mut remove_keys)
             .await?;
+        let (remove_files, remove_dirs) = self.plan_obsolete_attempt_cleanup(
+            dataset,
+            &rows,
+            &mut remove_keys,
+            checkpoint_plan.as_ref(),
+        )?;
         drop(rows);
         let upserts = checkpoint_plan
             .as_ref()
@@ -277,6 +283,12 @@ impl Engine {
             .await;
         match outcome {
             Ok((_, result)) => {
+                for file in remove_files {
+                    let _ = std::fs::remove_file(&file);
+                }
+                for dir in remove_dirs {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
                 if let Some(plan) = checkpoint_plan
                     && let Some(old_path) = plan.old_archive_path
                 {
@@ -297,6 +309,156 @@ impl Engine {
                 Err(err)
             }
         }
+    }
+
+    fn plan_obsolete_attempt_cleanup(
+        &self,
+        dataset: &Id,
+        rows: &crate::catalog::SnapshotRows,
+        remove_keys: &mut BTreeSet<String>,
+        checkpoint_plan: Option<&CheckpointCompactionPlan>,
+    ) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+        if !self.inner.retained.is_local() || rows.prefix("restore-point/").next().is_some() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let authority: Authority = rows
+            .get_record("authority")?
+            .map(|(_, _, value)| value)
+            .unwrap_or_default();
+        let Some(head_release) = &authority.release else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        let selected_id = head_release.id.as_str();
+        let has_computed_groups = !head_release.dataset.computed.is_empty();
+        let dataset_prefix = format!(
+            "{}/",
+            self.inner.retained.child(dataset.as_str())?.as_string()?
+        );
+        let base_dir = self.inner.retained.local_path()?.join(dataset.as_str());
+
+        let mut protected_keys = BTreeSet::new();
+        for (_, _, json) in rows.prefix("retirement/") {
+            let receipt: Retirement = serde_json::from_str(json)?;
+            for generation in receipt.plan.records {
+                protected_keys.insert(generation.key);
+            }
+        }
+
+        let mut referenced_paths = BTreeSet::new();
+        let mut referenced_attempts = BTreeSet::new();
+        for (key, _, json) in rows.prefix("") {
+            if remove_keys.contains(key) || key.starts_with("protection/") {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json) {
+                collect_dataset_refs(
+                    &val,
+                    &dataset_prefix,
+                    &mut referenced_paths,
+                    &mut referenced_attempts,
+                );
+            }
+        }
+        if let Some(plan) = checkpoint_plan {
+            for (key, val) in &plan.records {
+                if !key.starts_with("protection/") {
+                    collect_dataset_refs(
+                        val,
+                        &dataset_prefix,
+                        &mut referenced_paths,
+                        &mut referenced_attempts,
+                    );
+                }
+            }
+        }
+        if let Some(parent) = &head_release.dataset.parent_manifest
+            && let Ok(bytes) = std::fs::read(&parent.path)
+            && let Ok(val) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            collect_dataset_refs(
+                &val,
+                &dataset_prefix,
+                &mut referenced_paths,
+                &mut referenced_attempts,
+            );
+        }
+        for computed in head_release.dataset.computed.values() {
+            for extra in [
+                Some(&computed.base_manifest),
+                computed.origins.as_ref(),
+                computed.qualification.as_ref().map(|q| &q.origins),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Ok(bytes) = std::fs::read(&extra.path)
+                    && let Ok(val) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                {
+                    collect_dataset_refs(
+                        &val,
+                        &dataset_prefix,
+                        &mut referenced_paths,
+                        &mut referenced_attempts,
+                    );
+                }
+            }
+        }
+
+        let mut candidate_protections = Vec::new();
+        for (key, _, json) in rows.prefix("protection/") {
+            if remove_keys.contains(key)
+                || protected_keys.contains(key)
+                || protected_keys.contains(&owners::binding_key(key))
+            {
+                continue;
+            }
+            let Ok(protection) = serde_json::from_str::<Protection>(json) else {
+                continue;
+            };
+            if protection.retired || protection.consumer != *dataset {
+                continue;
+            }
+            let Some((op_str, kind)) = protection.purpose.split_once('/') else {
+                continue;
+            };
+            let is_archived = if matches!(kind, "admission" | "processing" | "changes" | "release")
+            {
+                let op_key = format!("operation/{op_str}");
+                op_str != selected_id
+                    && (!rows.contains_key(&op_key) || remove_keys.contains(&op_key))
+                    && !rows.contains_key(&format!("abandoned/{op_str}"))
+                    && !(kind == "processing" && has_computed_groups)
+            } else if kind == "compaction" {
+                let req_key = format!("compaction-request/{op_str}");
+                (!rows.contains_key(&req_key) || remove_keys.contains(&req_key))
+                    && !has_computed_groups
+            } else {
+                false
+            };
+            if !is_archived {
+                continue;
+            }
+            candidate_protections.push((key.to_owned(), protection.id));
+        }
+
+        let mut remove_files = Vec::new();
+        let mut remove_dirs = Vec::new();
+        for (key, attempt) in candidate_protections {
+            let attempt_dir = base_dir.join(attempt.as_str());
+            if !referenced_attempts.contains(attempt.as_str()) {
+                let bkey = owners::binding_key(&key);
+                if rows.contains_key(&bkey) {
+                    remove_keys.insert(bkey);
+                }
+                remove_keys.insert(key);
+                if attempt_dir.exists() {
+                    remove_dirs.push(attempt_dir);
+                }
+            } else if attempt_dir.exists() {
+                collect_unreferenced_parquet(&attempt_dir, &referenced_paths, &mut remove_files);
+            }
+        }
+        Ok((remove_files, remove_dirs))
     }
 
     async fn plan_succession_checkpoint(
@@ -381,10 +543,18 @@ impl Engine {
                 }
             }
         }
-        for (_, _, json) in rows.prefix("compaction-request/") {
+        for (key, _, json) in rows.prefix("compaction-request/") {
+            let Some(compaction_op) = key.strip_prefix("compaction-request/") else {
+                continue;
+            };
+            let is_incomplete = !rows.contains_key(&format!("compaction-result/{compaction_op}"));
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(json)
-                && let Some(base) = val.pointer("/spec/base").and_then(|v| v.as_str())
-                && let Ok(op) = Id::new(base)
+                && let Some(ver) = val
+                    .pointer("/spec/version")
+                    .or_else(|| val.pointer("/spec/base"))
+                    .and_then(|v| v.as_str())
+                && let Ok(op) = Id::new(ver)
+                && (is_incomplete || op == head_release.id)
             {
                 protected_ops.insert(op);
             }
@@ -621,6 +791,62 @@ struct CheckpointCompactionPlan {
     old_archive_path: Option<String>,
 }
 
+fn collect_dataset_refs(
+    val: &serde_json::Value,
+    dataset_prefix: &str,
+    paths: &mut BTreeSet<String>,
+    attempts: &mut BTreeSet<String>,
+) {
+    match val {
+        serde_json::Value::String(s) => {
+            if let Some(rest) = s.strip_prefix(dataset_prefix) {
+                let attempt = rest.split('/').next().unwrap_or_default();
+                if !attempt.is_empty() {
+                    attempts.insert(attempt.to_owned());
+                    paths.insert(s.clone());
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_dataset_refs(item, dataset_prefix, paths, attempts);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_dataset_refs(item, dataset_prefix, paths, attempts);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_unreferenced_parquet(
+    dir: &Path,
+    referenced_paths: &BTreeSet<String>,
+    remove_files: &mut Vec<PathBuf>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_unreferenced_parquet(&path, referenced_paths, remove_files);
+        } else if file_type.is_file()
+            && path.extension().and_then(|ext| ext.to_str()) == Some("parquet")
+        {
+            let path_str = path.to_string_lossy();
+            if !referenced_paths.contains(path_str.as_ref()) {
+                remove_files.push(path);
+            }
+        }
+    }
+}
+
 fn collect_obsolete_lifecycle_keys(
     rows: &crate::catalog::SnapshotRows,
 ) -> Result<BTreeSet<String>> {
@@ -705,6 +931,78 @@ fn collect_obsolete_lifecycle_keys(
             && !incomplete_ops.contains(&phase.operation)
         {
             candidate_keys.insert(key.to_owned());
+        }
+    }
+
+    if incomplete_ops.is_empty()
+        && let Some(head_release) = &authority.release
+    {
+        let mut active_logical_digests = BTreeSet::new();
+        for table in head_release.dataset.groups.values() {
+            active_logical_digests.insert(table.logical_metadata().digest.clone());
+            active_logical_digests.insert(table.metadata.digest.clone());
+        }
+        if let Some(evidence) = &head_release.dataset.evidence {
+            active_logical_digests.insert(evidence.table.logical_metadata().digest.clone());
+            active_logical_digests.insert(evidence.table.metadata.digest.clone());
+        }
+        if let Some(related) = &head_release.dataset.related {
+            active_logical_digests.insert(related.evidence.logical_metadata().digest.clone());
+            active_logical_digests.insert(related.evidence.metadata.digest.clone());
+            for source in related.input_sources.values() {
+                active_logical_digests.insert(source.logical_metadata().digest.clone());
+                active_logical_digests.insert(source.metadata.digest.clone());
+            }
+        }
+
+        let mut kept_compaction_ops = BTreeSet::new();
+        for (key, _, json) in rows.prefix("representation/") {
+            if let Ok(result) = serde_json::from_str::<CompactionResult>(json) {
+                if active_logical_digests.contains(&result.source.logical_metadata().digest)
+                    || active_logical_digests
+                        .contains(&result.replacement.logical_metadata().digest)
+                    || protected_keys.contains(key)
+                    || protected_keys.contains(&owners::binding_key(key))
+                {
+                    kept_compaction_ops.insert(result.spec.operation);
+                } else {
+                    candidate_keys.insert(key.to_owned());
+                }
+            }
+        }
+
+        for (key, _, json) in rows.prefix("compaction-request/") {
+            let Some(compaction_op) = key.strip_prefix("compaction-request/") else {
+                continue;
+            };
+            if !rows.contains_key(&format!("compaction-result/{compaction_op}")) {
+                continue;
+            }
+            if let Ok(capture) = serde_json::from_str::<crate::engine::compaction::Capture>(json)
+                && completed_non_selected.contains(&capture.spec.version)
+                && !kept_compaction_ops.contains(&capture.spec.operation)
+                && !active_logical_digests.contains(&capture.source.logical_metadata().digest)
+                && !active_logical_digests.contains(&capture.source.metadata.digest)
+            {
+                let prefixes = [
+                    "compaction-request",
+                    "compaction-prepared",
+                    "compaction-verified",
+                    "compaction-result",
+                ];
+                let any_protected = prefixes.iter().any(|prefix| {
+                    let k = format!("{prefix}/{compaction_op}");
+                    protected_keys.contains(&k) || protected_keys.contains(&owners::binding_key(&k))
+                });
+                if !any_protected {
+                    for prefix in prefixes {
+                        let exact = format!("{prefix}/{compaction_op}");
+                        if rows.contains_key(&exact) {
+                            candidate_keys.insert(exact);
+                        }
+                    }
+                }
+            }
         }
     }
 

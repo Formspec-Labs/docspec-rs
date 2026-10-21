@@ -636,6 +636,14 @@ impl Lifecycle {
             &self.budget,
         )
         .await?;
+        let active_file_names: BTreeSet<std::ffi::OsString> = files
+            .iter()
+            .filter_map(|file| {
+                std::path::Path::new(file.file_path())
+                    .file_name()
+                    .map(ToOwned::to_owned)
+            })
+            .collect();
         let files_after = files.len();
         let table = replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await?;
         #[cfg(test)]
@@ -647,6 +655,20 @@ impl Lifecycle {
                 "lost_commit_response",
                 "test interruption after native commit and before cache publication",
             ));
+        }
+        if self.retained_prefix.is_none()
+            && !active_file_names.is_empty()
+            && let Ok(entries) =
+                std::fs::read_dir(std::path::Path::new(table.metadata().location()).join("data"))
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) == Some("parquet")
+                    && !active_file_names.contains(&entry.file_name())
+                {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
         }
         let revisions_after = table.metadata().snapshots().count();
         let current_revision = table.metadata().last_sequence_number();

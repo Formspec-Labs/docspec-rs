@@ -91,14 +91,20 @@ pub(crate) async fn verify_groups(
             {
                 return Err(invalid_group());
             }
+            let mut expected_inputs = base.inputs.clone();
+            if matches!(base.request, OperationRequest::Update(_)) {
+                for name in base.request.inputs().keys() {
+                    expected_inputs.remove(&base.request.input_key(name));
+                }
+            }
             let mut inherited_inputs = dataset.inputs.clone();
             for name in dataset.request.inputs().keys() {
                 let key = dataset.request.input_key(name);
-                if base.inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
+                if expected_inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
                     return Err(invalid_group());
                 }
             }
-            if inherited_inputs != base.inputs
+            if inherited_inputs != expected_inputs
                 || base.related.is_some()
                 || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
                 || base.eligibility != dataset.eligibility

@@ -1869,6 +1869,14 @@ impl Engine {
                 })
                 .map(|base| base.dataset.inputs.clone())
                 .unwrap_or_default();
+            if matches!(spec, OperationRequest::Update(_))
+                && let Some(base) = &base
+                && matches!(base.dataset.request, OperationRequest::Update(_))
+            {
+                for name in base.dataset.request.inputs().keys() {
+                    inputs.remove(&base.dataset.request.input_key(name));
+                }
+            }
             if let Some(dependencies) = &processing.dependencies {
                 for (name, input) in &dependencies.admitted_inputs {
                     inputs.insert(spec.input_key(name), input.clone());

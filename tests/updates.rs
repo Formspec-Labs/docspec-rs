@@ -1048,3 +1048,168 @@ async fn killed_update_workers_resume_retained_handoffs_and_exact_changes() {
         assert_eq!(engine.update(&request).await.unwrap(), release);
     }
 }
+
+#[tokio::test]
+async fn update_chain_bounds_inputs_temp_keys_active_files_and_lifecycle_metadata() {
+    use axum::{body::Body, http::Request};
+    use docspec::{
+        engine::verify_release_at,
+        model::{CompactionSpec, VerificationLevel},
+    };
+    use tower::ServiceExt;
+
+    fn count_parquet_under(dir: &Path, keys_only: bool) -> usize {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .map(|entry| {
+                let path = entry.path();
+                if entry.file_type().unwrap().is_dir() {
+                    count_parquet_under(&path, keys_only)
+                } else if path.extension().and_then(|e| e.to_str()) == Some("parquet") {
+                    if keys_only {
+                        usize::from(path.to_string_lossy().contains("/keys/"))
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            })
+            .sum()
+    }
+
+    let root = TempDir::new().unwrap();
+    let workspace = root.path().join("workspace");
+    let fast_limits = Limits {
+        compute_threads: 2,
+        batch_rows: 128,
+        max_batch_bytes: 4 << 20,
+        scratch_bytes: 16 << 20,
+        ..Limits::default()
+    };
+    let mut expected_rows: Vec<Row> = (0_i64..32)
+        .map(|v| (Some(v), Some(format!("init-{v}"))))
+        .collect();
+    let source = input(&root.path().join("input.parquet"), &expected_rows, false);
+    let run_spec = RunSpec {
+        base: None,
+        relationship: None,
+        dataset: id("comments"),
+        operation: id("initial"),
+        input: source.path,
+        expected_digest: source.digest,
+        sql: "SELECT * FROM input".into(),
+        definition: "v1".into(),
+    };
+    let engine = Engine::open(&workspace, fast_limits).await.unwrap();
+    let base = engine.run(&run_spec).await.unwrap();
+    let mut latest = base.clone();
+
+    for step in 1..=31_i64 {
+        let op = format!("poll-{step}");
+        let row = (Some(100 + step), Some(format!("val-{step}")));
+        let spec = update(
+            root.path(),
+            latest.id.as_str(),
+            &op,
+            std::slice::from_ref(&row),
+            &[],
+        );
+        latest = engine.update(&spec).await.unwrap();
+        expected_rows = reconstruction(&expected_rows, &[row], &[]);
+
+        // ss-onwi: DatasetPin.inputs retains only the base build input and latest update inputs.
+        assert_eq!(
+            latest
+                .dataset
+                .inputs
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "input",
+                &format!("{op}/deletions"),
+                &format!("{op}/replacements"),
+            ]
+        );
+
+        if step == 4 {
+            // Exercise HTTP /compact alias on poll-4 before continuing the Update chain.
+            let app = docspec::http::router(engine.clone());
+            let compact_spec = CompactionSpec {
+                dataset: latest.dataset.dataset.clone(),
+                operation: id("compact-poll-4"),
+                version: latest.id.clone(),
+                group: "source".into(),
+                files: vec![],
+                target_file_bytes: 256 << 10,
+            };
+            let response = app
+                .oneshot(
+                    Request::post("/compact")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&compact_spec).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+        }
+    }
+
+    // ss-onwi: no temporary `keys/data/*.parquet` files remain after completed updates.
+    assert_eq!(count_parquet_under(&workspace.join("objects"), true), 0);
+
+    // ss-7hrv: tail coalescing + compaction keep active source data files bounded (<< 29).
+    let active_data_files = latest.dataset.groups["source"]
+        .objects
+        .iter()
+        .filter(|obj| obj.path.ends_with(".parquet"))
+        .count();
+    assert!(
+        active_data_files <= 10,
+        "expected coalesced active source files <= 10, got {active_data_files}"
+    );
+
+    let stats = engine
+        .compact_lifecycle(&latest.dataset.dataset)
+        .await
+        .unwrap();
+    assert_eq!(stats.revisions_after, 1);
+    assert!(
+        stats.metadata_bytes_after < 128 << 10,
+        "expected compacted lifecycle_bytes < 128 KiB (<< 1 MiB), got {}",
+        stats.metadata_bytes_after
+    );
+
+    let inspected = engine.inspect(&latest.dataset.dataset).await.unwrap();
+    assert!(
+        !inspected.contains_key("compaction-request/compact-poll-4"),
+        "superseded compaction records must be pruned after compact_lifecycle"
+    );
+    assert!(
+        !inspected
+            .keys()
+            .any(|k| k.starts_with("representation/")),
+        "superseded representation records must be pruned after compact_lifecycle"
+    );
+
+    let total_parquet_on_disk = count_parquet_under(&workspace, false);
+    assert!(
+        total_parquet_on_disk <= 20,
+        "expected bounded total Parquet files on disk <= 20, got {total_parquet_on_disk}"
+    );
+
+    assert_eq!(read(&latest.dataset.groups["source"]).await, expected_rows);
+    verify_release_at(&latest, limits(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+    let proof = engine
+        .prove_succession(&base.version_ref(), &latest.version_ref())
+        .await
+        .unwrap();
+    assert_eq!(proof.selections_advanced, 31);
+}

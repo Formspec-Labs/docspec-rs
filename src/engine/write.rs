@@ -768,14 +768,109 @@ impl Engine {
                 budget,
             )
             .await?;
+            let _ = context.deregister_table("affected_keys");
+            if directory.is_local()
+                && let Ok(path) = directory.local_path()
+            {
+                let _ = std::fs::remove_dir_all(path.join("keys"));
+            }
             metrics.rows_removed = removed_files.iter().map(|file| file.record_count()).sum();
             metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
+            let small_threshold =
+                (budget.limits.max_batch_bytes as u64 / 8).clamp(64 << 10, 512 << 10);
+            let small_dirs = shared
+                .iter()
+                .filter(|file| file.file_size_in_bytes() < small_threshold)
+                .filter_map(|file| Path::new(file.file_path()).parent())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let total_dirs = shared
+                .iter()
+                .filter_map(|file| Path::new(file.file_path()).parent())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
+                && storage::identity::has_origins(native.metadata().current_schema())?
+                && (small_dirs >= 24 || total_dirs > 48)
+            {
+                let mut indices = if small_dirs >= 24 {
+                    shared
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, file)| file.file_size_in_bytes() < small_threshold)
+                        .map(|(idx, _)| idx)
+                        .take(32)
+                        .collect::<Vec<_>>()
+                } else {
+                    let mut by_size = shared
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, file)| (file.file_size_in_bytes(), idx))
+                        .collect::<Vec<_>>();
+                    by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
+                    let take = (shared.len().saturating_sub(32)).clamp(16, 32);
+                    let mut selected = by_size
+                        .into_iter()
+                        .take(take)
+                        .map(|(_, idx)| idx)
+                        .collect::<Vec<_>>();
+                    selected.sort_unstable();
+                    selected
+                };
+                let coalesce_bytes = indices
+                    .iter()
+                    .map(|&idx| shared[idx].file_size_in_bytes())
+                    .sum::<u64>();
+                let reserve = coalesce_bytes
+                    .saturating_mul(2)
+                    .saturating_add(budget.limits.scratch_bytes);
+                if directory.is_local() && fs2::available_space(&self.inner.root)? < reserve {
+                    indices.clear();
+                }
+                if indices.len() >= 2 {
+                    let selected_set = indices
+                        .into_iter()
+                        .collect::<std::collections::BTreeSet<_>>();
+                    let mut remaining = Vec::with_capacity(shared.len() - selected_set.len());
+                    let mut paths = Vec::with_capacity(selected_set.len());
+                    for (idx, file) in shared.into_iter().enumerate() {
+                        if selected_set.contains(&idx) {
+                            paths.push(file.file_path().to_owned());
+                        } else {
+                            remaining.push(file);
+                        }
+                    }
+                    shared = remaining;
+                    let scan_for_coalesce = scan.clone();
+                    let coalesced_stream = futures::stream::iter(paths)
+                        .map(move |path| scan_for_coalesce.read_file(&path, budget))
+                        .try_flatten();
+                    let target_file_bytes = usize::try_from(coalesce_bytes)
+                        .unwrap_or(usize::MAX)
+                        .max(budget.limits.max_batch_bytes);
+                    storage::write_batches_sized(
+                        &candidate,
+                        coalesced_stream,
+                        budget,
+                        target_file_bytes,
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
             metrics.data_files_written = key_files_written
-                + (kept_files.len() + removed_files.len() + added_files.len()) as u64;
+                + (kept_files.len()
+                    + removed_files.len()
+                    + added_files.len()
+                    + coalesced_files.len()) as u64;
             metrics.bytes_written = kept_files
                 .iter()
                 .chain(&removed_files)
                 .chain(&added_files)
+                .chain(&coalesced_files)
                 .map(|file| file.file_size_in_bytes())
                 .sum::<u64>()
                 + key_bytes_written;
@@ -789,6 +884,7 @@ impl Engine {
                         "applied change counts do not fit the captured base",
                     )
                 })?;
+            shared.extend(coalesced_files);
             shared.extend(kept_files);
             shared.extend(added_files.clone());
             let catalog = self.inner.lifecycle.catalog.as_ref();
