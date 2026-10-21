@@ -23,7 +23,7 @@ use arrow::{
         Int64Array, Int64Builder, LargeStringArray, ListArray, ListBuilder, StringArray,
         StringBuilder, StructArray, StructBuilder, UInt32Builder,
     },
-    compute::{SortColumn as ArrowSortColumn, SortOptions, concat_batches, lexsort_to_indices, take},
+    compute::take,
     datatypes::{DataType, Field, Fields, Schema, SchemaRef},
     record_batch::RecordBatch,
 };
@@ -32,6 +32,7 @@ use datafusion::{
         DFSchema, ScalarValue,
         tree_node::{TreeNode, TreeNodeRecursion},
     },
+    datasource::MemTable,
     logical_expr::{BinaryExpr, Case, Expr, Operator, Volatility, col, lit},
     physical_plan::SendableRecordBatchStream,
     prelude::SessionContext,
@@ -39,8 +40,11 @@ use datafusion::{
 use futures::TryStreamExt;
 use parquet::{
     arrow::{
-        ArrowWriter, PARQUET_FIELD_ID_META_KEY,
-        arrow_reader::{ArrowReaderOptions, ParquetRecordBatchReaderBuilder, RowSelection, RowSelector},
+        ArrowWriter, PARQUET_FIELD_ID_META_KEY, ParquetRecordBatchStreamBuilder,
+        arrow_reader::{
+            ArrowReaderOptions, ParquetRecordBatchReaderBuilder, RowSelection, RowSelector,
+        },
+        async_reader::AsyncFileReader,
     },
     basic::{Compression, ZstdLevel},
     file::{
@@ -135,32 +139,53 @@ impl Engine {
         let ord_col = child_spec.ordinal_column.clone();
         let end_ordinal =
             start_ordinal.saturating_add(i64::try_from(limit).unwrap_or(i64::MAX));
-        let path = PathBuf::from(&child.object.path);
-        let expected_bytes = child.object.bytes;
-        let browse_ranges = child.browse_ranges;
+        let browse_ranges = child.browse_ranges.clone();
         let key_value = key_value.to_owned();
+        let child_object = child.object.clone();
         self.admit_work(memory, move |engine| async move {
             let budget = &engine.inner.lifecycle.budget;
             let mem = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
-            budget
-                .blocking(move || {
-                    let _mem = mem;
-                    let meta = std::fs::metadata(&path).map_err(|_| invalid_export())?;
-                    if meta.len() != expected_bytes {
-                        return Err(invalid_export());
-                    }
-                    slice_child_parquet(
-                        &path,
-                        &browse_ranges,
-                        &key_col,
-                        &ord_col,
-                        &key_value,
-                        start_ordinal,
-                        end_ordinal,
-                        limit,
-                    )
-                })
+            if !engine.inner.retained.is_local() {
+                let _mem = mem;
+                let reader = engine
+                    .inner
+                    .objects
+                    .open_flat_parquet_reader(&child_object)
+                    .await?;
+                slice_child_parquet_async(
+                    reader,
+                    &browse_ranges,
+                    &key_col,
+                    &ord_col,
+                    &key_value,
+                    start_ordinal,
+                    end_ordinal,
+                    limit,
+                )
                 .await
+            } else {
+                let path = PathBuf::from(&child_object.path);
+                let expected_bytes = child_object.bytes;
+                budget
+                    .blocking(move || {
+                        let _mem = mem;
+                        let meta = std::fs::metadata(&path).map_err(|_| invalid_export())?;
+                        if meta.len() != expected_bytes {
+                            return Err(invalid_export());
+                        }
+                        slice_child_parquet(
+                            &path,
+                            &browse_ranges,
+                            &key_col,
+                            &ord_col,
+                            &key_value,
+                            start_ordinal,
+                            end_ordinal,
+                            limit,
+                        )
+                    })
+                    .await
+            }
         })
         .await
     }
@@ -208,11 +233,10 @@ impl Engine {
         }
 
         // 1. Register and join all requested groups in DataFusion.
-        let (df, source_field_map, expected_unfiltered_rows) =
+        let (context, df, source_field_map, expected_unfiltered_rows) =
             self.build_joined_export_dataframe(operation).await?;
 
         // 2. Apply optional row filter (`policy.filter`).
-        let context = budget.context();
         let df = if let Some(predicate) = &policy.filter {
             let expr = compile_predicate(&context, df.schema(), predicate)?;
             df.filter(expr)?
@@ -231,10 +255,63 @@ impl Engine {
         let joined_arrow_schema = Arc::new(df.schema().as_arrow().clone());
         validate_pipeline_columns(&joined_arrow_schema, policy, &computed_field_names)?;
 
-        // 5. Stream the joined/filtered/computed batches.
-        let stream = crate::query::bounded(df.execute_stream().await?, budget)?;
-        futures::pin_mut!(stream);
+        let mut seen_ids = BTreeSet::new();
+        let multi_or_synthesized = policy.effective_groups().len() > 1
+            || !policy.computed_columns.is_empty()
+            || policy.fold_readings.is_some()
+            || !policy.child_tables.is_empty();
 
+        let parent_schema = build_parent_output_schema(
+            &joined_arrow_schema,
+            policy,
+            &source_field_map,
+            &mut seen_ids,
+            multi_or_synthesized,
+        )?;
+        let parent_fields = describe_schema(&parent_schema)?;
+        let page_index_cols = resolve_page_index_columns(&parent_schema, policy)?;
+        let browse_cols = resolve_browse_range_columns(&parent_schema, policy)?;
+
+        // 5. Push `policy.order_by` into DataFusion's spill-enabled `SortExec`.
+        let df = if !policy.order_by.is_empty() {
+            let mut sort_exprs = Vec::with_capacity(policy.order_by.len());
+            for sc in &policy.order_by {
+                let field = parent_schema.field_with_name(&sc.column).map_err(|_| {
+                    Error::refusal(
+                        "invalid_export",
+                        format!("order_by column {} is absent from the exported schema", sc.column),
+                    )
+                })?;
+                if !is_scalar_data_type(field.data_type()) {
+                    return Err(Error::refusal(
+                        "invalid_export",
+                        format!("order_by column {} must be a scalar column", sc.column),
+                    ));
+                }
+                let asc = sc.direction == SortDirection::Asc;
+                if let Some(child_spec) = policy
+                    .child_tables
+                    .values()
+                    .find(|c| c.replace_with_count_column.as_ref() == Some(&sc.column))
+                {
+                    let count_expr = context.parse_sql_expr(
+                        &format!(
+                            "COALESCE(CAST(ARRAY_LENGTH({}) AS BIGINT), 0)",
+                            quote(&child_spec.list_column)
+                        ),
+                        df.schema(),
+                    )?;
+                    sort_exprs.push(count_expr.sort(asc, sc.nulls_first));
+                } else {
+                    sort_exprs.push(col(quote(&sc.column)).sort(asc, sc.nulls_first));
+                }
+            }
+            df.sort(sort_exprs)?
+        } else {
+            df
+        };
+
+        // 6. Initialize child accumulators, facet accumulator, and streaming parent writer.
         let mut child_accumulators = BTreeMap::new();
         for (child_name, child_spec) in &policy.child_tables {
             child_accumulators.insert(
@@ -247,59 +324,37 @@ impl Engine {
                 )?,
             );
         }
+        let mut facet_accumulator =
+            FacetAccumulator::new(&policy.facet_sets, budget.limits.max_metadata_bytes);
 
-        let mut facet_accumulator = FacetAccumulator::new(&policy.facet_sets);
-        let mut parent_batches: Vec<RecordBatch> = Vec::new();
-        let mut parent_schema_opt: Option<SchemaRef> = None;
-        let mut seen_ids = BTreeSet::new();
-        let multi_or_synthesized = policy.effective_groups().len() > 1
-            || !policy.computed_columns.is_empty()
-            || policy.fold_readings.is_some()
-            || !policy.child_tables.is_empty();
+        let (object, rows, browse_ranges, custody) = self
+            .stream_parent_and_extract_children(
+                operation,
+                &directory,
+                is_staged,
+                stop,
+                df,
+                parent_schema,
+                &parent_fields,
+                policy.row_group_rows,
+                &page_index_cols,
+                &browse_cols,
+                &mut child_accumulators,
+                &mut facet_accumulator,
+            )
+            .await?;
 
-        let initial_parent_schema = build_parent_output_schema(
-            &joined_arrow_schema,
-            policy,
-            &source_field_map,
-            &mut seen_ids,
-            multi_or_synthesized,
-        )?;
-        let parent_fields = describe_schema(&initial_parent_schema)?;
-
-        while let Some(batch) = stream.try_next().await? {
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            for acc in child_accumulators.values_mut() {
-                acc.extract_batch(&batch, budget.limits.max_batch_bytes)?;
-            }
-
-            let parent_batch =
-                transform_to_parent_batch(&batch, &initial_parent_schema, policy)?;
-
-            facet_accumulator.observe(&batch, &parent_batch)?;
-
-            parent_schema_opt = Some(parent_batch.schema());
-            for slice in
-                storage::split_oversized_batch(parent_batch, budget.limits.max_batch_bytes)?
-            {
-                parent_batches.push(slice);
-            }
+        if policy.filter.is_none()
+            && let Some(expected_rows) = expected_unfiltered_rows
+            && rows != expected_rows
+        {
+            return Err(Error::refusal(
+                "row_count_mismatch",
+                "export rows differ from the retained native group",
+            ));
         }
 
-        let parent_schema = parent_schema_opt.unwrap_or_else(|| initial_parent_schema.clone());
-
-        // 6. Globally sort parent batches if `policy.order_by` is non-empty.
-        if !policy.order_by.is_empty() && !parent_batches.is_empty() {
-            parent_batches = sort_record_batches(
-                &parent_schema,
-                &parent_batches,
-                &policy.order_by,
-                budget.limits.max_batch_bytes,
-            )?;
-        }
-
-        // 7. Write child Parquet files (`{child_name}.parquet`) and validate each.
+        // 7. Sort, stream, and validate child Parquet files (`{child_name}.parquet`).
         let mut child_exports = BTreeMap::new();
         for (child_name, acc) in child_accumulators {
             let child_export = acc
@@ -312,34 +367,6 @@ impl Engine {
                 )
                 .await?;
             child_exports.insert(child_name, child_export);
-        }
-
-        // 8. Write parent `export.parquet` with selective `PageIndex` and record `browse_ranges`.
-        let page_index_cols = resolve_page_index_columns(&parent_schema, policy)?;
-        let browse_cols = resolve_browse_range_columns(&parent_schema, policy)?;
-        let (object, rows, browse_ranges, custody) = self
-            .write_parent_parquet(
-                operation,
-                &directory,
-                is_staged,
-                stop,
-                parent_schema,
-                &parent_fields,
-                parent_batches,
-                policy.row_group_rows,
-                &page_index_cols,
-                &browse_cols,
-            )
-            .await?;
-
-        if policy.filter.is_none()
-            && let Some(expected_rows) = expected_unfiltered_rows
-            && rows != expected_rows
-        {
-            return Err(Error::refusal(
-                "row_count_mismatch",
-                "export rows differ from the retained native group",
-            ));
         }
 
         let facets = facet_accumulator.finish();
@@ -370,6 +397,7 @@ impl Engine {
         &self,
         operation: &ExportOperation,
     ) -> Result<(
+        SessionContext,
         datafusion::prelude::DataFrame,
         HashMap<String, Field>,
         Option<u64>,
@@ -379,54 +407,21 @@ impl Engine {
         let dataset = &operation.source.dataset;
         let budget = &self.inner.lifecycle.budget;
         let context = budget.context();
+        self.inner
+            .objects
+            .register_query_store(&context.runtime_env())?;
 
         let mut source_field_map: HashMap<String, Field> = HashMap::new();
         let mut select_exprs: Vec<String> = Vec::new();
         let mut seen_public_names: BTreeSet<String> = BTreeSet::new();
 
-        if groups.len() == 1 {
-            let group_name = &groups[0];
-            if group_name == "evidence" || group_name == "receipts" {
-                let evidence = dataset.evidence.as_ref().ok_or_else(|| {
-                    Error::refusal("missing_group", "export policy names an absent receipt table")
-                })?;
-                let native = self.inner.objects.open_pin(&evidence.table, budget).await?;
-                let arrow_schema = storage::schema::read_schema(&native)?;
-                for f in arrow_schema.fields() {
-                    source_field_map.insert(f.name().clone(), f.as_ref().clone());
-                }
-                context.register_table(
-                    "t0",
-                    crate::query::table(native, budget.clone(), Some(evidence.table.rows))?,
-                )?;
-                return Ok((
-                    context.table("t0").await?,
-                    source_field_map,
-                    Some(evidence.table.rows),
-                ));
-            }
-            let table_pin = dataset.groups.get(group_name).ok_or_else(|| {
-                Error::refusal("missing_group", "export policy names an absent field group")
-            })?;
-            let native = self.inner.objects.open_pin(table_pin, budget).await?;
-            let arrow_schema = storage::schema::read_schema(&native)?;
-            for f in arrow_schema.fields() {
-                source_field_map.insert(f.name().clone(), f.as_ref().clone());
-            }
-            context.register_table(
-                "t0",
-                crate::query::table(native, budget.clone(), Some(table_pin.rows))?,
-            )?;
-            return Ok((
-                context.table("t0").await?,
-                source_field_map,
-                Some(table_pin.rows),
-            ));
-        }
-
-        let mut from_sql = String::new();
-        let mut anchor_alias = String::new();
+        let anchor_group_idx = groups
+            .iter()
+            .position(|g| g != "evidence" && g != "receipts");
+        let anchor_idx = anchor_group_idx.unwrap_or(0);
+        let anchor_alias = format!("g{anchor_idx}");
         let mut expected_rows = None;
+        let need_occurrences = groups.len() > 1;
 
         for (idx, group_name) in groups.iter().enumerate() {
             let alias = format!("g{idx}");
@@ -439,7 +434,11 @@ impl Engine {
                 {
                     return Err(invalid_export());
                 }
-                let native = self.inner.objects.open_pin(&evidence.table, budget).await?;
+                let (native, _) = self
+                    .inner
+                    .objects
+                    .open_snapshot(&evidence.table, budget)
+                    .await?;
                 let arrow_schema = storage::schema::read_schema(&native)?;
                 if let Ok(ev_field) = arrow_schema.field_with_name(EVIDENCE) {
                     if !seen_public_names.insert(EVIDENCE.to_owned()) {
@@ -450,35 +449,32 @@ impl Engine {
                     }
                     source_field_map.insert(EVIDENCE.to_owned(), ev_field.clone());
                 }
+                let native = self.inner.objects.bind_table(&native)?.into_native();
                 context.register_table(
                     &alias,
                     crate::query::table(native, budget.clone(), Some(evidence.table.rows))?,
                 )?;
-                if anchor_alias.is_empty() {
-                    anchor_alias = alias.clone();
-                    from_sql.push_str(&alias);
+                if idx == anchor_idx {
                     expected_rows = Some(evidence.table.rows);
-                } else {
-                    from_sql.push_str(&format!(
-                        " LEFT JOIN {alias} ON {anchor_alias}.{} = {alias}.{} AND {anchor_alias}.{} = {alias}.{}",
-                        quote(storage::OCCURRENCE_FILE),
-                        quote(SOURCE_FILE),
-                        quote(storage::OCCURRENCE_ROW),
-                        quote(SOURCE_ROW),
-                    ));
                 }
                 select_exprs.push(format!("{alias}.{}", quote(EVIDENCE)));
             } else if group_name == "source" {
                 let source_pin = dataset.groups.get("source").ok_or_else(|| {
                     Error::refusal("missing_group", "export policy names an absent field group")
                 })?;
-                let native = self.inner.objects.open_pin(source_pin, budget).await?;
+                let (native, _) = self
+                    .inner
+                    .objects
+                    .open_snapshot(source_pin, budget)
+                    .await?;
                 let arrow_schema = storage::schema::read_schema(&native)?;
                 for field in arrow_schema.fields() {
                     let name = field.name();
                     if storage::defaults::supplied_id(name).is_none()
                         && !storage::identity::hidden(name)
                         && !name.to_ascii_lowercase().starts_with("__docspec_")
+                        && (dataset.related.is_none()
+                            || !crate::engine::refresh::hidden_field(name))
                     {
                         if !seen_public_names.insert(name.clone()) {
                             return Err(Error::refusal(
@@ -490,28 +486,25 @@ impl Engine {
                         select_exprs.push(format!("{alias}.{}", quote(name)));
                     }
                 }
-                context.register_table(
-                    &alias,
-                    crate::query::occurrences(native, budget.clone(), Some(source_pin.rows))?,
-                )?;
-                if anchor_alias.is_empty() {
-                    anchor_alias = alias.clone();
-                    from_sql.push_str(&alias);
-                    expected_rows = Some(source_pin.rows);
+                let native = self.inner.objects.bind_table(&native)?.into_native();
+                let provider = if need_occurrences {
+                    crate::query::occurrences(native, budget.clone(), Some(source_pin.rows))?
                 } else {
-                    from_sql.push_str(&format!(
-                        " INNER JOIN {alias} ON {anchor_alias}.{} = {alias}.{} AND {anchor_alias}.{} = {alias}.{}",
-                        quote(storage::OCCURRENCE_FILE),
-                        quote(storage::OCCURRENCE_FILE),
-                        quote(storage::OCCURRENCE_ROW),
-                        quote(storage::OCCURRENCE_ROW),
-                    ));
+                    crate::query::table(native, budget.clone(), Some(source_pin.rows))?
+                };
+                context.register_table(&alias, provider)?;
+                if idx == anchor_idx {
+                    expected_rows = Some(source_pin.rows);
                 }
             } else {
                 let group_pin = dataset.groups.get(group_name).ok_or_else(|| {
                     Error::refusal("missing_group", "export policy names an absent field group")
                 })?;
-                let native = self.inner.objects.open_pin(group_pin, budget).await?;
+                let (native, _) = self
+                    .inner
+                    .objects
+                    .open_snapshot(group_pin, budget)
+                    .await?;
                 let arrow_schema = storage::schema::read_schema(&native)?;
                 for field in arrow_schema.fields() {
                     let name = field.name();
@@ -528,44 +521,66 @@ impl Engine {
                         select_exprs.push(format!("{alias}.{}", quote(name)));
                     }
                 }
+                let native = self.inner.objects.bind_table(&native)?.into_native();
                 context.register_table(
                     &alias,
                     crate::query::table(native, budget.clone(), Some(group_pin.rows))?,
                 )?;
-                if anchor_alias.is_empty() {
-                    anchor_alias = alias.clone();
-                    from_sql.push_str(&alias);
+                if idx == anchor_idx {
                     expected_rows = Some(group_pin.rows);
-                } else {
-                    from_sql.push_str(&format!(
-                        " INNER JOIN {alias} ON {anchor_alias}.{} = {alias}.{} AND {anchor_alias}.{} = {alias}.{}",
-                        quote(storage::OCCURRENCE_FILE),
-                        quote(storage::OCCURRENCE_FILE),
-                        quote(storage::OCCURRENCE_ROW),
-                        quote(storage::OCCURRENCE_ROW),
-                    ));
                 }
+            }
+        }
+
+        if select_exprs.is_empty() {
+            return Err(invalid_export());
+        }
+
+        let mut from_sql = anchor_alias.clone();
+        for (idx, group_name) in groups.iter().enumerate() {
+            if idx == anchor_idx {
+                continue;
+            }
+            let alias = format!("g{idx}");
+            if group_name == "evidence" || group_name == "receipts" {
+                from_sql.push_str(&format!(
+                    " LEFT JOIN {alias} ON {anchor_alias}.{} = {alias}.{} AND {anchor_alias}.{} = {alias}.{}",
+                    quote(storage::OCCURRENCE_FILE),
+                    quote(SOURCE_FILE),
+                    quote(storage::OCCURRENCE_ROW),
+                    quote(SOURCE_ROW),
+                ));
+            } else {
+                from_sql.push_str(&format!(
+                    " INNER JOIN {alias} ON {anchor_alias}.{} = {alias}.{} AND {anchor_alias}.{} = {alias}.{}",
+                    quote(storage::OCCURRENCE_FILE),
+                    quote(storage::OCCURRENCE_FILE),
+                    quote(storage::OCCURRENCE_ROW),
+                    quote(storage::OCCURRENCE_ROW),
+                ));
             }
         }
 
         let sql = format!("SELECT {} FROM {from_sql}", select_exprs.join(", "));
         let df = context.sql(&sql).await?;
-        Ok((df, source_field_map, expected_rows))
+        Ok((context, df, source_field_map, expected_rows))
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn write_parent_parquet(
+    async fn stream_parent_and_extract_children(
         &self,
         operation: &ExportOperation,
         directory: &std::path::Path,
         is_staged: bool,
         stop: Option<&str>,
+        df: datafusion::prelude::DataFrame,
         schema: SchemaRef,
         fields: &[ExportField],
-        batches: Vec<RecordBatch>,
         row_group_rows: Option<usize>,
         page_index_cols: &[String],
         browse_cols: &[String],
+        child_accumulators: &mut BTreeMap<String, ChildAccumulator>,
+        facet_accumulator: &mut FacetAccumulator,
     ) -> Result<(
         crate::model::ObjectRef,
         u64,
@@ -574,6 +589,7 @@ impl Engine {
     )> {
         let budget = &self.inner.lifecycle.budget;
         let spec = &operation.request;
+        let policy = &spec.policy;
         let memory = budget.reserve(
             budget
                 .limits
@@ -637,124 +653,156 @@ impl Engine {
             |size, field| size.saturating_add(field.name.len() + field.data_type.len()),
         );
 
+        let stream = crate::query::bounded(df.execute_stream().await?, budget)?;
+        futures::pin_mut!(stream);
+
+        let mut tracker = BrowseRangeTracker::new(browse_cols);
         let mut rows = 0_u64;
-        for batch in &batches {
-            let columns = batch
-                .columns()
-                .iter()
-                .zip(schema.fields())
-                .map(|(column, field)| sanitize_export_array(column, field.data_type()))
-                .collect::<Result<Vec<_>>>()?;
-            let sanitized_batch = RecordBatch::try_new(schema.clone(), columns)?;
-            rows = rows
-                .checked_add(sanitized_batch.num_rows() as u64)
-                .ok_or_else(invalid_export)?;
-            let limits = budget.limits.clone();
-            let root = self.inner.root.clone();
-            #[cfg(feature = "test-util")]
-            let stop_payload = stop == Some("host-payload");
-            writer = budget
-                .blocking(move || {
-                    let reserve = limits
-                        .scratch_bytes
-                        .saturating_add((limits.max_batch_bytes as u64).saturating_mul(4));
-                    if fs2::available_space(&root)? < reserve {
-                        return Err(Error::refusal(
-                            "disk_capacity",
-                            "export output and declared scratch no longer fit available disk",
-                        ));
-                    }
-                    writer.0.write(&sanitized_batch)?;
-                    #[cfg(feature = "test-util")]
-                    if stop_payload {
-                        writer.0.flush()?;
-                    }
-                    if writer.0.memory_size() >= limits.max_batch_bytes {
-                        writer.0.flush()?;
-                    }
-                    if writer
-                        .0
+        let max_rg_rows = row_group_rows.unwrap_or(1024 * 1024).max(1);
+
+        while let Some(batch) = stream.try_next().await? {
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            for acc in child_accumulators.values_mut() {
+                acc.extract_batch(&batch, budget)?;
+            }
+            let parent_batch = transform_to_parent_batch(&batch, &schema, policy)?;
+            facet_accumulator.observe(&batch, &parent_batch)?;
+
+            for slice in
+                storage::split_oversized_batch(parent_batch, budget.limits.max_batch_bytes)?
+            {
+                let columns = slice
+                    .columns()
+                    .iter()
+                    .zip(schema.fields())
+                    .map(|(column, field)| sanitize_export_array(column, field.data_type()))
+                    .collect::<Result<Vec<_>>>()?;
+                let sanitized_batch = RecordBatch::try_new(schema.clone(), columns)?;
+                rows = rows
+                    .checked_add(sanitized_batch.num_rows() as u64)
+                    .ok_or_else(invalid_export)?;
+                let limits = budget.limits.clone();
+                let root = self.inner.root.clone();
+                #[cfg(feature = "test-util")]
+                let stop_payload = stop == Some("host-payload");
+                let moved_tracker = std::mem::replace(&mut tracker, BrowseRangeTracker::new(&[]));
+                let (next_writer, next_tracker) = budget
+                    .blocking(move || {
+                        let mut tracker = moved_tracker;
+                        let reserve = limits
+                            .scratch_bytes
+                            .saturating_add((limits.max_batch_bytes as u64).saturating_mul(4));
+                        if fs2::available_space(&root)? < reserve {
+                            return Err(Error::refusal(
+                                "disk_capacity",
+                                "export output and declared scratch no longer fit available disk",
+                            ));
+                        }
+                        let mut offset = 0usize;
+                        while offset < sanitized_batch.num_rows() {
+                            let rem = sanitized_batch.num_rows() - offset;
+                            let in_prog = writer.0.in_progress_rows();
+                            let take_len = rem.min(max_rg_rows.saturating_sub(in_prog).max(1));
+                            let sub_batch = sanitized_batch.slice(offset, take_len);
+                            offset += take_len;
+
+                            writer.0.write(&sub_batch)?;
+                            tracker.observe_batch(&sub_batch)?;
+
+                            let should_flush = {
+                                #[cfg(feature = "test-util")]
+                                let force = stop_payload;
+                                #[cfg(not(feature = "test-util"))]
+                                let force = false;
+                                force
+                                    || writer.0.in_progress_rows() >= max_rg_rows
+                                    || writer.0.memory_size() >= limits.max_batch_bytes
+                                    || writer.0.in_progress_size() >= max_row_group_bytes
+                            };
+                            if should_flush && writer.0.in_progress_rows() > 0 {
+                                writer.0.flush()?;
+                                tracker.finish_row_group();
+                            }
+                            if writer
+                                .0
+                                .flushed_row_groups()
+                                .len()
+                                .saturating_mul(footer_group_bytes)
+                                > limits.max_metadata_bytes
+                            {
+                                return Err(Error::refusal(
+                                    "metadata_capacity",
+                                    "estimated flat export footer exceeds the declared metadata allowance",
+                                ));
+                            }
+                        }
+                        Ok((writer, tracker))
+                    })
+                    .await?;
+                writer = next_writer;
+                tracker = next_tracker;
+                stop_after(stop, "host-payload")?;
+            }
+        }
+        drop(stream);
+
+        let owner = spec.dataset.clone();
+        let max_metadata_bytes = budget.limits.max_metadata_bytes;
+        let path_clone = path.clone();
+        let (object, browse_ranges): (crate::model::ObjectRef, Vec<ExportKeyRange>) = budget
+            .blocking(
+                move || -> Result<(crate::model::ObjectRef, Vec<ExportKeyRange>)> {
+                    let (mut output, _memory) = writer;
+                    let groups = output
                         .flushed_row_groups()
                         .len()
-                        .saturating_mul(footer_group_bytes)
-                        > limits.max_metadata_bytes
-                    {
+                        .saturating_add(usize::from(output.in_progress_rows() != 0));
+                    if groups.saturating_mul(footer_group_bytes) > max_metadata_bytes {
                         return Err(Error::refusal(
                             "metadata_capacity",
                             "estimated flat export footer exceeds the declared metadata allowance",
                         ));
                     }
-                    Ok(writer)
-                })
-                .await?;
-            stop_after(stop, "host-payload")?;
-        }
-
-        let owner = spec.dataset.clone();
-        let max_metadata_bytes = budget.limits.max_metadata_bytes;
-        let path_clone = path.clone();
-        let (object, row_group_counts): (crate::model::ObjectRef, Vec<usize>) = budget
-            .blocking(move || -> Result<(crate::model::ObjectRef, Vec<usize>)> {
-                let (mut output, _memory) = writer;
-                let groups = output
-                    .flushed_row_groups()
-                    .len()
-                    .saturating_add(usize::from(output.in_progress_rows() != 0));
-                if groups.saturating_mul(footer_group_bytes) > max_metadata_bytes {
-                    return Err(Error::refusal(
-                        "metadata_capacity",
-                        "estimated flat export footer exceeds the declared metadata allowance",
-                    ));
-                }
-                let metadata = output.finish()?;
-                let rg_counts = metadata
-                    .row_groups()
-                    .iter()
-                    .map(|rg| usize::try_from(rg.num_rows()).unwrap_or(0))
-                    .collect::<Vec<usize>>();
-                let obj = output.inner().finish(&owner, &path_clone)?;
-                Ok((obj, rg_counts))
-            })
+                    if output.in_progress_rows() > 0 {
+                        tracker.finish_row_group();
+                    }
+                    let _metadata = output.finish()?;
+                    let obj = output.inner().finish(&owner, &path_clone)?;
+                    Ok((obj, tracker.into_ranges()))
+                },
+            )
             .await?;
-
-        let browse_ranges = if browse_cols.is_empty() || batches.is_empty() {
-            Vec::new()
-        } else {
-            compute_browse_ranges(&schema, &batches, &row_group_counts, browse_cols)?
-        };
 
         Ok((object, rows, browse_ranges, custody))
     }
 }
 
 fn build_writer_properties(
-    row_group_rows: Option<usize>,
-    max_row_group_bytes: usize,
+    _row_group_rows: Option<usize>,
+    _max_row_group_bytes: usize,
     page_index_cols: &[String],
 ) -> Result<WriterProperties> {
-    let page_size_limit = if page_index_cols.is_empty() {
-        1024 * 1024
-    } else {
-        16 * 1024
-    };
     let mut builder = WriterProperties::builder()
         .set_writer_version(WriterVersion::PARQUET_2_0)
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_max_row_group_row_count(row_group_rows)
-        .set_max_row_group_bytes(Some(max_row_group_bytes))
-        .set_data_page_size_limit(page_size_limit)
+        .set_max_row_group_row_count(None)
+        .set_max_row_group_bytes(None)
+        .set_data_page_size_limit(1024 * 1024)
         .set_dictionary_enabled(true)
         .set_statistics_enabled(EnabledStatistics::Chunk)
         .set_statistics_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
+        .set_column_index_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
         .set_offset_index_disabled(true);
     if !page_index_cols.is_empty() {
         builder = builder.set_write_batch_size(256);
     }
     for col_name in page_index_cols {
-        builder = builder.set_column_statistics_enabled(
-            ColumnPath::from(col_name.as_str()),
-            EnabledStatistics::Page,
-        );
+        let col_path = ColumnPath::from(col_name.as_str());
+        builder = builder
+            .set_column_statistics_enabled(col_path.clone(), EnabledStatistics::Page)
+            .set_column_data_page_size_limit(col_path, 16 * 1024);
     }
     Ok(builder.build())
 }
@@ -1548,42 +1596,6 @@ fn scalar_value_at(array: &ArrayRef, row: usize) -> Option<String> {
         .map(|sv| sv.to_string())
 }
 
-fn sort_record_batches(
-    schema: &SchemaRef,
-    batches: &[RecordBatch],
-    order_by: &[crate::export::SortColumn],
-    max_batch_bytes: usize,
-) -> Result<Vec<RecordBatch>> {
-    let combined = concat_batches(schema, batches)?;
-    if combined.num_rows() <= 1 {
-        return storage::split_oversized_batch(combined, max_batch_bytes);
-    }
-    let mut sort_cols = Vec::with_capacity(order_by.len());
-    for sc in order_by {
-        let col_arr = combined.column_by_name(&sc.column).ok_or_else(|| {
-            Error::refusal(
-                "invalid_export",
-                format!("order_by column {} is absent from the exported schema", sc.column),
-            )
-        })?;
-        sort_cols.push(ArrowSortColumn {
-            values: col_arr.clone(),
-            options: Some(SortOptions {
-                descending: sc.direction == SortDirection::Desc,
-                nulls_first: sc.nulls_first,
-            }),
-        });
-    }
-    let indices = lexsort_to_indices(&sort_cols, None)?;
-    let sorted_columns = combined
-        .columns()
-        .iter()
-        .map(|col| Ok(take(col.as_ref(), &indices, None)?))
-        .collect::<Result<Vec<_>>>()?;
-    let sorted_batch = RecordBatch::try_new(schema.clone(), sorted_columns)?;
-    storage::split_oversized_batch(sorted_batch, max_batch_bytes)
-}
-
 fn is_scalar_data_type(dt: &DataType) -> bool {
     !matches!(dt, DataType::List(_) | DataType::Struct(_))
 }
@@ -1656,43 +1668,114 @@ fn resolve_browse_range_columns(schema: &Schema, policy: &ExportPolicy) -> Resul
     Ok(out)
 }
 
-fn compute_browse_ranges(
-    schema: &SchemaRef,
-    batches: &[RecordBatch],
-    row_group_counts: &[usize],
-    browse_cols: &[String],
-) -> Result<Vec<ExportKeyRange>> {
-    let combined = concat_batches(schema, batches)?;
-    let mut ranges = Vec::with_capacity(row_group_counts.len());
-    let mut offset = 0usize;
-    for (rg_idx, &rg_rows) in row_group_counts.iter().enumerate() {
-        if offset + rg_rows > combined.num_rows() {
-            break;
+struct BrowseRangeTracker {
+    browse_cols: Vec<String>,
+    current_start_row: u64,
+    current_rows: u64,
+    current_min: BTreeMap<String, String>,
+    current_max: BTreeMap<String, String>,
+    ranges: Vec<ExportKeyRange>,
+}
+
+impl BrowseRangeTracker {
+    fn new(browse_cols: &[String]) -> Self {
+        Self {
+            browse_cols: browse_cols.to_vec(),
+            current_start_row: 0,
+            current_rows: 0,
+            current_min: BTreeMap::new(),
+            current_max: BTreeMap::new(),
+            ranges: Vec::new(),
         }
-        let start_row = offset as u64;
-        let slice = combined.slice(offset, rg_rows);
-        offset += rg_rows;
-        let mut min_values = BTreeMap::new();
-        let mut max_values = BTreeMap::new();
-        for col_name in browse_cols {
-            let col_arr = slice.column_by_name(col_name).ok_or_else(invalid_export)?;
+    }
+
+    fn observe_batch(&mut self, batch: &RecordBatch) -> Result<()> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        self.current_rows = self
+            .current_rows
+            .checked_add(batch.num_rows() as u64)
+            .ok_or_else(invalid_export)?;
+        if self.browse_cols.is_empty() {
+            return Ok(());
+        }
+        for col_name in &self.browse_cols {
+            let col_arr = batch.column_by_name(col_name).ok_or_else(invalid_export)?;
             let (min_val, max_val) = array_min_max_strings(col_arr);
             if let Some(min_s) = min_val {
-                min_values.insert(col_name.clone(), min_s);
+                match self.current_min.get_mut(col_name) {
+                    Some(cur) => {
+                        if compare_browse_val(col_arr.data_type(), &min_s, cur).is_lt() {
+                            *cur = min_s;
+                        }
+                    }
+                    None => {
+                        self.current_min.insert(col_name.clone(), min_s);
+                    }
+                }
             }
             if let Some(max_s) = max_val {
-                max_values.insert(col_name.clone(), max_s);
+                match self.current_max.get_mut(col_name) {
+                    Some(cur) => {
+                        if compare_browse_val(col_arr.data_type(), &max_s, cur).is_gt() {
+                            *cur = max_s;
+                        }
+                    }
+                    None => {
+                        self.current_max.insert(col_name.clone(), max_s);
+                    }
+                }
             }
         }
-        ranges.push(ExportKeyRange {
-            row_group: rg_idx,
-            start_row,
-            num_rows: rg_rows as u64,
-            min_values,
-            max_values,
-        });
+        Ok(())
     }
-    Ok(ranges)
+
+    fn finish_row_group(&mut self) {
+        if self.current_rows == 0 {
+            return;
+        }
+        let rg_idx = self.ranges.len();
+        let min_values = std::mem::take(&mut self.current_min);
+        let max_values = std::mem::take(&mut self.current_max);
+        let num_rows = self.current_rows;
+        let start_row = self.current_start_row;
+        self.current_start_row = self.current_start_row.saturating_add(num_rows);
+        self.current_rows = 0;
+        if !self.browse_cols.is_empty() {
+            self.ranges.push(ExportKeyRange {
+                row_group: rg_idx,
+                start_row,
+                num_rows,
+                min_values,
+                max_values,
+            });
+        }
+    }
+
+    fn into_ranges(mut self) -> Vec<ExportKeyRange> {
+        if self.current_rows > 0 {
+            self.finish_row_group();
+        }
+        self.ranges
+    }
+}
+
+fn compare_browse_val(dt: &DataType, a: &str, b: &str) -> std::cmp::Ordering {
+    match dt {
+        DataType::Int64 | DataType::Int32 | DataType::Date32 => {
+            if let (Ok(ia), Ok(ib)) = (a.parse::<i64>(), b.parse::<i64>()) {
+                return ia.cmp(&ib);
+            }
+        }
+        DataType::Float64 | DataType::Float32 => {
+            if let (Ok(fa), Ok(fb)) = (a.parse::<f64>(), b.parse::<f64>()) {
+                return fa.total_cmp(&fb);
+            }
+        }
+        _ => {}
+    }
+    a.cmp(b)
 }
 
 fn array_min_max_strings(array: &ArrayRef) -> (Option<String>, Option<String>) {
@@ -1719,14 +1802,21 @@ fn array_min_max_strings(array: &ArrayRef) -> (Option<String>, Option<String>) {
         let max = arrow::compute::max_string(a).map(str::to_owned);
         return (min, max);
     }
+    let dt = array.data_type();
     let mut min_val: Option<String> = None;
     let mut max_val: Option<String> = None;
     for i in 0..array.len() {
         if let Some(val) = scalar_value_at(array, i) {
-            if min_val.as_ref().is_none_or(|m| &val < m) {
+            if min_val
+                .as_ref()
+                .is_none_or(|m| compare_browse_val(dt, &val, m).is_lt())
+            {
                 min_val = Some(val.clone());
             }
-            if max_val.as_ref().is_none_or(|m| &val > m) {
+            if max_val
+                .as_ref()
+                .is_none_or(|m| compare_browse_val(dt, &val, m).is_gt())
+            {
                 max_val = Some(val);
             }
         }
@@ -1737,13 +1827,17 @@ fn array_min_max_strings(array: &ArrayRef) -> (Option<String>, Option<String>) {
 struct FacetAccumulator {
     sets: Vec<Vec<String>>,
     counts: Vec<BTreeMap<BTreeMap<String, Option<String>>, u64>>,
+    estimated_bytes: usize,
+    max_metadata_bytes: usize,
 }
 
 impl FacetAccumulator {
-    fn new(sets: &[Vec<String>]) -> Self {
+    fn new(sets: &[Vec<String>], max_metadata_bytes: usize) -> Self {
         Self {
             sets: sets.to_vec(),
             counts: vec![BTreeMap::new(); sets.len()],
+            estimated_bytes: 0,
+            max_metadata_bytes,
         }
     }
 
@@ -1771,7 +1865,23 @@ impl FacetAccumulator {
                 for &(name, arr) in &cols {
                     key.insert(name.to_owned(), scalar_value_at(arr, row));
                 }
-                *self.counts[set_idx].entry(key).or_insert(0) += 1;
+                if let Some(count) = self.counts[set_idx].get_mut(&key) {
+                    *count += 1;
+                } else {
+                    let entry_bytes = key.iter().fold(64_usize, |acc, (k, v)| {
+                        acc.saturating_add(k.len())
+                            .saturating_add(v.as_ref().map_or(0, String::len))
+                            .saturating_add(32)
+                    });
+                    self.estimated_bytes = self.estimated_bytes.saturating_add(entry_bytes);
+                    if self.estimated_bytes > self.max_metadata_bytes {
+                        return Err(Error::refusal(
+                            "metadata_capacity",
+                            "faceted export cardinality exceeds the declared metadata allowance",
+                        ));
+                    }
+                    self.counts[set_idx].insert(key, 1);
+                }
             }
         }
         Ok(())
@@ -1799,6 +1909,7 @@ struct ChildAccumulator {
     child_fields: Vec<ExportField>,
     struct_indices: Vec<usize>,
     batches: Vec<RecordBatch>,
+    reservations: Vec<tokio::sync::OwnedSemaphorePermit>,
 }
 
 impl ChildAccumulator {
@@ -1883,10 +1994,11 @@ impl ChildAccumulator {
             child_fields,
             struct_indices,
             batches: Vec::new(),
+            reservations: Vec::new(),
         })
     }
 
-    fn extract_batch(&mut self, batch: &RecordBatch, max_batch_bytes: usize) -> Result<()> {
+    fn extract_batch(&mut self, batch: &RecordBatch, budget: &Budget) -> Result<()> {
         let list_arr = batch
             .column_by_name(&self.spec.list_column)
             .ok_or_else(invalid_export)?
@@ -1935,7 +2047,7 @@ impl ChildAccumulator {
                         &mut parent_idx_builder,
                         &mut ordinal_builder,
                         &mut value_idx_builder,
-                        max_batch_bytes,
+                        budget,
                     )?;
                     count_in_chunk = 0;
                 }
@@ -1948,7 +2060,7 @@ impl ChildAccumulator {
                 &mut parent_idx_builder,
                 &mut ordinal_builder,
                 &mut value_idx_builder,
-                max_batch_bytes,
+                budget,
             )?;
         }
         Ok(())
@@ -1961,7 +2073,7 @@ impl ChildAccumulator {
         parent_idx_builder: &mut UInt32Builder,
         ordinal_builder: &mut Int64Builder,
         value_idx_builder: &mut UInt32Builder,
-        max_batch_bytes: usize,
+        budget: &Budget,
     ) -> Result<()> {
         let parent_indices = parent_idx_builder.finish();
         let ordinals = ordinal_builder.finish();
@@ -1981,47 +2093,30 @@ impl ChildAccumulator {
         }
 
         let child_batch = RecordBatch::try_new(self.child_schema.clone(), cols)?;
-        for slice in storage::split_oversized_batch(child_batch, max_batch_bytes)? {
+        for slice in storage::split_oversized_batch(child_batch, budget.limits.max_batch_bytes)? {
+            let mem = budget.reserve(storage::effective_batch_bytes(&slice))?;
+            self.reservations.push(mem);
             self.batches.push(slice);
         }
         Ok(())
     }
 
     async fn finish_and_write(
-        self,
+        mut self,
         owner: &Id,
         directory: &std::path::Path,
         is_staged: bool,
         budget: &Budget,
         workspace_root: &std::path::Path,
     ) -> Result<ChildTableExport> {
-        let mut sort_order = Vec::new();
+        let mut sort_exprs = Vec::new();
         let mut page_index_cols: Vec<String> = Vec::new();
         for ck in self.spec.effective_child_key_columns() {
-            sort_order.push(crate::export::SortColumn {
-                column: ck.clone(),
-                direction: SortDirection::Asc,
-                nulls_first: false,
-            });
+            sort_exprs.push(col(quote(&ck)).sort(true, false));
             page_index_cols.push(ck.clone());
         }
-        sort_order.push(crate::export::SortColumn {
-            column: self.spec.ordinal_column.clone(),
-            direction: SortDirection::Asc,
-            nulls_first: false,
-        });
+        sort_exprs.push(col(quote(&self.spec.ordinal_column)).sort(true, false));
         page_index_cols.push(self.spec.ordinal_column.clone());
-
-        let sorted_batches = if self.batches.is_empty() {
-            Vec::new()
-        } else {
-            sort_record_batches(
-                &self.child_schema,
-                &self.batches,
-                &sort_order,
-                budget.limits.max_batch_bytes,
-            )?
-        };
 
         let file_name = if is_staged {
             format!("stage-child-{}-{}.parquet", self.name, uuid::Uuid::new_v4())
@@ -2035,11 +2130,28 @@ impl ChildAccumulator {
         let fields = self.child_fields.clone();
         let owner_clone = owner.clone();
         let dir_buf = directory.to_path_buf();
-        let root_buf = workspace_root.to_path_buf();
         let limits = budget.limits.clone();
         let page_index_cols_clone = page_index_cols.clone();
-        let batches_for_write = sorted_batches.clone();
-        let path_for_write = path.clone();
+        let path_for_create = path.clone();
+
+        let primitive_leaves = count_primitive_leaves(&schema);
+        let footer_group_bytes = fields.iter().fold(
+            1024_usize.saturating_add(primitive_leaves.saturating_mul(1024)),
+            |size, field| size.saturating_add(field.name.len() + field.data_type.len()),
+        );
+
+        let stream_opt = if self.batches.is_empty() {
+            self.reservations.clear();
+            None
+        } else {
+            let context = budget.context();
+            let raw_batches = std::mem::take(&mut self.batches);
+            let mem_table = MemTable::try_new(schema.clone(), vec![raw_batches])?;
+            context.register_table("child_raw", Arc::new(mem_table))?;
+            let df = context.table("child_raw").await?.sort(sort_exprs)?;
+            self.reservations.clear();
+            Some(crate::query::bounded(df.execute_stream().await?, budget)?)
+        };
 
         let memory = budget.reserve(
             limits
@@ -2048,65 +2160,119 @@ impl ChildAccumulator {
                 .saturating_add(limits.max_metadata_bytes),
         )?;
 
-        let (object, total_rows, rg_counts): (crate::model::ObjectRef, u64, Vec<usize>) = budget
+        let mut writer = budget
+            .blocking(move || {
+                std::fs::create_dir_all(&dir_buf)?;
+                let output = HashingFile::create(&path_for_create)?;
+                let properties = build_writer_properties(
+                    Some(rg_rows),
+                    max_row_group_bytes,
+                    &page_index_cols_clone,
+                )?;
+                Ok((
+                    ArrowWriter::try_new(output, schema, Some(properties))?,
+                    memory,
+                ))
+            })
+            .await?;
+
+        let mut tracker = BrowseRangeTracker::new(&page_index_cols);
+        let mut total_rows = 0_u64;
+
+        if let Some(stream) = stream_opt {
+            futures::pin_mut!(stream);
+            while let Some(batch) = stream.try_next().await? {
+                if batch.num_rows() == 0 {
+                    continue;
+                }
+                for slice in storage::split_oversized_batch(batch, budget.limits.max_batch_bytes)? {
+                    total_rows = total_rows
+                        .checked_add(slice.num_rows() as u64)
+                        .ok_or_else(invalid_export)?;
+                    let limits = budget.limits.clone();
+                    let root_buf = workspace_root.to_path_buf();
+                    let moved_tracker =
+                        std::mem::replace(&mut tracker, BrowseRangeTracker::new(&[]));
+                    let (next_writer, next_tracker) = budget
+                        .blocking(move || {
+                            let mut tracker = moved_tracker;
+                            let reserve = limits
+                                .scratch_bytes
+                                .saturating_add((limits.max_batch_bytes as u64).saturating_mul(4));
+                            if fs2::available_space(&root_buf)? < reserve {
+                                return Err(Error::refusal(
+                                    "disk_capacity",
+                                    "child export output and declared scratch no longer fit available disk",
+                                ));
+                            }
+                            let mut offset = 0usize;
+                            while offset < slice.num_rows() {
+                                let rem = slice.num_rows() - offset;
+                                let in_prog = writer.0.in_progress_rows();
+                                let take_len = rem.min(rg_rows.saturating_sub(in_prog).max(1));
+                                let sub_batch = slice.slice(offset, take_len);
+                                offset += take_len;
+
+                                writer.0.write(&sub_batch)?;
+                                tracker.observe_batch(&sub_batch)?;
+
+                                if (writer.0.in_progress_rows() >= rg_rows
+                                    || writer.0.memory_size() >= limits.max_batch_bytes
+                                    || writer.0.in_progress_size() >= max_row_group_bytes)
+                                    && writer.0.in_progress_rows() > 0
+                                {
+                                    writer.0.flush()?;
+                                    tracker.finish_row_group();
+                                }
+                                if writer
+                                    .0
+                                    .flushed_row_groups()
+                                    .len()
+                                    .saturating_mul(footer_group_bytes)
+                                    > limits.max_metadata_bytes
+                                {
+                                    return Err(Error::refusal(
+                                        "metadata_capacity",
+                                        "estimated child export footer exceeds the declared metadata allowance",
+                                    ));
+                                }
+                            }
+                            Ok((writer, tracker))
+                        })
+                        .await?;
+                    writer = next_writer;
+                    tracker = next_tracker;
+                }
+            }
+        }
+
+        let max_metadata_bytes = budget.limits.max_metadata_bytes;
+        let path_for_finish = path.clone();
+        let (object, browse_ranges): (crate::model::ObjectRef, Vec<ExportKeyRange>) = budget
             .blocking(
-                move || -> Result<(crate::model::ObjectRef, u64, Vec<usize>)> {
-                    let _memory = memory;
-                    std::fs::create_dir_all(&dir_buf)?;
-                    let reserve = limits
-                        .scratch_bytes
-                        .saturating_add((limits.max_batch_bytes as u64).saturating_mul(4));
-                    if fs2::available_space(&root_buf)? < reserve {
+                move || -> Result<(crate::model::ObjectRef, Vec<ExportKeyRange>)> {
+                    let (mut output, _memory) = writer;
+                    let groups = output
+                        .flushed_row_groups()
+                        .len()
+                        .saturating_add(usize::from(output.in_progress_rows() != 0));
+                    if groups.saturating_mul(footer_group_bytes) > max_metadata_bytes {
                         return Err(Error::refusal(
-                            "disk_capacity",
-                            "child export output and declared scratch no longer fit available disk",
+                            "metadata_capacity",
+                            "estimated child export footer exceeds the declared metadata allowance",
                         ));
                     }
-                    let output = HashingFile::create(&path_for_write)?;
-                    let properties = build_writer_properties(
-                        Some(rg_rows),
-                        max_row_group_bytes,
-                        &page_index_cols_clone,
-                    )?;
-                    let mut writer =
-                        ArrowWriter::try_new(output, schema.clone(), Some(properties))?;
-                    let mut total_rows = 0_u64;
-                    if !batches_for_write.is_empty() {
-                        let combined = concat_batches(&schema, &batches_for_write)?;
-                        let mut offset = 0usize;
-                        while offset < combined.num_rows() {
-                            let len = rg_rows.min(combined.num_rows() - offset);
-                            let rg_slice = combined.slice(offset, len);
-                            writer.write(&rg_slice)?;
-                            writer.flush()?;
-                            total_rows += len as u64;
-                            offset += len;
-                        }
+                    if output.in_progress_rows() > 0 {
+                        tracker.finish_row_group();
                     }
-                    let metadata = writer.finish()?;
-                    let rg_counts = metadata
-                        .row_groups()
-                        .iter()
-                        .map(|rg| usize::try_from(rg.num_rows()).unwrap_or(0))
-                        .collect::<Vec<usize>>();
-                    let object = writer.inner().finish(&owner_clone, &path_for_write)?;
-                    Ok((object, total_rows, rg_counts))
+                    let _metadata = output.finish()?;
+                    let object = output.inner().finish(&owner_clone, &path_for_finish)?;
+                    Ok((object, tracker.into_ranges()))
                 },
             )
             .await?;
 
-        let browse_ranges = if sorted_batches.is_empty() {
-            Vec::new()
-        } else {
-            compute_browse_ranges(
-                &self.child_schema,
-                &sorted_batches,
-                &rg_counts,
-                &page_index_cols,
-            )?
-        };
-        let validation =
-            validate_output_object(&object, total_rows, &fields, budget).await?;
+        let validation = validate_output_object(&object, total_rows, &fields, budget).await?;
 
         Ok(ChildTableExport {
             object,
@@ -2116,6 +2282,114 @@ impl ChildAccumulator {
             browse_ranges,
         })
     }
+}
+
+fn prune_child_row_groups(
+    num_rgs: usize,
+    browse_ranges: &[ExportKeyRange],
+    key_col: &str,
+    ord_col: &str,
+    key_value: &str,
+    key_i64: Option<i64>,
+    start_ordinal: i64,
+    end_ordinal: i64,
+) -> Vec<usize> {
+    let mut matching_rgs = Vec::new();
+    for rg_idx in 0..num_rgs {
+        if let Some(kr) = browse_ranges.iter().find(|r| r.row_group == rg_idx) {
+            let (Some(min_s), Some(max_s)) =
+                (kr.min_values.get(key_col), kr.max_values.get(key_col))
+            else {
+                continue;
+            };
+            let in_key_bounds = if let Some(target_i) = key_i64 {
+                let min_i = min_s.parse::<i64>().unwrap_or(i64::MIN);
+                let max_i = max_s.parse::<i64>().unwrap_or(i64::MAX);
+                target_i >= min_i && target_i <= max_i
+            } else {
+                key_value >= min_s.as_str() && key_value <= max_s.as_str()
+            };
+            if !in_key_bounds {
+                continue;
+            }
+            if min_s == key_value
+                && max_s == key_value
+                && let (Some(min_o_s), Some(max_o_s)) =
+                    (kr.min_values.get(ord_col), kr.max_values.get(ord_col))
+                && let (Ok(min_o), Ok(max_o)) = (min_o_s.parse::<i64>(), max_o_s.parse::<i64>())
+                && (max_o < start_ordinal || min_o >= end_ordinal)
+            {
+                continue;
+            }
+        }
+        matching_rgs.push(rg_idx);
+    }
+    matching_rgs
+}
+
+#[allow(clippy::too_many_arguments)]
+fn filter_child_slice_batch(
+    batch: &RecordBatch,
+    key_col: &str,
+    ord_col: &str,
+    key_value: &str,
+    key_i64: Option<i64>,
+    start_ordinal: i64,
+    end_ordinal: i64,
+    limit: usize,
+    collected: &mut usize,
+    out: &mut Vec<RecordBatch>,
+) -> Result<()> {
+    let key_arr = batch.column_by_name(key_col).ok_or_else(invalid_export)?;
+    let ord_arr = batch
+        .column_by_name(ord_col)
+        .ok_or_else(invalid_export)?
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .ok_or_else(invalid_export)?;
+
+    let mut keep_indices = UInt32Builder::new();
+    let mut keep_count = 0usize;
+    for row in 0..batch.num_rows() {
+        if ord_arr.is_null(row) {
+            continue;
+        }
+        let ord = ord_arr.value(row);
+        if ord < start_ordinal || ord >= end_ordinal {
+            continue;
+        }
+        let matches_key = if let Some(target_i) = key_i64 {
+            if let Some(a) = key_arr.as_any().downcast_ref::<Int64Array>() {
+                !a.is_null(row) && a.value(row) == target_i
+            } else if let Some(a) = key_arr.as_any().downcast_ref::<Int32Array>() {
+                !a.is_null(row) && i64::from(a.value(row)) == target_i
+            } else {
+                false
+            }
+        } else if let Some(a) = key_arr.as_any().downcast_ref::<StringArray>() {
+            !a.is_null(row) && a.value(row) == key_value
+        } else {
+            scalar_value_at(key_arr, row).as_deref() == Some(key_value)
+        };
+        if matches_key {
+            keep_indices.append_value(row as u32);
+            keep_count += 1;
+            if *collected + keep_count >= limit {
+                break;
+            }
+        }
+    }
+    if keep_count > 0 {
+        let indices = keep_indices.finish();
+        let cols = batch
+            .columns()
+            .iter()
+            .map(|c| Ok(take(c.as_ref(), &indices, None)?))
+            .collect::<Result<Vec<_>>>()?;
+        out.push(RecordBatch::try_new(batch.schema(), cols)?);
+        *collected += keep_count;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2147,37 +2421,16 @@ fn slice_child_parquet(
         None
     };
 
-    let mut matching_rgs = Vec::new();
-    for rg_idx in 0..num_rgs {
-        if let Some(kr) = browse_ranges.iter().find(|r| r.row_group == rg_idx) {
-            let (Some(min_s), Some(max_s)) =
-                (kr.min_values.get(key_col), kr.max_values.get(key_col))
-            else {
-                continue;
-            };
-            let in_key_bounds = if let Some(target_i) = key_i64 {
-                let min_i = min_s.parse::<i64>().unwrap_or(i64::MIN);
-                let max_i = max_s.parse::<i64>().unwrap_or(i64::MAX);
-                target_i >= min_i && target_i <= max_i
-            } else {
-                key_value >= min_s.as_str() && key_value <= max_s.as_str()
-            };
-            if !in_key_bounds {
-                continue;
-            }
-            if min_s == key_value
-                && max_s == key_value
-                && let (Some(min_o_s), Some(max_o_s)) =
-                    (kr.min_values.get(ord_col), kr.max_values.get(ord_col))
-                && let (Ok(min_o), Ok(max_o)) = (min_o_s.parse::<i64>(), max_o_s.parse::<i64>())
-                && (max_o < start_ordinal || min_o >= end_ordinal)
-            {
-                continue;
-            }
-        }
-        matching_rgs.push(rg_idx);
-    }
-
+    let matching_rgs = prune_child_row_groups(
+        num_rgs,
+        browse_ranges,
+        key_col,
+        ord_col,
+        key_value,
+        key_i64,
+        start_ordinal,
+        end_ordinal,
+    );
     if matching_rgs.is_empty() {
         return Ok(Vec::new());
     }
@@ -2206,57 +2459,104 @@ fn slice_child_parquet(
     let mut collected = 0usize;
     for batch_res in reader {
         let batch = batch_res?;
-        let key_arr = batch.column_by_name(key_col).ok_or_else(invalid_export)?;
-        let ord_arr = batch
-            .column_by_name(ord_col)
-            .ok_or_else(invalid_export)?
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or_else(invalid_export)?;
-
-        let mut keep_indices = UInt32Builder::new();
-        let mut keep_count = 0usize;
-        for row in 0..batch.num_rows() {
-            if ord_arr.is_null(row) {
-                continue;
-            }
-            let ord = ord_arr.value(row);
-            if ord < start_ordinal || ord >= end_ordinal {
-                continue;
-            }
-            let matches_key = if let Some(target_i) = key_i64 {
-                if let Some(a) = key_arr.as_any().downcast_ref::<Int64Array>() {
-                    !a.is_null(row) && a.value(row) == target_i
-                } else if let Some(a) = key_arr.as_any().downcast_ref::<Int32Array>() {
-                    !a.is_null(row) && i64::from(a.value(row)) == target_i
-                } else {
-                    false
-                }
-            } else if let Some(a) = key_arr.as_any().downcast_ref::<StringArray>() {
-                !a.is_null(row) && a.value(row) == key_value
-            } else {
-                scalar_value_at(key_arr, row).as_deref() == Some(key_value)
-            };
-            if matches_key {
-                keep_indices.append_value(row as u32);
-                keep_count += 1;
-                if collected + keep_count >= limit {
-                    break;
-                }
-            }
+        filter_child_slice_batch(
+            &batch,
+            key_col,
+            ord_col,
+            key_value,
+            key_i64,
+            start_ordinal,
+            end_ordinal,
+            limit,
+            &mut collected,
+            &mut out,
+        )?;
+        if collected >= limit {
+            break;
         }
-        if keep_count > 0 {
-            let indices = keep_indices.finish();
-            let cols = batch
-                .columns()
-                .iter()
-                .map(|c| Ok(take(c.as_ref(), &indices, None)?))
-                .collect::<Result<Vec<_>>>()?;
-            out.push(RecordBatch::try_new(batch.schema(), cols)?);
-            collected += keep_count;
-            if collected >= limit {
-                break;
-            }
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn slice_child_parquet_async(
+    reader: Box<dyn AsyncFileReader>,
+    browse_ranges: &[ExportKeyRange],
+    key_col: &str,
+    ord_col: &str,
+    key_value: &str,
+    start_ordinal: i64,
+    end_ordinal: i64,
+    limit: usize,
+) -> Result<Vec<RecordBatch>> {
+    let options = ArrowReaderOptions::new().with_page_index_policy(PageIndexPolicy::Optional);
+    let builder = ParquetRecordBatchStreamBuilder::new_with_options(reader, options).await?;
+    let num_rgs = builder.metadata().num_row_groups();
+    if num_rgs == 0 {
+        return Ok(Vec::new());
+    }
+
+    let key_is_int64 = builder
+        .schema()
+        .field_with_name(key_col)
+        .is_ok_and(|f| matches!(f.data_type(), DataType::Int64 | DataType::Int32));
+    let key_i64 = if key_is_int64 {
+        key_value.parse::<i64>().ok()
+    } else {
+        None
+    };
+
+    let matching_rgs = prune_child_row_groups(
+        num_rgs,
+        browse_ranges,
+        key_col,
+        ord_col,
+        key_value,
+        key_i64,
+        start_ordinal,
+        end_ordinal,
+    );
+    if matching_rgs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let selection = build_page_index_selection(
+        builder.metadata(),
+        builder.schema(),
+        &matching_rgs,
+        key_col,
+        ord_col,
+        key_value,
+        key_i64,
+        start_ordinal,
+        end_ordinal,
+    );
+
+    let mut builder = builder
+        .with_row_groups(matching_rgs)
+        .with_batch_size(limit.clamp(64, 2048));
+    if let Some(sel) = selection {
+        builder = builder.with_row_selection(sel);
+    }
+    let mut stream = builder.build()?;
+
+    let mut out = Vec::new();
+    let mut collected = 0usize;
+    while let Some(batch) = stream.try_next().await? {
+        filter_child_slice_batch(
+            &batch,
+            key_col,
+            ord_col,
+            key_value,
+            key_i64,
+            start_ordinal,
+            end_ordinal,
+            limit,
+            &mut collected,
+            &mut out,
+        )?;
+        if collected >= limit {
+            break;
         }
     }
     Ok(out)

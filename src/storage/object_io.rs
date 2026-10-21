@@ -181,6 +181,13 @@ impl Objects {
         super::flat::read(self, object, budget).await
     }
 
+    pub(crate) async fn open_flat_parquet_reader(
+        &self,
+        object: &ObjectRef,
+    ) -> Result<Box<dyn parquet::arrow::async_reader::AsyncFileReader>> {
+        super::flat::open_reader(self, object).await
+    }
+
     pub(crate) async fn admit_source(
         &self,
         expected: &ObjectRef,

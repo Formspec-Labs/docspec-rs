@@ -140,7 +140,7 @@ impl Selection {
             columns,
             &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
         )?;
-        if result.get_array_memory_size() > limit {
+        if super::effective_batch_bytes(&result) > limit {
             return Err(Error::refusal(
                 "oversized_batch",
                 "selected output exceeds the reader byte allowance",

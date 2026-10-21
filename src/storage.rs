@@ -199,21 +199,32 @@ async fn read_projected_batches_inner(
         observation.attach(&result);
     }
     let stream = result.stream();
+    let pending = std::collections::VecDeque::<RecordBatch>::new();
     Ok(futures::stream::try_unfold(
-        (stream, reservation, selection, observation),
-        move |(mut stream, reservation, selection, observation)| async move {
-            let Some(batch) = stream.try_next().await? else {
-                if let Some(observation) = &observation {
-                    observation.finish();
+        (stream, pending, reservation, selection, observation),
+        move |(mut stream, mut pending, reservation, selection, observation)| async move {
+            loop {
+                if let Some(sub_batch) = pending.pop_front() {
+                    let sub_batch = match &selection {
+                        Some(selection) => selection.apply(sub_batch, None, limit)?,
+                        None => sub_batch,
+                    };
+                    return Ok(Some((
+                        sub_batch,
+                        (stream, pending, reservation, selection, observation),
+                    )));
                 }
-                return Ok(None);
-            };
-            let batch = schema::strip_file_column(batch, limit)?;
-            let batch = match &selection {
-                Some(selection) => selection.apply(batch, None, limit)?,
-                None => batch,
-            };
-            Ok(Some((batch, (stream, reservation, selection, observation))))
+                let Some(batch) = stream.try_next().await? else {
+                    if let Some(observation) = &observation {
+                        observation.finish();
+                    }
+                    return Ok(None);
+                };
+                let batch = schema::strip_file_column(batch, limit)?;
+                for slice in split_oversized_batch(batch, limit)? {
+                    pending.push_back(slice);
+                }
+            }
         },
     ))
 }
@@ -391,6 +402,7 @@ where
             .set_dictionary_enabled(true)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
+            .set_column_index_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
             .set_offset_index_disabled(true);
         if has_list_of_struct(&expected_arrow) {
             props_builder =
@@ -608,7 +620,8 @@ pub(crate) fn compact_batch_slice(
 }
 
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into
-/// deep-compacted row slices that fit within `limit`.
+/// deep-compacted row slices that fit within `limit` in a single linear pass
+/// by per-row byte weight so each slice is compacted at most once.
 pub(crate) fn split_oversized_batch(
     batch: RecordBatch,
     limit: usize,
@@ -625,15 +638,72 @@ pub(crate) fn split_oversized_batch(
             ),
         ));
     }
-    let mut out = Vec::new();
-    let mut queue = std::collections::VecDeque::from([batch]);
-    while let Some(current) = queue.pop_front() {
-        if current.get_array_memory_size() <= limit {
-            out.push(current);
-            continue;
+    let num_rows = batch.num_rows();
+    if num_rows <= 1 {
+        let compacted = if num_rows == 1
+            && batch.get_array_memory_size() > effective_batch_bytes(&batch).saturating_mul(2)
+        {
+            compact_batch_slice(&batch, 0, 1)?
+        } else {
+            batch
+        };
+        let effective = effective_batch_bytes(&compacted);
+        if effective > limit {
+            return Err(Error::refusal(
+                "oversized_batch",
+                format!(
+                    "single-row batch uses {effective} effective bytes, exceeding the {limit} byte allowance"
+                ),
+            ));
         }
-        if current.num_rows() <= 1 {
-            let effective = effective_batch_bytes(&current);
+        return Ok(vec![compacted]);
+    }
+
+    // Estimate per-row byte weights in a single linear pass across columns.
+    let mut row_weights = vec![0usize; num_rows];
+    for col in batch.columns() {
+        let col_bytes = col.get_array_memory_size();
+        if let Some(list) = col.as_any().downcast_ref::<arrow::array::ListArray>() {
+            let offsets = list.value_offsets();
+            let total_elems = usize::try_from(offsets[num_rows] - offsets[0])
+                .unwrap_or(0)
+                .max(1);
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let elems = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                let share = col_bytes.saturating_mul(elems).div_ceil(total_elems);
+                *weight = weight.saturating_add(share.saturating_add(8));
+            }
+        } else {
+            let per_row = col_bytes.div_ceil(num_rows);
+            for weight in &mut row_weights {
+                *weight = weight.saturating_add(per_row);
+            }
+        }
+    }
+
+    let mut ranges = Vec::new();
+    let mut slice_start = 0usize;
+    let mut acc_bytes = 0usize;
+    for (r, &w) in row_weights.iter().enumerate() {
+        if r > slice_start && acc_bytes.saturating_add(w) > limit {
+            ranges.push((slice_start, r - slice_start));
+            slice_start = r;
+            acc_bytes = w;
+        } else {
+            acc_bytes = acc_bytes.saturating_add(w);
+        }
+    }
+    if slice_start < num_rows {
+        ranges.push((slice_start, num_rows - slice_start));
+    }
+
+    let mut out = Vec::with_capacity(ranges.len());
+    for (start, len) in ranges {
+        let slice = compact_batch_slice(&batch, start, len)?;
+        if slice.get_array_memory_size() <= limit {
+            out.push(slice);
+        } else if slice.num_rows() <= 1 {
+            let effective = effective_batch_bytes(&slice);
             if effective > limit {
                 return Err(Error::refusal(
                     "oversized_batch",
@@ -642,14 +712,22 @@ pub(crate) fn split_oversized_batch(
                     ),
                 ));
             }
-            out.push(current);
-            continue;
+            out.push(slice);
+        } else {
+            for r in 0..slice.num_rows() {
+                let one = compact_batch_slice(&batch, start + r, 1)?;
+                let effective = effective_batch_bytes(&one);
+                if effective > limit {
+                    return Err(Error::refusal(
+                        "oversized_batch",
+                        format!(
+                            "single-row batch uses {effective} effective bytes, exceeding the {limit} byte allowance"
+                        ),
+                    ));
+                }
+                out.push(one);
+            }
         }
-        let mid = current.num_rows() / 2;
-        let left = compact_batch_slice(&current, 0, mid)?;
-        let right = compact_batch_slice(&current, mid, current.num_rows() - mid)?;
-        queue.push_front(right);
-        queue.push_front(left);
     }
     Ok(out)
 }

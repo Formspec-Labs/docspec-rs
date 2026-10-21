@@ -86,9 +86,6 @@ impl Engine {
         for group in spec.policy.effective_groups() {
             self.require_group(&group)?;
         }
-        if spec.policy.has_extended_features() {
-            self.require_local()?;
-        }
         let memory = self.request_memory(&(spec, &stop))?;
         validate_request(spec)?;
         let spec = spec.clone();
@@ -535,7 +532,6 @@ impl Engine {
                 .effective_groups()
                 .iter()
                 .any(|g| BackendCapability::for_group(g).local_only())
-                || policy.has_extended_features()
                 || !remote_source_only(&source.dataset))
         {
             return Err(locations::unsupported());
@@ -638,6 +634,7 @@ impl Engine {
                     .set_dictionary_enabled(true)
                     .set_statistics_enabled(EnabledStatistics::Chunk)
                     .set_statistics_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
+                    .set_column_index_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
                     .set_offset_index_disabled(true)
                     .build();
                 let native = if cfg!(unix) {
@@ -870,8 +867,12 @@ pub(super) fn check_materialized(
 ) -> Result<()> {
     let policy = &operation.request.policy;
     let expected_cols = policy.expected_output_columns();
-    let primary_group = policy.primary_group();
-    let expected_rows = if primary_group == "evidence" || primary_group == "receipts" {
+    let groups = policy.effective_groups();
+    let anchor_group = groups
+        .iter()
+        .find(|g| *g != "evidence" && *g != "receipts")
+        .map_or_else(|| policy.primary_group(), String::as_str);
+    let expected_rows = if anchor_group == "evidence" || anchor_group == "receipts" {
         operation
             .source
             .dataset
@@ -883,7 +884,7 @@ pub(super) fn check_materialized(
             .source
             .dataset
             .groups
-            .get(primary_group)
+            .get(anchor_group)
             .map(|g| g.rows)
     };
     let rows_ok = match expected_rows {

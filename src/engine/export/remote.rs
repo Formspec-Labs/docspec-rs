@@ -22,6 +22,7 @@ pub(in crate::engine) struct ExportAttempt {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::engine) struct CompletedStage {
     pub(in crate::engine) object: ObjectRef,
+    pub(in crate::engine) child_objects: Vec<ObjectRef>,
     pub(in crate::engine) remote: ObjectRef,
     pub(in crate::engine) attempt: Id,
     pub(in crate::engine) operation_revision: i64,
@@ -127,9 +128,44 @@ impl Engine {
         if transferred != expected {
             return Err(invalid_export());
         }
+        let mut transferred_children = BTreeMap::new();
+        for (child_name, staged_child) in &staged.child_tables {
+            let expected_child = ObjectRef {
+                path: format!("{}{child_name}.parquet", attempt.retained_prefix),
+                ..staged_child.object.clone()
+            };
+            self.inner
+                .objects
+                .validate_retained_path(&expected_child.path)?;
+            let remote_child_obj = self
+                .inner
+                .objects
+                .transfer_immutable_file(
+                    &expected_child,
+                    PathBuf::from(&staged_child.object.path),
+                    &self.inner.lifecycle.budget,
+                    true,
+                )
+                .await?;
+            if remote_child_obj != expected_child {
+                return Err(invalid_export());
+            }
+            transferred_children.insert(
+                child_name.clone(),
+                ChildTableExport {
+                    object: remote_child_obj.clone(),
+                    validation: ExportValidation {
+                        object: remote_child_obj,
+                        ..staged_child.validation.clone()
+                    },
+                    ..staged_child.clone()
+                },
+            );
+        }
         stop_after(stop, "transfer-uncommitted")?;
         let materialized = ExportMaterialized {
             object: transferred.clone(),
+            child_tables: transferred_children,
             ..staged
         };
         let validation = ExportValidation {
@@ -410,6 +446,23 @@ fn check_staged(
     {
         return Err(invalid_export());
     }
+    for (child_name, child) in &staged.child_tables {
+        let child_file = child
+            .object
+            .path
+            .strip_prefix(&attempt.host_prefix)
+            .ok_or_else(invalid_export)?;
+        let prefix = format!("stage-child-{child_name}-");
+        let child_token = child_file
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(".parquet"))
+            .ok_or_else(invalid_export)?;
+        if !storage::valid_object_locator(&child.object.path)
+            || uuid::Uuid::parse_str(child_token).is_err()
+        {
+            return Err(invalid_export());
+        }
+    }
     Ok(())
 }
 
@@ -478,7 +531,12 @@ pub(in crate::engine) fn validate_record(
         return Err(invalid_export());
     }
     if let Some(completed) = completed_stage(rows, &operation.request.operation, budget)? {
-        if completed.object != staged.object {
+        let expected_children: Vec<ObjectRef> = staged
+            .child_tables
+            .values()
+            .map(|c| c.object.clone())
+            .collect();
+        if completed.object != staged.object || completed.child_objects != expected_children {
             return Err(invalid_export());
         }
         // The closed bytes are now durable remotely. Original stage metadata
@@ -541,8 +599,32 @@ pub(in crate::engine) fn check_completed(
     {
         return Err(invalid_export());
     }
+    let child_objects: Vec<ObjectRef> = staged
+        .child_tables
+        .values()
+        .map(|c| c.object.clone())
+        .collect();
+    let mut expected_children = BTreeMap::new();
+    for (child_name, staged_child) in &staged.child_tables {
+        let expected_child_obj = ObjectRef {
+            path: format!("{}{child_name}.parquet", attempt.retained_prefix),
+            ..staged_child.object.clone()
+        };
+        expected_children.insert(
+            child_name.clone(),
+            ChildTableExport {
+                object: expected_child_obj.clone(),
+                validation: ExportValidation {
+                    object: expected_child_obj,
+                    ..staged_child.validation.clone()
+                },
+                ..staged_child.clone()
+            },
+        );
+    }
     let completed = CompletedStage {
         object: staged.object.clone(),
+        child_objects,
         remote: materialized.object.clone(),
         attempt: attempt.id.clone(),
         operation_revision: revision,
@@ -557,6 +639,7 @@ pub(in crate::engine) fn check_completed(
     if materialized
         != &(ExportMaterialized {
             object: expected.clone(),
+            child_tables: expected_children,
             ..staged
         })
         || validation

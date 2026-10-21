@@ -1060,6 +1060,9 @@ async fn visit_creation(
                 return Err(invalid());
             }
             observe(&output.object)?;
+            for child in output.child_tables.values() {
+                observe(&child.object)?;
+            }
         } else if let Some(suffix) = key.strip_prefix("export-staged/") {
             crate::engine::export::remote::validate_record(key, json, rows, None)?;
             let (operation, _) = suffix.split_once('/').ok_or_else(invalid)?;
@@ -1070,6 +1073,9 @@ async fn visit_creation(
                     return Err(invalid());
                 }
                 observe(&stage.object)?;
+                for child_obj in &stage.child_objects {
+                    observe(child_obj)?;
+                }
             }
         } else if let Some(id) = key.strip_prefix("export-materialized/") {
             let output: crate::engine::export::ExportMaterialized = serde_json::from_str(json)?;
@@ -1091,6 +1097,9 @@ async fn visit_creation(
                 )?;
             }
             observe(&output.object)?;
+            for child in output.child_tables.values() {
+                observe(&child.object)?;
+            }
         } else if key.starts_with("compaction-prepared/")
             || key.starts_with("representation/")
         {

@@ -1404,6 +1404,9 @@ impl Inventory {
                 }
                 if !ended {
                     self.object(&closed.object, origin)?;
+                    for child in closed.child_tables.values() {
+                        self.object(&child.object, origin)?;
+                    }
                 }
             } else if !ended {
                 self.path(&file.path, origin)?;
@@ -1421,6 +1424,12 @@ impl Inventory {
                 crate::engine::export::remote::validate_record(key, json, rows, None)?
             {
                 self.object(&staged, origin)?;
+                if key.starts_with("export-staged/") {
+                    let record: crate::engine::export::ExportMaterialized = decode(json)?;
+                    for child in record.child_tables.values() {
+                        self.object(&child.object, origin)?;
+                    }
+                }
             }
         } else if let Some(id) = key.strip_prefix("export-operation/") {
             let operation: crate::engine::export::ExportOperation = decode(json)?;

@@ -24,29 +24,36 @@ fn capacity() -> Error {
     )
 }
 
-pub(super) async fn read(
+pub(super) async fn open_reader(
     objects: &Objects,
     object: &ObjectRef,
-    budget: &Budget,
-) -> Result<SendableRecordBatchStream> {
+) -> Result<Box<dyn AsyncFileReader>> {
     objects.validate_path(&object.path)?;
     if object.bytes < 12 {
         return Err(invalid());
     }
-    // Match the existing remote streaming allowance; transport buffers remain
-    // maintained-client allocations, not a measured whole-process memory bound.
-    let transport = budget.reserve(2 << 20)?;
-    let mut reader: Box<dyn AsyncFileReader> = match objects {
+    match objects {
         Objects::Local => {
             let file = tokio::fs::File::open(&object.path).await?;
             if file.metadata().await?.len() != object.bytes {
                 return Err(invalid());
             }
-            Box::new(file)
+            Ok(Box::new(file))
         }
         #[cfg(feature = "remote")]
-        Objects::Remote(remote) => remote.flat_reader(object)?,
-    };
+        Objects::Remote(remote) => remote.flat_reader(object),
+    }
+}
+
+pub(super) async fn read(
+    objects: &Objects,
+    object: &ObjectRef,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
+    // Match the existing remote streaming allowance; transport buffers remain
+    // maintained-client allocations, not a measured whole-process memory bound.
+    let transport = budget.reserve(2 << 20)?;
+    let mut reader = open_reader(objects, object).await?;
     // Bound the footer before allocating or decoding it. Supply the decoded
     // interpretation to the maintained stream builder rather than rereading it.
     let tail = reader
@@ -124,7 +131,7 @@ pub(super) async fn read(
             let Some(batch) = stream.try_next().await.map_err(|_| invalid())? else {
                 return Ok(None);
             };
-            if batch.get_array_memory_size() > limit {
+            if super::effective_batch_bytes(&batch) > limit {
                 return Err(Error::refusal(
                     "oversized_batch",
                     "export batch exceeds the byte allowance",
