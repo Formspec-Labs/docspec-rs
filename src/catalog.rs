@@ -530,10 +530,21 @@ impl Lifecycle {
     /// # Errors
     /// Refuses stale views, empty compacted baselines, invalid removal reservations,
     /// oversized live state, or catalog commit failures.
+    #[cfg(test)]
     pub(crate) async fn compact_baseline(
         &self,
         view: &View,
         remove_keys: &BTreeSet<String>,
+    ) -> Result<(View, LifecycleCompactionResult)> {
+        self.compact_baseline_with_records(view, remove_keys, &[])
+            .await
+    }
+
+    pub(crate) async fn compact_baseline_with_records(
+        &self,
+        view: &View,
+        remove_keys: &BTreeSet<String>,
+        upsert_records: &[(String, serde_json::Value)],
     ) -> Result<(View, LifecycleCompactionResult)> {
         let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
         guard.load_table(view.table.identifier()).await?;
@@ -553,7 +564,7 @@ impl Lifecycle {
                 },
             ));
         }
-        let _ = view
+        let next_revision = view
             .revision
             .checked_add(1)
             .ok_or_else(|| Error::refusal("revision_exhausted", "revision overflow"))?;
@@ -572,6 +583,16 @@ impl Lifecycle {
             next_values.insert(key.clone(), (*rev, value.clone()));
         }
         drop(previous);
+        for (key, value) in upsert_records {
+            let encoded = serde_json::to_string(value)?;
+            let row_bytes = history_row_bytes(key, &encoded);
+            if let Some((_, old_value)) =
+                next_values.insert(key.clone(), (next_revision, Arc::from(encoded)))
+            {
+                cache_bytes = cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+            }
+            cache_bytes = cache_bytes.saturating_add(row_bytes);
+        }
         if next_values.is_empty() {
             return Err(Error::refusal(
                 "empty_baseline",

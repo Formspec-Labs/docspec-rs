@@ -74,13 +74,73 @@ impl Engine {
         let mut prior_at = None;
         let mut steps = 0;
         let mut bytes = 0usize;
+        let mut archive_entries: Option<std::vec::IntoIter<ArchivedSuccessionEntry>> = None;
         loop {
             // Serialized bytes bound variable-length identities. This separate
             // in-memory lower bound also caps visited links without retaining a set.
             if steps >= limit / std::mem::size_of::<Succession>() {
                 return Err(history_capacity());
             }
-            let (revision, charge, link) = read_link(&rows, view.revision, &current)?;
+            let (revision, charge, link) = if let Some(iter) = &mut archive_entries {
+                let entry = iter.next().ok_or_else(|| {
+                    Error::refusal(
+                        "unavailable_succession",
+                        "required accepted-history evidence is missing",
+                    )
+                })?;
+                if entry.revision <= 0
+                    || entry.revision > view.revision
+                    || entry.link.selected != current
+                    || entry.link.selected.manifest.owner != entry.link.selected.dataset
+                    || entry.link.predecessor.as_ref().is_some_and(|previous| {
+                        previous.dataset != current.dataset
+                            || previous.manifest.owner != previous.dataset
+                            || previous.version == current.version
+                    })
+                {
+                    return Err(invalid("accepted-history identity or revision differs"));
+                }
+                (entry.revision, 0usize, entry.link)
+            } else if rows.contains_key(&format!("succession/{}", current.version)) {
+                read_link(&rows, view.revision, &current)?
+            } else if let Some((cp_rev, cp_bytes, checkpoint)) =
+                rows.get_record::<SuccessionCheckpoint>("succession-checkpoint")?
+            {
+                validate_checkpoint(
+                    &checkpoint,
+                    &rows,
+                    &view.identifier().to_string(),
+                    view.revision,
+                )?;
+                if cp_rev <= 0 || cp_rev > view.revision || checkpoint.head != current {
+                    return Err(invalid("accepted-history checkpoint head differs"));
+                }
+                bytes = bytes.saturating_add(cp_bytes);
+                if bytes > limit {
+                    return Err(history_capacity());
+                }
+                let archive = self
+                    .read_succession_archive(&checkpoint, &mut bytes)
+                    .await?;
+                let mut iter = archive.entries.into_iter();
+                let entry = iter
+                    .next()
+                    .ok_or_else(|| invalid("empty succession archive"))?;
+                if entry.revision != checkpoint.head_revision
+                    || entry.link.selected != current
+                    || entry.link.boundary != checkpoint.head_boundary
+                    || entry.link.eligibility != checkpoint.head_eligibility
+                {
+                    return Err(invalid("accepted-history checkpoint entry differs"));
+                }
+                archive_entries = Some(iter);
+                (entry.revision, 0usize, entry.link)
+            } else {
+                return Err(Error::refusal(
+                    "unavailable_succession",
+                    "required accepted-history evidence is missing",
+                ));
+            };
             if steps == 0 {
                 check_selected_link(selection_revision, &head, revision, &link)?;
             }
@@ -265,6 +325,98 @@ impl Engine {
         lifecycle.commit(view, records).await?;
         Ok(())
     }
+
+    pub(in crate::engine) async fn read_succession_archive(
+        &self,
+        checkpoint: &SuccessionCheckpoint,
+        metadata_bytes: &mut usize,
+    ) -> Result<SuccessionArchive> {
+        let budget = &self.inner.lifecycle.budget;
+        let bytes = usize::try_from(checkpoint.archive.bytes).map_err(|_| history_capacity())?;
+        if bytes > budget.limits.max_metadata_bytes {
+            return Err(history_capacity());
+        }
+        let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
+        let archive: SuccessionArchive = inputs::read_manifest(
+            &self.inner.objects,
+            &checkpoint.archive,
+            budget,
+            metadata_bytes,
+            &memory,
+        )
+        .await?;
+        if archive.dataset != checkpoint.dataset
+            || archive.head != checkpoint.head
+            || archive.head_revision != checkpoint.head_revision
+            || archive.source_boundaries != checkpoint.source_boundaries
+            || archive.entries.len() as u64 != checkpoint.count
+            || archive.entries.first().is_none_or(|first| {
+                first.revision != checkpoint.head_revision
+                    || first.link.selected != checkpoint.head
+                    || first.link.boundary != checkpoint.head_boundary
+                    || first.link.eligibility != checkpoint.head_eligibility
+            })
+        {
+            return Err(invalid("succession archive differs from its checkpoint"));
+        }
+        Ok(archive)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::engine) struct ArchivedSuccessionEntry {
+    pub revision: i64,
+    pub link: Succession,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::engine) struct SuccessionArchive {
+    pub dataset: Id,
+    pub head: VersionRef,
+    pub head_revision: i64,
+    pub source_boundaries: u64,
+    pub entries: Vec<ArchivedSuccessionEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::engine) struct SuccessionCheckpoint {
+    pub dataset: Id,
+    pub head: VersionRef,
+    pub head_revision: i64,
+    pub head_boundary: u64,
+    pub head_eligibility: u64,
+    pub source_boundaries: u64,
+    pub count: u64,
+    pub archive: ObjectRef,
+    pub protection: Id,
+}
+
+pub(in crate::engine) fn validate_checkpoint(
+    checkpoint: &SuccessionCheckpoint,
+    rows: &SnapshotRows,
+    expected_table: &str,
+    observed_revision: i64,
+) -> Result<()> {
+    if crate::catalog::lifecycle_ident(&checkpoint.dataset).to_string() != expected_table
+        || checkpoint.head.dataset != checkpoint.dataset
+        || checkpoint.head.manifest.owner != checkpoint.dataset
+        || checkpoint.archive.owner != checkpoint.dataset
+        || checkpoint.head_revision <= 0
+        || checkpoint.head_revision > observed_revision
+        || checkpoint.count == 0
+        || checkpoint.source_boundaries > checkpoint.count
+        || !rows.contains_key(&format!("protection/{}", checkpoint.protection))
+    {
+        return Err(invalid(
+            "succession checkpoint identity or revision differs",
+        ));
+    }
+    crate::engine::retention::inventory::validate_object(&checkpoint.head.manifest)?;
+    crate::engine::retention::inventory::validate_object(&checkpoint.archive)?;
+    Ok(())
 }
 
 // Decode only identity fields; traversing history does not materialize every
@@ -326,7 +478,7 @@ fn read_head(
     }
 }
 
-fn read_link(
+pub(in crate::engine) fn read_link(
     rows: &SnapshotRows,
     observed_revision: i64,
     expected: &VersionRef,

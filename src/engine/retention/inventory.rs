@@ -1064,6 +1064,9 @@ impl Inventory {
         // availability, recovery, seals and grants retain stronger payload roots.
         let history = ((matches!(&dataset.request, OperationRequest::Build(spec) if spec.base.is_some())
             && dataset.related.is_none())
+            || (matches!(&dataset.request, OperationRequest::Update(_))
+                && dataset.computed.is_empty()
+                && dataset.related.is_none())
             || matches!(&dataset.request, OperationRequest::Refresh(spec)
                 if spec.base.is_some() && spec.mode == RefreshMode::Full && dataset.related.is_some()))
             && dataset.evidence.is_none();
@@ -1137,7 +1140,12 @@ impl Inventory {
                 }
             }
         }
-        if let Some(parent) = &dataset.parent_manifest {
+        if let Some(parent) = &dataset.parent_manifest
+            && (!dataset.computed.is_empty()
+                || dataset.related.is_some()
+                || dataset.evidence.is_some()
+                || !matches!(&dataset.request, OperationRequest::Update(_)))
+        {
             self.history(parent, origin)?;
         }
         Ok(())
@@ -1550,10 +1558,26 @@ impl Inventory {
             if !supported_format(operation.result_format) {
                 return Err(unknown_dependencies());
             }
+            let base_checkpointed = operation.base.as_ref().is_some_and(|base| {
+                !rows.contains_key(&format!("result/{base}"))
+                    && rows
+                        .get_record::<crate::engine::history::SuccessionCheckpoint>(
+                            "succession-checkpoint",
+                        )
+                        .ok()
+                        .flatten()
+                        .is_some_and(|(_, _, cp)| &cp.head.version == base)
+            });
             if let Some(base) = &operation.base_manifest {
-                self.release(base, origin)?;
+                if base_checkpointed {
+                    self.history(base, origin)?;
+                } else {
+                    self.release(base, origin)?;
+                }
             }
-            if let Some(base) = &operation.base {
+            if let Some(base) = &operation.base
+                && !base_checkpointed
+            {
                 let (_, _, release) = rows
                     .get_record::<ReleasePin>(&format!("result/{base}"))?
                     .ok_or_else(unknown_dependencies)?;
@@ -1615,6 +1639,15 @@ impl Inventory {
             self.seal(&seal, origin)?;
         } else if key == "family-members" {
             let _: BTreeSet<Id> = decode(json)?;
+        } else if key == "succession-checkpoint" {
+            let checkpoint: crate::engine::history::SuccessionCheckpoint = decode(json)?;
+            crate::engine::history::validate_checkpoint(
+                &checkpoint,
+                rows,
+                &origin.table,
+                origin.revision,
+            )?;
+            self.object(&checkpoint.archive, origin)?;
         } else if key.starts_with("succession/") {
             let succession: Succession = decode(json)?;
             if key != format!("succession/{}", succession.selected.version)
@@ -2051,7 +2084,7 @@ fn reference_bytes(object: &ObjectRef) -> usize {
         .saturating_add(256)
 }
 
-pub(super) fn validate_object(object: &ObjectRef) -> Result<()> {
+pub(in crate::engine) fn validate_object(object: &ObjectRef) -> Result<()> {
     if !storage::valid_object_locator(&object.path)
         || object.digest.len() != 64
         || !object.digest.bytes().all(|byte| byte.is_ascii_hexdigit())

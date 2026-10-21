@@ -305,26 +305,18 @@ async fn sha256_string_keys_prune_disjoint_files_on_update() {
             digest: storage::digest(path).unwrap().0,
         }
     };
-    let make_sha = |prefix: char, idx: usize| -> String {
-        format!("{}{:063x}", prefix, idx)
-    };
-    let file_a = [
-        (make_sha('1', 0), "a0"),
-        (make_sha('1', 1), "a1"),
-    ];
-    let file_b = [
-        (make_sha('5', 0), "b0"),
-        (make_sha('5', 1), "b1"),
-    ];
-    let file_c = [
-        (make_sha('9', 0), "c0"),
-        (make_sha('9', 1), "c1"),
-    ];
+    let make_sha = |prefix: char, idx: usize| -> String { format!("{}{:063x}", prefix, idx) };
+    let file_a = [(make_sha('1', 0), "a0"), (make_sha('1', 1), "a1")];
+    let file_b = [(make_sha('5', 0), "b0"), (make_sha('5', 1), "b1")];
+    let file_c = [(make_sha('9', 0), "c0"), (make_sha('9', 1), "c1")];
     assert_eq!(file_a[0].0.len(), 64);
 
     let initial = write_str_input(
         &root.path().join("file_a.parquet"),
-        &[(file_a[0].0.as_str(), file_a[0].1), (file_a[1].0.as_str(), file_a[1].1)],
+        &[
+            (file_a[0].0.as_str(), file_a[0].1),
+            (file_a[1].0.as_str(), file_a[1].1),
+        ],
     );
     let mut release = engine
         .run(&RunSpec {
@@ -342,7 +334,10 @@ async fn sha256_string_keys_prune_disjoint_files_on_update() {
     for (name, chunk) in [("append-b", &file_b), ("append-c", &file_c)] {
         let repl = write_str_input(
             &root.path().join(format!("{name}.parquet")),
-            &[(chunk[0].0.as_str(), chunk[0].1), (chunk[1].0.as_str(), chunk[1].1)],
+            &[
+                (chunk[0].0.as_str(), chunk[0].1),
+                (chunk[1].0.as_str(), chunk[1].1),
+            ],
         );
         release = engine
             .update(&UpdateSpec {

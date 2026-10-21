@@ -1104,6 +1104,11 @@ async fn visit_creation(
             for object in release_objects(&release) {
                 observe(&object)?;
             }
+        } else if key == "succession-checkpoint" {
+            let checkpoint: crate::engine::history::SuccessionCheckpoint =
+                serde_json::from_str(json)?;
+            observe(&checkpoint.archive)?;
+            observe(&checkpoint.head.manifest)?;
         } else if key.starts_with("owner-protection/") {
             let grant: OwnerProtection = serde_json::from_str(json)?;
             validate_grant(view, key, revision, &grant)?;

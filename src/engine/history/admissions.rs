@@ -64,6 +64,17 @@ impl Engine {
             .map(|(_, _, value)| value)
             .unwrap_or_default();
         let head = read_head(&rows, view.revision)?;
+        let checkpoint = if rows.contains_key("succession-checkpoint") {
+            charge(&mut used, rows.record_bytes("succession-checkpoint"), limit)?;
+            let (_, _, cp) = rows
+                .get_record::<SuccessionCheckpoint>("succession-checkpoint")?
+                .ok_or_else(|| invalid("missing succession checkpoint"))?;
+            validate_checkpoint(&cp, &rows, &view.identifier().to_string(), view.revision)?;
+            Some(cp)
+        } else {
+            None
+        };
+        let mut checkpoint_reached = false;
         let mut selected = BTreeMap::new();
         if let Some((selection_revision, head)) = head {
             if head.dataset.dataset != *dataset {
@@ -74,9 +85,24 @@ impl Engine {
             let mut previous_boundary = authority.boundary;
             let mut previous_eligibility = authority.eligibility;
             loop {
+                let link_key = format!("succession/{}", current.version);
+                if let Some(cp) = &checkpoint
+                    && current == cp.head
+                    && !rows.contains_key(&link_key)
+                {
+                    if previous_revision.is_none_or(|child| cp.head_revision >= child)
+                        || cp.head_boundary > previous_boundary
+                        || cp.head_eligibility > previous_eligibility
+                    {
+                        return Err(invalid(
+                            "accepted predecessor revisions or coverage are inconsistent",
+                        ));
+                    }
+                    checkpoint_reached = true;
+                    break;
+                }
                 // Admit both decodes, including read_link's temporary JSON value,
                 // before invoking the shared ordering and result receipt checks.
-                let link_key = format!("succession/{}", current.version);
                 let result_key = format!("result/{}", current.version);
                 charge(&mut used, rows.record_bytes(&link_key), limit)?;
                 charge(&mut used, rows.record_bytes(&result_key), limit)?;
@@ -105,6 +131,11 @@ impl Engine {
                 current = predecessor;
                 tokio::task::consume_budget().await;
             }
+        }
+        if checkpoint.is_some() && !checkpoint_reached {
+            return Err(invalid(
+                "succession checkpoint is not on the accepted head chain",
+            ));
         }
         let mut boundaries = BTreeSet::new();
         let mut pending = Vec::new();
@@ -181,7 +212,10 @@ impl Engine {
             }
             tokio::task::consume_budget().await;
         }
-        if !selected.is_empty() || boundaries.len() as u64 != authority.boundary {
+        let compacted_boundaries = checkpoint.as_ref().map_or(0, |cp| cp.source_boundaries);
+        if !selected.is_empty()
+            || (boundaries.len() as u64).saturating_add(compacted_boundaries) != authority.boundary
+        {
             return Err(invalid(
                 "accepted history or source admission boundaries are incomplete",
             ));

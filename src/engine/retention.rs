@@ -13,7 +13,7 @@ mod availability;
 pub(super) mod compaction_recovery;
 mod export_recovery;
 mod grants;
-mod inventory;
+pub(in crate::engine) mod inventory;
 pub(super) mod owners;
 mod recovery;
 pub(crate) mod removal;
@@ -264,11 +264,361 @@ impl Engine {
         let lifecycle = &self.inner.lifecycle;
         let view = lifecycle.open(dataset).await?;
         let rows = lifecycle.rows_for_compaction(&view).await?;
-        let remove_keys = collect_obsolete_lifecycle_keys(&rows)?;
+        let mut remove_keys = collect_obsolete_lifecycle_keys(&rows)?;
+        let checkpoint_plan = self
+            .plan_succession_checkpoint(dataset, &view, &rows, &mut remove_keys)
+            .await?;
         drop(rows);
-        let (_, result) = lifecycle.compact_baseline(&view, &remove_keys).await?;
-        Ok(result)
+        let upserts = checkpoint_plan
+            .as_ref()
+            .map_or(&[][..], |plan| plan.records.as_slice());
+        let outcome = lifecycle
+            .compact_baseline_with_records(&view, &remove_keys, upserts)
+            .await;
+        match outcome {
+            Ok((_, result)) => {
+                if let Some(plan) = checkpoint_plan
+                    && let Some(old_path) = plan.old_archive_path
+                {
+                    let _ = std::fs::remove_file(&old_path);
+                    if let Some(parent) = Path::new(&old_path).parent() {
+                        let _ = std::fs::remove_dir(parent);
+                    }
+                }
+                Ok(result)
+            }
+            Err(err) => {
+                if let Some(plan) = checkpoint_plan {
+                    let _ = std::fs::remove_file(&plan.new_archive_path);
+                    if let Some(parent) = Path::new(&plan.new_archive_path).parent() {
+                        let _ = std::fs::remove_dir(parent);
+                    }
+                }
+                Err(err)
+            }
+        }
     }
+
+    async fn plan_succession_checkpoint(
+        &self,
+        dataset: &Id,
+        view: &View,
+        rows: &crate::catalog::SnapshotRows,
+        remove_keys: &mut BTreeSet<String>,
+    ) -> Result<Option<CheckpointCompactionPlan>> {
+        use crate::engine::history::{
+            ArchivedSuccessionEntry, SuccessionArchive, SuccessionCheckpoint, read_link,
+            validate_checkpoint,
+        };
+
+        let authority: Authority = rows
+            .get_record("authority")?
+            .map(|(_, _, value)| value)
+            .unwrap_or_default();
+        let Some(head_release) = &authority.release else {
+            return Ok(None);
+        };
+        let mut protected_ops = BTreeSet::from([head_release.id.clone()]);
+        let mut protected_keys = BTreeSet::new();
+        for (_, _, json) in rows.prefix("retirement/") {
+            let receipt: Retirement = serde_json::from_str(json)?;
+            match &receipt.plan.scope {
+                RetirementScope::ResultAvailability { operation }
+                | RetirementScope::OperationRecovery { operation } => {
+                    protected_ops.insert(operation.clone());
+                }
+                _ => {}
+            }
+            for generation in receipt.plan.records {
+                if let Some(op_str) = generation
+                    .key
+                    .strip_prefix("result/")
+                    .or_else(|| generation.key.strip_prefix("operation/"))
+                    .or_else(|| generation.key.strip_prefix("change-certificate/"))
+                    && let Ok(op) = Id::new(op_str)
+                {
+                    protected_ops.insert(op);
+                }
+                protected_keys.insert(generation.key);
+            }
+        }
+        for prefix in ["availability-retired/", "operation-retired/"] {
+            for (key, _, _) in rows.prefix(prefix) {
+                if let Some(op_str) = key.strip_prefix(prefix)
+                    && let Ok(op) = Id::new(op_str)
+                {
+                    protected_ops.insert(op);
+                }
+            }
+        }
+        for (key, _, json) in rows.prefix("operation/") {
+            let Some(op_str) = key.strip_prefix("operation/") else {
+                continue;
+            };
+            let Ok(op) = Id::new(op_str) else {
+                continue;
+            };
+            if !rows.contains_key(&format!("result/{op}"))
+                && !rows.contains_key(&format!("abandoned/{op}"))
+            {
+                protected_ops.insert(op);
+                if let Ok(admitted) = serde_json::from_str::<Operation>(json)
+                    && let Some(base) = admitted.base
+                {
+                    protected_ops.insert(base);
+                }
+            }
+        }
+        for (_, _, json) in rows.prefix("export-operation/") {
+            if let Ok(op) = serde_json::from_str::<crate::engine::export::ExportOperation>(json) {
+                protected_ops.insert(op.source.id);
+            }
+        }
+        for prefix in ["export-result/", "export-channel/"] {
+            for (_, _, json) in rows.prefix(prefix) {
+                if let Ok(pin) = serde_json::from_str::<crate::export::ExportPin>(json) {
+                    protected_ops.insert(pin.source.version);
+                }
+            }
+        }
+        for (_, _, json) in rows.prefix("compaction-request/") {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json)
+                && let Some(base) = val.pointer("/spec/base").and_then(|v| v.as_str())
+                && let Ok(op) = Id::new(base)
+            {
+                protected_ops.insert(op);
+            }
+        }
+        for (key, _, json) in rows.prefix("continuous") {
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(json) else {
+                continue;
+            };
+            if key.starts_with("continuous/") {
+                if let Some(ver) = val.pointer("/initial/version").and_then(|v| v.as_str())
+                    && let Ok(op) = Id::new(ver)
+                {
+                    protected_ops.insert(op);
+                }
+            } else if key.starts_with("continuous-child/") {
+                for ptr in ["/capture/version", "/child"] {
+                    if let Some(ver) = val.pointer(ptr).and_then(|v| v.as_str())
+                        && let Ok(op) = Id::new(ver)
+                    {
+                        protected_ops.insert(op);
+                    }
+                }
+            }
+        }
+
+        let existing_checkpoint = if let Some((_, _, cp)) =
+            rows.get_record::<SuccessionCheckpoint>("succession-checkpoint")?
+        {
+            if validate_checkpoint(&cp, rows, &view.identifier().to_string(), view.revision)
+                .is_err()
+            {
+                return Ok(None);
+            }
+            Some(cp)
+        } else {
+            None
+        };
+
+        let mut live_chain = Vec::new();
+        let mut current = head_release.version_ref();
+        let mut previous_revision = None;
+        let mut previous_boundary = authority.boundary;
+        let mut previous_eligibility = authority.eligibility;
+        loop {
+            let link_key = format!("succession/{}", current.version);
+            if let Some(cp) = &existing_checkpoint
+                && current == cp.head
+                && !rows.contains_key(&link_key)
+            {
+                if previous_revision.is_none_or(|child| cp.head_revision >= child)
+                    || cp.head_boundary > previous_boundary
+                    || cp.head_eligibility > previous_eligibility
+                {
+                    return Ok(None);
+                }
+                break;
+            }
+            let Ok((revision, _, link)) = read_link(rows, view.revision, &current) else {
+                return Ok(None);
+            };
+            if previous_revision.is_some_and(|child| revision >= child)
+                || link.boundary > previous_boundary
+                || link.eligibility > previous_eligibility
+            {
+                return Ok(None);
+            }
+            previous_revision = Some(revision);
+            previous_boundary = link.boundary;
+            previous_eligibility = link.eligibility;
+            let predecessor = link.predecessor.clone();
+            live_chain.push((revision, link));
+            let Some(predecessor) = predecessor else {
+                if existing_checkpoint.is_some() {
+                    return Ok(None);
+                }
+                break;
+            };
+            current = predecessor;
+        }
+
+        let last_protected_idx = live_chain
+            .iter()
+            .rposition(|(_, link)| protected_ops.contains(&link.selected.version))
+            .unwrap_or(0);
+        let to_archive = &live_chain[last_protected_idx + 1..];
+        if to_archive.is_empty() {
+            return Ok(None);
+        }
+
+        let mut new_source_boundaries = 0_u64;
+        for (_, link) in to_archive {
+            let op_id = &link.selected.version;
+            let op_key = format!("operation/{op_id}");
+            let req_key = format!("request/{op_id}");
+            let (Some((op_rev, _, op)), Some((req_rev, _, req))) = (
+                rows.get_record::<Operation>(&op_key)?,
+                rows.get_record::<OperationRequest>(&req_key)?,
+            ) else {
+                return Ok(None);
+            };
+            if op_rev <= 0
+                || op_rev != req_rev
+                || req.operation() != op_id
+                || req.dataset() != dataset
+            {
+                return Ok(None);
+            }
+            let is_source = matches!(
+                req,
+                OperationRequest::Build(_)
+                    | OperationRequest::Update(_)
+                    | OperationRequest::Refresh(_)
+            ) || (matches!(req, OperationRequest::Schema(_))
+                && op.result_format == PREVIOUS_FORMAT);
+            if is_source {
+                if op.boundary == 0 {
+                    return Ok(None);
+                }
+                new_source_boundaries = new_source_boundaries.saturating_add(1);
+            }
+            for exact in [
+                format!("result/{op_id}"),
+                format!("succession/{op_id}"),
+                op_key,
+                req_key,
+                format!("runtime/{op_id}"),
+                format!("change-certificate/{op_id}"),
+                format!("input-progress/{op_id}"),
+            ] {
+                if protected_keys.contains(&exact) {
+                    return Ok(None);
+                }
+                let bkey = owners::binding_key(&exact);
+                if protected_keys.contains(&bkey) {
+                    return Ok(None);
+                }
+                if rows.contains_key(&bkey) {
+                    remove_keys.insert(bkey);
+                }
+                if rows.contains_key(&exact) {
+                    remove_keys.insert(exact);
+                }
+            }
+        }
+
+        let mut entries = to_archive
+            .iter()
+            .map(|(revision, link)| ArchivedSuccessionEntry {
+                revision: *revision,
+                link: link.clone(),
+            })
+            .collect::<Vec<_>>();
+        let mut old_archive_path = None;
+        let mut total_source_boundaries = new_source_boundaries;
+        if let Some(cp) = &existing_checkpoint {
+            let mut metadata_bytes = 0usize;
+            let previous_archive = self
+                .read_succession_archive(cp, &mut metadata_bytes)
+                .await?;
+            entries.extend(previous_archive.entries);
+            total_source_boundaries = total_source_boundaries.saturating_add(cp.source_boundaries);
+            remove_keys.insert(format!("protection/{}", cp.protection));
+            old_archive_path = Some(cp.archive.path.clone());
+        }
+
+        let (head_revision, head_link) = &to_archive[0];
+        let attempt = Id::new(format!("checkpoint-{}", uuid::Uuid::new_v4().simple()))?;
+        let prefix = self
+            .inner
+            .retained
+            .child(dataset.as_str())?
+            .child(attempt.as_str())?;
+        let protection_prefix = prefix.protection_prefix()?;
+        let dir = self
+            .inner
+            .retained
+            .local_path()?
+            .join(dataset.as_str())
+            .join(attempt.as_str());
+        std::fs::create_dir_all(&dir)?;
+        let archive_path = dir.join("succession-checkpoint.json");
+        let new_archive_path = archive_path.to_string_lossy().into_owned();
+        let archive = SuccessionArchive {
+            dataset: dataset.clone(),
+            head: head_link.selected.clone(),
+            head_revision: *head_revision,
+            source_boundaries: total_source_boundaries,
+            entries,
+        };
+        let archive_bytes = serde_json::to_vec(&archive)?;
+        if let Err(err) = std::fs::write(&archive_path, &archive_bytes) {
+            let _ = std::fs::remove_dir(&dir);
+            return Err(err.into());
+        }
+        let archive_obj = ObjectRef {
+            owner: dataset.clone(),
+            path: new_archive_path.clone(),
+            digest: blake3::hash(&archive_bytes).to_hex().to_string(),
+            bytes: archive_bytes.len() as u64,
+        };
+        let protection = Protection {
+            id: attempt.clone(),
+            consumer: dataset.clone(),
+            purpose: "succession-checkpoint/archive".into(),
+            paths: vec![protection_prefix],
+            retired: false,
+        };
+        let checkpoint = SuccessionCheckpoint {
+            dataset: dataset.clone(),
+            head: head_link.selected.clone(),
+            head_revision: *head_revision,
+            head_boundary: head_link.boundary,
+            head_eligibility: head_link.eligibility,
+            source_boundaries: total_source_boundaries,
+            count: archive.entries.len() as u64,
+            archive: archive_obj,
+            protection: attempt.clone(),
+        };
+        let records = vec![
+            record(format!("protection/{attempt}"), &protection)?,
+            record("succession-checkpoint", &checkpoint)?,
+        ];
+        Ok(Some(CheckpointCompactionPlan {
+            records,
+            new_archive_path,
+            old_archive_path,
+        }))
+    }
+}
+
+struct CheckpointCompactionPlan {
+    records: Vec<(String, serde_json::Value)>,
+    new_archive_path: String,
+    old_archive_path: Option<String>,
 }
 
 fn collect_obsolete_lifecycle_keys(
@@ -1058,6 +1408,16 @@ mod tests {
                 let stats = engine.compact_lifecycle(&dataset).await.unwrap();
                 assert_eq!(stats.revisions_after, 1);
                 assert_eq!(stats.files_after, 1);
+                assert!(
+                    stats.rows_after <= 20,
+                    "expected O(1) rows_after, got {}",
+                    stats.rows_after
+                );
+                assert!(
+                    stats.metadata_bytes_after < 32 << 10,
+                    "expected O(1) metadata_bytes_after < 32 KiB, got {}",
+                    stats.metadata_bytes_after
+                );
                 view = engine.inner.lifecycle.open(&dataset).await.unwrap();
             }
         }
@@ -1080,8 +1440,13 @@ mod tests {
         assert_eq!(final_stats.revisions_after, 1);
         assert_eq!(final_stats.files_after, 1);
         assert!(
-            final_stats.metadata_bytes_after < limits.max_metadata_bytes,
-            "metadata_bytes_after={} must fit within the declared 3 MiB metadata budget",
+            final_stats.rows_after <= 32,
+            "rows_after={} must remain O(1) bounded",
+            final_stats.rows_after
+        );
+        assert!(
+            final_stats.metadata_bytes_after < 32 << 10,
+            "metadata_bytes_after={} must remain O(1) bounded (< 32 KiB)",
             final_stats.metadata_bytes_after
         );
 
@@ -1090,6 +1455,10 @@ mod tests {
         let cold_view = reopened.inner.lifecycle.open(&dataset).await.unwrap();
         let cold_rows = reopened.inner.lifecycle.rows(&cold_view).await.unwrap();
         assert_eq!(cold_rows.history_bytes(), final_stats.metadata_bytes_after);
+        assert!(cold_rows.contains_key("succession-checkpoint"));
+        assert!(!cold_rows.contains_key("result/op-0"));
+        assert!(!cold_rows.contains_key("result/op-259"));
+        assert!(cold_rows.contains_key("result/op-260"));
         verify_release_at(&latest, limits, VerificationLevel::Deep)
             .await
             .unwrap();

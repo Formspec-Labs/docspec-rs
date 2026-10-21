@@ -496,14 +496,10 @@ fn untruncated_file_bounds(
     let high = PrimitiveLiteral::from(file.upper_bounds().get(&field_id)?.clone());
     for bound in [&low, &high] {
         match bound {
-            PrimitiveLiteral::String(s)
-                if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES =>
-            {
+            PrimitiveLiteral::String(s) if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => {
                 return None;
             }
-            PrimitiveLiteral::Binary(b)
-                if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES =>
-            {
+            PrimitiveLiteral::Binary(b) if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => {
                 return None;
             }
             PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => return None,

@@ -219,7 +219,10 @@ pub(super) async fn read_pin_projected_with_objects(
             .await?
             .and_then(|batch| async move { storage::identity::public_batch(batch) })
             .map_err(|error| datafusion::error::DataFusionError::External(Box::new(error)));
-        return Ok(Box::pin(RecordBatchStreamAdapter::new(public_schema, stream)));
+        return Ok(Box::pin(RecordBatchStreamAdapter::new(
+            public_schema,
+            stream,
+        )));
     };
     if cols.is_empty()
         || cols

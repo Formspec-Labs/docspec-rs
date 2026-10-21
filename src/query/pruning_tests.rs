@@ -166,8 +166,14 @@ fn unprovable_cases_keep_the_file() {
     let long = "z".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES);
     assert!(keeps(col("name").eq(lit(long.clone()))));
     let truncated = file(
-        vec![(NAME, Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)))],
-        vec![(NAME, Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)))],
+        vec![(
+            NAME,
+            Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)),
+        )],
+        vec![(
+            NAME,
+            Datum::string("a".repeat(crate::storage::STATISTICS_TRUNCATE_BYTES)),
+        )],
     );
     assert!(file_matches_inexact_filters(
         &schema(),
