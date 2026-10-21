@@ -846,27 +846,37 @@ impl Engine {
                 .try_flatten()
                 .boxed();
             let kept = source.and_then(move |batch| {
-            let sender = sender.clone();
-            async move {
-                let bytes = batch.get_array_memory_size();
-                if bytes > max_batch_bytes {
-                    return Err(Error::refusal(
-                        "oversized_batch",
-                        format!("joined update batch uses {bytes} bytes, exceeding the {max_batch_bytes} byte allowance"),
-                    ));
+                let sender = sender.clone();
+                async move {
+                    let bytes = storage::effective_batch_bytes(&batch);
+                    if !storage::has_list_of_struct(batch.schema().as_ref())
+                        && bytes > max_batch_bytes
+                    {
+                        return Err(Error::refusal(
+                            "oversized_batch",
+                            format!("joined update batch uses {bytes} bytes, exceeding the {max_batch_bytes} byte allowance"),
+                        ));
+                    }
+                    let (mut keep, mut remove) = split_rows(batch)?;
+                    if storage::has_list_of_struct(keep.schema().as_ref()) {
+                        if keep.num_rows() != 0 {
+                            keep = storage::compact_batch_slice(&keep, 0, keep.num_rows())?;
+                        }
+                        if remove.num_rows() != 0 {
+                            remove = storage::compact_batch_slice(&remove, 0, remove.num_rows())?;
+                        }
+                    }
+                    if remove.num_rows() != 0 {
+                        sender.send(Ok(remove)).await.map_err(|_| {
+                            Error::refusal(
+                                "writer_stopped",
+                                "removed-row writer stopped before completion",
+                            )
+                        })?;
+                    }
+                    Ok(keep)
                 }
-                let (keep, remove) = split_rows(batch)?;
-                if remove.num_rows() != 0 {
-                    sender.send(Ok(remove)).await.map_err(|_| {
-                        Error::refusal(
-                            "writer_stopped",
-                            "removed-row writer stopped before completion",
-                        )
-                    })?;
-                }
-                Ok(keep)
-            }
-        });
+            });
             let removed_rows = futures::stream::unfold(receiver, |mut receiver| async move {
                 receiver.recv().await.map(|batch| (batch, receiver))
             });

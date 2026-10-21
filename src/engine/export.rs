@@ -4,8 +4,12 @@
 use super::*;
 
 pub(in crate::engine) mod host;
+pub(super) mod pipeline;
 pub(super) mod remote;
-use crate::export::{ExportField, ExportPin, ExportPolicy, ExportSpec, ExportValidation};
+use crate::export::{
+    ChildTableExport, ExportField, ExportKeyRange, ExportPin, ExportPolicy, ExportSpec,
+    ExportValidation, FacetCountEntry,
+};
 use arrow::{
     array::Array,
     datatypes::{DataType, Field, Schema, SchemaRef},
@@ -47,6 +51,12 @@ pub(super) struct ExportMaterialized {
     pub object: ObjectRef,
     pub rows: u64,
     pub fields: Vec<ExportField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facets: Vec<FacetCountEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browse_ranges: Vec<ExportKeyRange>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub child_tables: BTreeMap<String, ChildTableExport>,
 }
 
 impl Engine {
@@ -73,7 +83,12 @@ impl Engine {
 
     async fn export_request(&self, spec: &ExportSpec, stop: Option<String>) -> Result<ExportPin> {
         self.require_data_work()?;
-        self.require_group(&spec.policy.group)?;
+        for group in spec.policy.effective_groups() {
+            self.require_group(&group)?;
+        }
+        if spec.policy.has_extended_features() {
+            self.require_local()?;
+        }
         let memory = self.request_memory(&(spec, &stop))?;
         validate_request(spec)?;
         let spec = spec.clone();
@@ -202,6 +217,11 @@ impl Engine {
         self.inner
             .objects
             .validate_retained_path(&pin.object.path)?;
+        for child in pin.child_tables.values() {
+            self.inner
+                .objects
+                .validate_retained_path(&child.object.path)?;
+        }
         if !self.inner.retained.is_local() {
             remote::check_pin_binding(
                 &pin,
@@ -309,6 +329,9 @@ impl Engine {
             rows: materialized.rows,
             fields: materialized.fields,
             validation,
+            facets: materialized.facets,
+            browse_ranges: materialized.browse_ranges,
+            child_tables: materialized.child_tables,
         };
         let lock = self.lock(&spec.dataset).await;
         let _guard = lock.lock().await;
@@ -383,8 +406,15 @@ impl Engine {
             return Ok(saved);
         }
         self.check_operation_available(&view, &source.id).await?;
-        self.guard_corrections(&view, &source.dataset, Some(&spec.policy.group))
-            .await?;
+        for group in spec.policy.effective_groups() {
+            let guard_group = if group == "evidence" || group == "receipts" {
+                "source"
+            } else {
+                group.as_str()
+            };
+            self.guard_corrections(&view, &source.dataset, Some(guard_group))
+                .await?;
+        }
         let rows = self.inner.lifecycle.rows(&view).await?;
         let source_revision = rows
             .revision(&format!("result/{}", source.id))
@@ -419,12 +449,15 @@ impl Engine {
         let rows = self.inner.lifecycle.rows(view).await?;
         self.check_export_recovery(&rows, view, &operation.request.operation)?;
         drop(rows);
-        self.guard_corrections(
-            view,
-            &operation.source.dataset,
-            Some(&operation.request.policy.group),
-        )
-        .await?;
+        for group in operation.request.policy.effective_groups() {
+            let guard_group = if group == "evidence" || group == "receipts" {
+                "source"
+            } else {
+                group.as_str()
+            };
+            self.guard_corrections(view, &operation.source.dataset, Some(guard_group))
+                .await?;
+        }
         let authority: Authority = self
             .inner
             .lifecycle
@@ -498,7 +531,11 @@ impl Engine {
 
     fn check_export_backend(&self, source: &ReleasePin, policy: &ExportPolicy) -> Result<()> {
         if !self.inner.retained.is_local()
-            && (BackendCapability::for_group(&policy.group).local_only()
+            && (policy
+                .effective_groups()
+                .iter()
+                .any(|g| BackendCapability::for_group(g).local_only())
+                || policy.has_extended_features()
                 || !remote_source_only(&source.dataset))
         {
             return Err(locations::unsupported());
@@ -513,6 +550,11 @@ impl Engine {
         stop: Option<&str>,
     ) -> Result<ExportMaterialized> {
         let spec = &operation.request;
+        if spec.policy.has_extended_features() {
+            return self
+                .materialize_extended_export(operation, staged_directory, stop)
+                .await;
+        }
         let budget = &self.inner.lifecycle.budget;
         let table_pin = operation
             .source
@@ -724,6 +766,9 @@ impl Engine {
             object,
             rows,
             fields,
+            facets: Vec::new(),
+            browse_ranges: Vec::new(),
+            child_tables: BTreeMap::new(),
         };
         if let Some(custody) = custody {
             self.retain_export_record(
@@ -741,17 +786,55 @@ impl Engine {
 }
 
 fn validate_request(spec: &ExportSpec) -> Result<()> {
-    let columns = &spec.policy.columns;
+    let policy = &spec.policy;
+    let columns = &policy.columns;
+    let groups = policy.effective_groups();
     if spec.source.dataset != spec.dataset
-        || spec.policy.group.is_empty()
+        || groups.is_empty()
+        || groups.iter().any(|g| g.is_empty())
+        || groups.iter().collect::<BTreeSet<_>>().len() != groups.len()
         || columns.is_empty()
         || columns.iter().any(|name| name.is_empty())
         || columns.iter().collect::<BTreeSet<_>>().len() != columns.len()
+        || policy.computed_columns.keys().any(|name| name.is_empty())
+        || policy.order_by.iter().any(|sc| sc.column.is_empty())
+        || policy.page_index_columns.iter().any(|c| c.is_empty())
+        || policy.browse_range_columns.iter().any(|c| c.is_empty())
+        || policy
+            .facet_sets
+            .iter()
+            .any(|set| set.is_empty() || set.iter().any(|c| c.is_empty()))
+        || policy.row_group_rows == Some(0)
     {
         return Err(Error::refusal(
             "invalid_export",
             "export requires one exact source and distinct explicit columns",
         ));
+    }
+    if let Some(fold) = &policy.fold_readings
+        && (fold.target_column.is_empty() || fold.columns.iter().any(|c| c.is_empty()))
+    {
+        return Err(Error::refusal(
+            "invalid_export",
+            "export fold_readings requires a nonempty target_column",
+        ));
+    }
+    for (child_name, child_spec) in &policy.child_tables {
+        if Id::new(child_name).is_err()
+            || child_name == "export"
+            || child_spec.list_column.is_empty()
+            || child_spec.parent_key_columns.is_empty()
+            || child_spec.parent_key_columns.iter().any(|c| c.is_empty())
+            || (!child_spec.child_key_columns.is_empty()
+                && child_spec.child_key_columns.len() != child_spec.parent_key_columns.len())
+            || child_spec.ordinal_column.is_empty()
+            || child_spec.row_group_rows == 0
+        {
+            return Err(Error::refusal(
+                "invalid_export",
+                "invalid child_tables specification in export policy",
+            ));
+        }
     }
     Ok(())
 }
@@ -786,19 +869,43 @@ pub(super) fn check_materialized(
     operation: &ExportOperation,
 ) -> Result<()> {
     let policy = &operation.request.policy;
+    let expected_cols = policy.expected_output_columns();
+    let primary_group = policy.primary_group();
+    let expected_rows = if primary_group == "evidence" || primary_group == "receipts" {
+        operation
+            .source
+            .dataset
+            .evidence
+            .as_ref()
+            .map(|ev| ev.table.rows)
+    } else {
+        operation
+            .source
+            .dataset
+            .groups
+            .get(primary_group)
+            .map(|g| g.rows)
+    };
+    let rows_ok = match expected_rows {
+        Some(group_rows) if policy.filter.is_some() => value.rows <= group_rows,
+        Some(group_rows) => value.rows == group_rows,
+        None => false,
+    };
     if value.request_digest != operation.request_digest
         || value.object.owner != operation.request.dataset
         || value
             .fields
             .iter()
             .map(|field| &field.name)
-            .ne(policy.columns.iter())
-        || operation
-            .source
-            .dataset
-            .groups
-            .get(&policy.group)
-            .is_none_or(|group| group.rows != value.rows)
+            .ne(expected_cols.iter())
+        || !rows_ok
+        || value.child_tables.keys().ne(policy.child_tables.keys())
+        || value.child_tables.values().any(|child| {
+            child.object.owner != operation.request.dataset
+                || child.validation.object != child.object
+                || child.validation.rows != child.rows
+                || child.fields.is_empty()
+        })
     {
         return Err(invalid_export());
     }
@@ -806,6 +913,7 @@ pub(super) fn check_materialized(
 }
 
 pub(super) fn check_pin(pin: &ExportPin) -> Result<()> {
+    let expected_cols = pin.policy.expected_output_columns();
     if pin.format != 1
         || pin.dataset != pin.source.dataset
         || pin.dataset != pin.object.owner
@@ -815,9 +923,16 @@ pub(super) fn check_pin(pin: &ExportPin) -> Result<()> {
             .fields
             .iter()
             .map(|field| &field.name)
-            .ne(pin.policy.columns.iter())
+            .ne(expected_cols.iter())
         || pin.source_revision <= 0
         || pin.fields.is_empty()
+        || pin.child_tables.keys().ne(pin.policy.child_tables.keys())
+        || pin.child_tables.values().any(|child| {
+            child.object.owner != pin.dataset
+                || child.validation.object != child.object
+                || child.validation.rows != child.rows
+                || child.fields.is_empty()
+        })
     {
         return Err(invalid_export());
     }
@@ -1035,7 +1150,30 @@ async fn validate_output(
     materialized: &ExportMaterialized,
     budget: &Budget,
 ) -> Result<ExportValidation> {
-    let value = materialized.clone();
+    for child in materialized.child_tables.values() {
+        let child_val =
+            validate_output_object(&child.object, child.rows, &child.fields, budget).await?;
+        if child_val.object != child.object || child_val.rows != child.rows {
+            return Err(invalid_export());
+        }
+    }
+    validate_output_object(
+        &materialized.object,
+        materialized.rows,
+        &materialized.fields,
+        budget,
+    )
+    .await
+}
+
+pub(super) async fn validate_output_object(
+    object: &ObjectRef,
+    rows: u64,
+    fields: &[ExportField],
+    budget: &Budget,
+) -> Result<ExportValidation> {
+    let object = object.clone();
+    let fields = fields.to_vec();
     let limits = budget.limits.clone();
     let memory = budget.reserve(
         limits
@@ -1046,8 +1184,8 @@ async fn validate_output(
     budget
         .blocking(move || {
             let _memory = memory;
-            let mut file = File::open(&value.object.path)?;
-            if file.metadata()?.len() != value.object.bytes {
+            let mut file = File::open(&object.path)?;
+            if file.metadata()?.len() != object.bytes {
                 return Err(invalid_export());
             }
             file.seek(SeekFrom::End(-8))?;
@@ -1060,9 +1198,9 @@ async fn validate_output(
                 ));
             }
             let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-            if describe_schema(builder.schema())? != value.fields
+            if describe_schema(builder.schema())? != fields
                 || u64::try_from(builder.metadata().file_metadata().num_rows()).ok()
-                    != Some(value.rows)
+                    != Some(rows)
             {
                 return Err(invalid_export());
             }
@@ -1072,7 +1210,7 @@ async fn validate_output(
             let (sampled_rows, sampled_decoded_bytes) = match reader.next().transpose()? {
                 None => (0, 0),
                 Some(batch) => {
-                    if batch.get_array_memory_size() > limits.max_batch_bytes {
+                    if storage::effective_batch_bytes(&batch) > limits.max_batch_bytes {
                         return Err(Error::refusal(
                             "oversized_batch",
                             "export sample exceeds the byte allowance",
@@ -1089,12 +1227,12 @@ async fn validate_output(
                     (batch.num_rows(), batch.get_array_memory_size())
                 }
             };
-            if (sampled_rows == 0) != (value.rows == 0) {
+            if (sampled_rows == 0) != (rows == 0) {
                 return Err(invalid_export());
             }
             Ok(ExportValidation {
-                object: value.object,
-                rows: value.rows,
+                object,
+                rows,
                 sampled_rows,
                 sampled_decoded_bytes,
             })
@@ -1254,6 +1392,7 @@ mod tests {
                 "nested_list".into(),
                 "nested_struct".into(),
             ],
+            ..ExportPolicy::default()
         };
         let (indices, selected, fields) = authorized_schema(&source, &policy).unwrap();
         assert_eq!(indices, [0, 3, 4]);
@@ -1461,6 +1600,7 @@ mod tests {
                     "spans".into(),
                     "span".into(),
                 ],
+                ..ExportPolicy::default()
             },
         };
         let pin = engine.export(&spec).await.unwrap();
@@ -1590,6 +1730,7 @@ mod tests {
                 group: "source".into(),
                 rows: ExportRows::All,
                 columns: vec!["id".into(), "wide".into()],
+                ..ExportPolicy::default()
             },
         };
         let err = engine.export(&spec).await.unwrap_err();
@@ -1694,6 +1835,7 @@ mod tests {
                     group: "source".into(),
                     rows: ExportRows::All,
                     columns: vec!["id".into(), "custom_category".into(), "payload".into()],
+                    ..ExportPolicy::default()
                 },
             })
             .await
@@ -1765,6 +1907,7 @@ mod tests {
                 group: "source".into(),
                 rows: ExportRows::All,
                 columns: vec!["value".into()],
+                ..ExportPolicy::default()
             },
         };
         let pin = engine.export(&spec).await.unwrap();

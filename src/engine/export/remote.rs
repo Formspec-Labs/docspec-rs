@@ -722,6 +722,9 @@ pub(super) async fn test_retained_phase_revision_bindings(
         object: stage_object.clone(),
         rows: pin.rows,
         fields: pin.fields.clone(),
+        facets: pin.facets.clone(),
+        browse_ranges: pin.browse_ranges.clone(),
+        child_tables: pin.child_tables.clone(),
     };
     let stage_validation = ExportValidation {
         object: stage_object,

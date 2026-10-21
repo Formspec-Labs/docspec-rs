@@ -1267,6 +1267,12 @@ pub struct WriteMetrics {
     pub rows_added: u64,
 }
 
+pub use crate::export::{
+    ChildTableExport, ChildTableExportSpec, ExportKeyRange, FacetCountEntry, Predicate,
+    ReadingsFoldSpec, ScalarExpr, SortColumn, SortDirection, TaggedPredicate, TaggedScalarExpr,
+    WhenThen,
+};
+
 #[cfg(test)]
 mod unknown_field_tests {
     use super::*;

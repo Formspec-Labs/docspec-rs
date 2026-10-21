@@ -102,6 +102,7 @@ fn request(source: &ReleasePin, operation: &str) -> ExportSpec {
             group: "source".into(),
             rows: ExportRows::All,
             columns: vec!["public".into(), "id".into()],
+            ..ExportPolicy::default()
         },
     }
 }
@@ -1109,6 +1110,700 @@ async fn cli_compaction_and_offline_restore_share_the_application_paths() {
         .await
         .unwrap();
     assert_eq!(engine.latest(&spec.dataset).await.unwrap(), release);
+}
+
+#[tokio::test]
+async fn multi_group_filtered_computed_folded_sorted_and_faceted_export_preserves_selective_page_index()
+ {
+    use arrow::array::{Array, ListArray, ListBuilder, StringBuilder, StructArray};
+    use docspec::{
+        evidence::{EVIDENCE, EvidenceSpec, SOURCE_FILE, SOURCE_ROW},
+        export::{
+            ExportPolicy, ExportRows, ExportSpec, Predicate, ReadingsFoldSpec, ScalarExpr,
+            SortColumn,
+        },
+        model::{BackfillSpec, ComputedField},
+    };
+    use futures::TryStreamExt;
+    use parquet::{
+        arrow::arrow_reader::ArrowReaderOptions,
+        file::{
+            metadata::PageIndexPolicy, page_index::column_index::ColumnIndexMetaData,
+        },
+    };
+    use std::collections::BTreeMap;
+
+    let root = tempfile::tempdir().unwrap();
+    let input_path = root.path().join("multi-group-input.parquet");
+
+    let mut committee_builder = ListBuilder::new(StringBuilder::new());
+    // Row 0: owner-b, congress 118
+    committee_builder.values().append_value("hsag");
+    committee_builder.values().append_value("hsap");
+    committee_builder.append(true);
+    // Row 1: owner-a, congress 119
+    committee_builder.append(true);
+    // Row 2: owner-c, congress 117 (filtered out)
+    committee_builder.values().append_value("hsju");
+    committee_builder.append(true);
+    // Row 3: owner-d, congress 119
+    committee_builder.values().append_value("hsif");
+    committee_builder.append(true);
+
+    let mut bill_builder = ListBuilder::new(StringBuilder::new());
+    // Row 0: empty
+    bill_builder.append(true);
+    // Row 1: hr-1
+    bill_builder.values().append_value("hr1");
+    bill_builder.append(true);
+    // Row 2: hr-2
+    bill_builder.values().append_value("hr2");
+    bill_builder.append(true);
+    // Row 3: null
+    bill_builder.append(false);
+
+    let mut empty_builder = ListBuilder::new(StringBuilder::new());
+    for _ in 0..4 {
+        empty_builder.append(true);
+    }
+
+    let list_field = Arc::new(Field::new_list_field(DataType::Utf8, true));
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("owner_id", DataType::Utf8, false),
+        Field::new("congress", DataType::Int64, false),
+        Field::new("chamber", DataType::Utf8, false),
+        Field::new("body", DataType::Utf8, true),
+        Field::new("retain_until", DataType::Utf8, false),
+        Field::new("secret", DataType::Utf8, false),
+        Field::new("committee_values", DataType::List(list_field.clone()), true),
+        Field::new("bill_values", DataType::List(list_field.clone()), true),
+        Field::new("empty_values", DataType::List(list_field), true),
+    ]));
+
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec![
+                "owner-b", "owner-a", "owner-c", "owner-d",
+            ])),
+            Arc::new(Int64Array::from(vec![118, 119, 117, 119])),
+            Arc::new(StringArray::from(vec![
+                "house", "senate", "house", "house",
+            ])),
+            Arc::new(StringArray::from(vec![
+                Some("expired-body"),
+                Some("active-senate-body"),
+                Some("filtered-out-body"),
+                Some("active-house-body"),
+            ])),
+            Arc::new(StringArray::from(vec![
+                "2026-01-01",
+                "2027-01-01",
+                "2027-01-01",
+                "2027-06-01",
+            ])),
+            Arc::new(StringArray::from(vec![
+                "secret-0", "secret-1", "secret-2", "secret-3",
+            ])),
+            Arc::new(committee_builder.finish()),
+            Arc::new(bill_builder.finish()),
+            Arc::new(empty_builder.finish()),
+        ],
+    )
+    .unwrap();
+    let mut writer = ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    let engine = Engine::open(root.path().join("workspace"), limits())
+        .await
+        .unwrap();
+    let release = engine
+        .run(&RunSpec {
+            dataset: id("hearings"),
+            operation: id("ingest"),
+            base: None,
+            relationship: None,
+            input: input_path.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&input_path).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+
+    let release = engine
+        .backfill(&BackfillSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("backfill-naming"),
+            base: release.id.clone(),
+            definition: "v1".into(),
+            group: id("house_naming"),
+            group_definition: "naming-v1".into(),
+            fields: vec![ComputedField {
+                id: 1,
+                name: "canonical_title".into(),
+                expression: "UPPER(body)".into(),
+            }],
+        })
+        .await
+        .unwrap();
+
+    // Collect occurrence coordinates and attach evidence receipts
+    let mut occ_stream = engine.read_source_occurrences(&release).await.unwrap();
+    let mut src_files = Vec::new();
+    let mut src_rows = Vec::new();
+    let mut citations = Vec::new();
+    while let Some(occ_batch) = occ_stream.try_next().await.unwrap() {
+        let owners = occ_batch
+            .column_by_name("owner_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let files = occ_batch
+            .column_by_name(storage::OCCURRENCE_FILE)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let positions = occ_batch
+            .column_by_name(storage::OCCURRENCE_ROW)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        for i in 0..occ_batch.num_rows() {
+            src_files.push(files.value(i).to_owned());
+            src_rows.push(positions.value(i));
+            citations.push(Some(format!("cit-{}", owners.value(i))));
+        }
+    }
+    let evidence_path = root.path().join("evidence.parquet");
+    let evidence_schema = Arc::new(Schema::new(vec![
+        Field::new(SOURCE_FILE, DataType::Utf8, false),
+        Field::new(SOURCE_ROW, DataType::Int64, false),
+        Field::new(EVIDENCE, DataType::Utf8, true),
+    ]));
+    let evidence_batch = RecordBatch::try_new(
+        evidence_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(src_files)),
+            Arc::new(Int64Array::from(src_rows)),
+            Arc::new(StringArray::from(citations)),
+        ],
+    )
+    .unwrap();
+    let mut ev_writer =
+        ArrowWriter::try_new(File::create(&evidence_path).unwrap(), evidence_schema, None).unwrap();
+    ev_writer.write(&evidence_batch).unwrap();
+    ev_writer.close().unwrap();
+
+    let release = engine
+        .update_evidence(&EvidenceSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("record-receipts"),
+            definition: "v1".into(),
+            base: release.id.clone(),
+            replacements: InputSpec {
+                path: evidence_path.to_string_lossy().into_owned(),
+                digest: storage::digest(&evidence_path).unwrap().0,
+            },
+            deletions: None,
+        })
+        .await
+        .unwrap();
+
+    let mut computed_columns = BTreeMap::new();
+    computed_columns.insert(
+        "body".into(),
+        ScalarExpr::sql("CASE WHEN retain_until <= '2026-10-21' THEN NULL ELSE body END"),
+    );
+
+    let pin = engine
+        .export(&ExportSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("export-multi"),
+            source: release.version_ref(),
+            channel: id("public"),
+            expected: None,
+            policy: ExportPolicy {
+                group: "source".into(),
+                groups: vec!["source".into(), "house_naming".into(), "evidence".into()],
+                rows: ExportRows::All,
+                columns: vec![
+                    "owner_id".into(),
+                    "congress".into(),
+                    "chamber".into(),
+                    "canonical_title".into(),
+                    "body".into(),
+                    "evidence".into(),
+                    "filename_readings".into(),
+                ],
+                filter: Some(Predicate::sql("congress >= 118")),
+                computed_columns,
+                fold_readings: Some(ReadingsFoldSpec {
+                    target_column: "filename_readings".into(),
+                    columns: vec![
+                        "committee_values".into(),
+                        "bill_values".into(),
+                        "empty_values".into(),
+                    ],
+                    include_suffixes: vec!["_values".into()],
+                    include_prefixes: Vec::new(),
+                    strip_suffix: true,
+                    drop_source_columns: true,
+                }),
+                order_by: vec![SortColumn::desc("congress"), SortColumn::asc("owner_id")],
+                page_index_columns: vec!["owner_id".into(), "congress".into()],
+                facet_sets: vec![
+                    vec!["congress".into()],
+                    vec!["congress".into(), "chamber".into()],
+                ],
+                browse_range_columns: vec!["owner_id".into(), "congress".into()],
+                child_tables: BTreeMap::new(),
+                row_group_rows: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    storage::verify_object(&pin.object).unwrap();
+    assert_eq!(pin.rows, 3);
+
+    // Verify selective PageIndex: enabled on owner_id (col 0) and congress (col 1),
+    // omitted on nested filename_readings (col 6) and unindexed body (col 4).
+    let file = File::open(&pin.object.path).unwrap();
+    let options = ArrowReaderOptions::new().with_page_index_policy(PageIndexPolicy::Optional);
+    let builder = ParquetRecordBatchReaderBuilder::try_new_with_options(file, options).unwrap();
+    let metadata = builder.metadata();
+    let col_index = metadata.column_index().expect("column index present");
+    let off_index = metadata.offset_index().expect("offset index present");
+    for rg_idx in 0..metadata.num_row_groups() {
+        assert!(
+            !matches!(col_index[rg_idx][0], ColumnIndexMetaData::NONE),
+            "owner_id should have ColumnIndex"
+        );
+        assert!(
+            !matches!(col_index[rg_idx][1], ColumnIndexMetaData::NONE),
+            "congress should have ColumnIndex"
+        );
+        assert!(
+            matches!(col_index[rg_idx][4], ColumnIndexMetaData::NONE),
+            "body should not have ColumnIndex"
+        );
+        assert!(
+            matches!(col_index[rg_idx][6], ColumnIndexMetaData::NONE),
+            "nested filename_readings should not have ColumnIndex"
+        );
+        assert!(!off_index[rg_idx][0].page_locations().is_empty());
+        assert!(!off_index[rg_idx][1].page_locations().is_empty());
+    }
+
+    let batches: Vec<RecordBatch> = builder.build().unwrap().map(Result::unwrap).collect();
+    let combined = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+    assert_eq!(
+        combined
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "owner_id",
+            "congress",
+            "chamber",
+            "canonical_title",
+            "body",
+            "evidence",
+            "filename_readings",
+        ]
+    );
+
+    let owners = combined
+        .column_by_name("owner_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let congresses = combined
+        .column_by_name("congress")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    let titles = combined
+        .column_by_name("canonical_title")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let bodies = combined
+        .column_by_name("body")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let evidence_col = combined
+        .column_by_name("evidence")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+
+    // Sorted by congress DESC, owner_id ASC -> (119, owner-a), (119, owner-d), (118, owner-b)
+    assert_eq!(
+        (0..combined.num_rows())
+            .map(|i| (congresses.value(i), owners.value(i)))
+            .collect::<Vec<_>>(),
+        vec![(119, "owner-a"), (119, "owner-d"), (118, "owner-b")]
+    );
+    assert_eq!(titles.value(0), "ACTIVE-SENATE-BODY");
+    assert_eq!(titles.value(1), "ACTIVE-HOUSE-BODY");
+    assert_eq!(titles.value(2), "EXPIRED-BODY");
+
+    // Computed column masked expired row (owner-b has retain_until 2026-01-01 <= 2026-10-21)
+    assert_eq!(bodies.value(0), "active-senate-body");
+    assert_eq!(bodies.value(1), "active-house-body");
+    assert!(bodies.is_null(2));
+
+    // Evidence join populated evidence column
+    assert_eq!(evidence_col.value(0), "cit-owner-a");
+    assert_eq!(evidence_col.value(1), "cit-owner-d");
+    assert_eq!(evidence_col.value(2), "cit-owner-b");
+
+    // Folded readings contain only non-empty entries per row with suffix `_values` stripped
+    let readings = combined
+        .column_by_name("filename_readings")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .unwrap();
+    let extract_readings = |row_idx: usize| -> Vec<(String, Vec<String>)> {
+        let row_list = readings.value(row_idx);
+        let struct_arr = row_list.as_any().downcast_ref::<StructArray>().unwrap();
+        let fields = struct_arr
+            .column_by_name("field")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let values_list = struct_arr
+            .column_by_name("values")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+        (0..struct_arr.len())
+            .map(|i| {
+                let vals = values_list.value(i);
+                let str_vals = vals.as_any().downcast_ref::<StringArray>().unwrap();
+                let v = (0..str_vals.len())
+                    .map(|j| str_vals.value(j).to_owned())
+                    .collect::<Vec<_>>();
+                (fields.value(i).to_owned(), v)
+            })
+            .collect()
+    };
+    assert_eq!(
+        extract_readings(0),
+        vec![("bill".to_owned(), vec!["hr1".to_owned()])]
+    );
+    assert_eq!(
+        extract_readings(1),
+        vec![("committee".to_owned(), vec!["hsif".to_owned()])]
+    );
+    assert_eq!(
+        extract_readings(2),
+        vec![(
+            "committee".to_owned(),
+            vec!["hsag".to_owned(), "hsap".to_owned()]
+        )]
+    );
+
+    // Facets and browse ranges populated
+    assert!(!pin.facets.is_empty());
+    let congress_119_count = pin
+        .facets
+        .iter()
+        .find(|f| {
+            f.grouping == vec!["congress".to_owned()]
+                && f.values.get("congress") == Some(&Some("119".to_owned()))
+        })
+        .expect("congress=119 facet count")
+        .count;
+    assert_eq!(congress_119_count, 2);
+    assert!(!pin.browse_ranges.is_empty());
+}
+
+#[tokio::test]
+async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fast_slice_lookup() {
+    use arrow::{
+        array::{Array, Int64Builder, ListBuilder, StringBuilder, StructBuilder},
+        datatypes::Fields,
+    };
+    use docspec::export::{
+        ChildTableExportSpec, ExportPolicy, ExportRows, ExportSpec, SortColumn,
+    };
+    use futures::TryStreamExt;
+    use std::{collections::BTreeMap, time::Instant};
+
+    let root = tempfile::tempdir().unwrap();
+    let input_path = root.path().join("wide-occurrences.parquet");
+
+    let struct_fields = Fields::from(vec![
+        Field::new("file_path", DataType::Utf8, false),
+        Field::new("byte_offset", DataType::Int64, false),
+    ]);
+    let struct_builder = StructBuilder::new(
+        struct_fields.clone(),
+        vec![
+            Box::new(StringBuilder::new()),
+            Box::new(Int64Builder::new()),
+        ],
+    );
+    let mut occ_builder = ListBuilder::new(struct_builder);
+
+    // Row 0: doc-5000 with 5,200 occurrences
+    for ord in 0..5_200_i64 {
+        let sb = occ_builder.values();
+        sb.field_builder::<StringBuilder>(0)
+            .unwrap()
+            .append_value(format!("archive/part-{:04}/segment-{:05}.xml", ord / 100, ord));
+        sb.field_builder::<Int64Builder>(1)
+            .unwrap()
+            .append_value(ord * 4096);
+        sb.append(true);
+    }
+    occ_builder.append(true);
+
+    // Row 1: doc-0010 with 10 occurrences
+    for ord in 0..10_i64 {
+        let sb = occ_builder.values();
+        sb.field_builder::<StringBuilder>(0)
+            .unwrap()
+            .append_value(format!("archive/small/segment-{ord:02}.xml"));
+        sb.field_builder::<Int64Builder>(1)
+            .unwrap()
+            .append_value(ord * 512);
+        sb.append(true);
+    }
+    occ_builder.append(true);
+
+    let list_field = Arc::new(Field::new_list_field(
+        DataType::Struct(struct_fields),
+        true,
+    ));
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("owner_id", DataType::Utf8, false),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("source_occurrences", DataType::List(list_field), false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["doc-5000", "doc-0010"])),
+            Arc::new(StringArray::from(vec!["Omnibus Appropriations", "Short Notice"])),
+            Arc::new(occ_builder.finish()),
+        ],
+    )
+    .unwrap();
+    let mut writer = ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    // Use a tight max_batch_bytes (512 KiB) so the single 5,200-occurrence row exercises
+    // adaptive List<Struct> slicing and single-row high-cardinality admission.
+    let tight_limits = Limits {
+        compute_threads: 2,
+        memory_bytes: 512 << 20,
+        scratch_bytes: 32 << 20,
+        batch_rows: 16,
+        max_batch_bytes: 512 << 10,
+        max_metadata_bytes: 8 << 20,
+    };
+    let engine = Engine::open(root.path().join("workspace"), tight_limits)
+        .await
+        .unwrap();
+
+    // 1. Build succeeds with 5,200-occurrence single parent row
+    let release = engine
+        .run(&RunSpec {
+            dataset: id("catalog"),
+            operation: id("build-wide"),
+            base: None,
+            relationship: None,
+            input: input_path.to_string_lossy().into_owned(),
+            expected_digest: storage::digest(&input_path).unwrap().0,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+
+    // 2. Update succeeds with 5,200-occurrence single parent row replacement
+    let release = engine
+        .update(&UpdateSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("update-wide"),
+            definition: "v1".into(),
+            base: release.id.clone(),
+            keys: vec!["owner_id".into()],
+            replacements: InputSpec {
+                path: input_path.to_string_lossy().into_owned(),
+                digest: storage::digest(&input_path).unwrap().0,
+            },
+            deletions: None,
+            relationship: None,
+        })
+        .await
+        .unwrap();
+
+    // 3. Read succeeds with 5,200-occurrence single parent row
+    let read_batches: Vec<RecordBatch> = engine
+        .read_source_occurrences(&release)
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    let total_read_rows: usize = read_batches.iter().map(RecordBatch::num_rows).sum();
+    assert_eq!(total_read_rows, 2);
+
+    // 3. Export with ChildTableExportSpec unnests source_occurrences into occurrences.parquet
+    //    and replaces source_occurrences with occurrence_count in parent export.parquet.
+    let mut child_tables = BTreeMap::new();
+    child_tables.insert(
+        "occurrences".into(),
+        ChildTableExportSpec {
+            list_column: "source_occurrences".into(),
+            parent_key_columns: vec!["owner_id".into()],
+            child_key_columns: vec!["owner_id".into()],
+            ordinal_column: "occurrence_order".into(),
+            struct_columns: None,
+            row_group_rows: 2048,
+            replace_with_count_column: Some("occurrence_count".into()),
+            drop_parent_column: true,
+        },
+    );
+
+    let pin = engine
+        .export(&ExportSpec {
+            dataset: release.dataset.dataset.clone(),
+            operation: id("export-wide"),
+            source: release.version_ref(),
+            channel: id("public"),
+            expected: None,
+            policy: ExportPolicy {
+                group: "source".into(),
+                groups: vec!["source".into()],
+                rows: ExportRows::All,
+                columns: vec![
+                    "owner_id".into(),
+                    "title".into(),
+                    "source_occurrences".into(),
+                ],
+                filter: None,
+                computed_columns: BTreeMap::new(),
+                fold_readings: None,
+                order_by: vec![SortColumn::asc("owner_id")],
+                page_index_columns: vec!["owner_id".into()],
+                facet_sets: Vec::new(),
+                browse_range_columns: vec!["owner_id".into()],
+                child_tables,
+                row_group_rows: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    storage::verify_object(&pin.object).unwrap();
+    let child = pin
+        .child_tables
+        .get("occurrences")
+        .expect("occurrences child export recorded");
+    storage::verify_object(&child.object).unwrap();
+    assert_eq!(child.rows, 5_210);
+    assert!(
+        child.object.path.ends_with("occurrences.parquet"),
+        "unexpected child path: {}",
+        child.object.path
+    );
+    assert!(
+        child.browse_ranges.len() >= 3,
+        "expected >= 3 row-group browse ranges for 5,210 rows at 2,048 rows/group"
+    );
+
+    // Parent export has occurrence_count: Int64 instead of source_occurrences
+    let parent_batches: Vec<RecordBatch> = engine
+        .read_export(&pin)
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    let parent =
+        arrow::compute::concat_batches(&parent_batches[0].schema(), &parent_batches).unwrap();
+    assert_eq!(
+        parent
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+        vec!["owner_id", "title", "occurrence_count"]
+    );
+    let counts = parent
+        .column_by_name("occurrence_count")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    assert_eq!(counts.value(0), 10); // doc-0010
+    assert_eq!(counts.value(1), 5_200); // doc-5000
+
+    // Warm up OS file cache once, then assert child slice lookup for a single owner_id
+    // across 5,200 occurrences completes in < 5 ms with exact ordinal order.
+    let _ = engine
+        .read_export_child_slice(&pin, "occurrences", "doc-5000", 2_500, 25)
+        .await
+        .unwrap();
+    let start = Instant::now();
+    let slice_batches = engine
+        .read_export_child_slice(&pin, "occurrences", "doc-5000", 2_500, 25)
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_millis() < 5,
+        "expected child slice lookup in < 5 ms, took {elapsed:?}"
+    );
+    let slice =
+        arrow::compute::concat_batches(&slice_batches[0].schema(), &slice_batches).unwrap();
+    assert_eq!(slice.num_rows(), 25);
+    let slice_owners = slice
+        .column_by_name("owner_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let slice_ordinals = slice
+        .column_by_name("occurrence_order")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    let slice_offsets = slice
+        .column_by_name("byte_offset")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    for i in 0..25 {
+        assert_eq!(slice_owners.value(i), "doc-5000");
+        assert_eq!(slice_ordinals.value(i), 2_500 + i as i64);
+        assert_eq!(slice_offsets.value(i), (2_500 + i as i64) * 4096);
+    }
 }
 
 #[path = "exports/mcp.rs"]

@@ -111,6 +111,7 @@ async fn read_projected_occurrences_inner(
 
 struct FileRows {
     stream: ArrowRecordBatchStream,
+    pending: std::collections::VecDeque<RecordBatch>,
     path: String,
     next: u64,
     rows: u64,
@@ -252,8 +253,15 @@ impl Occurrences {
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
         loop {
             if let Some(file) = &mut self.current {
-                if let Some(batch) = file.stream.try_next().await? {
-                    let batch = super::schema::strip_file_column(batch, self.limit)?;
+                if file.pending.is_empty()
+                    && let Some(raw_batch) = file.stream.try_next().await?
+                {
+                    let stripped = super::schema::strip_file_column(raw_batch, self.limit)?;
+                    for slice in super::split_oversized_batch(stripped, self.limit)? {
+                        file.pending.push_back(slice);
+                    }
+                }
+                if let Some(batch) = file.pending.pop_front() {
                     let batch =
                         super::identity::materialize(batch, &file.path, file.next, self.limit)?;
                     let end = file
@@ -322,6 +330,7 @@ impl Occurrences {
             let stream = result.stream();
             self.current = Some(FileRows {
                 stream,
+                pending: std::collections::VecDeque::new(),
                 path,
                 next: 0,
                 rows,
@@ -613,7 +622,7 @@ fn append_locations(
     columns.push(file.expect("requested file column"));
     columns.push(row.expect("requested row column"));
     let result = RecordBatch::try_new(schema.clone(), columns)?;
-    if result.get_array_memory_size() > limit {
+    if super::effective_batch_bytes(&result) > limit {
         return Err(oversized());
     }
     Ok(result)
@@ -650,7 +659,7 @@ pub(super) fn location_columns(
         .saturating_add(row_bytes)
         .saturating_mul(batch.num_rows())
         .saturating_add(if want_file { size_of::<i32>() } else { 0 });
-    if batch.get_array_memory_size().saturating_add(added) > limit {
+    if super::effective_batch_bytes(batch).saturating_add(added) > limit {
         return Err(oversized());
     }
     let file = want_file.then(|| {

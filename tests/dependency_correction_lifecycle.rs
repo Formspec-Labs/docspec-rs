@@ -82,6 +82,7 @@ fn export(source: &ReleasePin, operation: &str, group: &str) -> ExportSpec {
             } else {
                 vec!["text_length".into()]
             },
+            ..ExportPolicy::default()
         },
     }
 }

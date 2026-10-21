@@ -518,6 +518,7 @@ async fn qualify() -> Result<()> {
                     group: "source".into(),
                     rows: ExportRows::All,
                     columns: vec!["counter".into(), "text".into()],
+                    ..ExportPolicy::default()
                 },
             };
             let current = data.export(&spec).await?;

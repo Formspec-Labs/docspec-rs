@@ -69,6 +69,7 @@ async fn fixture() -> Fixture {
         group: "source".into(),
         rows: ExportRows::All,
         columns: vec!["value".into()],
+        ..ExportPolicy::default()
     };
     // Actual maintained writer/validation produce the staged bytes. This fixture
     // qualifies transfer/cleanup, not remote native source materialization.
@@ -168,6 +169,9 @@ async fn fixture() -> Fixture {
         },
         rows: original.rows,
         fields: original.fields.clone(),
+        facets: Vec::new(),
+        browse_ranges: Vec::new(),
+        child_tables: BTreeMap::new(),
     };
     let validation = ExportValidation {
         object: stage.object.clone(),
