@@ -1003,83 +1003,6 @@ pub(crate) fn validate_partition_tuple(
     Ok(())
 }
 
-/// Extracts the single `Transform::Month` partition value (`months_since_epoch`).
-///
-/// Refuses specs with more than one month field: choosing the first would prune
-/// by an arbitrary column.
-pub(crate) fn data_file_month_partition(
-    spec: &iceberg::spec::PartitionSpec,
-    file: &DataFile,
-) -> Result<Option<i32>> {
-    use iceberg::spec::{Literal, PrimitiveLiteral, Transform};
-    validate_partition_tuple(spec, file)?;
-    let mut months = spec
-        .fields()
-        .iter()
-        .enumerate()
-        .filter(|(_, field)| field.transform == Transform::Month);
-    let Some((idx, _)) = months.next() else {
-        return Ok(None);
-    };
-    if months.next().is_some() {
-        return Err(Error::refusal(
-            "unsupported_write_layout",
-            "month pruning requires exactly one month partition field",
-        ));
-    }
-    Ok(match &file.partition()[idx] {
-        Some(Literal::Primitive(PrimitiveLiteral::Int(month))) => Some(*month),
-        _ => None,
-    })
-}
-
-/// Returns live current-snapshot [`DataFile`] descriptors pruned to `[min_month, max_month]`.
-///
-/// A bounded range on a table without exactly one month partition field is refused
-/// rather than answered with an empty (and therefore misleading) file set.
-#[allow(dead_code)]
-pub(crate) async fn snapshot_files_for_month_range(
-    table: &Table,
-    min_month: Option<i32>,
-    max_month: Option<i32>,
-    budget: &Budget,
-) -> Result<Vec<DataFile>> {
-    let spec = table.metadata().default_partition_spec();
-    let bounded = min_month.is_some() || max_month.is_some();
-    if bounded
-        && spec
-            .fields()
-            .iter()
-            .filter(|field| field.transform == iceberg::spec::Transform::Month)
-            .count()
-            != 1
-    {
-        return Err(Error::refusal(
-            "unsupported_write_layout",
-            "month range pruning requires exactly one month partition field",
-        ));
-    }
-    let inventory = current_snapshot_files(table, budget).await?;
-    let mut matched = Vec::with_capacity(inventory.data.len());
-    for file in inventory.data {
-        match data_file_month_partition(spec, &file)? {
-            Some(month) => {
-                if min_month.is_none_or(|min| month >= min)
-                    && max_month.is_none_or(|max| month <= max)
-                {
-                    matched.push(file);
-                }
-            }
-            None => {
-                if !bounded {
-                    matched.push(file);
-                }
-            }
-        }
-    }
-    Ok(matched)
-}
-
 async fn snapshot_files_guarded(
     table: &Table,
     budget: &Budget,
@@ -1400,6 +1323,32 @@ mod tests {
         array::Int64Array,
         datatypes::{DataType, Field, Schema},
     };
+
+    fn data_file_month_partition(
+        spec: &iceberg::spec::PartitionSpec,
+        file: &DataFile,
+    ) -> Result<Option<i32>> {
+        use iceberg::spec::{Literal, PrimitiveLiteral, Transform};
+        validate_partition_tuple(spec, file)?;
+        let mut months = spec
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| field.transform == Transform::Month);
+        let Some((idx, _)) = months.next() else {
+            return Ok(None);
+        };
+        if months.next().is_some() {
+            return Err(Error::refusal(
+                "unsupported_write_layout",
+                "month pruning requires exactly one month partition field",
+            ));
+        }
+        Ok(match &file.partition()[idx] {
+            Some(Literal::Primitive(PrimitiveLiteral::Int(month))) => Some(*month),
+            _ => None,
+        })
+    }
 
     fn assert_json_digest<T: serde::Serialize + ?Sized>(value: &T) {
         let bytes = serde_json::to_vec(value).unwrap();
@@ -2207,17 +2156,6 @@ mod tests {
         let pinned = pin(&owner, &table, 4, &budget, &[]).await.unwrap();
         assert_eq!(pinned.rows, 4);
 
-        // Verify month-range pruning returns only matching months.
-        let feb_only = snapshot_files_for_month_range(&table, Some(649), Some(649), &budget)
-            .await
-            .unwrap();
-        assert_eq!(feb_only.len(), 1);
-        assert_eq!(feb_only[0].record_count(), 1);
-        let jan_feb = snapshot_files_for_month_range(&table, Some(648), Some(649), &budget)
-            .await
-            .unwrap();
-        assert_eq!(jan_feb.len(), 2);
-
         // Verify OccurrenceScan and read_occurrences preserve exact values and occurrence identities.
         let scan = OccurrenceScan::open(&table, &budget).await.unwrap();
         assert_eq!(scan.files().count(), 3);
@@ -2293,6 +2231,19 @@ mod tests {
             candidate.metadata().default_partition_spec(),
             table.metadata().default_partition_spec()
         );
+        let jan_feb: Vec<_> = current_snapshot_files(&table, &budget)
+            .await
+            .unwrap()
+            .data
+            .into_iter()
+            .filter(|file| {
+                data_file_month_partition(table.metadata().default_partition_spec(), file)
+                    .unwrap()
+                    .unwrap()
+                    <= 649
+            })
+            .collect();
+        assert_eq!(jan_feb.len(), 2);
         let candidate = append(&candidate, catalog.as_ref(), jan_feb).await.unwrap();
         let candidate_pin = pin(&owner, &candidate, 3, &budget, &pinned.objects)
             .await

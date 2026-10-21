@@ -279,6 +279,63 @@ fn cli_validates_once_then_reads_and_resumes_without_inspection() {
             .unwrap()
             .contains("DOCSPEC_TEST_DEEP_TABLE")
     );
+    let compacted = run(&["compact-lifecycle".as_ref(), spec.dataset.as_str().as_ref()]);
+    let compaction: docspec::catalog::LifecycleCompactionResult =
+        serde_json::from_slice(&compacted.stdout).unwrap();
+    assert!(compaction.revisions_before >= 1);
+    assert_eq!(compaction.revisions_after, 1);
+    assert_eq!(compaction.files_after, 1);
+}
+
+#[test]
+fn cli_compact_lifecycle_returns_compaction_result_json() {
+    let root = TempDir::new().unwrap();
+    let mut spec = fixture(root.path());
+    let request = root.path().join("request.json");
+    let profile = root.path().join("limits.json");
+    std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let run = |args: &[&std::ffi::OsStr]| {
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+            .arg("--workspace")
+            .arg(root.path().join("workspace"))
+            .arg("--limits")
+            .arg(&profile)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result
+    };
+    std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
+    run(&["run".as_ref(), request.as_os_str()]);
+    spec.operation = Id::new("second").unwrap();
+    spec.sql = "SELECT id, docket, comment FROM input WHERE id >= 1".into();
+    std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let second_out = run(&["run".as_ref(), request.as_os_str()]);
+    let release_path = root.path().join("release.json");
+    std::fs::write(&release_path, &second_out.stdout).unwrap();
+
+    let compacted = run(&["compact-lifecycle".as_ref(), spec.dataset.as_str().as_ref()]);
+    let result: docspec::catalog::LifecycleCompactionResult =
+        serde_json::from_slice(&compacted.stdout).unwrap();
+    assert!(result.revisions_before > 1);
+    assert_eq!(result.revisions_after, 1);
+    assert!(result.files_before > 1);
+    assert_eq!(result.files_after, 1);
+    assert!(result.rows_after < result.rows_before);
+    assert!(result.metadata_bytes_after < result.metadata_bytes_before);
+
+    let verified = run(&[
+        "verify".as_ref(),
+        release_path.as_os_str(),
+        "--deep".as_ref(),
+    ]);
+    let report: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
+    assert_eq!(report["checks"]["level"], "deep");
 }
 
 #[tokio::test]

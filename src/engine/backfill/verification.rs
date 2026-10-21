@@ -92,9 +92,29 @@ pub(crate) async fn verify_groups(
                 return Err(invalid_group());
             }
             let mut expected_inputs = base.inputs.clone();
-            if matches!(base.request, OperationRequest::Update(_)) {
-                for name in base.request.inputs().keys() {
-                    expected_inputs.remove(&base.request.input_key(name));
+            let mut prior_cursor = base.clone();
+            let mut visited = BTreeSet::from([prior_cursor.version.clone()]);
+            loop {
+                match &prior_cursor.request {
+                    OperationRequest::Update(_) => {
+                        for name in prior_cursor.request.inputs().keys() {
+                            expected_inputs.remove(&prior_cursor.request.input_key(name));
+                        }
+                        break;
+                    }
+                    OperationRequest::Evidence(_)
+                    | OperationRequest::Backfill(_)
+                    | OperationRequest::Schema(_) => {
+                        let Some(prev_ref) = &prior_cursor.parent_manifest else {
+                            break;
+                        };
+                        let prev = history.read(prev_ref).await?;
+                        if !visited.insert(prev.version.clone()) {
+                            return Err(invalid_group());
+                        }
+                        prior_cursor = prev;
+                    }
+                    OperationRequest::Build(_) | OperationRequest::Refresh(_) => break,
                 }
             }
             let mut inherited_inputs = dataset.inputs.clone();

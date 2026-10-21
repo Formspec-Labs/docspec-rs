@@ -1213,3 +1213,210 @@ async fn update_chain_bounds_inputs_temp_keys_active_files_and_lifecycle_metadat
         .unwrap();
     assert_eq!(proof.selections_advanced, 31);
 }
+
+#[tokio::test]
+async fn backfill_and_evidence_interleaved_updates_survive_compaction_and_identity_projection() {
+    use arrow::{
+        array::{ArrayRef, Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+    };
+    use docspec::{
+        engine::{is_identity_source_projection, verify_release_at},
+        evidence::{EVIDENCE, EvidenceSpec, SOURCE_FILE, SOURCE_ROW},
+        model::{BackfillSpec, ComputedField, VerificationLevel},
+    };
+
+    let test_schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("value", DataType::Utf8, true),
+    ]);
+    assert!(is_identity_source_projection(
+        "SELECT * FROM input",
+        &test_schema
+    ));
+    assert!(is_identity_source_projection(
+        "SELECT id, value FROM input",
+        &test_schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT value, id FROM input",
+        &test_schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT id, UPPER(value) AS value FROM input",
+        &test_schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT * FROM input WHERE id > 0",
+        &test_schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT DISTINCT * FROM input",
+        &test_schema
+    ));
+
+    let root = TempDir::new().unwrap();
+    let workspace = root.path().join("workspace");
+    let fast_limits = Limits {
+        compute_threads: 2,
+        batch_rows: 128,
+        max_batch_bytes: 4 << 20,
+        scratch_bytes: 16 << 20,
+        ..Limits::default()
+    };
+    let initial_rows: Vec<Row> = vec![(Some(1), Some("one".into())), (Some(2), Some("two".into()))];
+    let source = input(&root.path().join("input.parquet"), &initial_rows, false);
+    let engine = Engine::open(&workspace, fast_limits).await.unwrap();
+    let b0 = engine
+        .run(&RunSpec {
+            base: None,
+            relationship: None,
+            dataset: id("comments"),
+            operation: id("b0"),
+            input: source.path,
+            expected_digest: source.digest,
+            sql: "SELECT id, text FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+
+    // Add a Backfill group `bf1` on `b0`.
+    let bf1 = engine
+        .backfill(&BackfillSpec {
+            dataset: id("comments"),
+            operation: id("bf1"),
+            base: b0.id.clone(),
+            definition: "v1".into(),
+            group: id("derived"),
+            group_definition: "g1".into(),
+            fields: vec![ComputedField {
+                id: 1,
+                name: "doubled".into(),
+                expression: "id * 2".into(),
+            }],
+        })
+        .await
+        .unwrap();
+
+    // Run 3 Updates (u1 -> u2 -> u3) after Backfill `bf1`, then compact_lifecycle, then u4.
+    let mut latest = bf1.clone();
+    for step in 1..=3_i64 {
+        let op = format!("u{step}");
+        let row = (Some(10 + step), Some(format!("val-{step}")));
+        let spec = update(
+            root.path(),
+            latest.id.as_str(),
+            &op,
+            std::slice::from_ref(&row),
+            &[],
+        );
+        latest = engine.update(&spec).await.unwrap();
+    }
+
+    let stats = engine
+        .compact_lifecycle(&latest.dataset.dataset)
+        .await
+        .unwrap();
+    assert_eq!(stats.revisions_after, 1);
+    verify_release_at(&latest, limits(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+
+    // Post-compaction Update `u4` must succeed and verify deeply (every parent_manifest hop
+    // u3 -> u2 -> u1 -> bf1 -> b0 was retained by live_retained_closure).
+    let u4_row = (Some(14), Some("val-4".into()));
+    let u4 = engine
+        .update(&update(
+            root.path(),
+            latest.id.as_str(),
+            "u4",
+            std::slice::from_ref(&u4_row),
+            &[],
+        ))
+        .await
+        .unwrap();
+    verify_release_at(&u4, limits(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+
+    // Interleave Evidence `e1` between `u4` and `u5`: `u4 -> e1 -> u5`.
+    let mut occ_stream = engine.read_source_occurrences(&u4).await.unwrap();
+    let occ_batch = occ_stream.try_next().await.unwrap().unwrap();
+    let occ_file = occ_batch
+        .column_by_name(storage::OCCURRENCE_FILE)
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap()
+        .value(0)
+        .to_owned();
+    let occ_row = occ_batch
+        .column_by_name(storage::OCCURRENCE_ROW)
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap()
+        .value(0);
+    drop(occ_stream);
+
+    let receipt_schema = Arc::new(Schema::new(vec![
+        Field::new(SOURCE_FILE, DataType::Utf8, false),
+        Field::new(SOURCE_ROW, DataType::Int64, false),
+        Field::new(EVIDENCE, DataType::Utf8, true),
+    ]));
+    let receipt_batch = RecordBatch::try_new(
+        receipt_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec![occ_file.as_str()])) as ArrayRef,
+            Arc::new(Int64Array::from(vec![occ_row])) as ArrayRef,
+            Arc::new(StringArray::from(vec![Some("receipt-1")])) as ArrayRef,
+        ],
+    )
+    .unwrap();
+    let receipt_path = root.path().join("e1-replacements.parquet");
+    let mut writer =
+        ArrowWriter::try_new(File::create(&receipt_path).unwrap(), receipt_schema, None).unwrap();
+    writer.write(&receipt_batch).unwrap();
+    writer.close().unwrap();
+    let e1_input = InputSpec {
+        path: receipt_path.to_string_lossy().into_owned(),
+        digest: storage::digest(&receipt_path).unwrap().0,
+    };
+    let e1 = engine
+        .update_evidence(&EvidenceSpec {
+            dataset: id("comments"),
+            operation: id("e1"),
+            base: u4.id.clone(),
+            definition: "v1".into(),
+            replacements: e1_input,
+            deletions: None,
+        })
+        .await
+        .unwrap();
+
+    // Update `u5` after `e1`: `u4/replacements` and `u4/deletions` must be pruned while
+    // `e1/replacements` and `u5/replacements` + `u5/deletions` + `input` are preserved!
+    let u5_row = (Some(15), Some("val-5".into()));
+    let u5 = engine
+        .update(&update(
+            root.path(),
+            e1.id.as_str(),
+            "u5",
+            std::slice::from_ref(&u5_row),
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        u5.dataset
+            .inputs
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["e1/replacements", "input", "u5/deletions", "u5/replacements"]
+    );
+    verify_release_at(&u5, limits(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+}

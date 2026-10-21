@@ -102,6 +102,125 @@ pub(super) async fn build_query(context: &SessionContext, sql: &str) -> Result<D
     Ok(dataframe)
 }
 
+/// Returns `true` when `sql` is a pure identity projection over `input`
+/// (`SELECT * FROM input` or `SELECT c1, c2, ... FROM input` matching `input_schema`
+/// fields in exact order with no filtering, grouping, ordering, aliasing, or expressions).
+pub fn is_identity_source_projection(sql: &str, input_schema: &arrow::datatypes::Schema) -> bool {
+    use datafusion::sql::sqlparser::{
+        ast::{Expr, GroupByExpr, ObjectNamePart, SelectItem, SetExpr, Statement, TableFactor},
+        dialect::GenericDialect,
+        parser::Parser,
+    };
+    let Ok(statements) = Parser::parse_sql(&GenericDialect {}, sql) else {
+        return false;
+    };
+    if statements.len() != 1 {
+        return false;
+    }
+    let Statement::Query(query) = &statements[0] else {
+        return false;
+    };
+    if query.with.is_some()
+        || query.order_by.is_some()
+        || query.limit_clause.is_some()
+        || query.fetch.is_some()
+        || !query.locks.is_empty()
+        || query.for_clause.is_some()
+        || query.settings.is_some()
+        || query.format_clause.is_some()
+    {
+        return false;
+    }
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return false;
+    };
+    if select.distinct.is_some()
+        || select.top.is_some()
+        || select.into.is_some()
+        || select.selection.is_some()
+        || !matches!(
+            &select.group_by,
+            GroupByExpr::Expressions(exprs, modifiers) if exprs.is_empty() && modifiers.is_empty()
+        )
+        || !select.cluster_by.is_empty()
+        || !select.distribute_by.is_empty()
+        || !select.sort_by.is_empty()
+        || select.having.is_some()
+        || !select.named_window.is_empty()
+        || select.qualify.is_some()
+        || select.prewhere.is_some()
+        || select.value_table_mode.is_some()
+        || !select.lateral_views.is_empty()
+        || !select.connect_by.is_empty()
+        || select.from.len() != 1
+    {
+        return false;
+    }
+    let table_with_joins = &select.from[0];
+    if !table_with_joins.joins.is_empty() {
+        return false;
+    }
+    let TableFactor::Table {
+        name,
+        alias: None,
+        args: None,
+        with_hints,
+        version: None,
+        with_ordinality: false,
+        partitions,
+        json_path: None,
+        sample: None,
+        index_hints,
+    } = &table_with_joins.relation
+    else {
+        return false;
+    };
+    if !with_hints.is_empty()
+        || !partitions.is_empty()
+        || !index_hints.is_empty()
+        || name.0.len() != 1
+    {
+        return false;
+    }
+    let ObjectNamePart::Identifier(table_ident) = &name.0[0] else {
+        return false;
+    };
+    let is_input_table = if table_ident.quote_style.is_some() {
+        table_ident.value == "input"
+    } else {
+        table_ident.value.eq_ignore_ascii_case("input")
+    };
+    if !is_input_table {
+        return false;
+    }
+    if select.projection.len() == 1
+        && let SelectItem::Wildcard(options) = &select.projection[0]
+    {
+        return options.opt_ilike.is_none()
+            && options.opt_exclude.is_none()
+            && options.opt_except.is_none()
+            && options.opt_replace.is_none()
+            && options.opt_rename.is_none();
+    }
+    if select.projection.len() != input_schema.fields().len() {
+        return false;
+    }
+    select
+        .projection
+        .iter()
+        .zip(input_schema.fields().iter())
+        .all(|(item, field)| match item {
+            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
+                if ident.quote_style.is_some() {
+                    ident.value == *field.name()
+                } else {
+                    ident.value.eq_ignore_ascii_case(field.name()) && ident.value == *field.name()
+                }
+            }
+            _ => false,
+        })
+}
+
 impl Engine {
     pub(super) async fn pin_output(
         &self,
@@ -208,7 +327,13 @@ impl Engine {
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
             .await?;
-        let dataframe = build_query(&context, &spec.sql).await?;
+        let input_df = context.table("input").await?;
+        let dataframe = if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
+            validate_plan(input_df.logical_plan())?;
+            input_df
+        } else {
+            build_query(&context, &spec.sql).await?
+        };
         if let Some(base) = &spec.base {
             let release = self.release_admitted(&spec.dataset, base).await?;
             let native = storage::open_pin(
@@ -707,6 +832,8 @@ impl Engine {
                 .replacement_output_at(dataset, &directory.child("added")?, &native)
                 .await?;
             let mut metrics = WriteMetrics {
+                // Counts total native file decode passes: one key-only probe pass per
+                // unpruned candidate file plus one full-row rewrite pass per affected file.
                 files_scanned: files_probed.saturating_add(changed.len() as u64),
                 files_reused: shared.len() as u64,
                 bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
@@ -778,22 +905,22 @@ impl Engine {
             metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
             let small_threshold =
                 (budget.limits.max_batch_bytes as u64 / 8).clamp(64 << 10, 512 << 10);
+            let small_files = shared
+                .iter()
+                .filter(|file| file.file_size_in_bytes() < small_threshold)
+                .count();
             let small_dirs = shared
                 .iter()
                 .filter(|file| file.file_size_in_bytes() < small_threshold)
                 .filter_map(|file| Path::new(file.file_path()).parent())
                 .collect::<std::collections::BTreeSet<_>>()
                 .len();
-            let total_dirs = shared
-                .iter()
-                .filter_map(|file| Path::new(file.file_path()).parent())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
+            let total_files = shared.len();
             let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
                 && storage::identity::has_origins(native.metadata().current_schema())?
-                && (small_dirs >= 24 || total_dirs > 48)
+                && ((small_files >= 24 && small_dirs >= 2) || total_files > 48)
             {
-                let mut indices = if small_dirs >= 24 {
+                let mut indices = if small_files >= 24 && small_dirs >= 2 {
                     shared
                         .iter()
                         .enumerate()

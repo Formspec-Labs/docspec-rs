@@ -63,6 +63,8 @@ mod verification;
 use validation::ValidatedReadback;
 mod worker;
 mod write;
+#[doc(inline)]
+pub use write::is_identity_source_projection;
 
 #[cfg(all(test, feature = "test-util", feature = "remote"))]
 mod remote_build_provider_tests;
@@ -1871,10 +1873,44 @@ impl Engine {
                 .unwrap_or_default();
             if matches!(spec, OperationRequest::Update(_))
                 && let Some(base) = &base
-                && matches!(base.dataset.request, OperationRequest::Update(_))
             {
-                for name in base.dataset.request.inputs().keys() {
-                    inputs.remove(&base.dataset.request.input_key(name));
+                let mut prior_cursor = base.dataset.clone();
+                let mut visited = std::collections::BTreeSet::from([prior_cursor.version.clone()]);
+                loop {
+                    match &prior_cursor.request {
+                        OperationRequest::Update(_) => {
+                            for name in prior_cursor.request.inputs().keys() {
+                                inputs.remove(&prior_cursor.request.input_key(name));
+                            }
+                            break;
+                        }
+                        OperationRequest::Evidence(_)
+                        | OperationRequest::Backfill(_)
+                        | OperationRequest::Schema(_) => {
+                            let Some(prev_ref) = &prior_cursor.parent_manifest else {
+                                break;
+                            };
+                            let memory = Arc::new(
+                                self.inner
+                                    .lifecycle
+                                    .budget
+                                    .reserve(self.inner.lifecycle.budget.limits.max_metadata_bytes)?,
+                            );
+                            let prev: DatasetPin = inputs::read_manifest(
+                                &self.inner.objects,
+                                prev_ref,
+                                &self.inner.lifecycle.budget,
+                                &mut 0,
+                                &memory,
+                            )
+                            .await?;
+                            if !visited.insert(prev.version.clone()) {
+                                break;
+                            }
+                            prior_cursor = prev;
+                        }
+                        OperationRequest::Build(_) | OperationRequest::Refresh(_) => break,
+                    }
                 }
             }
             if let Some(dependencies) = &processing.dependencies {

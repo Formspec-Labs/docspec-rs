@@ -175,6 +175,30 @@ impl Engine {
         Ok((boundaries, inventory.into_references()?))
     }
 
+    pub(in crate::engine) async fn live_retained_closure(
+        &self,
+    ) -> Result<(BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> {
+        let budget = &self.inner.lifecycle.budget;
+        let limit = budget.limits.max_metadata_bytes;
+        let _memory = budget.reserve(limit)?;
+        let mut inventory = Inventory::collecting(limit)?;
+        self.collect_inventory(&mut inventory, None).await?;
+        let mut live_paths = inventory.required_paths.unwrap_or_default();
+        live_paths.extend(inventory.candidates.into_keys());
+        let mut live_native_metadata = BTreeSet::new();
+        for (path, entry) in inventory.visited {
+            if entry.kind == MetadataKind::Native {
+                live_native_metadata.insert(path.clone());
+            }
+            live_paths.insert(path);
+        }
+        Ok((
+            live_paths,
+            live_native_metadata,
+            inventory.protected_prefixes,
+        ))
+    }
+
     async fn collect_inventory(
         &self,
         inventory: &mut Inventory,
@@ -535,6 +559,7 @@ struct Inventory {
     // these must resolve to retained exact identities after the whole closure is
     // visited, independent of expansion order. None preserves candidate inspection.
     required_paths: Option<BTreeSet<String>>,
+    protected_prefixes: BTreeSet<String>,
     shallow: bool,
     // Metadata identity and interpretation are retained; payload inventories are
     // consumed one at a time. A second use still checks its exact declaration.
@@ -561,6 +586,7 @@ impl Inventory {
         let mut result = Self {
             candidates: BTreeMap::new(),
             required_paths: None,
+            protected_prefixes: BTreeSet::new(),
             shallow: false,
             visited: BTreeMap::new(),
             pending: Vec::new(),
@@ -1727,6 +1753,10 @@ impl Inventory {
                     }
                     if !prefix.ends_with('/') {
                         return Err(invalid_inventory("unsupported protection path"));
+                    }
+                    if self.required_paths.is_some() && !self.protected_prefixes.contains(prefix) {
+                        self.charge(prefix.len().saturating_add(128))?;
+                        self.protected_prefixes.insert(prefix.clone());
                     }
                     let candidates = self
                         .candidates

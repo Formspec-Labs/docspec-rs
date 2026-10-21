@@ -301,7 +301,13 @@ impl Engine {
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
             .await?;
-        let frame = build_query(&context, &spec.sql).await?;
+        let input_df = context.table("input").await?;
+        let frame = if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
+            validate_plan(input_df.logical_plan())?;
+            input_df
+        } else {
+            build_query(&context, &spec.sql).await?
+        };
         check_build_fields(&frame)?;
         Ok(frame)
     }

@@ -1717,6 +1717,94 @@ async fn collect_set_grouped_and_global_refresh_full_and_incrementally_with_refu
     };
     let typed_release = engine.refresh(&typed_spec).await.unwrap();
     verify_release(&typed_release, limits()).await.unwrap();
+    let typed_batches: Vec<RecordBatch> = engine
+        .read_group(&typed_release, "source")
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    let mut actual_typed = BTreeMap::new();
+    for batch in &typed_batches {
+        let grps = batch
+            .column_by_name("grp")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let flags = batch
+            .column_by_name("flags")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .unwrap();
+        let nums = batch
+            .column_by_name("nums")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .unwrap();
+        let days = batch
+            .column_by_name("days")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .unwrap();
+        let timestamps = batch
+            .column_by_name("timestamps")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            let grp = grps.value(row);
+            let flag_vals: Vec<bool> = flags
+                .value(row)
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .unwrap()
+                .iter()
+                .map(|v| v.unwrap())
+                .collect();
+            let num_vals: Vec<i32> = nums
+                .value(row)
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap()
+                .values()
+                .to_vec();
+            let day_vals: Vec<i32> = days
+                .value(row)
+                .as_any()
+                .downcast_ref::<Date32Array>()
+                .unwrap()
+                .values()
+                .to_vec();
+            let ts_vals: Vec<i64> = timestamps
+                .value(row)
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .unwrap()
+                .values()
+                .to_vec();
+            actual_typed.insert(grp, (flag_vals, num_vals, day_vals, ts_vals));
+        }
+    }
+    assert_eq!(
+        actual_typed,
+        BTreeMap::from([
+            (
+                1,
+                (
+                    vec![false, true],
+                    vec![10, 30],
+                    vec![19_000, 19_500],
+                    vec![1_000_000, 2_000_000],
+                ),
+            ),
+            (2, (vec![], vec![], vec![], vec![])),
+        ])
+    );
 
     let mut bad_flt = typed_spec.clone();
     bad_flt.dataset = id("bad-flt-collect");
