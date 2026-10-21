@@ -137,7 +137,7 @@ impl Engine {
         &'a self,
         dataset: &'a Id,
         captured: (&'a TablePin, &'a iceberg::table::Table),
-        directory: &'a Path,
+        directory: &'a locations::Location,
         replacement: DataFrame,
         keys: &'a [String],
     ) -> futures::future::BoxFuture<'a, Result<(TablePin, DataFrame)>> {
@@ -146,9 +146,13 @@ impl Engine {
             let mut native = native.clone();
             let before = if !storage::identity::has_origins(native.metadata().current_schema())? {
                 let pin = self
-                    .source_with_origins(dataset, source, &directory.join("source-origins"))
+                    .source_with_origins_at(dataset, source, &directory.child("source-origins")?)
                     .await?;
-                native = storage::open_pin(&pin, &self.inner.lifecycle.budget).await?;
+                native = self
+                    .inner
+                    .objects
+                    .open_pin(&pin, &self.inner.lifecycle.budget)
+                    .await?;
                 pin
             } else {
                 source.clone()
@@ -164,6 +168,7 @@ impl Engine {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn source_with_origins<'a>(
         &'a self,
         dataset: &'a Id,
@@ -256,7 +261,7 @@ impl Engine {
     /// # Errors
     /// Refuses missing receipts, unavailable results, and capacity exhaustion.
     pub async fn read_receipts(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -266,7 +271,12 @@ impl Engine {
                 .evidence
                 .as_ref()
                 .ok_or_else(|| invalid("result has no receipt table"))?;
-            read::read_pin(&evidence.table, &engine.inner.lifecycle.budget).await
+            read::read_pin_with_objects(
+                &engine.inner.objects,
+                &evidence.table,
+                &engine.inner.lifecycle.budget,
+            )
+            .await
         })
         .await
     }
@@ -279,7 +289,7 @@ impl Engine {
         &self,
         release: &ReleasePin,
     ) -> Result<SendableRecordBatchStream> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -296,7 +306,11 @@ impl Engine {
             context.register_table(
                 "source",
                 crate::query::occurrences(
-                    storage::open_pin(&pin, &engine.inner.lifecycle.budget).await?,
+                    engine
+                        .inner
+                        .objects
+                        .open_pin(&pin, &engine.inner.lifecycle.budget)
+                        .await?,
                     engine.inner.lifecycle.budget.clone(),
                     Some(pin.rows),
                 )?,
@@ -310,7 +324,7 @@ impl Engine {
     pub(super) fn process_receipts<'a>(
         &'a self,
         spec: &'a EvidenceSpec,
-        directory: &'a Path,
+        directory: &'a locations::Location,
         admission: &'a PhaseResult,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
         Box::pin(async move {
@@ -332,15 +346,19 @@ impl Engine {
             let before = if let Some(previous) = &base.dataset.evidence {
                 previous.table.clone()
             } else {
-                self.write_frame(
+                self.write_frame_at(
                     &spec.dataset,
-                    &directory.join("empty-before"),
+                    &directory.child("empty-before")?,
                     replacement.clone().limit(0, Some(0))?,
                 )
                 .await?
                 .table
             };
-            let before_native = storage::open_pin(&before, &self.inner.lifecycle.budget).await?;
+            let before_native = self
+                .inner
+                .objects
+                .open_pin(&before, &self.inner.lifecycle.budget)
+                .await?;
             let expected =
                 iceberg::arrow::schema_to_arrow_schema(before_native.metadata().current_schema())?;
             if !same_fields(&expected, replacement.schema().as_arrow())? {
@@ -351,7 +369,7 @@ impl Engine {
             let applied = self
                 .replace_keys(Replacement {
                     dataset: &spec.dataset,
-                    directory: locations::Location::Local(directory.to_owned()),
+                    directory: directory.clone(),
                     before: &before,
                     keys: &keys(),
                     scope,
@@ -443,10 +461,13 @@ impl Engine {
                 } else {
                     #[cfg(feature = "test-util")]
                     work_started("receipts");
-                    let directory = self.reserve_attempt(request, operation, "receipts").await?;
+                    let directory = self.reserve_location(request, operation, "receipts").await?;
                     let context = self.context();
-                    let native =
-                        storage::open_pin(&previous.table, &self.inner.lifecycle.budget).await?;
+                    let native = self
+                        .inner
+                        .objects
+                        .open_pin(&previous.table, &self.inner.lifecycle.budget)
+                        .await?;
                     context.register_table(
                         "receipts",
                         crate::query::table(
@@ -460,7 +481,9 @@ impl Engine {
                         context.register_table(
                             "removed",
                             crate::query::occurrences(
-                                storage::open_pin(&changes.removed, &self.inner.lifecycle.budget)
+                                self.inner
+                                    .objects
+                                    .open_pin(&changes.removed, &self.inner.lifecycle.budget)
                                     .await?,
                                 self.inner.lifecycle.budget.clone(),
                                 Some(changes.removed.rows),
@@ -491,7 +514,7 @@ impl Engine {
                     } = self
                         .replace_keys(Replacement {
                             dataset: request.dataset(),
-                            directory: locations::Location::Local(directory.clone()),
+                            directory,
                             before: &previous.table,
                             keys: &keys(),
                             scope,
@@ -914,9 +937,8 @@ async fn associate(
         datatypes::Field,
         record_batch::RecordBatch,
     };
-    let native = storage::open_pin(source, budget).await?;
-    let inventory = storage::snapshot_files(&native, budget).await?;
-    storage::check_inventory_files(source, &inventory)?;
+    let objects = storage::Objects::for_path(&source.metadata.path);
+    let (native, inventory) = objects.open_snapshot(source, budget).await?;
     let context = budget.context();
     if !storage::identity::has_origins(native.metadata().current_schema())? {
         let memory = budget.reserve(budget.limits.max_metadata_bytes)?;

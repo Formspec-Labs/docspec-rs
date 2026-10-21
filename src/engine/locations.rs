@@ -63,6 +63,7 @@ impl Location {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn into_local(self) -> Result<PathBuf> {
         match self {
             Self::Local(path) => Ok(path),

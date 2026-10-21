@@ -8,6 +8,8 @@ use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchSt
 use std::{future::Future, sync::atomic::Ordering};
 use tokio::{runtime::Handle, sync::OwnedSemaphorePermit};
 
+static CLOCK_ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
 /// Process ownership retained after uncertain private-worker termination.
 #[derive(Debug)]
 pub(super) struct Host {
@@ -19,11 +21,12 @@ pub(super) struct Host {
 
 impl Host {
     pub(super) fn acquire(root: &Path) -> Result<Arc<Self>> {
+        let origin = *CLOCK_ORIGIN.get_or_init(std::time::Instant::now);
         Ok(Arc::new(Self {
             _workspace: WorkspaceLock::acquire(root)?,
             uncertain: AtomicBool::new(false),
             instance: uuid::Uuid::new_v4().to_string(),
-            clock_origin: std::time::Instant::now(),
+            clock_origin: origin,
         }))
     }
 

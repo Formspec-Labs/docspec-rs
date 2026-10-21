@@ -197,7 +197,7 @@ impl Engine {
         &self,
         release: &ReleasePin,
     ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -240,7 +240,10 @@ async fn combined_dataset(
     dataset: &DatasetPin,
     budget: &Budget,
 ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-    let source = storage::open_pin(&dataset.groups["source"], budget).await?;
+    let source_pin = &dataset.groups["source"];
+    let objects = storage::Objects::for_path(&source_pin.metadata.path);
+    objects.register_query_store(budget.runtime_env())?;
+    let source = objects.open_pin(source_pin, budget).await?;
     let context = budget.context();
     let mut columns = source
         .metadata()
@@ -307,11 +310,11 @@ impl Engine {
     }
 
     async fn plan_backfill_admitted(&self, spec: &BackfillSpec) -> Result<BackfillPlan> {
-        self.require_local()?;
+        self.require_data_work()?;
         validate(spec)?;
         let request = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
+        let view = self.read_view(&spec.dataset).await?;
         self.check_operation_available(&view, &spec.operation)
             .await?;
         self.check_not_abandoned(&view, &spec.operation).await?;
@@ -413,7 +416,9 @@ impl Engine {
                 &operation,
                 &capture,
                 &base,
-                &mut super::verification::Checks::composition(),
+                &mut super::verification::Checks::composition_with_objects(
+                    self.inner.objects.clone(),
+                ),
             )
             .await?
         } else {
@@ -520,10 +525,8 @@ impl Engine {
         spec: &BackfillSpec,
         stop: Option<&str>,
     ) -> Result<ReleasePin> {
-        self.require_local()?;
+        self.require_data_work()?;
         validate(spec)?;
-        self.check_operation_entry(&spec.dataset, &spec.operation)
-            .await?;
         let digest = fingerprint(&OperationRequest::Backfill(spec.clone()))?;
         // Native preparation has a large async state. Keep it on the heap rather
         // than nesting another copy in the reconciliation future's stack frame.
@@ -535,17 +538,18 @@ impl Engine {
             let lock = self.lock(&spec.dataset).await;
             let _guard = lock.lock().await;
             let lifecycle = &self.inner.lifecycle;
-            let view = lifecycle.open(&spec.dataset).await?;
-            let operation: Option<Operation> = lifecycle
-                .get(&view, &format!("operation/{}", spec.operation))
-                .await?;
-            self.check_continuous_child(&view, spec, None).await?;
-            if operation.is_some_and(|operation| operation.request_digest == digest)
-                && let Some(completed) = lifecycle
-                    .get(&view, &format!("result/{}", spec.operation))
-                    .await?
-            {
-                return Ok(completed);
+            if let Ok(view) = self.read_view(&spec.dataset).await {
+                let operation: Option<Operation> = lifecycle
+                    .get(&view, &format!("operation/{}", spec.operation))
+                    .await?;
+                self.check_continuous_child(&view, spec, None).await?;
+                if operation.is_some_and(|operation| operation.request_digest == digest)
+                    && let Some(completed) = lifecycle
+                        .get(&view, &format!("result/{}", spec.operation))
+                        .await?
+                {
+                    return Ok(completed);
+                }
             }
         }
         result
@@ -565,7 +569,9 @@ impl Engine {
         let mut admission: Option<super::admission::PreparedAdmission> = None;
         let (operation, capture, base, stale_capture) = loop {
             let guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
+            let view = self.read_view(&spec.dataset).await?;
+            self.check_operation_available(&view, &spec.operation)
+                .await?;
             let old: Option<Operation> = lifecycle
                 .get(&view, &format!("operation/{}", spec.operation))
                 .await?;
@@ -695,7 +701,10 @@ impl Engine {
             .ok_or_else(invalid_group)?;
         // Issued readbacks retain their qualified target even when earlier phase
         // promises retire. Resolve them before reopening those preparation paths.
-        let mut checks = super::verification::Checks::new(VerificationLevel::Routine);
+        let mut checks = super::verification::Checks::with_objects(
+            VerificationLevel::Routine,
+            self.inner.objects.clone(),
+        );
         let (mut retained_readback, current_readback_validator) = self
             .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
             .await?;
@@ -732,9 +741,19 @@ impl Engine {
                         "source manifest exceeds metadata allowance",
                     ));
                 }
-                storage::verify_objects(vec![base.manifest.clone()], &lifecycle.budget).await?;
-                let decoded: DatasetPin =
-                    serde_json::from_reader(std::fs::File::open(&base.manifest.path)?)?;
+                let memory = Arc::new(
+                    lifecycle
+                        .budget
+                        .reserve(lifecycle.budget.limits.max_metadata_bytes)?,
+                );
+                let decoded: DatasetPin = inputs::read_manifest(
+                    &self.inner.objects,
+                    &base.manifest,
+                    &lifecycle.budget,
+                    &mut 0,
+                    &memory,
+                )
+                .await?;
                 if decoded != base.dataset {
                     return Err(invalid_group());
                 }
@@ -910,17 +929,21 @@ impl Engine {
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");
                 let directory = self.reserve_group(&request, &operation, "release").await?;
-                let manifest_path = directory.join("release.json");
-                storage::write_new(&manifest_path, &serialized)?;
+                let manifest_path = directory.child("release.json")?.as_string()?;
+                let manifest = ObjectRef {
+                    owner: spec.dataset.clone(),
+                    path: manifest_path,
+                    digest: blake3::hash(&serialized).to_hex().to_string(),
+                    bytes: serialized.len() as u64,
+                };
+                self.inner
+                    .objects
+                    .create_candidate_metadata(&manifest, serialized, &lifecycle.budget, false)
+                    .await?;
                 let release = ReleasePin {
                     id: spec.operation.clone(),
                     dataset,
-                    manifest: ObjectRef {
-                        owner: spec.dataset.clone(),
-                        path: manifest_path.to_string_lossy().into_owned(),
-                        digest: blake3::hash(&serialized).to_hex().to_string(),
-                        bytes: serialized.len() as u64,
-                    },
+                    manifest,
                     verified: true,
                 };
                 let memory = Arc::new(
@@ -1259,22 +1282,29 @@ async fn read_completion(
     let descriptor = completion.descriptor.clone();
     let schema = schema.clone();
     let size = usize::try_from(descriptor.bytes).map_err(|_| invalid_group())?;
-    let buffer = budget.reserve(size.saturating_add(1))?;
+    let objects = storage::Objects::for_path(&descriptor.path);
+    let buffer = budget.reserve(
+        size.saturating_add(1)
+            .saturating_add(objects.metadata_read_allowance()),
+    )?;
+    let handle = tokio::runtime::Handle::current();
     let files = budget
-        .blocking(move || {
-            use std::io::Read;
+        .blocking_admitted(move || {
             // Keep input and decoder admission with the worker after cancellation.
             let (_metadata, _buffer) = (metadata, buffer);
-            let mut bytes = Vec::with_capacity(size.saturating_add(1));
-            std::fs::File::open(&descriptor.path)?
-                .take(descriptor.bytes.saturating_add(1))
-                .read_to_end(&mut bytes)?;
-            if bytes.len() != size || blake3::hash(&bytes).to_hex().as_str() != descriptor.digest {
-                return Err(Error::refusal(
-                    "corrupt_object",
-                    "scalar completion descriptor differs from its retained identity",
-                ));
-            }
+            let mut bytes = vec![0u8; size];
+            objects
+                .read_metadata_admitted(&descriptor, &mut bytes, &handle)
+                .map_err(|error| {
+                    if error.code() == "corrupt_object" {
+                        Error::refusal(
+                            "corrupt_object",
+                            "scalar completion descriptor differs from its retained identity",
+                        )
+                    } else {
+                        error
+                    }
+                })?;
             Ok(iceberg::spec::read_data_files_from_avro(
                 &mut bytes.as_slice(),
                 &schema,

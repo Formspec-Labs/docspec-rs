@@ -46,7 +46,8 @@ pub(super) async fn open_captured_source(
     source: &TablePin,
     budget: &Budget,
 ) -> Result<Table> {
-    open_captured_source_with_objects(&storage::Objects::Local, canonical, source, budget).await
+    let objects = storage::Objects::for_path(&source.metadata.path);
+    open_captured_source_with_objects(&objects, canonical, source, budget).await
 }
 
 async fn open_captured_source_with_objects(
@@ -77,8 +78,8 @@ async fn open_captured_source_with_objects(
     Ok(native)
 }
 
-fn check_build_fields(frame: &DataFrame) -> Result<()> {
-    if frame.schema().fields().iter().any(|f| {
+pub(super) fn check_build_arrow_schema(schema: &arrow::datatypes::Schema) -> Result<()> {
+    if schema.fields().iter().any(|f| {
         f.name()
             .to_ascii_lowercase()
             .starts_with(storage::defaults::SUPPLIED_PREFIX)
@@ -90,6 +91,10 @@ fn check_build_fields(frame: &DataFrame) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn check_build_fields(frame: &DataFrame) -> Result<()> {
+    check_build_arrow_schema(frame.schema().as_arrow())
 }
 
 pub(super) async fn build_query(context: &SessionContext, sql: &str) -> Result<DataFrame> {
@@ -247,7 +252,7 @@ impl Engine {
         .await
     }
 
-    async fn create_output_at(
+    pub(super) async fn create_output_at(
         &self,
         dataset: &Id,
         directory: &locations::Location,
@@ -278,7 +283,7 @@ impl Engine {
         .await
     }
 
-    async fn replacement_output_at(
+    pub(super) async fn replacement_output_at(
         &self,
         dataset: &Id,
         directory: &locations::Location,
@@ -319,11 +324,33 @@ impl Engine {
         directory: &Path,
         admission: &PhaseResult,
     ) -> Result<Prepared> {
-        let context = self.context();
         let input = admission
             .outputs
             .first()
             .ok_or_else(|| Error::refusal("corrupt_phase", "admission has no retained input"))?;
+        if spec.base.is_none() && !input.path.starts_with("s3://") {
+            let file = std::fs::File::open(&input.path)?;
+            let builder =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
+            let arrow_schema = builder.schema().clone();
+            if is_identity_source_projection(&spec.sql, arrow_schema.as_ref()) {
+                check_build_arrow_schema(arrow_schema.as_ref())?;
+                #[cfg(test)]
+                self.inner
+                    .identity_build_fast_path
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let schema = storage::arrow_schema_to_schema_auto_assign_ids(arrow_schema.as_ref())?;
+                let table = self
+                    .create_output(&spec.dataset, directory, schema)
+                    .await?;
+                let reader = builder
+                    .with_batch_size(self.inner.lifecycle.budget.limits.batch_rows)
+                    .build()?;
+                let stream = futures::stream::iter(reader.map(|batch| batch.map_err(Error::from)));
+                return self.write_batch_stream(&spec.dataset, table, stream).await;
+            }
+        }
+        let context = self.context();
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
             .await?;
@@ -343,6 +370,9 @@ impl Engine {
             .await?;
             // An explicit base fixes field meaning, order and allocation history.
             // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
+            let expected =
+                iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+            let dataframe = coerce_dataframe_for_schema(dataframe, &expected)?;
             let dataframe = schema::normalize(
                 dataframe,
                 native.metadata().current_schema(),
@@ -367,9 +397,23 @@ impl Engine {
         directory: &Path,
         dataframe: DataFrame,
     ) -> Result<Prepared> {
+        self.write_frame_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            dataframe,
+        )
+        .await
+    }
+
+    pub(super) async fn write_frame_at(
+        &self,
+        dataset: &Id,
+        directory: &locations::Location,
+        dataframe: DataFrame,
+    ) -> Result<Prepared> {
         let schema =
-            iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(dataframe.schema().as_arrow())?;
-        let table = self.create_output(dataset, directory, schema).await?;
+            storage::arrow_schema_to_schema_auto_assign_ids(dataframe.schema().as_arrow())?;
+        let table = self.create_output_at(dataset, directory, schema).await?;
         self.write_output(dataset, table, dataframe).await
     }
 
@@ -379,16 +423,28 @@ impl Engine {
         table: Table,
         dataframe: DataFrame,
     ) -> Result<Prepared> {
-        let budget = &self.inner.lifecycle.budget;
-        let files = storage::write_batches(
-            &table,
+        self.write_batch_stream(
+            dataset,
+            table,
             dataframe
                 .execute_stream()
                 .await?
                 .map(|batch| batch.map_err(Error::from)),
-            budget,
         )
-        .await?;
+        .await
+    }
+
+    pub(super) async fn write_batch_stream<S>(
+        &self,
+        dataset: &Id,
+        table: Table,
+        batches: S,
+    ) -> Result<Prepared>
+    where
+        S: futures::Stream<Item = Result<RecordBatch>> + Send,
+    {
+        let budget = &self.inner.lifecycle.budget;
+        let files = storage::write_batches(&table, batches, budget).await?;
         let rows = files.iter().map(|file| file.record_count()).sum();
         let metrics = WriteMetrics {
             data_files_written: files.len() as u64,
@@ -459,7 +515,8 @@ impl Engine {
                 .await?;
         }
         let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-        let mut replacement = context.table("replacements").await?;
+        let mut replacement =
+            coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
         if storage::defaults::has_supplied(native.metadata().current_schema())
             || storage::identity::has_origins(native.metadata().current_schema())?
         {
@@ -470,9 +527,9 @@ impl Engine {
                 &self.inner.lifecycle.budget,
             )
             .await?;
-            context.deregister_table("replacements")?;
-            context.register_table("replacements", replacement.clone().into_view())?;
         }
+        context.deregister_table("replacements")?;
+        context.register_table("replacements", replacement.clone().into_view())?;
         if !same_fields(&schema, replacement.schema().as_arrow())? {
             return Err(Error::refusal(
                 "schema_mismatch",
@@ -497,7 +554,10 @@ impl Engine {
             .collect::<Vec<_>>()
             .join(", ");
         if spec.deletions.is_some() {
-            let deletions = context.table("deletions").await?;
+            let deletions =
+                coerce_dataframe_for_schema(context.table("deletions").await?, &schema)?;
+            context.deregister_table("deletions")?;
+            context.register_table("deletions", deletions.clone().into_view())?;
             let expected_keys = spec
                 .keys
                 .iter()
@@ -598,23 +658,7 @@ impl Engine {
     }
 
     /// Retains the captured source and its change schema when no rows were applied.
-    pub(super) async fn finish_source_replacement(
-        &self,
-        dataset: &Id,
-        directory: &Path,
-        captured: &TablePin,
-        applied: Applied,
-    ) -> Result<Applied> {
-        self.finish_source_replacement_at(
-            dataset,
-            &locations::Location::Local(directory.to_owned()),
-            captured,
-            applied,
-        )
-        .await
-    }
-
-    async fn finish_source_replacement_at(
+    pub(super) async fn finish_source_replacement_at(
         &self,
         dataset: &Id,
         directory: &locations::Location,
@@ -681,7 +725,7 @@ impl Engine {
                 let _metadata =
                     budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
                 let metadata = storage::fresh_metadata_at(
-                    iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                    storage::arrow_schema_to_schema_auto_assign_ids(
                         scope.schema().as_arrow(),
                     )?,
                     &directory.child("keys")?.as_string()?,
@@ -737,6 +781,9 @@ impl Engine {
                 // Exact affected points when they fit one batch allowance; otherwise
                 // only the coarser affected-interval test below applies.
                 let points = key_points::KeyPoints::collect(&context, keys, budget).await?;
+                let affected_keys_df = context.table("affected_keys").await?;
+                let mut outcomes = Vec::new();
+                let mut candidates = Vec::new();
                 for (index, file) in scan.files().enumerate() {
                     if !file_may_overlap_key_files(
                         native_schema,
@@ -748,63 +795,73 @@ impl Engine {
                         .as_ref()
                         .is_some_and(|points| !points.may_contain(native_schema, keys, file))
                     {
-                        shared.push(file.clone());
-                        continue;
+                        outcomes.push(Some(file.clone()));
+                    } else {
+                        outcomes.push(None);
+                        candidates.push((index, file.clone()));
                     }
-                    files_probed = files_probed.saturating_add(1);
-                    let name = format!("chunk_{index}");
-                    context.register_table(
-                        name.as_str(),
-                        crate::query::file(
+                }
+                files_probed = candidates.len() as u64;
+                let probed = futures::stream::iter(candidates.into_iter().map(|(index, file)| {
+                    let context = &context;
+                    let scan = &scan;
+                    let affected_keys_df = &affected_keys_df;
+                    let schema = &schema;
+                    let marker = &marker;
+                    async move {
+                        let key_probe = context.read_table(crate::query::file(
                             scan.clone(),
                             file.file_path().to_owned(),
                             Some(keys),
                             budget.clone(),
-                        )?,
-                    )?;
-                    if any_rows(key_join(
-                        context.table(&name).await?,
-                        context.table("affected_keys").await?,
-                        keys,
-                        datafusion::logical_expr::JoinType::Inner,
-                    )?)
-                    .await?
-                    {
-                        rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
-                        // Replace the key-only probe with the complete selected native schema.
-                        context.deregister_table(&name)?;
-                        context.register_table(
-                            name.as_str(),
-                            crate::query::file(
+                        )?)?;
+                        if any_rows(key_join(
+                            key_probe,
+                            affected_keys_df.clone(),
+                            keys,
+                            datafusion::logical_expr::JoinType::Inner,
+                        )?)
+                        .await?
+                        {
+                            // Replace the key-only probe with the complete selected native schema.
+                            let full_file = context.read_table(crate::query::file(
                                 scan.clone(),
                                 file.file_path().to_owned(),
                                 None,
                                 budget.clone(),
-                            )?,
-                        )?;
-                        // One joined decode supplies both kept rows and actual removed rows.
-                        let mut columns = schema
-                            .fields()
-                            .iter()
-                            .map(|field| qualified("l", field.name()))
-                            .collect::<Vec<_>>();
-                        columns.push(qualified("r", &marker).is_not_null().alias(&marker));
-                        changed.push(
-                            key_join(
-                                context.table(&name).await?,
-                                context.table("affected_keys").await?,
+                            )?)?;
+                            // One joined decode supplies both kept rows and actual removed rows.
+                            let mut columns = schema
+                                .fields()
+                                .iter()
+                                .map(|field| qualified("l", field.name()))
+                                .collect::<Vec<_>>();
+                            columns.push(qualified("r", marker).is_not_null().alias(marker));
+                            let joined = key_join(
+                                full_file,
+                                affected_keys_df.clone(),
                                 keys,
                                 datafusion::logical_expr::JoinType::Left,
                             )?
-                            .select(columns)?,
-                        );
-                    } else {
-                        shared.push(file.clone());
+                            .select(columns)?;
+                            Ok::<_, Error>((index, file, Some(joined)))
+                        } else {
+                            Ok((index, file, None))
+                        }
                     }
-                    // Retained changed-file plans own their provider; idle catalog entries
-                    // need not accumulate across the file population.
-                    context.deregister_table(&name)?;
+                }))
+                .buffered(16)
+                .try_collect::<Vec<_>>()
+                .await?;
+                for (index, file, changed_df) in probed {
+                    if let Some(df) = changed_df {
+                        rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
+                        changed.push(df);
+                    } else {
+                        outcomes[index] = Some(file);
+                    }
                 }
+                shared.extend(outcomes.into_iter().flatten());
             }
             // Remote output consumes retained object storage; host preflight
             // covers scratch and bounded writer buffers, not those remote bytes.
@@ -1068,6 +1125,65 @@ fn key_join(
         .alias("l")?
         .join_on(right.alias("r")?, kind, conditions)?)
 }
+pub(super) fn coerce_dataframe_for_schema(
+    frame: DataFrame,
+    expected: &arrow::datatypes::Schema,
+) -> Result<DataFrame> {
+    let actual = frame.schema().as_arrow().clone();
+    let mut needs_projection = false;
+    let mut exprs = Vec::with_capacity(actual.fields().len());
+    for field in actual.fields() {
+        let col_expr = datafusion::prelude::col(datafusion::common::Column::from_name(field.name()));
+        let target_type = if let Ok(expected_field) = expected.field_with_name(field.name()) {
+            let coerced_actual = storage::coerce_data_type(field.data_type());
+            if &coerced_actual == expected_field.data_type()
+                || matches!(
+                    (&coerced_actual, expected_field.data_type()),
+                    (
+                        arrow::datatypes::DataType::Binary,
+                        arrow::datatypes::DataType::LargeBinary,
+                    )
+                    | (
+                        arrow::datatypes::DataType::LargeBinary,
+                        arrow::datatypes::DataType::Binary,
+                    )
+                    | (
+                        arrow::datatypes::DataType::Utf8,
+                        arrow::datatypes::DataType::LargeUtf8,
+                    )
+                    | (
+                        arrow::datatypes::DataType::LargeUtf8,
+                        arrow::datatypes::DataType::Utf8,
+                    )
+                )
+            {
+                expected_field.data_type().clone()
+            } else {
+                coerced_actual
+            }
+        } else {
+            storage::coerce_data_type(field.data_type())
+        };
+        if field.data_type() != &target_type {
+            needs_projection = true;
+            exprs.push(
+                datafusion::logical_expr::Expr::Cast(datafusion::logical_expr::Cast::new(
+                    Box::new(col_expr),
+                    target_type,
+                ))
+                .alias(field.name()),
+            );
+        } else {
+            exprs.push(col_expr);
+        }
+    }
+    if needs_projection {
+        Ok(frame.select(exprs)?)
+    } else {
+        Ok(frame)
+    }
+}
+
 pub(super) fn same_fields(
     left: &arrow::datatypes::Schema,
     right: &arrow::datatypes::Schema,
@@ -1090,8 +1206,8 @@ pub(super) fn same_fields(
     }
     let right = arrow::datatypes::Schema::new(fields);
     Ok(
-        iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(left)?
-            == iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(&right)?,
+        storage::arrow_schema_to_schema_auto_assign_ids(left)?
+            == storage::arrow_schema_to_schema_auto_assign_ids(&right)?,
     )
 }
 pub(super) async fn any_rows(frame: DataFrame) -> Result<bool> {

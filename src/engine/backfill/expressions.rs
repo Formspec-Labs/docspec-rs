@@ -164,7 +164,7 @@ impl Expressions {
         let dependencies = storage::json_digest(&(PROCESSOR, spec, &input_fields, dependencies))?
             .to_hex()
             .to_string();
-        let inferred = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+        let inferred = storage::arrow_schema_to_schema_auto_assign_ids(
             &arrow::datatypes::Schema::new(fields),
         )?;
         if inferred

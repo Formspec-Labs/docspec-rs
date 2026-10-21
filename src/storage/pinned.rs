@@ -12,6 +12,14 @@ use std::io::Read;
 /// # Errors
 /// Refuses oversized or changed metadata, invalid native metadata, and exhausted capacity.
 pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
+    #[cfg(feature = "remote")]
+    if let Some(objects) = super::remote::RemoteObjects::for_uri(&pin.metadata.path) {
+        objects.validate_path(&pin.metadata.path)?;
+        for object in &pin.objects {
+            objects.validate_path(&object.path)?;
+        }
+        return open_pin_with_io(pin, objects.file_io(), budget).await;
+    }
     open_pin_with_io(pin, FileIO::new_with_fs(), budget).await
 }
 

@@ -47,6 +47,7 @@ pub(in crate::engine) struct ScalarOrigins {
 ///
 /// # Errors
 /// Returns metadata capacity, serialization or storage errors.
+#[cfg(test)]
 pub(in crate::engine) fn write(
     owner: &Id,
     path: &Path,
@@ -65,6 +66,28 @@ pub(in crate::engine) fn write(
     })
 }
 
+pub(in crate::engine) async fn write_at(
+    objects: &storage::Objects,
+    owner: &Id,
+    path: &locations::Location,
+    value: &impl Serialize,
+    budget: &Budget,
+) -> Result<ObjectRef> {
+    let size = inputs::metadata_size(value, budget.limits.max_metadata_bytes)?;
+    let _buffer = budget.reserve(size)?;
+    let bytes = serde_json::to_vec(value)?;
+    let object = ObjectRef {
+        owner: owner.clone(),
+        path: path.as_string()?,
+        digest: blake3::hash(&bytes).to_hex().to_string(),
+        bytes: bytes.len() as u64,
+    };
+    objects
+        .create_candidate_metadata(&object, bytes, budget, false)
+        .await?;
+    Ok(object)
+}
+
 /// Reads bounded hash-bound metadata through the maintained manifest reader.
 ///
 /// # Errors
@@ -75,5 +98,6 @@ pub(in crate::engine) async fn read<T: serde::de::DeserializeOwned + Send + 'sta
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<T> {
-    inputs::read_manifest(&storage::Objects::Local, object, budget, bytes, memory).await
+    let objects = storage::Objects::for_path(&object.path);
+    inputs::read_manifest(&objects, object, budget, bytes, memory).await
 }

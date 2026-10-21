@@ -244,11 +244,12 @@ impl Checks {
         {
             return Err(invalid_group());
         }
+        let objects = storage::Objects::for_path(&reference.metadata.path);
         Ok(Table::builder()
             .identifier(iceberg::TableIdent::from_strs(["scalar", "originals"])?)
             .metadata(metadata)
             .metadata_location(&reference.metadata.path)
-            .file_io(iceberg::io::FileIO::new_with_fs())
+            .file_io(objects.file_io())
             .runtime(iceberg::Runtime::try_current()?)
             .readonly(true)
             .build()?)

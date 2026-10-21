@@ -121,7 +121,7 @@ impl Engine {
             work_started("backfill-assembly");
             let directory = self.reserve_group(request, operation, "processing").await?;
             let output = self
-                .create_output(request.dataset(), &directory, expressions.native.clone())
+                .create_output_at(request.dataset(), &directory, expressions.native.clone())
                 .await?;
             let scan = storage::OccurrenceScan::open(&native, &lifecycle.budget).await?;
             let objects = source_objects(source);
@@ -140,16 +140,18 @@ impl Engine {
                 .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
             // One declaration serves every newly computed file in this preparation.
             // The reserved prefix protects it before any file acknowledgment.
-            let declaration = origins::write(
+            let declaration = origins::write_at(
+                &self.inner.objects,
                 request.dataset(),
-                &directory.join("declaration.json"),
+                &directory.child("declaration.json")?,
                 &OriginalDeclaration {
                     processor: PROCESSOR.into(),
                     definition: definition.clone(),
                     input_fields: expressions.input_fields.clone(),
                 },
                 &lifecycle.budget,
-            )?;
+            )
+            .await?;
             let mut completion_view = lifecycle.open(request.dataset()).await?;
             for file in scan.files() {
                 let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
@@ -215,6 +217,7 @@ impl Engine {
                 let result = self
                     .compute_file(
                         request.dataset(),
+                        &directory,
                         &scan,
                         object,
                         file.record_count(),
@@ -316,9 +319,10 @@ impl Engine {
                     self.retained_protections(&view, &prepared_key).await?,
                 )
             } else {
-                let origins = origins::write(
+                let origins = origins::write_at(
+                    &self.inner.objects,
                     request.dataset(),
-                    &directory.join("origins.json"),
+                    &directory.child("origins.json")?,
                     &ScalarOrigins {
                         processor: PROCESSOR.into(),
                         definition: definition.clone(),
@@ -331,7 +335,8 @@ impl Engine {
                         files: assembly.origins,
                     },
                     &lifecycle.budget,
-                )?;
+                )
+                .await?;
                 let completed = PreparedCompletion {
                     origins: Some(origins),
                     dependencies: Some(GroupDependencies {
@@ -488,14 +493,13 @@ impl Engine {
         request: &OperationRequest,
         operation: &Operation,
         purpose: &str,
-    ) -> Result<PathBuf> {
+    ) -> Result<locations::Location> {
         let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
         let directory = self
             .inner
-            .root
-            .join("objects")
-            .join(request.dataset().as_str())
-            .join(id.as_str());
+            .retained
+            .child(request.dataset().as_str())?
+            .child(id.as_str())?;
         let lock = self.lock(request.dataset()).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
@@ -511,13 +515,17 @@ impl Engine {
                         id,
                         consumer: request.dataset().clone(),
                         purpose: format!("{}/{purpose}", request.operation()),
-                        paths: vec![format!("{}/", directory.display())],
+                        paths: vec![directory.protection_prefix()?],
                         retired: false,
                     },
                 )?],
             )
             .await?;
-        std::fs::create_dir_all(&directory)?;
+        match &directory {
+            locations::Location::Local(path) => std::fs::create_dir_all(path)?,
+            #[cfg(feature = "remote")]
+            locations::Location::Remote(_) => {}
+        }
         Ok(directory)
     }
 
@@ -614,9 +622,14 @@ impl Engine {
         Ok(acknowledged)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "File execution binds its protected directory alongside scan, source and output"
+    )]
     async fn compute_file(
         &self,
         dataset: &Id,
+        directory: &locations::Location,
         scan: &storage::OccurrenceScan,
         source: &ObjectRef,
         rows: u64,
@@ -626,12 +639,15 @@ impl Engine {
         #[cfg(feature = "test-util")]
         work_started("backfill-file");
         let budget = &self.inner.lifecycle.budget;
-        if fs2::available_space(&self.inner.root)?
-            < source
+        let required_disk = if self.inner.retained.is_local() {
+            source
                 .bytes
                 .saturating_mul(2)
                 .saturating_add(budget.limits.scratch_bytes)
-        {
+        } else {
+            budget.limits.scratch_bytes
+        };
+        if fs2::available_space(&self.inner.root)? < required_disk {
             return Err(Error::refusal(
                 "disk_capacity",
                 "computed output and scratch do not fit available disk",
@@ -656,8 +672,8 @@ impl Engine {
         if files.iter().map(DataFile::record_count).sum::<u64>() != rows {
             return Err(invalid_group());
         }
-        let descriptor_path = Path::new(output.metadata().location())
-            .join(format!("{}.avro", uuid::Uuid::new_v4().simple()));
+        let descriptor_location =
+            directory.child(&format!("{}.avro", uuid::Uuid::new_v4().simple()))?;
         let mut bytes = Vec::new();
         iceberg::spec::write_data_files_to_avro(
             &mut bytes,
@@ -671,22 +687,31 @@ impl Engine {
                 "file completion descriptor exceeds metadata allowance",
             ));
         }
-        storage::write_new(&descriptor_path, &bytes)?;
-        let owner = dataset.clone();
-        let outputs = budget
-            .blocking(move || {
-                files
-                    .iter()
-                    .map(|file| storage::object(&owner, Path::new(file.file_path())))
-                    .collect()
-            })
+        let descriptor = ObjectRef {
+            owner: dataset.clone(),
+            path: descriptor_location.as_string()?,
+            digest: blake3::hash(&bytes).to_hex().to_string(),
+            bytes: bytes.len() as u64,
+        };
+        self.inner
+            .objects
+            .create_candidate_metadata(&descriptor, bytes, budget, false)
             .await?;
+        let mut outputs = Vec::with_capacity(files.len());
+        for file in &files {
+            outputs.push(
+                self.inner
+                    .objects
+                    .identify(dataset, file.file_path(), budget)
+                    .await?,
+            );
+        }
         Ok(FileCompletion {
             execution: None,
             source_metadata: None,
             source: source.clone(),
             rows,
-            descriptor: storage::object(dataset, &descriptor_path)?,
+            descriptor,
             outputs,
         })
     }

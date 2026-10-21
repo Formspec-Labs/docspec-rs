@@ -21,7 +21,7 @@ impl Engine {
         prior: &VersionRef,
         target: &VersionRef,
     ) -> Result<SuccessionProof> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(&(prior, target))?;
         let prior = prior.clone();
         let target = target.clone();

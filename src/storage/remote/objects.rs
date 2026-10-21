@@ -266,7 +266,33 @@ impl fmt::Debug for RemoteObjects {
     }
 }
 
+static REGISTERED_PREFIXES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, RemoteObjects>>,
+> = std::sync::OnceLock::new();
+
+fn registered_prefixes() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, RemoteObjects>>
+{
+    REGISTERED_PREFIXES.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
 impl RemoteObjects {
+    pub(crate) fn for_uri(uri: &str) -> Option<Self> {
+        if !uri.starts_with("s3://") {
+            return None;
+        }
+        let guard = registered_prefixes().lock().ok()?;
+        guard
+            .iter()
+            .filter(|(prefix, _)| {
+                uri == prefix.as_str()
+                    || uri
+                        .strip_prefix(prefix.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+            .max_by_key(|(prefix, _)| prefix.len())
+            .map(|(_, objects)| objects.clone())
+    }
+
     pub(crate) fn same_placement(&self, other: &Self) -> bool {
         self.placement == other.placement && self.owned_location() == other.owned_location()
     }
@@ -394,16 +420,23 @@ impl RemoteObjects {
             query = query.with_token(token);
         }
         let query_store = Arc::new(query.build().map_err(|_| config())?);
-        Ok(Self {
+        let temporary = properties
+            .get("s3.session-token")
+            .is_some_and(|token| !token.is_empty());
+        let instance = Self {
             operator,
             file_io,
             query_store,
             scope,
-            temporary: properties
-                .get("s3.session-token")
-                .is_some_and(|token| !token.is_empty()),
+            temporary,
             placement,
-        })
+        };
+        if !temporary
+            && let Ok(mut guard) = registered_prefixes().lock()
+        {
+            guard.insert(instance.owned_location(), instance.clone());
+        }
+        Ok(instance)
     }
 
     pub(in crate::storage) fn register_query_store(

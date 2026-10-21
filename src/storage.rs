@@ -227,6 +227,16 @@ pub(crate) async fn check_available(objects: Vec<ObjectRef>, budget: &Budget) ->
 }
 
 fn check_object_available(object: &ObjectRef) -> Result<()> {
+    #[cfg(feature = "remote")]
+    if let Some(remote) = remote::RemoteObjects::for_uri(&object.path) {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            Error::refusal(
+                "runtime_required",
+                "remote object availability check requires a Tokio runtime",
+            )
+        })?;
+        return handle.block_on(remote.check_available_admitted(object));
+    }
     let metadata = std::fs::metadata(&object.path).map_err(|_| {
         Error::refusal(
             "unavailable_phase",
@@ -276,6 +286,75 @@ async fn check_objects(
             Ok(())
         })
         .await
+}
+
+pub(crate) fn coerce_data_type(
+    data_type: &arrow::datatypes::DataType,
+) -> arrow::datatypes::DataType {
+    use arrow::datatypes::DataType;
+    match data_type {
+        DataType::UInt64 => DataType::Decimal128(20, 0),
+        DataType::List(field) => DataType::List(Arc::new(coerce_arrow_field(field))),
+        DataType::LargeList(field) => DataType::LargeList(Arc::new(coerce_arrow_field(field))),
+        DataType::FixedSizeList(field, size) => {
+            DataType::FixedSizeList(Arc::new(coerce_arrow_field(field)), *size)
+        }
+        DataType::Struct(fields) => DataType::Struct(
+            fields
+                .iter()
+                .map(|field| Arc::new(coerce_arrow_field(field)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+pub(crate) fn coerce_arrow_field(field: &arrow::datatypes::Field) -> arrow::datatypes::Field {
+    let coerced = coerce_data_type(field.data_type());
+    if &coerced == field.data_type() {
+        field.clone()
+    } else {
+        field.clone().with_data_type(coerced)
+    }
+}
+
+pub(crate) fn coerce_arrow_schema(schema: &arrow::datatypes::Schema) -> arrow::datatypes::Schema {
+    let fields = schema
+        .fields()
+        .iter()
+        .map(|field| Arc::new(coerce_arrow_field(field)))
+        .collect::<Vec<_>>();
+    arrow::datatypes::Schema::new_with_metadata(fields, schema.metadata().clone())
+}
+
+pub(crate) fn arrow_schema_to_schema_auto_assign_ids(
+    schema: &arrow::datatypes::Schema,
+) -> Result<iceberg::spec::Schema> {
+    let coerced = coerce_arrow_schema(schema);
+    Ok(iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+        &coerced,
+    )?)
+}
+
+pub(crate) fn coerce_batch(batch: RecordBatch) -> Result<RecordBatch> {
+    let schema = batch.schema();
+    if schema
+        .fields()
+        .iter()
+        .all(|field| &coerce_data_type(field.data_type()) == field.data_type())
+    {
+        return Ok(batch);
+    }
+    let coerced_schema = Arc::new(coerce_arrow_schema(schema.as_ref()));
+    let mut columns = Vec::with_capacity(batch.num_columns());
+    for (column, target_field) in batch.columns().iter().zip(coerced_schema.fields()) {
+        if column.data_type() == target_field.data_type() {
+            columns.push(column.clone());
+        } else {
+            columns.push(arrow::compute::cast(column, target_field.data_type())?);
+        }
+    }
+    Ok(RecordBatch::try_new(coerced_schema, columns)?)
 }
 
 // Keep the large maintained writer future out of each caller's poll frame.
@@ -418,6 +497,7 @@ where
                 if batch.num_rows() == 0 {
                     continue;
                 }
+                let batch = coerce_batch(batch)?;
                 let batch =
                     identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
                 next_row = next_row
@@ -459,13 +539,30 @@ where
                         // Iceberg stores zoned timestamps as UTC. Arrow can label that
                         // same instant with "UTC", "+00:00", or another zone; normalize
                         // only zone metadata, retaining the exact unit and epoch values.
-                        if let (
-                            arrow::datatypes::DataType::Timestamp(unit, Some(_)),
-                            arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
-                        ) = (field.data_type(), target)
-                            && unit == target_unit
-                            && field.data_type() != target
-                        {
+                        let compatible_cast = match (field.data_type(), target) {
+                            (
+                                arrow::datatypes::DataType::Timestamp(unit, Some(_)),
+                                arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
+                            ) => unit == target_unit && field.data_type() != target,
+                            (
+                                arrow::datatypes::DataType::Binary,
+                                arrow::datatypes::DataType::LargeBinary,
+                            )
+                            | (
+                                arrow::datatypes::DataType::LargeBinary,
+                                arrow::datatypes::DataType::Binary,
+                            )
+                            | (
+                                arrow::datatypes::DataType::Utf8,
+                                arrow::datatypes::DataType::LargeUtf8,
+                            )
+                            | (
+                                arrow::datatypes::DataType::LargeUtf8,
+                                arrow::datatypes::DataType::Utf8,
+                            ) => true,
+                            _ => false,
+                        };
+                        if compatible_cast {
                             columns[index] = arrow::compute::cast(&columns[index], target)?;
                             field = field.with_data_type(target.clone());
                         }
@@ -845,6 +942,30 @@ pub(crate) fn object(owner: &Id, path: &Path) -> Result<ObjectRef> {
 /// # Errors
 /// Refuses changed, missing, or unreadable bytes.
 pub fn verify_object(object: &ObjectRef) -> Result<()> {
+    #[cfg(feature = "remote")]
+    if let Some(remote) = remote::RemoteObjects::for_uri(&object.path) {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            Error::refusal(
+                "runtime_required",
+                "remote object verification requires a Tokio runtime",
+            )
+        })?;
+        let actual = handle
+            .block_on(remote.identity_admitted(&object.owner, &object.path))
+            .map_err(|_| {
+                Error::refusal(
+                    "corrupt_object",
+                    format!("object identity differs for owner {}", object.owner),
+                )
+            })?;
+        if actual.digest != object.digest || actual.bytes != object.bytes {
+            return Err(Error::refusal(
+                "corrupt_object",
+                format!("object identity differs for owner {}", object.owner),
+            ));
+        }
+        return Ok(());
+    }
     let (digest, bytes) = digest(Path::new(&object.path))?;
     if digest != object.digest || bytes != object.bytes {
         return Err(Error::refusal(
@@ -1292,6 +1413,11 @@ pub(crate) async fn pin_bound(
 }
 
 pub(crate) async fn check_inventory(pin: &TablePin, table: &Table, budget: &Budget) -> Result<()> {
+    let objects = Objects::for_path(&pin.metadata.path);
+    if objects.is_remote() {
+        let (_, inventory) = objects.open_snapshot(pin, budget).await?;
+        return check_inventory_files(pin, &inventory);
+    }
     let inventory = snapshot_files(table, budget).await?;
     check_inventory_files(pin, &inventory)
 }

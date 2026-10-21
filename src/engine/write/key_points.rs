@@ -14,7 +14,10 @@
 //! interval test; pruning stays conservative and correctness never depends on it.
 
 use crate::{Result, budget::Budget};
-use arrow::array::{Array, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray};
+use arrow::array::{
+    Array, BinaryArray, Date32Array, Decimal128Array, FixedSizeBinaryArray, Int32Array, Int64Array,
+    LargeBinaryArray, LargeStringArray, StringArray, UInt64Array,
+};
 use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
 use iceberg::spec::{DataFile, PrimitiveLiteral, Schema};
@@ -23,12 +26,14 @@ use tokio::sync::OwnedSemaphorePermit;
 
 /// One affected key component ordered exactly like its Iceberg bound literal.
 ///
-/// Strings order bytewise (UTF-8), matching Parquet's unsigned byte ordering for
-/// UTF8 statistics; integer and date columns share a widened `i64` order.
+/// Strings and binaries order bytewise, matching Parquet's unsigned byte ordering
+/// for BYTE_ARRAY statistics; integer, decimal, and date columns order numerically.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Point {
     Int(i64),
+    Int128(i128),
     Str(String),
+    Bin(Vec<u8>),
 }
 
 #[derive(Debug, Default)]
@@ -154,7 +159,8 @@ fn insert(column: &mut Column, array: &dyn Array) -> Option<usize> {
                 let point = $convert($array.value(row));
                 let size = match &point {
                     Point::Str(value) => value.len(),
-                    Point::Int(_) => 0,
+                    Point::Bin(value) => value.len(),
+                    Point::Int(_) | Point::Int128(_) => 0,
                 };
                 if column.values.insert(point) {
                     added = added.saturating_add(size + ENTRY_OVERHEAD);
@@ -167,12 +173,22 @@ fn insert(column: &mut Column, array: &dyn Array) -> Option<usize> {
         each!(array, |value: &str| Point::Str(value.to_owned()));
     } else if let Some(array) = any.downcast_ref::<LargeStringArray>() {
         each!(array, |value: &str| Point::Str(value.to_owned()));
+    } else if let Some(array) = any.downcast_ref::<BinaryArray>() {
+        each!(array, |value: &[u8]| Point::Bin(value.to_vec()));
+    } else if let Some(array) = any.downcast_ref::<LargeBinaryArray>() {
+        each!(array, |value: &[u8]| Point::Bin(value.to_vec()));
+    } else if let Some(array) = any.downcast_ref::<FixedSizeBinaryArray>() {
+        each!(array, |value: &[u8]| Point::Bin(value.to_vec()));
     } else if let Some(array) = any.downcast_ref::<Int64Array>() {
         each!(array, Point::Int);
     } else if let Some(array) = any.downcast_ref::<Int32Array>() {
         each!(array, |value: i32| Point::Int(i64::from(value)));
     } else if let Some(array) = any.downcast_ref::<Date32Array>() {
         each!(array, |value: i32| Point::Int(i64::from(value)));
+    } else if let Some(array) = any.downcast_ref::<UInt64Array>() {
+        each!(array, |value: u64| Point::Int128(i128::from(value)));
+    } else if let Some(array) = any.downcast_ref::<Decimal128Array>() {
+        each!(array, Point::Int128);
     } else {
         return None;
     }
@@ -183,8 +199,10 @@ fn insert(column: &mut Column, array: &dyn Array) -> Option<usize> {
 fn point(datum: &iceberg::spec::Datum) -> Option<Point> {
     match super::untruncated_bound(datum)? {
         PrimitiveLiteral::String(value) => Some(Point::Str(value)),
+        PrimitiveLiteral::Binary(value) => Some(Point::Bin(value)),
         PrimitiveLiteral::Int(value) => Some(Point::Int(i64::from(value))),
         PrimitiveLiteral::Long(value) => Some(Point::Int(value)),
+        PrimitiveLiteral::Int128(value) => Some(Point::Int128(value)),
         _ => None,
     }
 }

@@ -499,7 +499,7 @@ impl Engine {
     fn check_export_backend(&self, source: &ReleasePin, policy: &ExportPolicy) -> Result<()> {
         if !self.inner.retained.is_local()
             && (BackendCapability::for_group(&policy.group).local_only()
-                || !remote_source_only(&source.dataset))
+                || !source.dataset.groups.contains_key("source"))
         {
             return Err(locations::unsupported());
         }

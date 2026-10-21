@@ -40,7 +40,7 @@ impl Engine {
     pub(super) async fn process_incremental(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         admission: &PhaseResult,
         operation: &Operation,
         captured_source: Option<&TablePin>,
@@ -88,7 +88,7 @@ impl Engine {
             // Preserve the current native schema ID as well as its fields;
             // fresh creation can renumber an evolved source's schema.
             let empty = self
-                .replacement_output(&spec.dataset, &directory.join("empty-changes"), &native)
+                .replacement_output_at(&spec.dataset, &directory.child("empty-changes")?, &native)
                 .await?;
             let empty = self.pin_output(&spec.dataset, &empty, 0, &[]).await?;
             let key_field_ids = refresh::output_keys(&spec.transform)
@@ -147,7 +147,7 @@ impl Engine {
     async fn process_incremental_join(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         base: &ReleasePin,
         previous: &refresh::LoadedInputs,
         current: &refresh::LoadedInputs,
@@ -182,21 +182,21 @@ impl Engine {
                     }
                 })
                 .collect::<Vec<_>>();
-            let (pin, scanned) = self
-                .changed_keys(
-                    &spec.dataset,
-                    &directory.join(format!("discovery-{index}")),
-                    (
-                        &previous.releases[&old_version.dataset],
-                        &current.releases[&new_version.dataset],
-                    ),
-                    (
-                        previous.canonical_source(&old_version.dataset)?,
-                        current.canonical_source(&new_version.dataset)?,
-                    ),
-                    &keys,
-                )
-                .await?;
+            let discovery_dir = directory.child(&format!("discovery-{index}"))?;
+            let (pin, scanned) = Box::pin(self.changed_keys(
+                &spec.dataset,
+                &discovery_dir,
+                (
+                    &previous.releases[&old_version.dataset],
+                    &current.releases[&new_version.dataset],
+                ),
+                (
+                    previous.canonical_source(&old_version.dataset)?,
+                    current.canonical_source(&new_version.dataset)?,
+                ),
+                &keys,
+            ))
+            .await?;
             discovery.files_scanned += scanned;
             let native = storage::open_pin(&pin, &self.inner.lifecycle.budget).await?;
             let files = storage::snapshot_files(&native, budget).await?;
@@ -222,9 +222,9 @@ impl Engine {
             }
         }
         let keys = self
-            .write_frame(
+            .write_frame_at(
                 &spec.dataset,
-                &directory.join("affected-keys"),
+                &directory.child("affected-keys")?,
                 context
                     .sql("SELECT * FROM keys_0 UNION SELECT * FROM keys_1")
                     .await?,
@@ -310,19 +310,18 @@ impl Engine {
         let (write_before, replacement) = self
             .source_replacement(&spec.dataset, captured, directory, replacement, &keys)
             .await?;
-        let applied = self
-            .replace_keys(Replacement {
-                dataset: &spec.dataset,
-                directory: locations::Location::Local(directory.join("replacement")),
-                before: &write_before,
-                keys: &keys,
-                scope,
-                replacement,
-                replacement_bytes: None,
-            })
-            .await?;
+        let applied = Box::pin(self.replace_keys(Replacement {
+            dataset: &spec.dataset,
+            directory: directory.child("replacement")?,
+            before: &write_before,
+            keys: &keys,
+            scope,
+            replacement,
+            replacement_bytes: None,
+        }))
+        .await?;
         let mut applied = self
-            .finish_source_replacement(&spec.dataset, directory, captured_source, applied)
+            .finish_source_replacement_at(&spec.dataset, directory, captured_source, applied)
             .await?;
         applied.metrics.files_scanned += discovery.files_scanned;
         applied.metrics.data_files_written += discovery.data_files_written;
@@ -350,7 +349,7 @@ impl Engine {
     pub(super) async fn changed_keys(
         &self,
         dataset: &Id,
-        directory: &Path,
+        directory: &locations::Location,
         versions: (&ReleasePin, &ReleasePin),
         canonical: (&TablePin, &TablePin),
         keys: &[String],
@@ -384,10 +383,10 @@ impl Engine {
                 .collect::<Vec<_>>()
         }));
         let table = self
-            .create_output(
+            .create_output_at(
                 dataset,
                 directory,
-                iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(&key_schema)?,
+                storage::arrow_schema_to_schema_auto_assign_ids(&key_schema)?,
             )
             .await?;
         // Equivalent representations carry their original logical identity. Resolve
@@ -395,17 +394,16 @@ impl Engine {
         if old.logical_metadata() == new.logical_metadata() {
             return Ok((self.pin_output(dataset, &table, 0, &[]).await?, 0));
         }
-        if let Some(discovered) = self
-            .history_keys(
-                dataset,
-                &table,
-                versions,
-                canonical,
-                &old_native,
-                keys,
-                key_schema.clone(),
-            )
-            .await?
+        if let Some(discovered) = Box::pin(self.history_keys(
+            dataset,
+            &table,
+            versions,
+            canonical,
+            &old_native,
+            keys,
+            key_schema.clone(),
+        ))
+        .await?
         {
             return Ok(discovered);
         }
@@ -506,7 +504,7 @@ impl Engine {
     pub(super) async fn incremental_evidence(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         processing: &PhaseResult,
         operation: &Operation,
     ) -> Result<write::Prepared> {
@@ -551,25 +549,24 @@ impl Engine {
         }
         let columns = tuple_columns(None);
         let keys = TUPLE.map(str::to_owned);
-        let applied = self
-            .replace_keys(Replacement {
-                dataset: &spec.dataset,
-                directory: locations::Location::Local(directory.to_owned()),
-                before,
-                keys: &keys,
-                scope: context
-                    .sql(&format!("SELECT DISTINCT {columns} FROM removed"))
-                    .await?,
-                replacement: context.sql(&format!("SELECT {columns} FROM added")).await?,
-                replacement_bytes: Some(
-                    changes
-                        .added
-                        .objects
-                        .iter()
-                        .fold(0u64, |bytes, object| bytes.saturating_add(object.bytes)),
-                ),
-            })
-            .await?;
+        let applied = Box::pin(self.replace_keys(Replacement {
+            dataset: &spec.dataset,
+            directory: directory.clone(),
+            before,
+            keys: &keys,
+            scope: context
+                .sql(&format!("SELECT DISTINCT {columns} FROM removed"))
+                .await?,
+            replacement: context.sql(&format!("SELECT {columns} FROM added")).await?,
+            replacement_bytes: Some(
+                changes
+                    .added
+                    .objects
+                    .iter()
+                    .fold(0u64, |bytes, object| bytes.saturating_add(object.bytes)),
+            ),
+        }))
+        .await?;
         Ok(write::Prepared {
             table: applied.table,
             changes: None,

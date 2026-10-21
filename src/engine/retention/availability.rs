@@ -239,19 +239,6 @@ pub(super) fn collect(
 }
 
 impl Engine {
-    // Dataset creation shares the same lock as admission. In particular, two
-    // first-time retries must not race to create the native namespace.
-    pub(in crate::engine) async fn check_operation_entry(
-        &self,
-        dataset: &Id,
-        operation: &Id,
-    ) -> Result<()> {
-        let lock = self.lock(dataset).await;
-        let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
-        self.check_operation_available(&view, operation).await
-    }
-
     /// Captures a non-current result and all its saved readbacks for retirement.
     ///
     /// Unselected readbacks require an abandoned operation. Original records stay

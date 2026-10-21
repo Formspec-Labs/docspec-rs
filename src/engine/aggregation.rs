@@ -110,12 +110,18 @@ async fn qualify(
             DataType::Boolean
                 | DataType::Int32
                 | DataType::Int64
+                | DataType::UInt64
+                | DataType::Decimal128(_, 0)
                 | DataType::Utf8
+                | DataType::LargeUtf8
+                | DataType::Binary
+                | DataType::LargeBinary
+                | DataType::FixedSizeBinary(_)
                 | DataType::Date32
         ) {
             return Err(Error::refusal(
                 "aggregate_key_type",
-                "summary keys currently support Boolean, Int32, Int64, Utf8 and Date32",
+                "summary keys currently support Boolean, Int32, Int64, UInt64/Decimal128, Utf8, Binary and Date32",
             ));
         }
     }
@@ -131,8 +137,13 @@ async fn qualify(
                         DataType::Boolean
                             | DataType::Int32
                             | DataType::Int64
+                            | DataType::UInt64
+                            | DataType::Decimal128(_, 0)
                             | DataType::Utf8
                             | DataType::LargeUtf8
+                            | DataType::Binary
+                            | DataType::LargeBinary
+                            | DataType::FixedSizeBinary(_)
                             | DataType::Date32
                     ) || matches!(
                         data_type,
@@ -140,10 +151,26 @@ async fn qualify(
                             if zone.as_ref() == "UTC" || zone.as_ref() == "+00:00"
                     )
                 }
-                AggregateFunction::Sum { .. }
-                | AggregateFunction::Min { .. }
-                | AggregateFunction::Max { .. } => {
-                    matches!(data_type, DataType::Int32 | DataType::Int64)
+                AggregateFunction::Sum { .. } => {
+                    matches!(
+                        data_type,
+                        DataType::Int32
+                            | DataType::Int64
+                            | DataType::UInt64
+                            | DataType::Decimal128(_, 0)
+                    )
+                }
+                AggregateFunction::Min { .. } | AggregateFunction::Max { .. } => {
+                    matches!(
+                        data_type,
+                        DataType::Int32
+                            | DataType::Int64
+                            | DataType::UInt64
+                            | DataType::Decimal128(_, 0)
+                            | DataType::Binary
+                            | DataType::LargeBinary
+                            | DataType::FixedSizeBinary(_)
+                    )
                 }
             };
             if !valid {
@@ -233,7 +260,7 @@ impl Engine {
     pub(super) async fn process_aggregation(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         base: &ReleasePin,
         previous: &LoadedInputs,
         current: &LoadedInputs,
@@ -247,21 +274,21 @@ impl Engine {
         let before = source(base)?;
         let context = self.context();
         register_input(&context, aggregate, &current.borrowed(), budget).await?;
-        let (affected, scanned) = self
-            .changed_keys(
-                &spec.dataset,
-                &directory.join("affected"),
-                (
-                    &previous.releases[&aggregate.input.dataset],
-                    &current.releases[&aggregate.input.dataset],
-                ),
-                (
-                    previous.canonical_source(&aggregate.input.dataset)?,
-                    current.canonical_source(&aggregate.input.dataset)?,
-                ),
-                &aggregate.grouping.keys,
-            )
-            .await?;
+        let affected_dir = directory.child("affected")?;
+        let (affected, scanned) = Box::pin(self.changed_keys(
+            &spec.dataset,
+            &affected_dir,
+            (
+                &previous.releases[&aggregate.input.dataset],
+                &current.releases[&aggregate.input.dataset],
+            ),
+            (
+                previous.canonical_source(&aggregate.input.dataset)?,
+                current.canonical_source(&aggregate.input.dataset)?,
+            ),
+            &aggregate.grouping.keys,
+        ))
+        .await?;
         let native = storage::open_pin(&affected, &self.inner.lifecycle.budget).await?;
         let (discovery_files, discovery_bytes) = {
             let inventory = storage::snapshot_files(&native, budget).await?;
@@ -320,19 +347,18 @@ impl Engine {
         let (write_before, replacement) = self
             .source_replacement(&spec.dataset, captured, directory, replacement, &key_names)
             .await?;
-        let applied = self
-            .replace_keys(Replacement {
-                dataset: &spec.dataset,
-                directory: locations::Location::Local(directory.join("replacement")),
-                before: &write_before,
-                keys: &key_names,
-                scope,
-                replacement,
-                replacement_bytes: None,
-            })
-            .await?;
+        let applied = Box::pin(self.replace_keys(Replacement {
+            dataset: &spec.dataset,
+            directory: directory.child("replacement")?,
+            before: &write_before,
+            keys: &key_names,
+            scope,
+            replacement,
+            replacement_bytes: None,
+        }))
+        .await?;
         let mut applied = self
-            .finish_source_replacement(&spec.dataset, directory, captured_source, applied)
+            .finish_source_replacement_at(&spec.dataset, directory, captured_source, applied)
             .await?;
         applied.metrics.files_scanned += scanned;
         applied.metrics.data_files_written += discovery_files;
@@ -356,7 +382,7 @@ impl Engine {
     pub(super) async fn aggregate_evidence(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         processing: &PhaseResult,
         before: &TablePin,
         context: &SessionContext,
@@ -403,17 +429,16 @@ impl Engine {
                 "SELECT s.* FROM contributors s LEFT SEMI JOIN affected_groups k ON {predicate}"
             ))
             .await?;
-        let applied = self
-            .replace_keys(Replacement {
-                dataset: &spec.dataset,
-                directory: locations::Location::Local(directory.to_owned()),
-                before,
-                keys: &key_names,
-                scope,
-                replacement,
-                replacement_bytes: None,
-            })
-            .await?;
+        let applied = Box::pin(self.replace_keys(Replacement {
+            dataset: &spec.dataset,
+            directory: directory.clone(),
+            before,
+            keys: &key_names,
+            scope,
+            replacement,
+            replacement_bytes: None,
+        }))
+        .await?;
         Ok(write::Prepared {
             table: applied.table,
             changes: None,

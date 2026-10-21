@@ -138,8 +138,9 @@ async fn replacement_inputs(
             .await?;
     }
     let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+    let replacement = coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
     let replacement = schema::normalize(
-        context.table("replacements").await?,
+        replacement,
         native.metadata().current_schema(),
         &spec.keys,
         budget,
@@ -156,7 +157,7 @@ async fn replacement_inputs(
     };
     let mut scope = replacement.clone().select(key_columns())?.distinct()?;
     if spec.deletions.is_some() {
-        let deletions = context.table("deletions").await?;
+        let deletions = coerce_dataframe_for_schema(context.table("deletions").await?, &schema)?;
         let expected = spec
             .keys
             .iter()

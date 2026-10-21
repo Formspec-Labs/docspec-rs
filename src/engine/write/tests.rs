@@ -941,3 +941,282 @@ async fn prepared_scope_view_scan_observations() {
         );
     }
 }
+
+#[tokio::test]
+async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
+    use arrow::datatypes::{DataType, Field as ArrowField, Schema as ArrowSchema};
+    use parquet::arrow::ArrowWriter;
+    use std::sync::atomic::Ordering;
+
+    let schema = Arc::new(ArrowSchema::new(vec![
+        ArrowField::new("id", DataType::Int64, false),
+        ArrowField::new("text", DataType::Utf8, true),
+    ]));
+    assert!(is_identity_source_projection("SELECT * FROM input", &schema));
+    assert!(is_identity_source_projection(
+        "  select * from input ; ",
+        &schema
+    ));
+    assert!(is_identity_source_projection(
+        "SELECT id, text FROM input",
+        &schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT text, id FROM input",
+        &schema
+    ));
+    assert!(!is_identity_source_projection(
+        "SELECT * FROM input WHERE id > 0",
+        &schema
+    ));
+
+    let root = TempDir::new().unwrap();
+    let input_path = root.path().join("input.parquet");
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from(vec![10_i64, 20, 30])),
+            Arc::new(StringArray::from(vec![Some("a"), None, Some("c")])),
+        ],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&input_path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let digest = storage::digest(&input_path).unwrap().0;
+
+    let engine = Engine::open(root.path().join("workspace"), Limits::default())
+        .await
+        .unwrap();
+    let fast_spec = RunSpec {
+        dataset: Id::new("fast_ds").unwrap(),
+        operation: Id::new("build_fast").unwrap(),
+        base: None,
+        relationship: None,
+        input: input_path.to_string_lossy().into_owned(),
+        expected_digest: digest.clone(),
+        sql: "SELECT id, text FROM input".into(),
+        definition: "v1".into(),
+    };
+    let pin = engine.run(&fast_spec).await.unwrap();
+    assert_eq!(pin.dataset.groups["source"].rows, 3);
+    assert_eq!(
+        engine.inner.identity_build_fast_path.load(Ordering::Relaxed),
+        1,
+        "identity SQL projection should take the direct Parquet fast path"
+    );
+
+    let filtered_spec = RunSpec {
+        dataset: Id::new("filtered_ds").unwrap(),
+        operation: Id::new("build_filtered").unwrap(),
+        base: None,
+        relationship: None,
+        input: input_path.to_string_lossy().into_owned(),
+        expected_digest: digest,
+        sql: "SELECT id, text FROM input WHERE id >= 20".into(),
+        definition: "v1".into(),
+    };
+    let filtered_pin = engine.run(&filtered_spec).await.unwrap();
+    assert_eq!(filtered_pin.dataset.groups["source"].rows, 2);
+    assert_eq!(
+        engine.inner.identity_build_fast_path.load(Ordering::Relaxed),
+        1,
+        "non-identity SQL should not increment identity_build_fast_path"
+    );
+    engine.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn native_uint64_and_binary_support_across_build_update_query_read_keys_and_export() {
+    use crate::export::{ExportPolicy, ExportRows, ExportSpec};
+    use arrow::array::{BinaryArray, Decimal128Array, LargeBinaryArray, UInt64Array};
+    use arrow::datatypes::{DataType, Field as ArrowField, Schema as ArrowSchema};
+    use parquet::arrow::ArrowWriter;
+
+    let root = TempDir::new().unwrap();
+    let input_path = root.path().join("uint64_binary.parquet");
+    let schema = Arc::new(ArrowSchema::new(vec![
+        ArrowField::new("uid", DataType::UInt64, false),
+        ArrowField::new("payload", DataType::Binary, true),
+        ArrowField::new("large_payload", DataType::LargeBinary, true),
+    ]));
+    let high_u64 = u64::MAX - 7;
+    let mid_u64 = (i64::MAX as u64) + 42;
+    let low_u64 = 100_u64;
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(UInt64Array::from(vec![low_u64, mid_u64, high_u64])),
+            Arc::new(BinaryArray::from(vec![
+                Some(b"\x00\xff\x01".as_slice()),
+                Some(b"\xfe\xdc\xba".as_slice()),
+                None,
+            ])),
+            Arc::new(LargeBinaryArray::from(vec![
+                Some(b"alpha".as_slice()),
+                None,
+                Some(b"\x80\x81\x82".as_slice()),
+            ])),
+        ],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&input_path).unwrap(), schema.clone(), None)
+            .unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    let engine = Engine::open(root.path().join("workspace"), Limits::default())
+        .await
+        .unwrap();
+    let build_spec = RunSpec {
+        dataset: Id::new("bin_u64").unwrap(),
+        operation: Id::new("op_build").unwrap(),
+        base: None,
+        relationship: None,
+        input: input_path.to_string_lossy().into_owned(),
+        expected_digest: storage::digest(&input_path).unwrap().0,
+        sql: "SELECT * FROM input".into(),
+        definition: "v1".into(),
+    };
+    let release1 = engine.run(&build_spec).await.unwrap();
+    assert_eq!(release1.dataset.groups["source"].rows, 3);
+    verify_release_at(&release1, Limits::default(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+
+    // Update by UInt64 key (including > i64::MAX) and replace Binary payload.
+    let repl_path = root.path().join("repl.parquet");
+    let repl_batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(UInt64Array::from(vec![high_u64])),
+            Arc::new(BinaryArray::from(vec![Some(b"\xde\xad\xbe\xef".as_slice())])),
+            Arc::new(LargeBinaryArray::from(vec![Some(b"updated".as_slice())])),
+        ],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&repl_path).unwrap(), schema, None).unwrap();
+    writer.write(&repl_batch).unwrap();
+    writer.close().unwrap();
+
+    let update_spec = UpdateSpec {
+        dataset: Id::new("bin_u64").unwrap(),
+        operation: Id::new("op_update").unwrap(),
+        definition: "v1".into(),
+        base: release1.id.clone(),
+        keys: vec!["uid".into()],
+        replacements: InputSpec {
+            path: repl_path.to_string_lossy().into_owned(),
+            digest: storage::digest(&repl_path).unwrap().0,
+        },
+        relationship: None,
+        deletions: None,
+    };
+    let release2 = engine.update(&update_spec).await.unwrap();
+    assert_eq!(release2.dataset.groups["source"].rows, 3);
+    verify_release_at(&release2, Limits::default(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+
+    // Point lookup via read_keys on coerced UInt64 (Decimal128(20, 0)) key
+    let key_batches: Vec<RecordBatch> = engine
+        .read_keys(
+            &release2,
+            &KeyReadSpec {
+                key: "uid".into(),
+                values: vec![high_u64.to_string()],
+                columns: Some(vec!["uid".into(), "payload".into()]),
+            },
+        )
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(key_batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+    let uid_col = key_batches[0]
+        .column_by_name("uid")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap();
+    assert_eq!(uid_col.value(0), i128::from(high_u64));
+    let payload_col = key_batches[0]
+        .column_by_name("payload")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<LargeBinaryArray>()
+        .unwrap();
+    assert_eq!(payload_col.value(0), b"\xde\xad\xbe\xef");
+
+    // Point lookup via read_keys on Binary key using hex: prefix
+    let bin_key_batches: Vec<RecordBatch> = engine
+        .read_keys(
+            &release2,
+            &KeyReadSpec {
+                key: "payload".into(),
+                values: vec!["hex:deadbeef".into()],
+                columns: Some(vec!["uid".into()]),
+            },
+        )
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        bin_key_batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        1
+    );
+
+    // Aggregate refresh over UInt64 and Binary fields
+    let agg_spec = RefreshSpec {
+        dataset: Id::new("bin_u64_agg").unwrap(),
+        operation: Id::new("op_agg").unwrap(),
+        base: None,
+        definition: "agg-v1".into(),
+        transform: RefreshTransform::Aggregate(AggregateTransform {
+            input: release2.version_ref(),
+            grouping: AggregationDefinition {
+                keys: vec!["payload".into()],
+                aggregates: vec![
+                    AggregateField {
+                        name: "n".into(),
+                        function: AggregateFunction::CountRows,
+                    },
+                    AggregateField {
+                        name: "max_uid".into(),
+                        function: AggregateFunction::Max {
+                            field: "uid".into(),
+                        },
+                    },
+                ],
+            },
+        }),
+        policy: RefreshPolicy::Captured,
+        mode: RefreshMode::Full,
+        relationship: None,
+    };
+    let agg_release = engine.refresh(&agg_spec).await.unwrap();
+    assert_eq!(agg_release.dataset.groups["source"].rows, 3);
+
+    // Export dataset containing UInt64 + Binary columns
+    let export_spec = ExportSpec {
+        dataset: Id::new("bin_u64").unwrap(),
+        operation: Id::new("op_export").unwrap(),
+        source: release2.version_ref(),
+        channel: Id::new("stable").unwrap(),
+        expected: None,
+        policy: ExportPolicy {
+            group: "source".into(),
+            rows: ExportRows::All,
+            columns: vec!["uid".into(), "payload".into(), "large_payload".into()],
+        },
+    };
+    let export_pin = engine.export(&export_spec).await.unwrap();
+    assert_eq!(export_pin.validation.rows, 3);
+    engine.shutdown().await.unwrap();
+}

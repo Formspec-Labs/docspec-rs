@@ -118,7 +118,7 @@ impl Engine {
     pub(super) async fn process_refresh(
         &self,
         spec: &RefreshSpec,
-        directory: &Path,
+        directory: &locations::Location,
         admission: &PhaseResult,
         operation: &Operation,
         captured_source: Option<&TablePin>,
@@ -156,7 +156,7 @@ impl Engine {
             true,
         )
         .await?;
-        self.write_frame(&spec.dataset, directory, frame).await
+        self.write_frame_at(&spec.dataset, directory, frame).await
     }
 
     pub(super) async fn prepare_evidence(
@@ -188,7 +188,7 @@ impl Engine {
             #[cfg(feature = "test-util")]
             work_started("evidence");
             let directory = self
-                .reserve_attempt(&request, operation, "evidence")
+                .reserve_location(&request, operation, "evidence")
                 .await?;
             let prepared = if spec.mode == RefreshMode::Incremental {
                 Box::pin(self.incremental_evidence(spec, &directory, processing, operation)).await?
@@ -227,7 +227,8 @@ impl Engine {
                     }
                 }
                 let frame = evidence_frame(&context, &spec.transform, "matches").await?;
-                self.write_frame(&spec.dataset, &directory, frame).await?
+                self.write_frame_at(&spec.dataset, &directory, frame)
+                    .await?
             };
             let phase = PhaseResult {
                 phase: "evidence".into(),
@@ -551,7 +552,8 @@ pub(super) async fn read_release(
     bytes: &mut usize,
     memory: &Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<ReleasePin> {
-    read_release_with_objects(&storage::Objects::Local, version, budget, bytes, memory).await
+    let objects = storage::Objects::for_path(&version.manifest.path);
+    read_release_with_objects(&objects, version, budget, bytes, memory).await
 }
 
 pub(super) async fn read_release_with_objects(
@@ -915,7 +917,7 @@ pub(super) async fn verify_related_with_inputs(
     )
     .await?;
     let expected_schema =
-        iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
+        storage::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
     let native = storage::open_pin(source, budget).await?;
     if !storage::identity::preserves_schema(&expected_schema, native.metadata().current_schema())? {
         return Err(Error::refusal(
@@ -949,9 +951,8 @@ pub(super) async fn verify_related_with_inputs(
         .map(|field| quote(field.name()))
         .collect::<Vec<_>>()
         .join(", ");
-    let evidence_schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
-        expected_evidence.schema().as_arrow(),
-    )?;
+    let evidence_schema =
+        storage::arrow_schema_to_schema_auto_assign_ids(expected_evidence.schema().as_arrow())?;
     context.register_table("expected_evidence", expected_evidence.into_view())?;
     if *evidence.metadata().current_schema().as_ref() != evidence_schema {
         return Err(Error::refusal(

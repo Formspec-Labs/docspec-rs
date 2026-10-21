@@ -15,7 +15,12 @@ pub(super) struct Checks {
 }
 
 impl Checks {
+    #[cfg(test)]
     pub fn new(level: VerificationLevel) -> Self {
+        Self::with_objects(level, storage::Objects::Local)
+    }
+
+    pub(super) fn with_objects(level: VerificationLevel, objects: storage::Objects) -> Self {
         Self {
             report: VerificationReport {
                 level,
@@ -23,7 +28,7 @@ impl Checks {
                 ..VerificationReport::default()
             },
             inspect_tables: true,
-            objects: storage::Objects::Local,
+            objects,
             scalar_originals: None,
             known: BTreeMap::new(),
             _memory: None,
@@ -31,10 +36,7 @@ impl Checks {
     }
 
     pub(super) fn routine(objects: storage::Objects) -> Self {
-        Self {
-            objects,
-            ..Self::new(VerificationLevel::Routine)
-        }
+        Self::with_objects(VerificationLevel::Routine, objects)
     }
 
     pub(super) fn objects(&self) -> &storage::Objects {
@@ -43,9 +45,13 @@ impl Checks {
 
     /// Components already passed their durable validation; check only their assembly.
     pub fn composition() -> Self {
+        Self::composition_with_objects(storage::Objects::Local)
+    }
+
+    pub(super) fn composition_with_objects(objects: storage::Objects) -> Self {
         Self {
             inspect_tables: false,
-            ..Self::new(VerificationLevel::Routine)
+            ..Self::with_objects(VerificationLevel::Routine, objects)
         }
     }
 
@@ -220,7 +226,7 @@ impl Checks {
             return Ok(());
         }
         if self.deep() {
-            verify_table(pin, budget).await?;
+            Box::pin(verify_table(pin, budget)).await?;
         } else {
             self.admit(budget)?;
             let (inspected, known) = storage::inspect_table(
@@ -369,8 +375,15 @@ async fn walk(
                     }
                     continue;
                 }
+                let objects = match checks.as_ref().map(|c| c.objects()) {
+                    Some(objects) if objects.is_remote() => objects.clone(),
+                    _ => storage::Objects::for_path(&version.manifest.path),
+                };
+                objects.register_query_store(budget.runtime_env())?;
                 charge(&mut bytes, std::mem::size_of::<Node>(), budget)?;
-                let release = refresh::read_release(&version, budget, &mut bytes, &memory).await?;
+                let release =
+                    refresh::read_release_with_objects(&objects, &version, budget, &mut bytes, &memory)
+                        .await?;
                 if let Some(root) = expected.get(&key)
                     && (root.manifest != release.manifest
                         || root.dataset != release.dataset
@@ -402,11 +415,18 @@ async fn walk(
                 let node = nodes
                     .get(&key)
                     .ok_or_else(|| invalid("missing verification node"))?;
-                let mut composition = Checks::composition();
+                let node_objects = storage::Objects::for_path(&node.release.manifest.path);
+                let mut composition = Checks::composition_with_objects(node_objects.clone());
                 let checks = if let Some(checks) = checks.as_deref_mut() {
+                    if !checks.objects.is_remote() {
+                        checks.objects = node_objects;
+                    }
                     checks
                 } else {
-                    storage::check_available(release_objects(&node.release), budget).await?;
+                    composition
+                        .objects()
+                        .check_available(release_objects(&node.release), budget)
+                        .await?;
                     &mut composition
                 };
                 verify_local_release(&node.release, budget, checks).await?;

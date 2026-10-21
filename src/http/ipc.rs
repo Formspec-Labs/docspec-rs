@@ -1,11 +1,29 @@
 //! Demand-driven Arrow IPC encoding with admission owned by outgoing chunks.
 
-use crate::{Error, Result, budget::Budget};
-use arrow::ipc::writer::StreamWriter;
-use axum::body::Bytes;
+use crate::{
+    Engine, Error, Result,
+    budget::Budget,
+    model::{Id, InputSpec, OperationId, RunSpec, SourceRelationship, UpdateSpec},
+};
+use arrow::ipc::{
+    reader::{StreamDecoder, StreamReader},
+    writer::StreamWriter,
+};
+use axum::{
+    body::{Body, Bytes},
+    http::{HeaderMap, header},
+};
 use datafusion::physical_plan::SendableRecordBatchStream;
-use futures::{Stream, TryStreamExt};
-use std::io::Write;
+use futures::{Stream, StreamExt, TryStreamExt};
+use parquet::{
+    arrow::ArrowWriter,
+    basic::{Compression, ZstdLevel},
+    file::properties::{WriterProperties, WriterVersion},
+};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 use tokio::sync::OwnedSemaphorePermit;
 
 pub(super) fn encode(
@@ -120,6 +138,531 @@ impl Write for Sink {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+pub(super) struct StagedIpc<T> {
+    pub spec: T,
+    pub staged_path: PathBuf,
+}
+
+impl<T> StagedIpc<T> {
+    pub(super) fn cleanup(&self) {
+        let _ = std::fs::remove_file(&self.staged_path);
+    }
+}
+
+pub(super) fn is_arrow_stream(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|raw| raw.split(';').next())
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/vnd.apache.arrow.stream"))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpcRunSpec {
+    dataset: Id,
+    operation: OperationId,
+    #[serde(default)]
+    base: Option<Id>,
+    #[serde(default)]
+    relationship: Option<SourceRelationship>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    input: Option<String>,
+    #[serde(default)]
+    expected_digest: Option<String>,
+    #[serde(default = "default_ipc_sql")]
+    sql: String,
+    definition: String,
+}
+
+fn default_ipc_sql() -> String {
+    "SELECT * FROM input".to_owned()
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpcInputSpec {
+    #[serde(default)]
+    #[allow(dead_code)]
+    path: Option<String>,
+    #[serde(default)]
+    digest: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpcUpdateSpec {
+    dataset: Id,
+    operation: OperationId,
+    definition: String,
+    base: Id,
+    keys: Vec<String>,
+    #[serde(default)]
+    replacements: IpcInputSpec,
+    #[serde(default)]
+    relationship: Option<SourceRelationship>,
+    #[serde(default)]
+    deletions: Option<InputSpec>,
+}
+
+pub(super) async fn stage_run(
+    engine: &Engine,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<StagedIpc<RunSpec>> {
+    let spec_bytes = decode_spec_header(headers)?;
+    let ipc_spec: IpcRunSpec = serde_json::from_slice(&spec_bytes).map_err(|e| {
+        Error::refusal(
+            "invalid_spec",
+            format!("invalid RunSpec in X-Docspec-Spec header: {e}"),
+        )
+    })?;
+    let expected_digest = resolve_expected_digest(headers, ipc_spec.expected_digest.as_deref())?;
+    let (staged_path, parquet_digest) = stage_ipc_stream_to_parquet(
+        &engine.scratch_dir(),
+        &ipc_spec.dataset,
+        &ipc_spec.operation,
+        expected_digest.as_deref(),
+        body,
+        &engine.read_budget(),
+    )
+    .await?;
+    let spec = RunSpec {
+        dataset: ipc_spec.dataset,
+        operation: ipc_spec.operation,
+        base: ipc_spec.base,
+        relationship: ipc_spec.relationship,
+        input: staged_path.to_string_lossy().into_owned(),
+        expected_digest: parquet_digest,
+        sql: if ipc_spec.sql.trim().is_empty() {
+            default_ipc_sql()
+        } else {
+            ipc_spec.sql
+        },
+        definition: ipc_spec.definition,
+    };
+    Ok(StagedIpc { spec, staged_path })
+}
+
+pub(super) async fn stage_update(
+    engine: &Engine,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<StagedIpc<UpdateSpec>> {
+    let spec_bytes = decode_spec_header(headers)?;
+    let ipc_spec: IpcUpdateSpec = serde_json::from_slice(&spec_bytes).map_err(|e| {
+        Error::refusal(
+            "invalid_spec",
+            format!("invalid UpdateSpec in X-Docspec-Spec header: {e}"),
+        )
+    })?;
+    let expected_digest =
+        resolve_expected_digest(headers, ipc_spec.replacements.digest.as_deref())?;
+    let (staged_path, parquet_digest) = stage_ipc_stream_to_parquet(
+        &engine.scratch_dir(),
+        &ipc_spec.dataset,
+        &ipc_spec.operation,
+        expected_digest.as_deref(),
+        body,
+        &engine.read_budget(),
+    )
+    .await?;
+    let spec = UpdateSpec {
+        dataset: ipc_spec.dataset,
+        operation: ipc_spec.operation,
+        definition: ipc_spec.definition,
+        base: ipc_spec.base,
+        keys: ipc_spec.keys,
+        replacements: InputSpec {
+            path: staged_path.to_string_lossy().into_owned(),
+            digest: parquet_digest,
+        },
+        relationship: ipc_spec.relationship,
+        deletions: ipc_spec.deletions,
+    };
+    Ok(StagedIpc { spec, staged_path })
+}
+
+fn decode_spec_header(headers: &HeaderMap) -> Result<Vec<u8>> {
+    if let Some(value) = headers.get("x-docspec-spec") {
+        let raw = value.to_str().map_err(|_| {
+            Error::refusal("invalid_spec", "X-Docspec-Spec header must be valid ASCII")
+        })?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "X-Docspec-Spec header cannot be empty",
+            ));
+        }
+        if trimmed.starts_with('{') {
+            return Ok(trimmed.as_bytes().to_vec());
+        }
+        return decode_base64(trimmed);
+    }
+    if let Some(value) = headers.get("x-docspec-spec-base64") {
+        let raw = value.to_str().map_err(|_| {
+            Error::refusal(
+                "invalid_spec",
+                "X-Docspec-Spec-Base64 header must be valid ASCII",
+            )
+        })?;
+        return decode_base64(raw.trim());
+    }
+    Err(Error::refusal(
+        "invalid_spec",
+        "Arrow IPC write stream requires an X-Docspec-Spec header",
+    ))
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>> {
+    fn val(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' | b'-' => Some(62),
+            b'/' | b'_' => Some(63),
+            _ => None,
+        }
+    }
+    let clean: Vec<u8> = input
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+        .collect();
+    if clean.is_empty() || clean.len() % 4 == 1 {
+        return Err(Error::refusal(
+            "invalid_spec",
+            "invalid base64 in X-Docspec-Spec header",
+        ));
+    }
+    let mut out = Vec::with_capacity((clean.len() * 3) / 4);
+    for chunk in clean.chunks(4) {
+        let b0 = val(chunk[0]).ok_or_else(|| {
+            Error::refusal("invalid_spec", "invalid base64 in X-Docspec-Spec header")
+        })?;
+        let b1 = val(chunk[1]).ok_or_else(|| {
+            Error::refusal("invalid_spec", "invalid base64 in X-Docspec-Spec header")
+        })?;
+        out.push((b0 << 2) | (b1 >> 4));
+        if chunk.len() > 2 {
+            let b2 = val(chunk[2]).ok_or_else(|| {
+                Error::refusal("invalid_spec", "invalid base64 in X-Docspec-Spec header")
+            })?;
+            out.push((b1 << 4) | (b2 >> 2));
+            if chunk.len() > 3 {
+                let b3 = val(chunk[3]).ok_or_else(|| {
+                    Error::refusal("invalid_spec", "invalid base64 in X-Docspec-Spec header")
+                })?;
+                out.push((b2 << 6) | b3);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn resolve_expected_digest(
+    headers: &HeaderMap,
+    spec_digest: Option<&str>,
+) -> Result<Option<String>> {
+    let header_digest = if let Some(value) = headers.get("x-docspec-input-blake3") {
+        let raw = value
+            .to_str()
+            .map_err(|_| {
+                Error::refusal(
+                    "input_digest_mismatch",
+                    "X-Docspec-Input-Blake3 header must be valid ASCII",
+                )
+            })?
+            .trim();
+        if raw.is_empty() {
+            return Err(Error::refusal(
+                "input_digest_mismatch",
+                "X-Docspec-Input-Blake3 header cannot be empty",
+            ));
+        }
+        Some(raw.to_owned())
+    } else {
+        None
+    };
+    let spec_digest = spec_digest.map(str::trim).filter(|s| !s.is_empty());
+    if let (Some(h), Some(s)) = (header_digest.as_deref(), spec_digest)
+        && h != s
+    {
+        return Err(Error::refusal(
+            "input_digest_mismatch",
+            "X-Docspec-Input-Blake3 header and spec expected digest disagree",
+        ));
+    }
+    Ok(header_digest.or_else(|| spec_digest.map(str::to_owned)))
+}
+
+struct TempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+struct HashingFileWriter {
+    file: std::fs::File,
+    hasher: blake3::Hasher,
+    written_bytes: u64,
+    max_bytes: u64,
+}
+
+impl Write for HashingFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let next = self
+            .written_bytes
+            .checked_add(buf.len() as u64)
+            .ok_or_else(|| std::io::Error::other("staged Parquet file size overflow"))?;
+        if next > self.max_bytes {
+            return Err(std::io::Error::other(
+                "staged Parquet file exceeds scratch storage allowance",
+            ));
+        }
+        let n = self.file.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.written_bytes += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+fn validate_ipc_schema(schema: &arrow::datatypes::Schema) -> Result<()> {
+    if schema.flattened_fields().iter().any(|field| {
+        matches!(
+            field.data_type(),
+            arrow::datatypes::DataType::Dictionary(..)
+        )
+    }) {
+        return Err(Error::refusal(
+            "unsupported_ipc_schema",
+            "dictionary state retention is not qualified for HTTP streaming",
+        ));
+    }
+    Ok(())
+}
+
+fn open_parquet_writer(
+    path: &Path,
+    schema: arrow::datatypes::SchemaRef,
+    max_bytes: u64,
+) -> Result<ArrowWriter<HashingFileWriter>> {
+    let file = std::fs::File::create(path)?;
+    let props = WriterProperties::builder()
+        .set_writer_version(WriterVersion::PARQUET_2_0)
+        .set_compression(Compression::ZSTD(
+            ZstdLevel::try_new(3).expect("valid zstd level"),
+        ))
+        .set_created_by("docspec-ipc".to_owned())
+        .build();
+    let writer = HashingFileWriter {
+        file,
+        hasher: blake3::Hasher::new(),
+        written_bytes: 0,
+        max_bytes,
+    };
+    ArrowWriter::try_new(writer, schema, Some(props))
+        .map_err(|e| Error::refusal("parquet_write", format!("failed opening staged Parquet: {e}")))
+}
+
+fn map_parquet_write_err(err: parquet::errors::ParquetError) -> Error {
+    let msg = err.to_string();
+    if msg.contains("exceeds scratch storage allowance") || msg.contains("size overflow") {
+        Error::refusal("disk_capacity", msg)
+    } else {
+        Error::refusal("parquet_write", format!("failed writing staged Parquet: {msg}"))
+    }
+}
+
+async fn stage_ipc_stream_to_parquet(
+    scratch_dir: &Path,
+    dataset: &Id,
+    operation: &Id,
+    expected_digest: Option<&str>,
+    body: Body,
+    budget: &Budget,
+) -> Result<(PathBuf, String)> {
+    std::fs::create_dir_all(scratch_dir)?;
+    let mut temp_guard = TempFileGuard::new(
+        scratch_dir.join(format!("ipc-stage-{}.parquet", uuid::Uuid::new_v4())),
+    );
+    let mut decoder = StreamDecoder::new();
+    let mut ipc_hasher = blake3::Hasher::new();
+    let mut total_ipc_bytes = 0u64;
+    let mut pre_batch_bytes: Option<Vec<u8>> = Some(Vec::new());
+    let mut writer: Option<ArrowWriter<HashingFileWriter>> = None;
+    let mut stream_schema: Option<arrow::datatypes::SchemaRef> = None;
+    let max_chunk_bytes = budget
+        .limits
+        .max_batch_bytes
+        .saturating_mul(2)
+        .max(budget.limits.max_metadata_bytes);
+
+    let mut data_stream = body.into_data_stream();
+    while let Some(chunk) = data_stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            Error::refusal(
+                "invalid_ipc_stream",
+                format!("failed reading HTTP Arrow IPC stream: {e}"),
+            )
+        })?;
+        if chunk.is_empty() {
+            continue;
+        }
+        if chunk.len() > max_chunk_bytes {
+            return Err(Error::refusal(
+                "oversized_batch",
+                "IPC input chunk exceeds the batch allowance",
+            ));
+        }
+        total_ipc_bytes = total_ipc_bytes
+            .checked_add(chunk.len() as u64)
+            .ok_or_else(|| {
+                Error::refusal("disk_capacity", "IPC input stream byte count overflowed")
+            })?;
+        if total_ipc_bytes > budget.limits.scratch_bytes {
+            return Err(Error::refusal(
+                "disk_capacity",
+                "IPC input stream exceeds scratch storage allowance",
+            ));
+        }
+        let _chunk_permit = budget.reserve(chunk.len())?;
+        ipc_hasher.update(&chunk);
+        if let Some(buf) = pre_batch_bytes.as_mut() {
+            if buf.len().saturating_add(chunk.len()) <= budget.limits.max_metadata_bytes {
+                buf.extend_from_slice(&chunk);
+            } else {
+                pre_batch_bytes = None;
+            }
+        }
+        let mut buffer = arrow::buffer::Buffer::from_slice_ref(&chunk);
+        while let Some(batch) = decoder.decode(&mut buffer).map_err(|e| {
+            Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+        })? {
+            pre_batch_bytes = None;
+            let batch_bytes = batch.get_array_memory_size();
+            if batch_bytes > budget.limits.max_batch_bytes {
+                return Err(Error::refusal(
+                    "oversized_batch",
+                    "IPC input exceeds the batch allowance",
+                ));
+            }
+            let _batch_permit = budget.reserve(batch_bytes.max(1))?;
+            if let Some(expected_schema) = &stream_schema {
+                if &batch.schema() != expected_schema {
+                    return Err(Error::refusal(
+                        "invalid_schema",
+                        "IPC batch differs from the declared stream schema",
+                    ));
+                }
+            } else {
+                validate_ipc_schema(&batch.schema())?;
+                stream_schema = Some(batch.schema());
+                writer = Some(open_parquet_writer(
+                    &temp_guard.path,
+                    batch.schema(),
+                    budget.limits.scratch_bytes,
+                )?);
+            }
+            writer
+                .as_mut()
+                .expect("writer initialized")
+                .write(&batch)
+                .map_err(map_parquet_write_err)?;
+        }
+    }
+    decoder.finish().map_err(|e| {
+        Error::refusal(
+            "invalid_ipc_stream",
+            format!("truncated or incomplete Arrow IPC stream: {e}"),
+        )
+    })?;
+
+    if writer.is_none() {
+        let raw = pre_batch_bytes.ok_or_else(|| {
+            Error::refusal(
+                "invalid_ipc_stream",
+                "Arrow IPC stream contained no schema or batches",
+            )
+        })?;
+        if raw.is_empty() {
+            return Err(Error::refusal(
+                "invalid_ipc_stream",
+                "Arrow IPC stream is empty",
+            ));
+        }
+        let mut reader = StreamReader::try_new(std::io::Cursor::new(&raw), None).map_err(|e| {
+            Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+        })?;
+        let schema = reader.schema();
+        validate_ipc_schema(&schema)?;
+        let mut out_writer =
+            open_parquet_writer(&temp_guard.path, schema, budget.limits.scratch_bytes)?;
+        for batch in &mut reader {
+            let batch = batch.map_err(|e| {
+                Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+            })?;
+            let batch_bytes = batch.get_array_memory_size();
+            if batch_bytes > budget.limits.max_batch_bytes {
+                return Err(Error::refusal(
+                    "oversized_batch",
+                    "IPC input exceeds the batch allowance",
+                ));
+            }
+            let _batch_permit = budget.reserve(batch_bytes.max(1))?;
+            out_writer.write(&batch).map_err(map_parquet_write_err)?;
+        }
+        writer = Some(out_writer);
+    }
+
+    let mut inner = writer
+        .expect("writer initialized")
+        .into_inner()
+        .map_err(map_parquet_write_err)?;
+    inner.file.flush()?;
+    inner.file.sync_all()?;
+    let parquet_digest = inner.hasher.finalize().to_hex().to_string();
+    let ipc_digest = ipc_hasher.finalize().to_hex().to_string();
+
+    if let Some(expected) = expected_digest
+        && expected != ipc_digest
+        && expected != parquet_digest
+    {
+        return Err(Error::refusal(
+            "input_digest_mismatch",
+            "supplied Arrow IPC stream does not match the expected BLAKE3 digest",
+        ));
+    }
+
+    let final_path = scratch_dir.join(format!("ipc-{dataset}-{operation}-{ipc_digest}.parquet"));
+    std::fs::rename(&temp_guard.path, &final_path)?;
+    temp_guard.disarm();
+    Ok((final_path, parquet_digest))
 }
 
 #[cfg(test)]

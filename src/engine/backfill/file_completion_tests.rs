@@ -93,12 +93,13 @@ async fn fixture(engine: &Engine) -> Fixture {
             .await
             .unwrap();
         let output = engine
-            .create_output(&dataset, &directory, expressions.native.clone())
+            .create_output_at(&dataset, &directory, expressions.native.clone())
             .await
             .unwrap();
         let mut completion = engine
             .compute_file(
                 &dataset,
+                &directory,
                 &scan,
                 object,
                 file.record_count(),
@@ -110,9 +111,10 @@ async fn fixture(engine: &Engine) -> Fixture {
         completion.source_metadata = Some(source.metadata.clone());
         completion.execution = Some(OriginalExecution {
             operation: request.operation().clone(),
-            declaration: origins::write(
+            declaration: origins::write_at(
+                &engine.inner.objects,
                 &dataset,
-                &directory.join("declaration.json"),
+                &directory.child("declaration.json").unwrap(),
                 &OriginalDeclaration {
                     processor: PROCESSOR.into(),
                     definition: spec.group_definition(),
@@ -120,6 +122,7 @@ async fn fixture(engine: &Engine) -> Fixture {
                 },
                 &engine.inner.lifecycle.budget,
             )
+            .await
             .unwrap(),
         });
         candidates.push(completion);

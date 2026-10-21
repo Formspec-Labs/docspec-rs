@@ -98,6 +98,8 @@ struct Inner {
     #[cfg(test)]
     initial_build_queries: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    identity_build_fast_path: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     routine_checks: std::sync::atomic::AtomicUsize,
     #[cfg(feature = "test-util")]
     scalar_reuse_pause: Mutex<Option<ScalarReusePause>>,
@@ -419,7 +421,13 @@ impl Engine {
         match request {
             OperationRequest::Build(_) if authority.selected.is_none() => Ok(()),
             OperationRequest::Update(_)
-                if authority.selected.as_ref().is_some_and(remote_source_only) =>
+            | OperationRequest::Refresh(_)
+            | OperationRequest::Evidence(_)
+            | OperationRequest::Backfill(_)
+                if authority
+                    .selected
+                    .as_ref()
+                    .is_none_or(|selected| selected.groups.contains_key("source")) =>
             {
                 Ok(())
             }
@@ -428,9 +436,12 @@ impl Engine {
     }
 
     async fn request_view(&self, request: &OperationRequest) -> Result<View> {
-        // Update requires an existing selected dataset; a remote refusal must
-        // not create a namespace or native lifecycle table for an unknown name.
-        if matches!(request, OperationRequest::Update(_)) {
+        // Update and Evidence require an existing selected dataset; a remote refusal
+        // must not create a namespace or native lifecycle table for an unknown name.
+        if matches!(
+            request,
+            OperationRequest::Update(_) | OperationRequest::Evidence(_)
+        ) {
             self.read_view(request.dataset()).await
         } else {
             self.inner.lifecycle.open(request.dataset()).await
@@ -439,8 +450,13 @@ impl Engine {
 
     fn check_request_backend(&self, request: &OperationRequest) -> Result<()> {
         self.require_data_work()?;
-        if matches!(request, OperationRequest::Update(_))
-            || matches!(request, OperationRequest::Build(build) if build.base.is_none() && build.relationship.as_ref().is_none_or(|relationship| matches!(relationship, SourceRelationship::Independent)))
+        if matches!(
+            request,
+            OperationRequest::Update(_)
+                | OperationRequest::Refresh(_)
+                | OperationRequest::Evidence(_)
+                | OperationRequest::Backfill(_)
+        ) || matches!(request, OperationRequest::Build(build) if build.base.is_none())
         {
             Ok(())
         } else {
@@ -479,6 +495,8 @@ impl Engine {
                 release_decodes: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 initial_build_queries: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                identity_build_fast_path: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 routine_checks: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(feature = "test-util")]
@@ -1176,7 +1194,9 @@ impl Engine {
                     if remote
                         && !matches!(
                             spec,
-                            OperationRequest::Build(_) | OperationRequest::Update(_)
+                            OperationRequest::Build(_)
+                                | OperationRequest::Update(_)
+                                | OperationRequest::Evidence(_)
                         )
                     {
                         return Err(locations::unsupported());
@@ -1268,7 +1288,7 @@ impl Engine {
                             && build.base.is_none()
                         {
                             (
-                                self.process_initial_build(build, operation, &admission)
+                                Box::pin(self.process_initial_build(build, operation, &admission))
                                     .await?,
                                 None,
                                 None,
@@ -1293,34 +1313,40 @@ impl Engine {
                                 };
                             let prepared = match spec {
                                 OperationRequest::Build(build) => {
-                                    self.process_build(build, directory.local_path()?, &admission)
-                                        .await?
+                                    Box::pin(self.process_build(
+                                        build,
+                                        directory.local_path()?,
+                                        &admission,
+                                    ))
+                                    .await?
                                 }
                                 OperationRequest::Update(update) => {
-                                    self.process_update(
+                                    Box::pin(self.process_update(
                                         update,
                                         &directory,
                                         &admission,
                                         update_source.as_ref(),
-                                    )
+                                    ))
                                     .await?
                                 }
                                 OperationRequest::Schema(schema) => {
-                                    self.process_schema(schema, directory.local_path()?, operation)
-                                        .await?
+                                    Box::pin(self.process_schema(
+                                        schema,
+                                        directory.local_path()?,
+                                        operation,
+                                    ))
+                                    .await?
                                 }
                                 OperationRequest::Evidence(evidence) => {
-                                    self.process_receipts(
-                                        evidence,
-                                        directory.local_path()?,
-                                        &admission,
+                                    Box::pin(
+                                        self.process_receipts(evidence, &directory, &admission),
                                     )
                                     .await?
                                 }
                                 OperationRequest::Refresh(refresh) => {
                                     Box::pin(self.process_refresh(
                                         refresh,
-                                        directory.local_path()?,
+                                        &directory,
                                         &admission,
                                         operation,
                                         update_source.as_ref(),
@@ -1513,8 +1539,14 @@ impl Engine {
                         let boundary = view.table.metadata_location_result()?.to_owned();
                         drop(guards);
                         prepared = Some(
-                            self.protect_admission(spec, boundary, base, update_source, decoding)
-                                .await?,
+                            Box::pin(self.protect_admission(
+                                spec,
+                                boundary,
+                                base,
+                                update_source,
+                                decoding,
+                            ))
+                            .await?,
                         );
                         continue;
                     };
@@ -1713,8 +1745,7 @@ impl Engine {
                         .transpose()?,
                 })
             } else if let Some(base) = &base {
-                self.inherit_receipts(spec, &operation, &processing, base, stop)
-                    .await?
+                Box::pin(self.inherit_receipts(spec, &operation, &processing, base, stop)).await?
             } else {
                 None
             };
@@ -1754,7 +1785,7 @@ impl Engine {
                         self.trust_current_readback(base, &mut checks).await?;
                     }
                     checks.table(&table, &lifecycle.budget).await?;
-                    verify_changes(
+                    Box::pin(verify_changes(
                         spec,
                         &table,
                         if evidence_only {
@@ -1764,10 +1795,10 @@ impl Engine {
                         },
                         &lifecycle.budget,
                         &mut checks,
-                    )
+                    ))
                     .await?;
                     if let Some(receipts) = &receipts {
-                        evidence::verify_prepared(
+                        Box::pin(evidence::verify_prepared(
                             spec,
                             &table,
                             base.as_ref().ok_or_else(|| {
@@ -1779,7 +1810,7 @@ impl Engine {
                             receipts,
                             &lifecycle.budget,
                             &mut checks,
-                        )
+                        ))
                         .await?;
                     }
                     if let Some(related) = &related {
@@ -1818,7 +1849,7 @@ impl Engine {
                 .await?
             };
             stop_after(stop, "validation")?;
-            self.prepare_changes(
+            Box::pin(self.prepare_changes(
                 spec,
                 &operation,
                 base.as_ref(),
@@ -1830,7 +1861,7 @@ impl Engine {
                 receipts
                     .as_ref()
                     .and_then(|receipts| receipts.changes.as_ref()),
-            )
+            ))
             .await?;
             let protection_view = lifecycle.open(spec.dataset()).await?;
             let mut readback_protections = self
@@ -2328,6 +2359,7 @@ impl Engine {
         ))
     }
 
+    #[cfg(test)]
     async fn reserve_attempt(
         &self,
         spec: &OperationRequest,
@@ -2527,16 +2559,6 @@ fn check_definition(authority: &Authority, spec: &OperationRequest) -> Result<()
         ));
     }
     Ok(())
-}
-fn remote_source_only(dataset: &DatasetPin) -> bool {
-    matches!(dataset.relationship, SourceRelationship::Independent)
-        && dataset.groups.len() == 1
-        && dataset.groups.contains_key("source")
-        && dataset.computed.is_empty()
-        && dataset.related.is_none()
-        && dataset.evidence.is_none()
-        && (matches!(&dataset.request, OperationRequest::Build(build) if build.base.is_none())
-            || matches!(&dataset.request, OperationRequest::Update(_)))
 }
 
 fn check_update_eligibility(authority: &Authority, request: &OperationRequest) -> Result<()> {
@@ -2872,7 +2894,12 @@ pub async fn verify_release_at(
     level: VerificationLevel,
 ) -> Result<VerificationReport> {
     let budget = Budget::new(limits)?;
-    let mut checks = verification::Checks::new(level);
+    #[cfg(feature = "remote")]
+    let objects = storage::remote::RemoteObjects::for_uri(&release.manifest.path)
+        .map_or(storage::Objects::Local, storage::Objects::Remote);
+    #[cfg(not(feature = "remote"))]
+    let objects = storage::Objects::Local;
+    let mut checks = verification::Checks::with_objects(level, objects);
     verification::verify_all(&[release], &budget, &mut checks).await?;
     Ok(checks.report)
 }
@@ -2957,7 +2984,8 @@ async fn check_release_available_with_checks(
 }
 
 async fn resolve_release(release: &ReleasePin, budget: &Budget) -> Result<()> {
-    resolve_release_with_objects(&storage::Objects::Local, release, budget).await
+    let objects = storage::Objects::for_path(&release.manifest.path);
+    resolve_release_with_objects(&objects, release, budget).await
 }
 
 async fn resolve_release_with_objects(

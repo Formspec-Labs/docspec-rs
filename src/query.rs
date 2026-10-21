@@ -525,8 +525,31 @@ fn scalar_to_primitive_literal(
         {
             Some(PrimitiveLiteral::String(s.clone()))
         }
+        (
+            ScalarValue::Binary(Some(b))
+            | ScalarValue::LargeBinary(Some(b))
+            | ScalarValue::FixedSizeBinary(_, Some(b)),
+            PrimitiveType::Binary,
+        ) if b.len() < crate::storage::STATISTICS_TRUNCATE_BYTES => {
+            Some(PrimitiveLiteral::Binary(b.clone()))
+        }
+        (ScalarValue::FixedSizeBinary(len, Some(b)), PrimitiveType::Fixed(expected_len))
+            if u64::try_from(*len).ok() == Some(*expected_len)
+                && b.len() < crate::storage::STATISTICS_TRUNCATE_BYTES =>
+        {
+            Some(PrimitiveLiteral::Binary(b.clone()))
+        }
         (ScalarValue::Int32(Some(v)), PrimitiveType::Int) => Some(PrimitiveLiteral::Int(*v)),
         (ScalarValue::Int64(Some(v)), PrimitiveType::Long) => Some(PrimitiveLiteral::Long(*v)),
+        (ScalarValue::UInt64(Some(v)), PrimitiveType::Decimal { precision: 20, scale: 0 }) => {
+            Some(PrimitiveLiteral::Int128(i128::from(*v)))
+        }
+        (
+            ScalarValue::Decimal128(Some(v), p, s),
+            PrimitiveType::Decimal { precision, scale },
+        ) if u32::from(*p) == *precision && *s >= 0 && (*s as u32) == *scale => {
+            Some(PrimitiveLiteral::Int128(*v))
+        }
         (ScalarValue::Date32(Some(v)), PrimitiveType::Date) => Some(PrimitiveLiteral::Int(*v)),
         (ScalarValue::Boolean(Some(v)), PrimitiveType::Boolean) => {
             Some(PrimitiveLiteral::Boolean(*v))

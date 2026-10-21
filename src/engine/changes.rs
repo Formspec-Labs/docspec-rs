@@ -46,6 +46,11 @@ pub async fn verify_applied_changes(
         return Err(invalid());
     }
     let budget = Budget::new(limits)?;
+    #[cfg(feature = "remote")]
+    let objects = storage::remote::RemoteObjects::for_uri(&after.manifest.path)
+        .map_or(storage::Objects::Local, storage::Objects::Remote);
+    #[cfg(not(feature = "remote"))]
+    let objects = storage::Objects::Local;
     resolve_release(before, &budget).await?;
     resolve_release(after, &budget).await?;
     if let OperationRequest::Refresh(spec) = &after.dataset.request
@@ -53,7 +58,7 @@ pub async fn verify_applied_changes(
     {
         incremental::qualify(spec, &before.dataset, after.dataset.eligibility, &budget).await?;
     }
-    let mut checks = verification::Checks::new(VerificationLevel::Deep);
+    let mut checks = verification::Checks::with_objects(VerificationLevel::Deep, objects);
     let source = after.dataset.groups.get("source").ok_or_else(invalid)?;
     checks.table(source, &budget).await?;
     verify_changes(

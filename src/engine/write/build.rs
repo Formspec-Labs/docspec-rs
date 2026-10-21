@@ -158,6 +158,23 @@ fn validate(
     Ok(native)
 }
 
+enum InitialSource {
+    DirectParquet {
+        path: String,
+        schema: arrow::datatypes::SchemaRef,
+    },
+    DataFrame(Box<DataFrame>),
+}
+
+impl InitialSource {
+    fn arrow_schema(&self) -> &arrow::datatypes::Schema {
+        match self {
+            Self::DirectParquet { schema, .. } => schema.as_ref(),
+            Self::DataFrame(frame) => frame.schema().as_arrow(),
+        }
+    }
+}
+
 impl Engine {
     pub(in crate::engine) async fn process_initial_build(
         &self,
@@ -182,13 +199,12 @@ impl Engine {
         } = if let Some(saved) = self.existing_candidate(spec, operation, input).await? {
             saved
         } else {
-            let frame = self.initial_frame(spec, input).await?;
-            let schema =
-                iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(frame.schema().as_arrow())?;
+            let source = self.initial_source(spec, input).await?;
+            let schema = storage::arrow_schema_to_schema_auto_assign_ids(source.arrow_schema())?;
             let pending = self
                 .reserve_candidate(spec, operation, input, schema)
                 .await?;
-            planned = Some(frame);
+            planned = Some(source);
             pending
         };
         let catalog = self.inner.lifecycle.catalog.as_ref();
@@ -230,11 +246,11 @@ impl Engine {
             crate::catalog::GuardedCatalog::new(catalog, &table)
                 .load_table(table.identifier())
                 .await?;
-            let frame = match planned {
-                Some(frame) => frame,
-                None => self.initial_frame(spec, input).await?,
+            let source = match planned {
+                Some(source) => source,
+                None => self.initial_source(spec, input).await?,
             };
-            self.write_output(&spec.dataset, table, frame).await
+            self.write_initial_source(&spec.dataset, table, source).await
         }
         .await;
         match result {
@@ -292,11 +308,49 @@ impl Engine {
         }))
     }
 
-    async fn initial_frame(&self, spec: &RunSpec, input: &ObjectRef) -> Result<DataFrame> {
+    async fn write_initial_source(
+        &self,
+        dataset: &Id,
+        table: Table,
+        source: InitialSource,
+    ) -> Result<Prepared> {
+        match source {
+            InitialSource::DirectParquet { path, .. } => {
+                let budget = &self.inner.lifecycle.budget;
+                let file = std::fs::File::open(&path)?;
+                let reader =
+                    parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?
+                        .with_batch_size(budget.limits.batch_rows)
+                        .build()?;
+                let stream = futures::stream::iter(reader.map(|batch| batch.map_err(Error::from)));
+                self.write_batch_stream(dataset, table, stream).await
+            }
+            InitialSource::DataFrame(frame) => self.write_output(dataset, table, *frame).await,
+        }
+    }
+
+    async fn initial_source(&self, spec: &RunSpec, input: &ObjectRef) -> Result<InitialSource> {
         #[cfg(test)]
         self.inner
             .initial_build_queries
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if !input.path.starts_with("s3://") {
+            let file = std::fs::File::open(&input.path)?;
+            let builder =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
+            let schema = builder.schema().clone();
+            if is_identity_source_projection(&spec.sql, schema.as_ref()) {
+                super::check_build_arrow_schema(schema.as_ref())?;
+                #[cfg(test)]
+                self.inner
+                    .identity_build_fast_path
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Ok(InitialSource::DirectParquet {
+                    path: input.path.clone(),
+                    schema,
+                });
+            }
+        }
         let context = self.context();
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
@@ -309,7 +363,7 @@ impl Engine {
             build_query(&context, &spec.sql).await?
         };
         check_build_fields(&frame)?;
-        Ok(frame)
+        Ok(InitialSource::DataFrame(Box::new(frame)))
     }
 
     async fn existing_candidate(

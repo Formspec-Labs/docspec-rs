@@ -160,7 +160,7 @@ impl Engine {
         operation: &OperationId,
         reason: &str,
     ) -> Result<Abandonment> {
-        self.require_local()?;
+        self.require_data_work()?;
         if reason.trim().is_empty() {
             return Err(Error::refusal(
                 "missing_reason",
@@ -174,6 +174,16 @@ impl Engine {
             return Err(Error::refusal(
                 "metadata_capacity",
                 "abandonment reason exceeds metadata allowance",
+            ));
+        }
+        if !lifecycle
+            .catalog
+            .table_exists(&crate::catalog::lifecycle_ident(dataset))
+            .await?
+        {
+            return Err(Error::refusal(
+                "no_operation",
+                "operation has not been admitted",
             ));
         }
         let view = lifecycle.open(dataset).await?;
@@ -258,7 +268,7 @@ impl Engine {
         &self,
         dataset: &Id,
     ) -> Result<crate::catalog::LifecycleCompactionResult> {
-        self.require_local()?;
+        self.require_data_work()?;
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let lifecycle = &self.inner.lifecycle;
@@ -628,15 +638,8 @@ impl Engine {
             .child(dataset.as_str())?
             .child(attempt.as_str())?;
         let protection_prefix = prefix.protection_prefix()?;
-        let dir = self
-            .inner
-            .retained
-            .local_path()?
-            .join(dataset.as_str())
-            .join(attempt.as_str());
-        std::fs::create_dir_all(&dir)?;
-        let archive_path = dir.join("succession-checkpoint.json");
-        let new_archive_path = archive_path.to_string_lossy().into_owned();
+        let archive_location = prefix.child("succession-checkpoint.json")?;
+        let new_archive_path = archive_location.as_string()?;
         let archive = SuccessionArchive {
             dataset: dataset.clone(),
             head: head_link.selected.clone(),
@@ -645,16 +648,21 @@ impl Engine {
             entries,
         };
         let archive_bytes = serde_json::to_vec(&archive)?;
-        if let Err(err) = std::fs::write(&archive_path, &archive_bytes) {
-            let _ = std::fs::remove_dir(&dir);
-            return Err(err.into());
-        }
         let archive_obj = ObjectRef {
             owner: dataset.clone(),
             path: new_archive_path.clone(),
             digest: blake3::hash(&archive_bytes).to_hex().to_string(),
             bytes: archive_bytes.len() as u64,
         };
+        self.inner
+            .objects
+            .create_candidate_metadata(
+                &archive_obj,
+                archive_bytes,
+                &self.inner.lifecycle.budget,
+                false,
+            )
+            .await?;
         let protection = Protection {
             id: attempt.clone(),
             consumer: dataset.clone(),

@@ -15,6 +15,8 @@ pub(in crate::engine) struct SourceFence {
     pub(in crate::engine) host: String,
     pub(in crate::engine) expires_millis: u64,
     pub(in crate::engine) closed: bool,
+    #[serde(default)]
+    pub(in crate::engine) epoch: u64,
 }
 
 pub(in crate::engine) fn validate_record(fence: &SourceFence) -> Result<()> {
@@ -32,9 +34,14 @@ pub(in crate::engine) fn validate_record(fence: &SourceFence) -> Result<()> {
 }
 
 impl SourceFence {
+    #[cfg(test)]
     fn live(&self, host: &str, now: u64) -> Result<bool> {
+        self.live_for(host, true, now)
+    }
+
+    fn live_for(&self, host: &str, require_host_match: bool, now: u64) -> Result<bool> {
         validate_record(self)?;
-        if self.host != host || self.closed || now >= self.expires_millis {
+        if (require_host_match && self.host != host) || self.closed || now >= self.expires_millis {
             return Ok(false);
         }
         if self.expires_millis - now > MAX_FENCE_MILLIS {
@@ -43,9 +50,20 @@ impl SourceFence {
         Ok(true)
     }
 
+    #[cfg(test)]
     fn exact_live(&self, expected: &Self, host: &str, now: u64) -> Result<()> {
+        self.exact_live_for(expected, host, true, now)
+    }
+
+    fn exact_live_for(
+        &self,
+        expected: &Self,
+        host: &str,
+        require_host_match: bool,
+        now: u64,
+    ) -> Result<()> {
         validate_record(expected)?;
-        if self != expected || !self.live(host, now)? {
+        if self != expected || !self.live_for(host, require_host_match, now)? {
             return Err(Error::refusal(
                 "source_fence_lost",
                 "source fence changed or expired; retry continuous cutover",
@@ -69,8 +87,9 @@ impl Engine {
 
     pub(in crate::engine) async fn check_source_intake(&self, view: &View) -> Result<()> {
         if let Some(fence) = self.source_fence(view).await?
-            && fence.live(
+            && fence.live_for(
                 &self.inner.host.instance,
+                self.inner.owned_catalog,
                 self.inner.host.monotonic_millis()?,
             )?
         {
@@ -113,12 +132,6 @@ impl Engine {
         millis: u64,
         intent: Option<&crate::engine::backfill::continuous::Intent>,
     ) -> Result<SourceFence> {
-        if !self.inner.owned_catalog {
-            return Err(Error::refusal(
-                "source_fence_catalog_unqualified",
-                "source fencing requires the owned embedded catalog",
-            ));
-        }
         if millis == 0 || millis > MAX_FENCE_MILLIS {
             return Err(Error::refusal(
                 "invalid_source_fence_budget",
@@ -127,38 +140,61 @@ impl Engine {
         }
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(dataset).await?;
-        if let Some(intent) = intent {
-            // Parent termination and fence acquisition share this lock and view.
-            self.check_continuous_fence_owner(&view, intent).await?;
-        }
-        let now = self.inner.host.monotonic_millis()?;
-        if let Some(fence) = self.source_fence(&view).await?
-            && fence.live(&self.inner.host.instance, now)?
-        {
-            if &fence.owner == owner {
-                return Ok(fence);
+        for attempt in 0..4 {
+            let view = self.inner.lifecycle.open(dataset).await?;
+            if let Some(intent) = intent {
+                // Parent termination and fence acquisition share this lock and view.
+                self.check_continuous_fence_owner(&view, intent).await?;
             }
-            return Err(Error::refusal(
-                "source_fenced",
-                "another continuous cutover owns the source fence; retry after it closes or expires",
-            ));
+            let now = self.inner.host.monotonic_millis()?;
+            let previous = self.source_fence(&view).await?;
+            if let Some(fence) = &previous
+                && fence.live_for(&self.inner.host.instance, self.inner.owned_catalog, now)?
+            {
+                if &fence.owner == owner {
+                    return Ok(fence.clone());
+                }
+                return Err(Error::refusal(
+                    "source_fenced",
+                    "another continuous cutover owns the source fence; retry after it closes or expires",
+                ));
+            }
+            let epoch = previous
+                .as_ref()
+                .map_or(Some(1), |prev| prev.epoch.checked_add(1))
+                .ok_or_else(|| invalid_fence("source fence epoch overflow"))?;
+            let fence = SourceFence {
+                dataset: dataset.clone(),
+                owner: owner.clone(),
+                token: uuid::Uuid::new_v4().to_string(),
+                host: self.inner.host.instance.clone(),
+                expires_millis: now
+                    .checked_add(millis)
+                    .ok_or_else(|| invalid_fence("source fence monotonic deadline overflow"))?,
+                closed: false,
+                epoch,
+            };
+            match self
+                .inner
+                .lifecycle
+                .commit(&view, vec![record("source-fence", &fence)?])
+                .await
+            {
+                Ok(_) => return Ok(fence),
+                Err(error)
+                    if !self.inner.owned_catalog
+                        && attempt < 3
+                        && matches!(
+                            error.code(),
+                            "stale_authority" | "catalog_conflict" | "catalog"
+                        ) => {}
+                Err(error) => return Err(error),
+            }
         }
-        let fence = SourceFence {
-            dataset: dataset.clone(),
-            owner: owner.clone(),
-            token: uuid::Uuid::new_v4().to_string(),
-            host: self.inner.host.instance.clone(),
-            expires_millis: now
-                .checked_add(millis)
-                .ok_or_else(|| invalid_fence("source fence monotonic deadline overflow"))?,
-            closed: false,
-        };
-        self.inner
-            .lifecycle
-            .commit(&view, vec![record("source-fence", &fence)?])
-            .await?;
-        Ok(fence)
+        Err(Error::refusal(
+            "source_fenced",
+            "concurrent source fence modification conflicted; retry after it settles",
+        ))
     }
 
     /// Checks the exact live fence against the caller's locked selecting view.
@@ -174,9 +210,10 @@ impl Engine {
             .source_fence(view)
             .await?
             .ok_or_else(|| Error::refusal("source_fence_lost", "source fence is missing"))?;
-        current.exact_live(
+        current.exact_live_for(
             fence,
             &self.inner.host.instance,
+            self.inner.owned_catalog,
             self.inner.host.monotonic_millis()?,
         )
     }
@@ -198,20 +235,33 @@ impl Engine {
         validate_record(fence)?;
         let lock = self.lock(&fence.dataset).await;
         let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(&fence.dataset).await?;
-        let Some(current) = self.source_fence(&view).await? else {
-            return Ok(());
-        };
-        if current != *fence
-            || !current.live(
-                &self.inner.host.instance,
-                self.inner.host.monotonic_millis()?,
-            )?
-        {
-            return Ok(());
+        for attempt in 0..4 {
+            let view = self.inner.lifecycle.open(&fence.dataset).await?;
+            let Some(current) = self.source_fence(&view).await? else {
+                return Ok(());
+            };
+            if current != *fence
+                || !current.live_for(
+                    &self.inner.host.instance,
+                    self.inner.owned_catalog,
+                    self.inner.host.monotonic_millis()?,
+                )?
+            {
+                return Ok(());
+            }
+            let closed = self.closed_source_fence_record(&view, fence).await?;
+            match self.inner.lifecycle.commit(&view, vec![closed]).await {
+                Ok(_) => return Ok(()),
+                Err(error)
+                    if !self.inner.owned_catalog
+                        && attempt < 3
+                        && matches!(
+                            error.code(),
+                            "stale_authority" | "catalog_conflict" | "catalog"
+                        ) => {}
+                Err(error) => return Err(error),
+            }
         }
-        let closed = self.closed_source_fence_record(&view, fence).await?;
-        self.inner.lifecycle.commit(&view, vec![closed]).await?;
         Ok(())
     }
 }
@@ -232,6 +282,7 @@ mod tests {
             host: uuid::Uuid::new_v4().to_string(),
             expires_millis: 100,
             closed: false,
+            epoch: 1,
         }
     }
 
@@ -355,11 +406,95 @@ mod tests {
             .acquire_source_fence(&dataset, &owner, MAX_FENCE_MILLIS)
             .await
             .unwrap();
+        assert_eq!(first.epoch, 1);
+        assert_eq!(successor.epoch, 2);
         assert_ne!(first.host, successor.host);
         assert_ne!(first.token, successor.token);
         engine.close_source_fence(&first).await.unwrap();
         let view = engine.inner.lifecycle.open(&dataset).await.unwrap();
         assert_eq!(engine.source_fence(&view).await.unwrap(), Some(successor));
         engine.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shared_catalog_distributed_fence_advances_epoch_and_blocks_competing_workers() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(&root.path().join("shared-catalog"))
+            .await
+            .unwrap();
+        let worker_a = Engine::with_catalog(
+            root.path().join("worker-a"),
+            catalog.clone(),
+            limits(),
+        )
+        .await
+        .unwrap();
+        let worker_b = Engine::with_catalog(
+            root.path().join("worker-b"),
+            catalog,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let dataset = Id::new("dataset").unwrap();
+        let owner_a = Id::new("parent-a").unwrap();
+        let owner_b = Id::new("parent-b").unwrap();
+
+        let first = worker_a
+            .acquire_source_fence(&dataset, &owner_a, MAX_FENCE_MILLIS)
+            .await
+            .unwrap();
+        assert_eq!(first.epoch, 1);
+        // Same logical owner on another worker adopts the active distributed fence.
+        let adopted = worker_b
+            .acquire_source_fence(&dataset, &owner_a, 1)
+            .await
+            .unwrap();
+        assert_eq!(adopted, first);
+        // Competing owner and source intake on worker B are blocked while fence is live.
+        assert_eq!(
+            worker_b
+                .acquire_source_fence(&dataset, &owner_b, MAX_FENCE_MILLIS)
+                .await
+                .unwrap_err()
+                .code(),
+            "source_fenced"
+        );
+        let view_b = worker_b.inner.lifecycle.open(&dataset).await.unwrap();
+        assert_eq!(
+            worker_b.check_source_intake(&view_b).await.unwrap_err().code(),
+            "source_fenced"
+        );
+        worker_b.check_source_fence(&view_b, &first).await.unwrap();
+
+        // Worker B closes the adopted fence; Worker B can then acquire a new epoch.
+        worker_b.close_source_fence(&first).await.unwrap();
+        let view_a = worker_a.inner.lifecycle.open(&dataset).await.unwrap();
+        worker_a.check_source_intake(&view_a).await.unwrap();
+        assert_eq!(
+            worker_a
+                .check_source_fence(&view_a, &first)
+                .await
+                .unwrap_err()
+                .code(),
+            "source_fence_lost"
+        );
+
+        let second = worker_b
+            .acquire_source_fence(&dataset, &owner_b, MAX_FENCE_MILLIS)
+            .await
+            .unwrap();
+        assert_eq!(second.epoch, 2);
+        assert_ne!(second.token, first.token);
+        // Stale close from worker A with epoch 1 cannot close epoch 2.
+        worker_a.close_source_fence(&first).await.unwrap();
+        let view_a = worker_a.inner.lifecycle.open(&dataset).await.unwrap();
+        assert_eq!(
+            worker_a.source_fence(&view_a).await.unwrap(),
+            Some(second.clone())
+        );
+        worker_b.close_source_fence(&second).await.unwrap();
+        worker_a.shutdown().await.unwrap();
+        worker_b.shutdown().await.unwrap();
     }
 }

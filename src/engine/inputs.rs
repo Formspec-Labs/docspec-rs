@@ -161,7 +161,7 @@ impl Engine {
     /// Refuses unknown or invalidated versions, retired, unsealed or mixed generations,
     /// rebound identities, missing manifests, and exhausted metadata capacity.
     pub async fn capture_inputs(&self, inputs: &BTreeMap<Id, VersionRef>) -> Result<InputCoverage> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(inputs)?;
         let inputs = inputs.clone();
         self.admit_work(memory, move |engine| async move {
@@ -311,16 +311,10 @@ pub async fn verify_input_coverage(coverage: &InputCoverage, limits: Limits) -> 
     validate_members(&coverage.inputs)?;
     let mut relationships = BTreeMap::new();
     for (dataset, version) in &coverage.inputs {
+        let objects = storage::Objects::for_path(&version.manifest.path);
         relationships.insert(
             dataset.clone(),
-            read_relationship(
-                &storage::Objects::Local,
-                version,
-                &budget,
-                &mut bytes,
-                &memory,
-            )
-            .await?,
+            read_relationship(&objects, version, &budget, &mut bytes, &memory).await?,
         );
     }
     check_relationships(coverage, &relationships)

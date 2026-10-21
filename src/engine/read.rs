@@ -30,7 +30,7 @@ impl Engine {
         group: &str,
         columns: Option<Vec<String>>,
     ) -> Result<SendableRecordBatchStream> {
-        self.require_group(group)?;
+        self.require_data_work()?;
         let memory = self.request_memory(&(release, group, &columns))?;
         let release = release.clone();
         let group = group.to_owned();
@@ -60,7 +60,7 @@ impl Engine {
     /// # Errors
     /// Refuses absent evidence, invalid retained releases, or exhausted reader capacity.
     pub async fn read_evidence(&self, release: &ReleasePin) -> Result<SendableRecordBatchStream> {
-        self.require_local()?;
+        self.require_data_work()?;
         let memory = self.request_memory(release)?;
         let release = release.clone();
         self.admit_stream(memory, move |engine| async move {
@@ -68,7 +68,12 @@ impl Engine {
             let related = release.dataset.related.as_ref().ok_or_else(|| {
                 Error::refusal("missing_evidence", "release has no contributor relation")
             })?;
-            read_pin(&related.evidence, &engine.inner.lifecycle.budget).await
+            read_pin_with_objects(
+                &engine.inner.objects,
+                &related.evidence,
+                &engine.inner.lifecycle.budget,
+            )
+            .await
         })
         .await
     }
@@ -153,6 +158,10 @@ impl Engine {
     pub(crate) fn read_budget(&self) -> Budget {
         self.inner.lifecycle.budget.clone()
     }
+
+    pub(crate) fn scratch_dir(&self) -> PathBuf {
+        self.inner.root.join("scratch")
+    }
 }
 
 /// Streams a retained field group without requiring its producing catalog.
@@ -195,7 +204,8 @@ pub async fn read_evidence(
 }
 
 pub(super) async fn read_pin(pin: &TablePin, budget: &Budget) -> Result<SendableRecordBatchStream> {
-    read_pin_with_objects(&storage::Objects::Local, pin, budget).await
+    let objects = storage::Objects::for_path(&pin.metadata.path);
+    read_pin_with_objects(&objects, pin, budget).await
 }
 
 pub(super) async fn read_pin_with_objects(
@@ -325,10 +335,15 @@ pub(super) async fn read_keys_with_objects(
             | arrow::datatypes::DataType::LargeUtf8
             | arrow::datatypes::DataType::Int32
             | arrow::datatypes::DataType::Int64
+            | arrow::datatypes::DataType::UInt64
+            | arrow::datatypes::DataType::Decimal128(_, 0)
+            | arrow::datatypes::DataType::Binary
+            | arrow::datatypes::DataType::LargeBinary
+            | arrow::datatypes::DataType::FixedSizeBinary(_)
     ) {
         return Err(Error::refusal(
             "invalid_key_read",
-            "key read requires a scalar Utf8, Int32, or Int64 key column",
+            "key read requires a scalar Utf8, Int32, Int64, UInt64/Decimal128, or Binary key column",
         ));
     }
     let out_indices: Vec<usize> = match &spec.columns {
@@ -434,6 +449,29 @@ pub(super) async fn read_keys_with_objects(
 enum KeyTargets {
     Strings(BTreeSet<String>),
     Ints(BTreeSet<i64>),
+    Int128s(BTreeSet<i128>),
+    Binaries(BTreeSet<Vec<u8>>),
+}
+
+fn parse_binary_key_candidates(value: &str) -> Vec<Vec<u8>> {
+    let mut out = vec![value.as_bytes().to_vec()];
+    let hex_str = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .or_else(|| value.strip_prefix("hex:"))
+        .or_else(|| value.strip_prefix("HEX:"))
+        .unwrap_or(value);
+    if !hex_str.is_empty()
+        && hex_str.len().is_multiple_of(2)
+        && let Some(decoded) = (0..hex_str.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16).ok())
+            .collect::<Option<Vec<u8>>>()
+        && !out.contains(&decoded)
+    {
+        out.push(decoded);
+    }
+    out
 }
 
 impl KeyTargets {
@@ -448,6 +486,17 @@ impl KeyTargets {
                     .map(i64::from)
                     .collect(),
             ),
+            DataType::UInt64 | DataType::Decimal128(_, 0) => {
+                Self::Int128s(values.iter().filter_map(|v| v.parse().ok()).collect())
+            }
+            DataType::Binary | DataType::LargeBinary | DataType::FixedSizeBinary(_) => {
+                Self::Binaries(
+                    values
+                        .iter()
+                        .flat_map(|v| parse_binary_key_candidates(v))
+                        .collect(),
+                )
+            }
             _ => Self::Strings(values.iter().cloned().collect()),
         }
     }
@@ -456,6 +505,8 @@ impl KeyTargets {
         match self {
             Self::Strings(set) => set.is_empty(),
             Self::Ints(set) => set.is_empty(),
+            Self::Int128s(set) => set.is_empty(),
+            Self::Binaries(set) => set.is_empty(),
         }
     }
 
@@ -491,6 +542,12 @@ impl KeyTargets {
                     _ => true,
                 }
             }
+            (Self::Int128s(set), PrimitiveLiteral::Int128(low), PrimitiveLiteral::Int128(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
+            (Self::Binaries(set), PrimitiveLiteral::Binary(low), PrimitiveLiteral::Binary(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
             _ => true,
         }
     }
@@ -503,7 +560,8 @@ fn filter_batch_by_keys(
     out_indices: &[usize],
 ) -> Result<RecordBatch> {
     use arrow::array::{
-        Array, BooleanArray, Int32Array, Int64Array, LargeStringArray, StringArray,
+        Array, BinaryArray, BooleanArray, Decimal128Array, FixedSizeBinaryArray, Int32Array,
+        Int64Array, LargeBinaryArray, LargeStringArray, StringArray, UInt64Array,
     };
     let col = batch.column(key_idx);
     let any = col.as_any();
@@ -532,6 +590,42 @@ fn filter_batch_by_keys(
             } else if let Some(arr) = any.downcast_ref::<Int32Array>() {
                 arr.iter()
                     .map(|v| Some(v.is_some_and(|v| set.contains(&i64::from(v)))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Int128s(set) => {
+            if let Some(arr) = any.downcast_ref::<Decimal128Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<UInt64Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&i128::from(v)))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Binaries(set) => {
+            if let Some(arr) = any.downcast_ref::<BinaryArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<LargeBinaryArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<FixedSizeBinaryArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
                     .collect()
             } else {
                 return Err(Error::refusal(

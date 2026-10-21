@@ -15,6 +15,23 @@ pub(crate) enum Objects {
 }
 
 impl Objects {
+    pub(crate) fn for_path(path: &str) -> Self {
+        #[cfg(feature = "remote")]
+        if let Some(objects) = super::remote::RemoteObjects::for_uri(path) {
+            return Self::Remote(objects);
+        }
+        let _ = path;
+        Self::Local
+    }
+
+    pub(crate) fn file_io(&self) -> iceberg::io::FileIO {
+        match self {
+            Self::Local => iceberg::io::FileIO::new_with_fs(),
+            #[cfg(feature = "remote")]
+            Self::Remote(objects) => objects.file_io(),
+        }
+    }
+
     // A selected immutable pin supplies identities; this backend supplies read
     // scope and credentials, never ownership or a replacement table head.
     pub(crate) async fn open_pin(
@@ -452,7 +469,7 @@ impl Objects {
         }
     }
 
-    pub(super) fn is_remote(&self) -> bool {
+    pub(crate) fn is_remote(&self) -> bool {
         match self {
             Self::Local => false,
             #[cfg(feature = "remote")]
