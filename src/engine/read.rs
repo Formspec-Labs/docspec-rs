@@ -17,8 +17,21 @@ impl Engine {
         release: &ReleasePin,
         group: &str,
     ) -> Result<SendableRecordBatchStream> {
+        self.read_group_projected(release, group, None).await
+    }
+
+    /// Streams one retained field group from an exact release with optional column projection.
+    ///
+    /// # Errors
+    /// Refuses unknown groups/columns, invalid retained releases, or exhausted reader capacity.
+    pub async fn read_group_projected(
+        &self,
+        release: &ReleasePin,
+        group: &str,
+        columns: Option<Vec<String>>,
+    ) -> Result<SendableRecordBatchStream> {
         self.require_group(group)?;
-        let memory = self.request_memory(&(release, group))?;
+        let memory = self.request_memory(&(release, group, &columns))?;
         let release = release.clone();
         let group = group.to_owned();
         self.admit_stream(memory, move |engine| async move {
@@ -29,7 +42,13 @@ impl Engine {
             let pin = engine
                 .representation_pin(&view, &release.id, &group, canonical)
                 .await?;
-            read_pin_with_objects(&engine.inner.objects, &pin, &engine.inner.lifecycle.budget).await
+            read_pin_projected_with_objects(
+                &engine.inner.objects,
+                &pin,
+                columns.as_deref(),
+                &engine.inner.lifecycle.budget,
+            )
+            .await
         })
         .await
     }
@@ -184,13 +203,63 @@ pub(super) async fn read_pin_with_objects(
     pin: &TablePin,
     budget: &Budget,
 ) -> Result<SendableRecordBatchStream> {
+    read_pin_projected_with_objects(objects, pin, None, budget).await
+}
+
+pub(super) async fn read_pin_projected_with_objects(
+    objects: &storage::Objects,
+    pin: &TablePin,
+    columns: Option<&[String]>,
+    budget: &Budget,
+) -> Result<SendableRecordBatchStream> {
     let table = objects.open_pin(pin, budget).await?;
-    let schema = storage::identity::public_schema(&table)?;
-    let stream = storage::read_batches(&table, budget)
+    let public_schema = storage::identity::public_schema(&table)?;
+    let Some(cols) = columns else {
+        let stream = storage::read_batches(&table, budget)
+            .await?
+            .and_then(|batch| async move { storage::identity::public_batch(batch) })
+            .map_err(|error| datafusion::error::DataFusionError::External(Box::new(error)));
+        return Ok(Box::pin(RecordBatchStreamAdapter::new(public_schema, stream)));
+    };
+    if cols.is_empty()
+        || cols
+            .iter()
+            .any(|c| c.is_empty() || c.to_ascii_lowercase().starts_with("__docspec_"))
+        || cols.iter().collect::<BTreeSet<_>>().len() != cols.len()
+    {
+        return Err(Error::refusal(
+            "invalid_projection",
+            "requested columns must be distinct public columns",
+        ));
+    }
+    let public_indices = cols
+        .iter()
+        .map(|name| {
+            public_schema.index_of(name).map_err(|_| {
+                Error::refusal(
+                    "invalid_projection",
+                    "requested column is absent from the group schema",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let out_schema = Arc::new(public_schema.project(&public_indices)?);
+    let read_schema = storage::schema::read_schema(&table)?;
+    let read_indices = cols
+        .iter()
+        .map(|name| {
+            read_schema.index_of(name).map_err(|_| {
+                Error::refusal(
+                    "invalid_projection",
+                    "requested column is absent from the physical read schema",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let stream = storage::read_projected_batches(&table, budget, Some(&read_indices))
         .await?
-        .and_then(|batch| async move { storage::identity::public_batch(batch) })
         .map_err(|error| datafusion::error::DataFusionError::External(Box::new(error)));
-    Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    Ok(Box::pin(RecordBatchStreamAdapter::new(out_schema, stream)))
 }
 
 /// Streams a verified physical representation without requiring its producer.

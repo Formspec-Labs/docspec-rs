@@ -978,11 +978,24 @@ async fn read_export(
     )
 }
 
+#[derive(serde::Deserialize, Default)]
+struct GroupReadQuery {
+    #[serde(default)]
+    columns: Option<String>,
+}
+
 async fn read_group(
     State(engine): State<Engine>,
     Path((dataset, version, group)): Path<(String, String, String)>,
+    axum::extract::Query(query): axum::extract::Query<GroupReadQuery>,
 ) -> Result<Response, HttpError> {
-    read(engine, dataset, version, ReadKind::Group(group)).await
+    let columns = query.columns.map(|raw| {
+        raw.split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    });
+    read(engine, dataset, version, ReadKind::Group(group, columns)).await
 }
 
 async fn read_keys(
@@ -1002,7 +1015,7 @@ async fn read_evidence(
 
 enum ReadKind {
     Combined,
-    Group(String),
+    Group(String, Option<Vec<String>>),
     Keys(crate::model::KeyReadSpec),
     Evidence,
     Receipts,
@@ -1032,7 +1045,11 @@ async fn read(
         .release(&Id::new(dataset)?, &Id::new(version)?)
         .await?;
     let batches = match kind {
-        ReadKind::Group(group) => engine.read_group(&release, &group).await?,
+        ReadKind::Group(group, columns) => {
+            engine
+                .read_group_projected(&release, &group, columns)
+                .await?
+        }
         ReadKind::Keys(spec) => engine.read_keys(&release, &spec).await?,
         ReadKind::Combined => engine.read_combined(&release).await?,
         ReadKind::Evidence => engine.read_evidence(&release).await?,

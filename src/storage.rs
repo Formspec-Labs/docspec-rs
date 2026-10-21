@@ -19,7 +19,7 @@ mod scan_metrics;
 #[cfg(any(test, feature = "test-util"))]
 #[doc(inline)]
 pub use scan_metrics::{NativeScanObservation, NativeScanSample};
-mod schema;
+pub(crate) mod schema;
 mod selection;
 pub(crate) use selection::reserve_projection;
 mod tables;

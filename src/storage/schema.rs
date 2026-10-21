@@ -14,7 +14,7 @@ use iceberg::{
 use std::sync::Arc;
 
 /// Qualifies top-level renames, reorderings, removals and nullable additions.
-pub(super) fn read_schema(table: &Table) -> Result<SchemaRef> {
+pub(crate) fn read_schema(table: &Table) -> Result<SchemaRef> {
     let current = table.metadata().current_schema();
     super::defaults::validate(current)?;
     // This virtual ID cannot also identify a nested physical field.
