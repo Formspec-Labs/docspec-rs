@@ -339,12 +339,29 @@ pub struct JoinTransform {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AggregateFunction {
     CountRows,
-    Count { field: String },
-    CountDistinct { field: String },
-    CollectSet { field: String },
-    Sum { field: String },
-    Min { field: String },
-    Max { field: String },
+    Count {
+        field: String,
+    },
+    CountDistinct {
+        field: String,
+    },
+    /// Collects sorted distinct non-null values into a single list row per group.
+    ///
+    /// Materializes `O(distinct)` values per group within a single output row
+    /// (bounded by `Limits::max_batch_bytes`), unlike [`Self::CountDistinct`],
+    /// which emits only a scalar count.
+    CollectSet {
+        field: String,
+    },
+    Sum {
+        field: String,
+    },
+    Min {
+        field: String,
+    },
+    Max {
+        field: String,
+    },
 }
 
 /// One named aggregate output.
@@ -1235,6 +1252,9 @@ pub struct CertifiedChanges {
 /// Counts observed while discovering and writing a candidate; no reporting scan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WriteMetrics {
+    /// Native file decode passes executed (`files_probed + files_rewritten` for keyed
+    /// replacements, where each affected file is decoded once for key probing and once
+    /// for full-row rewriting).
     pub files_scanned: u64,
     pub files_reused: u64,
     pub data_files_written: u64,

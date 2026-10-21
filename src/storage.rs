@@ -1007,6 +1007,7 @@ pub(crate) fn validate_partition_tuple(
 ///
 /// Refuses specs with more than one month field: choosing the first would prune
 /// by an arbitrary column.
+#[cfg(test)]
 pub(crate) fn data_file_month_partition(
     spec: &iceberg::spec::PartitionSpec,
     file: &DataFile,
@@ -1037,7 +1038,7 @@ pub(crate) fn data_file_month_partition(
 ///
 /// A bounded range on a table without exactly one month partition field is refused
 /// rather than answered with an empty (and therefore misleading) file set.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) async fn snapshot_files_for_month_range(
     table: &Table,
     min_month: Option<i32>,

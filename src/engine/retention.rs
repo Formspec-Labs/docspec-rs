@@ -285,6 +285,9 @@ impl Engine {
                         let _ = std::fs::remove_dir(parent);
                     }
                 }
+                if self.inner.retained.is_local() {
+                    self.reclaim_superseded_dataset_objects(dataset).await?;
+                }
                 Ok(result)
             }
             Err(err) => {
@@ -297,6 +300,58 @@ impl Engine {
                 Err(err)
             }
         }
+    }
+
+    async fn reclaim_superseded_dataset_objects(&self, dataset: &Id) -> Result<()> {
+        let (live_paths, protected_prefixes) = self.live_retained_closure().await?;
+        let ident = crate::catalog::lifecycle_ident(dataset);
+        let tables = self
+            .inner
+            .lifecycle
+            .catalog
+            .list_tables(ident.namespace())
+            .await?;
+        for native_ident in tables {
+            if native_ident == ident || !native_ident.name().starts_with("data_") {
+                continue;
+            }
+            let Ok(native) = self.inner.lifecycle.catalog.load_table(&native_ident).await else {
+                continue;
+            };
+            let Ok(metadata_loc) = native.metadata_location_result() else {
+                continue;
+            };
+            if live_paths.contains(metadata_loc)
+                || is_protected_path(metadata_loc, &protected_prefixes)
+            {
+                continue;
+            }
+            let Ok(files) = self
+                .inner
+                .objects
+                .snapshot_files(&native, &self.inner.lifecycle.budget)
+                .await
+            else {
+                let _ = self.inner.lifecycle.catalog.drop_table(&native_ident).await;
+                continue;
+            };
+            let all_live = !files.paths.is_empty()
+                && files.paths.iter().all(|path| {
+                    live_paths.contains(path) || is_protected_path(path, &protected_prefixes)
+                });
+            if !all_live {
+                let _ = self.inner.lifecycle.catalog.drop_table(&native_ident).await;
+            }
+        }
+
+        let dataset_objects_dir = self.inner.retained.local_path()?.join(dataset.as_str());
+        self.inner
+            .lifecycle
+            .budget
+            .blocking(move || {
+                reclaim_unreferenced_tree(&dataset_objects_dir, &live_paths, &protected_prefixes)
+            })
+            .await
     }
 
     async fn plan_succession_checkpoint(
@@ -649,7 +704,10 @@ fn collect_obsolete_lifecycle_keys(
             continue;
         };
         if rows.contains_key(&format!("result/{op}")) {
-            if Some(&op) != selected_id.as_ref() {
+            if Some(&op) != selected_id.as_ref()
+                && !rows.contains_key(&format!("availability-retired/{op}"))
+                && !rows.contains_key(&format!("operation-retired/{op}"))
+            {
                 completed_non_selected.insert(op);
             }
         } else if !rows.contains_key(&format!("abandoned/{op}")) {
@@ -683,6 +741,17 @@ fn collect_obsolete_lifecycle_keys(
         }
     }
 
+    let is_obsolete_op = |op: &Id| -> bool {
+        if Some(op) == selected_id.as_ref()
+            || incomplete_ops.contains(op)
+            || rows.contains_key(&format!("availability-retired/{op}"))
+            || rows.contains_key(&format!("operation-retired/{op}"))
+        {
+            return false;
+        }
+        completed_non_selected.contains(op) || !rows.contains_key(&format!("operation/{op}"))
+    };
+
     for (key, _, json) in rows.prefix("phase/") {
         if key.starts_with("phase/backfill/") {
             continue;
@@ -701,8 +770,7 @@ fn collect_obsolete_lifecycle_keys(
             continue;
         }
         if let Ok(phase) = serde_json::from_str::<PhaseResult>(json)
-            && completed_non_selected.contains(&phase.operation)
-            && !incomplete_ops.contains(&phase.operation)
+            && is_obsolete_op(&phase.operation)
         {
             candidate_keys.insert(key.to_owned());
         }
@@ -722,7 +790,108 @@ fn collect_obsolete_lifecycle_keys(
         }
         remove_keys.insert(key);
     }
+
+    for (key, _, json) in rows.prefix("protection/") {
+        if protected_keys.contains(key) {
+            continue;
+        }
+        let bkey = owners::binding_key(key);
+        if protected_keys.contains(&bkey) {
+            continue;
+        }
+        let Ok(protection) = serde_json::from_str::<Protection>(json) else {
+            continue;
+        };
+        let Some((op_str, kind)) = protection.purpose.split_once('/') else {
+            continue;
+        };
+        if !(kind == "admission"
+            || kind == "processing"
+            || kind == "release"
+            || kind.starts_with("backfill/"))
+        {
+            continue;
+        }
+        let Ok(op) = Id::new(op_str) else {
+            continue;
+        };
+        if !is_obsolete_op(&op) {
+            continue;
+        }
+        let attempt = &protection.id;
+        let has_live_attempt = [
+            format!("source-attempt/{op}/{attempt}"),
+            format!("candidate-attempt/{op}/{attempt}"),
+            format!("release-attempt/{op}/{attempt}"),
+        ]
+        .into_iter()
+        .any(|attempt_key| rows.contains_key(&attempt_key) && !remove_keys.contains(&attempt_key));
+        if !has_live_attempt {
+            if rows.contains_key(&bkey) {
+                remove_keys.insert(bkey);
+            }
+            remove_keys.insert(key.to_owned());
+        }
+    }
     Ok(remove_keys)
+}
+
+fn is_protected_path(path: &str, protected_prefixes: &BTreeSet<String>) -> bool {
+    protected_prefixes
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
+
+fn reclaim_unreferenced_tree(
+    root_dir: &Path,
+    live_paths: &BTreeSet<String>,
+    protected_prefixes: &BTreeSet<String>,
+) -> Result<()> {
+    if !root_dir.exists() {
+        return Ok(());
+    }
+    reclaim_unreferenced_subdir(root_dir, live_paths, protected_prefixes, true)
+}
+
+fn reclaim_unreferenced_subdir(
+    dir: &Path,
+    live_paths: &BTreeSet<String>,
+    protected_prefixes: &BTreeSet<String>,
+    is_root: bool,
+) -> Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            let dir_prefix = format!("{}/", path.to_string_lossy());
+            if is_protected_path(&dir_prefix, protected_prefixes) {
+                continue;
+            }
+            reclaim_unreferenced_subdir(&path, live_paths, protected_prefixes, false)?;
+            let _ = std::fs::remove_dir(&path);
+        } else if file_type.is_file() {
+            let path_str = path.to_string_lossy();
+            if !live_paths.contains(path_str.as_ref())
+                && !is_protected_path(path_str.as_ref(), protected_prefixes)
+            {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+    }
+    if !is_root {
+        let _ = std::fs::remove_dir(dir);
+    }
+    Ok(())
 }
 
 fn invalid_gap() -> Error {
@@ -1251,6 +1420,10 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(
+            Path::new(&r0.manifest.path).is_file(),
+            "initial release manifest should exist before compaction"
+        );
         let stats = engine.compact_lifecycle(&dataset).await.unwrap();
         assert!(stats.revisions_before > 10);
         assert_eq!(stats.revisions_after, 1);
@@ -1264,6 +1437,39 @@ mod tests {
         let cold_view = reopened.inner.lifecycle.open(&dataset).await.unwrap();
         assert_eq!(cold_view.revision, stats.current_revision);
         assert_eq!(cold_view.table.metadata().snapshots().count(), 1);
+        assert_eq!(
+            cold_view
+                .table
+                .metadata()
+                .properties()
+                .get("gc.enabled")
+                .map(String::as_str),
+            Some("false")
+        );
+        let lifecycle_loc = std::path::PathBuf::from(cold_view.table.metadata().location());
+        let data_files = std::fs::read_dir(lifecycle_loc.join("data"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert_eq!(
+            data_files, 1,
+            "expired lifecycle data files must be unlinked"
+        );
+        let metadata_json_files = std::fs::read_dir(lifecycle_loc.join("metadata"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with(".metadata.json"))
+            })
+            .count();
+        assert_eq!(
+            metadata_json_files, 1,
+            "expired lifecycle metadata.json files must be unlinked"
+        );
         let cold_rows = reopened.inner.lifecycle.rows(&cold_view).await.unwrap();
         assert_eq!(cold_rows.history_bytes(), stats.metadata_bytes_after);
         assert!(cold_rows.contains_key("operation/op-pending"));
@@ -1288,11 +1494,36 @@ mod tests {
         assert!(inspection.protected_bytes > 0);
         assert_eq!(export_pin.id, Id::new("exp-1").unwrap());
 
-        // Abandon the unfinished operation so subsequent cutovers can proceed cleanly.
+        // Abandon the unfinished operation so subsequent cutovers and object reclamation can proceed cleanly.
         reopened
             .abandon(&dataset, &Id::new("op-pending").unwrap(), "test cleanup")
             .await
             .unwrap();
+        reopened.compact_lifecycle(&dataset).await.unwrap();
+        assert!(
+            !Path::new(&r0.manifest.path).exists(),
+            "checkpointed release manifest should be unlinked from disk once incomplete work is resolved"
+        );
+        assert!(
+            Path::new(&latest.manifest.path).is_file(),
+            "active release manifest must remain on disk"
+        );
+        assert!(
+            Path::new(&export_pin.object.path).is_file(),
+            "exported parquet file must remain on disk"
+        );
+        for object in &latest.dataset.groups["source"].objects {
+            assert!(
+                Path::new(&object.path).is_file(),
+                "active source table object {} must remain on disk",
+                object.path
+            );
+        }
+        verify_release_at(&latest, limits.clone(), VerificationLevel::Deep)
+            .await
+            .unwrap();
+        let inspection = reopened.inspect_retention(&objects).await.unwrap();
+        assert_eq!(inspection.unmatched_bytes, 0);
     }
 
     #[tokio::test]

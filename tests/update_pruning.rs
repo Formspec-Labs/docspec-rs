@@ -218,7 +218,9 @@ async fn update_probes_only_files_whose_bounds_contain_an_affected_key() {
 
     let metrics = processing(&engine, &corrected).await.metrics;
     // The two interior files [100,103] and [200,203] contain no affected key and
-    // are shared without a decode. Two files are probed and then rewritten.
+    // are shared without a decode. The two extreme files are each decoded twice
+    // (once for the key-only probe pass and once for the full-row rewrite pass),
+    // yielding files_scanned == 2 + 2 == 4 native file decode passes.
     assert_eq!(metrics.files_reused, 2, "{metrics:?}");
     assert_eq!(metrics.files_scanned, 4, "{metrics:?}");
 }

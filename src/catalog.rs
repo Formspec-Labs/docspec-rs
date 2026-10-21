@@ -26,6 +26,7 @@ use iceberg::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -660,6 +661,7 @@ impl Lifecycle {
             _reservation: reservation,
         });
         *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+        self.reclaim_expired_baseline_files(&table).await?;
         Ok((
             View {
                 revision: current_revision,
@@ -678,6 +680,50 @@ impl Lifecycle {
                 current_revision,
             },
         ))
+    }
+
+    async fn reclaim_expired_baseline_files(&self, table: &Table) -> Result<()> {
+        if self.retained_prefix.is_some() {
+            return Ok(());
+        }
+        let live = storage::current_snapshot_files(table, &self.budget)
+            .await?
+            .paths;
+        let location = PathBuf::from(table.metadata().location());
+        self.budget
+            .blocking(move || {
+                for subdir in ["data", "metadata"] {
+                    let dir = location.join(subdir);
+                    let entries = match std::fs::read_dir(&dir) {
+                        Ok(entries) => entries,
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(err) => return Err(err.into()),
+                    };
+                    for entry in entries {
+                        let entry = entry?;
+                        let path = entry.path();
+                        let meta = match std::fs::symlink_metadata(&path) {
+                            Ok(meta) => meta,
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(err) => return Err(err.into()),
+                        };
+                        if !meta.file_type().is_file() {
+                            continue;
+                        }
+                        if let Some(path_str) = path.to_str()
+                            && !live.contains(path_str)
+                        {
+                            match std::fs::remove_file(&path) {
+                                Ok(()) => {}
+                                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                                Err(err) => return Err(err.into()),
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .await
     }
 }
 
@@ -780,6 +826,10 @@ async fn replace_baseline_snapshot(
             .expire_snapshot_ids(old_snapshot_ids)
             .apply(tx)?
     };
+    let tx = tx
+        .update_table_properties()
+        .set("gc.enabled".into(), "false".into())
+        .apply(tx)?;
     Ok(tx.commit(&guard).await?)
 }
 
@@ -1090,6 +1140,7 @@ mod tests {
         budget::Limits,
         model::{ObjectProtection, ObjectRef, RemovalOutcome, RemovalPlan, RetentionInspection},
     };
+    use std::path::Path;
 
     fn test_budget(max_metadata_bytes: usize) -> Budget {
         Budget::new(Limits {
@@ -1493,6 +1544,35 @@ mod tests {
         let cold_view = reopened.open(&owner).await.unwrap();
         assert_eq!(cold_view.revision, compacted_view.revision);
         assert_eq!(cold_view.table.metadata().snapshots().count(), 1);
+        assert_eq!(
+            cold_view
+                .table
+                .metadata()
+                .properties()
+                .get("gc.enabled")
+                .map(String::as_str),
+            Some("false")
+        );
+        let live_files = storage::current_snapshot_files(&cold_view.table, &reopened.budget)
+            .await
+            .unwrap()
+            .paths;
+        assert_eq!(
+            live_files.len(),
+            4,
+            "expected 1 metadata json, 1 manifest list, 1 manifest, and 1 parquet data file"
+        );
+        let location = PathBuf::from(cold_view.table.metadata().location());
+        let mut disk_files = BTreeSet::new();
+        for subdir in ["data", "metadata"] {
+            for entry in std::fs::read_dir(location.join(subdir)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_file() {
+                    disk_files.insert(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+        assert_eq!(disk_files, live_files);
         let cold_rows = reopened.rows(&cold_view).await.unwrap();
         assert_eq!(cold_rows.history_bytes, single_row_charge);
         assert_eq!(cold_rows.history_rows, 1);
@@ -1505,6 +1585,94 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(next.revision, compacted_view.revision + 1);
+    }
+
+    #[tokio::test]
+    async fn compact_baseline_survives_lost_commit_response_and_reclaims_files_on_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = storage::local_catalog(root.path()).await.unwrap();
+        let budget = test_budget(256 << 10);
+        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
+        let owner = Id::new("lost_compact").unwrap();
+        let mut view = lifecycle.open(&owner).await.unwrap();
+        view = lifecycle
+            .commit(&view, vec![record("obsolete/1", "drop-me").unwrap()])
+            .await
+            .unwrap();
+        for step in 0..4 {
+            view = lifecycle
+                .commit(
+                    &view,
+                    vec![record("authority", format!("v-{step}")).unwrap()],
+                )
+                .await
+                .unwrap();
+        }
+        let authority_rev = view.revision;
+        let remove = BTreeSet::from(["obsolete/1".to_owned()]);
+
+        lifecycle
+            .lose_commit_response
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let err = lifecycle
+            .compact_baseline(&view, &remove)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "lost_commit_response");
+
+        // Reopen reads the committed single-snapshot baseline and all referenced files exist.
+        let reopened_view = lifecycle.open(&owner).await.unwrap();
+        assert_eq!(reopened_view.revision, authority_rev + 1);
+        assert_eq!(reopened_view.table.metadata().snapshots().count(), 1);
+        assert_eq!(
+            reopened_view
+                .table
+                .metadata()
+                .properties()
+                .get("gc.enabled")
+                .map(String::as_str),
+            Some("false")
+        );
+        let live_after_lost =
+            storage::current_snapshot_files(&reopened_view.table, &lifecycle.budget)
+                .await
+                .unwrap()
+                .paths;
+        for path in &live_after_lost {
+            assert!(
+                Path::new(path).is_file(),
+                "missing live baseline file {path}"
+            );
+        }
+        let rows = lifecycle.rows(&reopened_view).await.unwrap();
+        assert_eq!(rows.history_rows, 1);
+        assert_eq!(rows.revision("authority"), Some(authority_rev));
+        assert!(!rows.contains_key("obsolete/1"));
+
+        // Retrying compaction on the reopened view succeeds and reclaims all expired files.
+        let (retried_view, stats) = lifecycle
+            .compact_baseline(&reopened_view, &remove)
+            .await
+            .unwrap();
+        assert_eq!(stats.revisions_after, 1);
+        assert_eq!(stats.files_after, 1);
+        assert_eq!(stats.rows_after, 1);
+        let live_after_retry =
+            storage::current_snapshot_files(&retried_view.table, &lifecycle.budget)
+                .await
+                .unwrap()
+                .paths;
+        let location = PathBuf::from(retried_view.table.metadata().location());
+        let mut disk_files = BTreeSet::new();
+        for subdir in ["data", "metadata"] {
+            for entry in std::fs::read_dir(location.join(subdir)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_file() {
+                    disk_files.insert(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+        assert_eq!(disk_files, live_after_retry);
     }
 
     #[tokio::test]

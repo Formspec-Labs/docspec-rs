@@ -707,6 +707,8 @@ impl Engine {
                 .replacement_output_at(dataset, &directory.child("added")?, &native)
                 .await?;
             let mut metrics = WriteMetrics {
+                // Counts total native file decode passes: one key-only probe pass per
+                // unpruned candidate file plus one full-row rewrite pass per affected file.
                 files_scanned: files_probed.saturating_add(changed.len() as u64),
                 files_reused: shared.len() as u64,
                 bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),

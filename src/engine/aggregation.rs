@@ -178,6 +178,8 @@ pub(super) async fn aggregate_frame(
                 format!("COUNT(DISTINCT {})", quote(field))
             }
             AggregateFunction::CollectSet { field } => {
+                // Materializes all distinct non-null values for each group into a
+                // single sorted list cell (O(distinct) per group within max_batch_bytes).
                 let col = quote(field);
                 format!(
                     "COALESCE(array_sort(ARRAY_AGG(DISTINCT {col}) FILTER (WHERE {col} IS NOT NULL)), make_array())"
