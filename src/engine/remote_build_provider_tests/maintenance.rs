@@ -506,6 +506,7 @@ async fn qualify() -> Result<()> {
                     expected_digest: storage::digest(&source)?.0,
                     sql: "SELECT * FROM input".into(),
                     definition: "maintenance-v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await?;
             let spec = ExportSpec {

@@ -57,6 +57,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         expected_digest: "0".repeat(64),
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let refused = |error: Error| assert_eq!(error.code(), "remote_build_unavailable");
     refused(engine.plan(&build).await.unwrap_err());
@@ -173,6 +174,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         parent_manifest: None,
         processor: PROCESSOR.into(),
         validation: VerificationLevel::Routine,
+        partition_by: Vec::new(),
     };
     let view = engine.inner.lifecycle.open(&dataset).await.unwrap();
     engine
@@ -273,6 +275,7 @@ async fn remote_selection_refuses_second_prepared_initial_but_reuses_completed_f
         expected_digest: storage::digest(&source).unwrap().0,
         sql: "SELECT value FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let mut second = first.clone();
     second.operation = Id::new("second").unwrap();

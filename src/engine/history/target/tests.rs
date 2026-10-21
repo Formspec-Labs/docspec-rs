@@ -41,6 +41,7 @@ fn build(dataset: &Id, name: &str, base: Option<&ReleasePin>) -> OperationReques
         definition: base
             .map_or("v1", |base| base.dataset.definition.as_str())
             .into(),
+            partition_by: Vec::new(),
     })
 }
 
@@ -87,6 +88,7 @@ fn candidate(request: &OperationRequest, base: Option<&ReleasePin>) -> ReleasePi
             parent_manifest: base.map(|base| base.manifest.clone()),
             processor: PROCESSOR.into(),
             validation: VerificationLevel::Routine,
+            partition_by: Vec::new(),
         },
     };
     match request {

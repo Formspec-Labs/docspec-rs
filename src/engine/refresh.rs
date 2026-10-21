@@ -81,9 +81,21 @@ impl Engine {
                 )
             };
         let loaded = load_inputs(&coverage, &input_sources, budget).await?;
-        if let RefreshTransform::Aggregate(aggregate) = &spec.transform {
-            aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
+        match &spec.transform {
+            RefreshTransform::Join(_) => {}
+            RefreshTransform::Aggregate(aggregate) => {
+                aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
+                    .await?;
+            }
+            RefreshTransform::ConnectedComponents(cc) => {
+                connected_components::register_input(
+                    &self.context(),
+                    cc,
+                    &loaded.borrowed(),
+                    budget,
+                )
                 .await?;
+            }
         }
         let phase = PhaseResult {
             operation: spec.operation.clone(),
@@ -225,8 +237,33 @@ impl Engine {
                         )
                         .await?;
                     }
+                    RefreshTransform::ConnectedComponents(cc) => {
+                        let loaded = load_inputs(
+                            processing.coverage.as_ref().ok_or_else(invalid)?,
+                            processing
+                                .dependencies
+                                .as_ref()
+                                .map(|dependencies| &dependencies.input_sources)
+                                .unwrap_or(&BTreeMap::new()),
+                            &self.inner.lifecycle.budget,
+                        )
+                        .await?;
+                        connected_components::register_input(
+                            &context,
+                            cc,
+                            &loaded.borrowed(),
+                            &self.inner.lifecycle.budget,
+                        )
+                        .await?;
+                    }
                 }
-                let frame = evidence_frame(&context, &spec.transform, "matches").await?;
+                let frame = evidence_frame(
+                    &context,
+                    &spec.transform,
+                    "matches",
+                    &self.inner.lifecycle.budget,
+                )
+                .await?;
                 self.write_frame(&spec.dataset, &directory, frame).await?
             };
             let phase = PhaseResult {
@@ -385,6 +422,9 @@ pub(super) fn validate(spec: &RefreshSpec) -> Result<()> {
     let spec = match &spec.transform {
         RefreshTransform::Join(spec) => spec,
         RefreshTransform::Aggregate(spec) => return aggregation::validate(&spec.grouping),
+        RefreshTransform::ConnectedComponents(spec) => {
+            return connected_components::validate(spec);
+        }
     };
     if (spec.left.dataset == spec.right.dataset && spec.left != spec.right)
         || spec.join.keys.is_empty()
@@ -941,7 +981,8 @@ pub(super) async fn verify_related_with_inputs(
     }
     checks.table(&related.evidence, budget).await?;
     let evidence = storage::open_pin(&related.evidence, budget).await?;
-    let expected_evidence = evidence_frame(&context, &related.request.transform, "actual").await?;
+    let expected_evidence =
+        evidence_frame(&context, &related.request.transform, "actual", budget).await?;
     let evidence_columns = expected_evidence
         .schema()
         .fields()
@@ -1050,12 +1091,17 @@ async fn source_frame(
             aggregation::register_input(context, aggregate, releases, budget).await?;
             aggregation::aggregate_frame(context, &aggregate.grouping, "aggregate_input").await
         }
+        RefreshTransform::ConnectedComponents(cc) => {
+            connected_components::register_input(context, cc, releases, budget).await?;
+            connected_components::source_frame(context, cc, "cc_input", budget).await
+        }
     }
 }
 async fn evidence_frame(
     context: &SessionContext,
     transform: &RefreshTransform,
     source: &str,
+    budget: &Budget,
 ) -> Result<DataFrame> {
     match transform {
         RefreshTransform::Join(_) => Ok(context
@@ -1064,12 +1110,16 @@ async fn evidence_frame(
         RefreshTransform::Aggregate(aggregate) => {
             aggregation::evidence_frame(context, &aggregate.grouping, "aggregate_input").await
         }
+        RefreshTransform::ConnectedComponents(cc) => {
+            connected_components::evidence_frame(context, cc, "cc_input", budget).await
+        }
     }
 }
 pub(super) fn output_keys(transform: &RefreshTransform) -> Vec<String> {
     match transform {
         RefreshTransform::Join(_) => TUPLE.map(str::to_owned).to_vec(),
         RefreshTransform::Aggregate(aggregate) => aggregation::keys(&aggregate.grouping),
+        RefreshTransform::ConnectedComponents(cc) => vec![cc.document_id_column.clone()],
     }
 }
 pub(super) fn hidden_field(name: &str) -> bool {

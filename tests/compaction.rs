@@ -643,6 +643,7 @@ async fn native_nested_decimal_time_and_null_values_survive_typed_rewrite() {
             expected_digest: storage::digest(&input).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

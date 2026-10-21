@@ -32,6 +32,7 @@ pub(super) fn validate(definition: &AggregationDefinition) -> Result<()> {
                             .iter()
                             .any(|key| key.eq_ignore_ascii_case(field))
                 }
+                AggregateFunction::FirstValue { .. } => true,
                 function => argument(function).is_some_and(|name| !valid(name)),
             })
     {
@@ -42,7 +43,7 @@ pub(super) fn validate(definition: &AggregationDefinition) -> Result<()> {
     }
     Ok(())
 }
-fn argument(function: &AggregateFunction) -> Option<&str> {
+pub(super) fn argument(function: &AggregateFunction) -> Option<&str> {
     match function {
         AggregateFunction::CountRows => None,
         AggregateFunction::Count { field }
@@ -50,7 +51,8 @@ fn argument(function: &AggregateFunction) -> Option<&str> {
         | AggregateFunction::CollectSet { field }
         | AggregateFunction::Sum { field }
         | AggregateFunction::Min { field }
-        | AggregateFunction::Max { field } => Some(field),
+        | AggregateFunction::Max { field }
+        | AggregateFunction::FirstValue { field } => Some(field),
     }
 }
 pub(super) fn keys(definition: &AggregationDefinition) -> Vec<String> {
@@ -145,6 +147,7 @@ async fn qualify(
                 | AggregateFunction::Max { .. } => {
                     matches!(data_type, DataType::Int32 | DataType::Int64)
                 }
+                AggregateFunction::FirstValue { .. } => false,
             };
             if !valid {
                 return Err(Error::refusal(
@@ -190,6 +193,7 @@ pub(super) async fn aggregate_frame(
             }
             AggregateFunction::Min { field } => format!("MIN({})", quote(field)),
             AggregateFunction::Max { field } => format!("MAX({})", quote(field)),
+            AggregateFunction::FirstValue { field } => format!("FIRST_VALUE({})", quote(field)),
         };
         format!("{expression} AS {}", quote(&field.name))
     }));
@@ -531,6 +535,7 @@ mod tests {
                 expected_digest: initial_input.digest,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -765,6 +770,7 @@ mod tests {
                 expected_digest: initial_input.digest,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();

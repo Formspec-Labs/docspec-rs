@@ -28,6 +28,7 @@ fn rebuild(root: &Path, base: &ReleasePin, operation: &str, rows: &[Row]) -> Run
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -573,6 +574,7 @@ async fn based_rebuild_preserves_renamed_hidden_fields_and_new_nullable_defaults
         expected_digest: source.digest,
         sql: "SELECT id, text, id AS discarded FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let initial = engine.run(&initial_spec).await.unwrap();
     let edit = SchemaSpec {

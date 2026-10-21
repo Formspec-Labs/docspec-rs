@@ -73,10 +73,12 @@ fn release(root: &Path, owner: &str, version: &str) -> ReleasePin {
                 expected_digest: "0".repeat(64),
                 sql: "SELECT id FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             }),
             parent_manifest: None,
             processor: "fixture".into(),
             validation: VerificationLevel::Routine,
+            partition_by: Vec::new(),
         },
     }
 }

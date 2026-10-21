@@ -105,6 +105,7 @@ async fn source(
             expected_digest: storage::digest(&path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap()
@@ -979,6 +980,7 @@ async fn offline_parent_rules_reject_related_conversion_and_role_rebinding() {
         expected_digest: left.dataset.inputs["input"].digest.clone(),
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     assert_eq!(engine.run(&raw).await.unwrap_err().code(), "related_source");
     let updated = docspec::model::UpdateSpec {
@@ -1673,6 +1675,7 @@ async fn collect_set_grouped_and_global_refresh_full_and_incrementally_with_refu
             expected_digest: storage::digest(&typed_path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -2214,6 +2217,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
             expected_digest: left_input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -2227,6 +2231,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
             expected_digest: right_input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

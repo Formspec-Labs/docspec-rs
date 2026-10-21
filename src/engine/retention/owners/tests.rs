@@ -52,6 +52,7 @@ fn request(root: &Path, dataset: &str) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

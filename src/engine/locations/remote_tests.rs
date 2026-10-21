@@ -71,6 +71,7 @@ pub(in crate::engine) async fn fixture(
         expected_digest: blake3::hash(&bytes).to_hex().to_string(),
         sql: "SELECT value FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     (root, engine, spec, bytes)
 }

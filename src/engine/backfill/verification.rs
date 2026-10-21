@@ -776,6 +776,7 @@ mod tests {
             expected_digest: "unused".into(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         DatasetPin {
             format: FORMAT,
@@ -794,6 +795,7 @@ mod tests {
             parent_manifest: None,
             processor: "test".into(),
             validation: VerificationLevel::Routine,
+            partition_by: Vec::new(),
         }
     }
 

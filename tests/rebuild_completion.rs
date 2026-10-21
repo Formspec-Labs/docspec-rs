@@ -211,6 +211,7 @@ async fn abandoned_workers_cannot_acknowledge_late_native_source_or_group_commit
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: base.dataset.definition.clone(),
+            partition_by: Vec::new(),
         };
         let group = spec(&base, "stopped", "lengths", "text_length", "length(text)");
         let (committed, release) = catalog.arm();
@@ -437,6 +438,7 @@ async fn newer_admission_preserves_finished_source_before_acknowledgment_and_reb
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     };
     let (committed, release) = catalog.arm();
     let worker = {
@@ -564,6 +566,7 @@ async fn disconnected_run_keeps_native_commit_custody_and_finishes_beneath_shutd
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: base.dataset.definition.clone(),
+            partition_by: Vec::new(),
         };
         // Success pauses the data commit before the nested historical release
         // lookup. Error pauses an actual lifecycle commit before its lost response.

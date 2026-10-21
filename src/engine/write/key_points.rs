@@ -13,12 +13,14 @@
 //! When the distinct values exceed the reservation the caller falls back to the
 //! interval test; pruning stays conservative and correctness never depends on it.
 
-use crate::{Result, budget::Budget};
-use arrow::array::{Array, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray};
+use crate::{Result, budget::Budget, storage};
+use arrow::array::{
+    Array, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray, StringViewArray,
+};
 use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
-use iceberg::spec::{DataFile, PrimitiveLiteral, Schema};
-use std::collections::BTreeSet;
+use iceberg::spec::{DataFile, Literal, PartitionSpec, PrimitiveLiteral, Schema, Transform};
+use std::collections::{BTreeSet, HashSet};
 use tokio::sync::OwnedSemaphorePermit;
 
 /// One affected key component ordered exactly like its Iceberg bound literal.
@@ -37,11 +39,20 @@ struct Column {
     has_null: bool,
 }
 
+#[derive(Debug)]
+struct PartitionFilter {
+    part_idx: usize,
+    key_idx: usize,
+    transform: Transform,
+    values: HashSet<Option<PrimitiveLiteral>>,
+}
+
 /// Distinct affected values per key column, retained under one reservation.
 #[derive(Debug)]
 pub(super) struct KeyPoints {
     /// `None` marks a key column whose type has no exact point representation.
     columns: Vec<Option<Column>>,
+    partitions: Vec<Option<PartitionFilter>>,
     _reservation: OwnedSemaphorePermit,
 }
 
@@ -54,6 +65,8 @@ impl KeyPoints {
     /// distinct values outgrow it; the caller then keeps the interval test.
     pub(super) async fn collect(
         context: &SessionContext,
+        native_schema: &Schema,
+        partition_spec: &PartitionSpec,
         keys: &[String],
         budget: &Budget,
     ) -> Result<Option<Self>> {
@@ -65,6 +78,24 @@ impl KeyPoints {
         };
         let mut columns: Vec<Option<Column>> =
             keys.iter().map(|_| Some(Column::default())).collect();
+        let mut partitions: Vec<Option<PartitionFilter>> = partition_spec
+            .fields()
+            .iter()
+            .enumerate()
+            .filter_map(|(part_idx, pf)| {
+                let key_idx = keys.iter().position(|key| {
+                    native_schema
+                        .field_by_name(key)
+                        .is_some_and(|field| field.id == pf.source_id)
+                })?;
+                Some(Some(PartitionFilter {
+                    part_idx,
+                    key_idx,
+                    transform: pf.transform,
+                    values: HashSet::new(),
+                }))
+            })
+            .collect();
         let mut bytes = 0usize;
         let mut stream = context
             .table("affected_keys")
@@ -87,12 +118,44 @@ impl KeyPoints {
                     return Ok(None);
                 }
             }
-            if columns.iter().all(Option::is_none) {
+            for slot in &mut partitions {
+                let Some(filter) = slot.as_mut() else {
+                    continue;
+                };
+                let array = batch.column(filter.key_idx);
+                let Ok(computed) = storage::compute_partition_column(filter.transform, array) else {
+                    *slot = None;
+                    continue;
+                };
+                for item in computed {
+                    let prim = match item {
+                        None => None,
+                        Some(Literal::Primitive(p)) => Some(p),
+                        _ => {
+                            *slot = None;
+                            break;
+                        }
+                    };
+                    let size = match &prim {
+                        Some(PrimitiveLiteral::String(s)) => s.len(),
+                        Some(PrimitiveLiteral::Binary(b)) => b.len(),
+                        _ => 0,
+                    };
+                    if filter.values.insert(prim) {
+                        bytes = bytes.saturating_add(size + ENTRY_OVERHEAD);
+                        if bytes > allowance {
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            if columns.iter().all(Option::is_none) && partitions.iter().all(Option::is_none) {
                 return Ok(None);
             }
         }
         Ok(Some(Self {
             columns,
+            partitions,
             _reservation: reservation,
         }))
     }
@@ -106,6 +169,20 @@ impl KeyPoints {
         keys: &[String],
         file: &DataFile,
     ) -> bool {
+        let part_fields = file.partition().fields();
+        for filter in self.partitions.iter().flatten() {
+            let Some(slot) = part_fields.get(filter.part_idx) else {
+                continue;
+            };
+            let file_lit = match slot {
+                None => None,
+                Some(Literal::Primitive(p)) => Some(p.clone()),
+                _ => continue,
+            };
+            if !filter.values.contains(&file_lit) {
+                return false;
+            }
+        }
         for (key, column) in keys.iter().zip(&self.columns) {
             let Some(column) = column else {
                 continue;
@@ -166,6 +243,8 @@ fn insert(column: &mut Column, array: &dyn Array) -> Option<usize> {
     if let Some(array) = any.downcast_ref::<StringArray>() {
         each!(array, |value: &str| Point::Str(value.to_owned()));
     } else if let Some(array) = any.downcast_ref::<LargeStringArray>() {
+        each!(array, |value: &str| Point::Str(value.to_owned()));
+    } else if let Some(array) = any.downcast_ref::<StringViewArray>() {
         each!(array, |value: &str| Point::Str(value.to_owned()));
     } else if let Some(array) = any.downcast_ref::<Int64Array>() {
         each!(array, Point::Int);

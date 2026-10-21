@@ -28,6 +28,7 @@ fn build(base: &ReleasePin, operation: &str) -> RunSpec {
         expected_digest: base.dataset.inputs["input"].digest.clone(),
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     }
 }
 

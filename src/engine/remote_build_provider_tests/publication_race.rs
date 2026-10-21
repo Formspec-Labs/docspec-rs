@@ -319,6 +319,7 @@ async fn race(
             expected_digest: original.digest,
             sql: "SELECT * FROM input".into(),
             definition: "publication-race-v1".into(),
+            partition_by: Vec::new(),
         })
         .await?;
     std::fs::remove_file(&original.path)?;

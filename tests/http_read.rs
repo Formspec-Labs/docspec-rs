@@ -343,6 +343,7 @@ async fn rebound_catalog_results_cannot_change_an_exact_version_url() {
             expected_digest: base.dataset.inputs["input"].digest.clone(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

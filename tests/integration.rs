@@ -39,6 +39,7 @@ mod input_generations;
 mod lifecycle;
 mod operation_retirement;
 mod operation_retirement_transport;
+mod partitioning_and_cc;
 mod phase_dependencies;
 mod phase_retirement;
 mod phase_retirement_transport;

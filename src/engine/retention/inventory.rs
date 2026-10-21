@@ -2563,10 +2563,12 @@ mod release_history_tests {
                 expected_digest: payload.digest.clone(),
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             }),
             parent_manifest: None,
             processor: "fixture".into(),
             validation: VerificationLevel::Routine,
+            partition_by: Vec::new(),
         };
         let bytes = serde_json::to_vec(&dataset).unwrap();
         let path = root.path().join("old.json");
@@ -2660,10 +2662,12 @@ mod scalar_readback_fields_tests {
                     expected_digest: object.digest.clone(),
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 }),
                 parent_manifest: None,
                 processor: "fixture".into(),
                 validation: VerificationLevel::Routine,
+                partition_by: Vec::new(),
             },
             manifest: object,
             verified: true,

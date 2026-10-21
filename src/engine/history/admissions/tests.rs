@@ -38,6 +38,7 @@ fn admission(dataset: &Id, name: &str, boundary: u64) -> (OperationRequest, Oper
         expected_digest: "0".repeat(64),
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     });
     let operation = Operation {
         request_digest: fingerprint(&request).unwrap(),

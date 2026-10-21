@@ -99,6 +99,7 @@ async fn fixture(root: &Path) -> (Engine, RunSpec, docspec::model::ReleasePin, V
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     // Force small initial native files while allowing realistic decoder buffers
     // during later joins. This makes physical sharing observable in a small test.
@@ -561,6 +562,7 @@ async fn paired_writer_refusal_retains_admission_and_can_resume() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -658,6 +660,7 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
         expected_digest: original.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     engine.run(&initial).await.unwrap();
     let replacements = vec![
@@ -815,6 +818,7 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
         expected_digest: original.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let before = engine.run(&initial).await.unwrap();
     let replacement = nested(
@@ -1103,6 +1107,7 @@ async fn update_chain_bounds_inputs_temp_keys_active_files_and_lifecycle_metadat
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let engine = Engine::open(&workspace, fast_limits).await.unwrap();
     let base = engine.run(&run_spec).await.unwrap();
@@ -1277,6 +1282,7 @@ async fn backfill_and_evidence_interleaved_updates_survive_compaction_and_identi
             expected_digest: source.digest,
             sql: "SELECT id, text FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

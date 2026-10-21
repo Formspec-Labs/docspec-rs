@@ -141,6 +141,17 @@ impl Engine {
                 ))
                 .await
             }
+            RefreshTransform::ConnectedComponents(_) => {
+                Box::pin(self.process_connected_components(
+                    spec,
+                    directory,
+                    &base,
+                    &previous,
+                    &current,
+                    (captured, &native),
+                ))
+                .await
+            }
         }
     }
 
@@ -547,6 +558,12 @@ impl Engine {
             return Box::pin(
                 self.aggregate_evidence(spec, directory, processing, before, &context),
             )
+            .await;
+        }
+        if let RefreshTransform::ConnectedComponents(_) = &spec.transform {
+            return Box::pin(self.connected_components_evidence(
+                spec, directory, processing, before, &context,
+            ))
             .await;
         }
         let columns = tuple_columns(None);

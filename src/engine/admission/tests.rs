@@ -54,6 +54,7 @@ fn request(root: &Path, dataset: &str) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -76,6 +77,7 @@ fn consumer(source: &ObjectRef, dataset: &str) -> RunSpec {
         expected_digest: source.digest.clone(),
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

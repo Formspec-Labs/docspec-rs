@@ -53,6 +53,7 @@ mod read;
 #[doc(inline)]
 pub use read::{read_compaction, read_evidence, read_group, read_keys};
 mod aggregation;
+mod connected_components;
 mod incremental;
 mod refresh;
 pub(crate) mod retention;
@@ -2035,6 +2036,24 @@ impl Engine {
                 }
             }
             stop_after(stop, "groups")?;
+            let partition_by = if let Some(source) = groups.get("source") {
+                let declared = match &captured_request {
+                    OperationRequest::Build(build) if !build.partition_by.is_empty() => {
+                        Some(build.partition_by.as_slice())
+                    }
+                    _ => base.as_ref().map(|b| b.dataset.partition_by.as_slice()),
+                };
+                if declared.is_some_and(|d| !d.is_empty())
+                    || base.as_ref().is_some_and(|b| !b.dataset.partition_by.is_empty())
+                {
+                    let native = storage::open_pin(source, &lifecycle.budget).await?;
+                    storage::partition_specs_from_metadata(native.metadata(), declared)
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
             let mut dataset = DatasetPin {
                 format: operation.result_format,
                 dataset: spec.dataset().clone(),
@@ -2052,6 +2071,7 @@ impl Engine {
                 parent_manifest: base.as_ref().map(|base| base.manifest.clone()),
                 processor: PROCESSOR.into(),
                 validation: VerificationLevel::Routine,
+                partition_by,
             };
             checks.compose();
             Box::pin(self.qualify_corrections(
@@ -2451,6 +2471,10 @@ fn material_phase_key(
             hash.update(b"native-omission-rules-v1");
             hash.update(source.as_bytes());
         }
+        if !build.partition_by.is_empty() {
+            hash.update(b"partition-by-v1");
+            hash.update(&serde_json::to_vec(&build.partition_by)?);
+        }
         return Ok(format!(
             "phase/build/{}/{eligibility}/{phase}",
             hash.finalize().to_hex()
@@ -2573,7 +2597,11 @@ fn check_base(authority: &Authority, expected: Option<&Id>) -> Result<()> {
 fn fingerprint(spec: &OperationRequest) -> Result<String> {
     let material = match spec {
         OperationRequest::Build(spec) => {
-            serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base, "relationship": spec.relationship}})
+            let mut value = serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base, "relationship": spec.relationship}});
+            if !spec.partition_by.is_empty() {
+                value["build"]["partition_by"] = serde_json::to_value(&spec.partition_by)?;
+            }
+            value
         }
         OperationRequest::Update(spec) => {
             serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition, "relationship": spec.relationship}})
@@ -2658,6 +2686,39 @@ fn validate_spec(spec: &RunSpec) -> Result<()> {
             "invalid_request",
             "expected a BLAKE3 input digest and nonempty definition",
         ));
+    }
+    let mut partition_names = std::collections::BTreeSet::new();
+    for pf in &spec.partition_by {
+        if pf.column.trim().is_empty()
+            || storage::identity::hidden(&pf.column)
+            || storage::defaults::supplied_id(&pf.column).is_some()
+        {
+            return Err(Error::refusal(
+                "unsupported_write_layout",
+                "partition_by requires a non-empty user source column",
+            ));
+        }
+        if matches!(
+            pf.transform,
+            PartitionTransformSpec::Bucket { num_buckets: 0 }
+                | PartitionTransformSpec::Truncate { width: 0 }
+        ) {
+            return Err(Error::refusal(
+                "unsupported_write_layout",
+                "partition bucket count and truncate width must be positive",
+            ));
+        }
+        let field_name = pf
+            .name
+            .clone()
+            .unwrap_or_else(|| storage::default_partition_field_name(&pf.column, &pf.transform));
+        if field_name.trim().is_empty() || !partition_names.insert(field_name.to_ascii_lowercase())
+        {
+            return Err(Error::refusal(
+                "unsupported_write_layout",
+                "partition field names must be non-empty and distinct",
+            ));
+        }
     }
     use datafusion::sql::sqlparser::{ast::Statement, dialect::GenericDialect, parser::Parser};
     let statements = Parser::parse_sql(&GenericDialect {}, &spec.sql)

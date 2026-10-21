@@ -42,6 +42,7 @@ async fn reordered_source(engine: &Engine, root: &Path, dataset: &str, rows: &[R
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap()

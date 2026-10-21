@@ -155,6 +155,16 @@ fn validate(
     {
         return Err(invalid());
     }
+    storage::validate_partition_spec(native.current_schema(), native.default_partition_spec())
+        .map_err(|_| invalid())?;
+    if let OperationRequest::Build(build) = &request {
+        storage::check_partition_by_matches(
+            native.current_schema(),
+            native.default_partition_spec(),
+            &build.partition_by,
+        )
+        .map_err(|_| invalid())?;
+    }
     Ok(native)
 }
 
@@ -421,10 +431,12 @@ impl Engine {
             .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
         let owner = spec.dataset.clone();
         let limit = lifecycle.budget.limits.max_metadata_bytes;
+        let partition_by = spec.partition_by.clone();
         let (metadata_ref, metadata_json, native, mut memory) = lifecycle
             .budget
             .blocking_admitted(move || {
-                let metadata = storage::fresh_metadata_at(schema, &location)?;
+                let unbound = storage::build_unbound_partition_spec(&schema, &partition_by)?;
+                let metadata = storage::fresh_partitioned_metadata_at(&schema, &location, unbound)?;
                 let bytes = storage::bounded_json(&metadata, limit)?;
                 let metadata_ref = ObjectRef {
                     owner,

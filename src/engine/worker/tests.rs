@@ -547,6 +547,7 @@ fn build(input: &InputSpec, dataset: &str) -> RunSpec {
         expected_digest: input.digest.clone(),
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

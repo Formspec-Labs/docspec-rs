@@ -23,6 +23,7 @@ fn build(root: &Path, operation: &str) -> RunSpec {
         expected_digest: input.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

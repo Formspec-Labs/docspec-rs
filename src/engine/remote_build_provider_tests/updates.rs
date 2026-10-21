@@ -154,6 +154,7 @@ async fn prepare(engine: &Engine, dataset: &Id, producer: &Path) -> Result<Prepa
             expected_digest: original.digest,
             sql: "SELECT * FROM input".into(),
             definition: "source-update-v1".into(),
+            partition_by: Vec::new(),
         })
         .await?;
     std::fs::remove_file(&original.path)?;

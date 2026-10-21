@@ -66,6 +66,7 @@ fn request(root: &Path, dataset: &str, operation: &str, values: Vec<i64>) -> Run
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

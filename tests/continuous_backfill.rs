@@ -38,6 +38,7 @@ fn build(root: &Path, operation: &str, base: &ReleasePin, rows: &[scalar::Row]) 
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

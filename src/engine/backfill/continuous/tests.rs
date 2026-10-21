@@ -52,6 +52,7 @@ async fn fixture(root: &Path) -> (Engine, ContinuousBackfillSpec) {
             expected_digest: storage::digest(&path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -302,6 +303,7 @@ async fn first_capture_race_retains_protected_admission_without_computing_obsole
             expected_digest: storage::digest(&source).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         if selected {
             engine.run(&advance).await.unwrap();

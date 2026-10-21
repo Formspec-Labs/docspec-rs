@@ -551,6 +551,7 @@ fn build(root: &Path, base: &ReleasePin, operation: &str, with_base: bool) -> Ru
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     }
 }
 

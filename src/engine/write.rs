@@ -264,6 +264,24 @@ impl Engine {
         .await
     }
 
+    pub(super) async fn create_partitioned_output(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        schema: Schema,
+        partition_by: &[PartitionFieldSpec],
+    ) -> Result<Table> {
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(dataset).await?;
+        let directory = directory.to_owned();
+        let partition_by = partition_by.to_vec();
+        self.register_output(view.identifier().namespace(), move || {
+            let unbound = storage::build_unbound_partition_spec(&schema, &partition_by)?;
+            storage::fresh_partitioned_metadata(&schema, &directory, unbound)
+        })
+        .await
+    }
+
     pub(super) async fn replacement_output(
         &self,
         dataset: &Id,
@@ -341,6 +359,13 @@ impl Engine {
                 &self.inner.lifecycle.budget,
             )
             .await?;
+            if !spec.partition_by.is_empty() {
+                storage::check_partition_by_matches(
+                    native.metadata().current_schema(),
+                    native.metadata().default_partition_spec(),
+                    &spec.partition_by,
+                )?;
+            }
             // An explicit base fixes field meaning, order and allocation history.
             // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
             let dataframe = schema::normalize(
@@ -358,6 +383,15 @@ impl Engine {
             return Ok(prepared);
         }
         check_build_fields(&dataframe)?;
+        if !spec.partition_by.is_empty() {
+            let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                dataframe.schema().as_arrow(),
+            )?;
+            let table = self
+                .create_partitioned_output(&spec.dataset, directory, schema, &spec.partition_by)
+                .await?;
+            return self.write_output(&spec.dataset, table, dataframe).await;
+        }
         self.write_frame(&spec.dataset, directory, dataframe).await
     }
 
@@ -733,13 +767,22 @@ impl Engine {
                 shared.extend(scan.files().cloned());
             } else {
                 let native_schema = native.metadata().current_schema();
+                let partition_spec = native.metadata().default_partition_spec();
                 let key_table_schema = scope_table.metadata().current_schema();
                 // Exact affected points when they fit one batch allowance; otherwise
                 // only the coarser affected-interval test below applies.
-                let points = key_points::KeyPoints::collect(&context, keys, budget).await?;
+                let points = key_points::KeyPoints::collect(
+                    &context,
+                    native_schema,
+                    partition_spec,
+                    keys,
+                    budget,
+                )
+                .await?;
                 for (index, file) in scan.files().enumerate() {
                     if !file_may_overlap_key_files(
                         native_schema,
+                        partition_spec,
                         key_table_schema,
                         keys,
                         &key_files,
@@ -1145,6 +1188,7 @@ pub(super) fn untruncated_bound(
 
 fn file_may_overlap_key_files(
     native_schema: &iceberg::spec::Schema,
+    partition_spec: &iceberg::spec::PartitionSpec,
     scope_schema: &iceberg::spec::Schema,
     keys: &[String],
     key_files: &[iceberg::spec::DataFile],
@@ -1170,6 +1214,52 @@ fn file_may_overlap_key_files(
         let keys_may_have_null = key_files
             .iter()
             .any(|kf| kf.null_value_counts().get(&scope_id).copied().unwrap_or(1) > 0);
+        // Check order-preserving partition tuple bounds first so files whose column
+        // bounds are absent or truncated still prune in O(1) from partition metadata.
+        for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+            if pf.source_id != native_id || !storage::is_order_preserving_transform(pf.transform) {
+                continue;
+            }
+            let Some(slot) = file.partition().fields().get(part_idx) else {
+                continue;
+            };
+            match slot {
+                None => {
+                    if !keys_may_have_null {
+                        return false;
+                    }
+                }
+                Some(iceberg::spec::Literal::Primitive(file_part)) => {
+                    let all_disjoint = key_files.iter().all(|kf| {
+                        let (Some(kf_low), Some(kf_high)) = (
+                            kf.lower_bounds().get(&scope_id).and_then(untruncated_bound),
+                            kf.upper_bounds().get(&scope_id).and_then(untruncated_bound),
+                        ) else {
+                            return false;
+                        };
+                        let (Some(part_low), Some(part_high)) = (
+                            storage::compute_partition_literal(
+                                pf.transform,
+                                &native_field.field_type,
+                                &kf_low,
+                            ),
+                            storage::compute_partition_literal(
+                                pf.transform,
+                                &native_field.field_type,
+                                &kf_high,
+                            ),
+                        ) else {
+                            return false;
+                        };
+                        part_low <= part_high && (&part_high < file_part || &part_low > file_part)
+                    });
+                    if all_disjoint {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
         // `key_join` uses `IsNotDistinctFrom`, so a possible NULL on both sides can match.
         if file_may_have_null && keys_may_have_null {
             continue;

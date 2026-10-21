@@ -163,6 +163,9 @@ async fn check_related(
         RefreshTransform::Aggregate(_) => {
             aggregation::check_summary(engine, release, left, false).await;
         }
+        RefreshTransform::ConnectedComponents(_) => {
+            unreachable!("compaction helper only checks join/aggregate fixtures");
+        }
     }
 }
 

@@ -34,6 +34,7 @@ async fn processing_keeps_its_consumed_input_when_an_admission_key_is_rebound() 
             expected_digest: incoming.digest.clone(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         let change = UpdateSpec {
             dataset: id("comments"),
@@ -284,6 +285,7 @@ async fn evolved_build_keeps_exact_consumed_schema_metadata() {
         expected_digest: incoming.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v3".into(),
+        partition_by: Vec::new(),
     };
     let result = engine.run(&request).await.unwrap();
     let state = engine.inspect(&request.dataset).await.unwrap();

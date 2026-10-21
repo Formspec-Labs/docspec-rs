@@ -284,6 +284,7 @@ async fn equal_null_receipts_cannot_hide_a_changed_native_payload_type() {
                 "SELECT {SOURCE_FILE}, {SOURCE_ROW}, CAST({EVIDENCE} AS BIGINT) AS {EVIDENCE} FROM input"
             ),
             definition: "typed-receipts-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -467,6 +468,7 @@ async fn final_receipt_promises_end_before_exact_payload_reclamation() {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: initial.dataset.definition.clone(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

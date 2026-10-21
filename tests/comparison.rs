@@ -299,6 +299,7 @@ async fn coincident_native_ids_do_not_align_unrelated_or_freshly_rebuilt_sources
             expected_digest: input.digest,
             sql: "SELECT id AS temperature_c, text AS description FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         if same_dataset {
             let based = RunSpec {
@@ -571,6 +572,7 @@ async fn schema_changes_are_explicit_in_counts_and_refused_for_streams() {
             expected_digest: input.digest,
             sql: "SELECT CAST(id AS VARCHAR) AS id, text FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

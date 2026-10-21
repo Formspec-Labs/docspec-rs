@@ -45,6 +45,7 @@ async fn fixture() -> (tempfile::TempDir, Engine, RunSpec) {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await

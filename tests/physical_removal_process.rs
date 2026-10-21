@@ -27,6 +27,7 @@ async fn run(engine: &Engine, root: &Path, operation: &str, rows: &[Row]) -> Rel
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap()

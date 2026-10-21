@@ -82,6 +82,7 @@ async fn lifetime(qualified_history: bool) {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -168,6 +169,7 @@ async fn lifetime(qualified_history: bool) {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let selected = engine.run(&request).await.unwrap();
     assert_eq!(

@@ -49,6 +49,7 @@ async fn fixture() -> (tempfile::TempDir, Engine, ReleasePin, BackfillSpec) {
             expected_digest: storage::digest(&path).unwrap().0,
             sql: "SELECT id FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

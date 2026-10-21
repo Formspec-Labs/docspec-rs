@@ -270,6 +270,7 @@ async fn reads_across_updates(trusted: bool) {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

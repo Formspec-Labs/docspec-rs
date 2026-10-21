@@ -387,11 +387,8 @@ pub(super) async fn read_keys_with_objects(
         .map(|f| projected_schema.index_of(f.name()))
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    let key_field_id = table
-        .metadata()
-        .current_schema()
-        .field_by_name(&spec.key)
-        .map(|f| f.id);
+    let key_field = table.metadata().current_schema().field_by_name(&spec.key);
+    let key_field_id = key_field.map(|f| f.id);
     // Parse requested values once into the key column's own domain. Integer keys
     // compare as integers: no per-row string formatting, and values that cannot
     // occur in the column (non-numeric, out of range) are dropped up front.
@@ -405,9 +402,18 @@ pub(super) async fn read_keys_with_objects(
             futures::stream::empty(),
         )));
     }
+    let key_partitions = key_field
+        .map(|field| {
+            target.partition_filters(
+                table.metadata().default_partition_spec(),
+                field.id,
+                &field.field_type,
+            )
+        })
+        .unwrap_or_default();
     let candidate_paths: Vec<String> = scan
         .files()
-        .filter(|file| target.file_may_contain(file, key_field_id))
+        .filter(|file| target.file_may_contain(file, key_field_id, &key_partitions))
         .map(|file| file.file_path().to_owned())
         .collect();
 
@@ -459,10 +465,100 @@ impl KeyTargets {
         }
     }
 
-    /// Returns `false` only when exact (untruncated) manifest bounds prove that no
-    /// requested value lies inside the file's key range.
-    fn file_may_contain(&self, file: &iceberg::spec::DataFile, key_field_id: Option<i32>) -> bool {
-        use iceberg::spec::PrimitiveLiteral;
+    fn partition_filters(
+        &self,
+        partition_spec: &iceberg::spec::PartitionSpec,
+        field_id: i32,
+        field_type: &iceberg::spec::Type,
+    ) -> Vec<(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)> {
+        use iceberg::spec::{PrimitiveLiteral, PrimitiveType, Type};
+        let Type::Primitive(prim) = field_type else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+            if pf.source_id != field_id {
+                continue;
+            }
+            let mut set = std::collections::HashSet::new();
+            let mut complete = true;
+            match (self, prim) {
+                (Self::Strings(values), PrimitiveType::String) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::String(value.clone());
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Ints(values), PrimitiveType::Int) => {
+                    for value in values {
+                        let Ok(v) = i32::try_from(*value) else {
+                            continue;
+                        };
+                        let lit = PrimitiveLiteral::Int(v);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Ints(values), PrimitiveType::Long) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Long(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    complete = false;
+                }
+            }
+            if complete {
+                out.push((part_idx, set));
+            }
+        }
+        out
+    }
+
+    /// Returns `false` only when partition metadata or exact (untruncated) manifest
+    /// bounds prove that no requested value lies inside the file's key range.
+    fn file_may_contain(
+        &self,
+        file: &iceberg::spec::DataFile,
+        key_field_id: Option<i32>,
+        key_partitions: &[(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)],
+    ) -> bool {
+        use iceberg::spec::{Literal, PrimitiveLiteral};
+        for (part_idx, allowed) in key_partitions {
+            let Some(slot) = file.partition().fields().get(*part_idx) else {
+                continue;
+            };
+            match slot {
+                None => return false,
+                Some(Literal::Primitive(p)) => {
+                    if !allowed.contains(p) {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
         let Some(field_id) = key_field_id else {
             return true;
         };

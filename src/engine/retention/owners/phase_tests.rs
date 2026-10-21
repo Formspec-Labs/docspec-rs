@@ -34,6 +34,7 @@ fn request(dataset: &str, operation: &str, input: &ObjectRef) -> RunSpec {
         expected_digest: input.digest.clone(),
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

@@ -176,6 +176,7 @@ async fn update_probes_only_files_whose_bounds_contain_an_affected_key() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "news-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -247,6 +248,7 @@ async fn null_affected_keys_keep_files_that_may_hold_null_keys() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "news-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -330,6 +332,7 @@ async fn sha256_string_keys_prune_disjoint_files_on_update() {
             expected_digest: initial.digest,
             sql: "SELECT * FROM input".into(),
             definition: "captures-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

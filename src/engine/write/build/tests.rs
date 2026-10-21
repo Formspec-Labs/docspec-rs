@@ -52,6 +52,7 @@ async fn initial_candidate_recovers_committed_snapshot_without_producer_or_secon
         expected_digest: storage::digest(&source).unwrap().0,
         sql: "SELECT value FROM input WHERE value IS NULL OR value < 2".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     assert!(engine.run_until(&spec, "admission").await.is_err());
     let request = OperationRequest::Build(spec.clone());

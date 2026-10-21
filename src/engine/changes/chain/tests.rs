@@ -56,6 +56,7 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
