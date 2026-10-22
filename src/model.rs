@@ -1853,7 +1853,7 @@ pub enum UpdateMergeStrategy {
     Min,
     /// Keep the maximum non-null value across prior and incoming.
     Max,
-    /// Deduplicated list union preserving prior-then-incoming element order.
+    /// Deduplicated list union in canonical ascending element order.
     SetUnion,
 }
 

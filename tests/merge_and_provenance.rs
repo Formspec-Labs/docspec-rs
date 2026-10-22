@@ -1003,3 +1003,268 @@ async fn first_value_by_and_collect_distinct_with_provenance_full_and_incrementa
         )
     );
 }
+
+#[tokio::test]
+async fn merge_multi_batch_chunking_and_schema_evolved_supply_flags() {
+    use arrow::array::BooleanArray;
+    use docspec::model::{ColumnAddition, ColumnType, SchemaField, SchemaSpec};
+
+    let root = TempDir::new().unwrap();
+    let tight_limits = Limits {
+        batch_rows: 3,
+        max_batch_bytes: 32 << 10,
+        ..limits()
+    };
+    let engine = Engine::open(root.path().join("workspace"), tight_limits.clone())
+        .await
+        .unwrap();
+
+    let base_schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("updated_at", DataType::Int64, true),
+        Field::new("title", DataType::Utf8, true),
+    ]));
+
+    let write_base_rows = |name: &str, rows: &[(i64, Option<i64>, Option<&str>)]| -> InputSpec {
+        let batch = RecordBatch::try_new(
+            base_schema.clone(),
+            vec![
+                Arc::new(Int64Array::from_iter_values(rows.iter().map(|r| r.0))),
+                Arc::new(Int64Array::from(
+                    rows.iter().map(|r| r.1).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.2).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .unwrap();
+        write_batch(&root.path().join(format!("{name}.parquet")), &batch)
+    };
+
+    // 12 initial rows (> batch_rows = 3)
+    let initial_rows: Vec<(i64, Option<i64>, Option<&str>)> = (1..=12)
+        .map(|i| (i, Some(100), Some(if i == 1 { "Title 1" } else { "Init" })))
+        .collect();
+    let init_input = write_base_rows("init", &initial_rows);
+
+    let base = engine
+        .run(&RunSpec {
+            dataset: id("docs"),
+            operation: id("initial"),
+            base: None,
+            relationship: None,
+            input: init_input.path,
+            expected_digest: init_input.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "v1".into(),
+        })
+        .await
+        .unwrap();
+
+    // Evolve schema to add `author` (field id 4, tracked by `__docspec_supplied_4`)
+    // with non-null default "unassigned".
+    let evolved = engine
+        .evolve_schema(&SchemaSpec {
+            dataset: id("docs"),
+            operation: id("add-author"),
+            base: base.id.clone(),
+            definition: "v1".into(),
+            next_definition: "v2".into(),
+            fields: vec![
+                SchemaField {
+                    id: 1,
+                    name: "id".into(),
+                },
+                SchemaField {
+                    id: 2,
+                    name: "updated_at".into(),
+                },
+                SchemaField {
+                    id: 3,
+                    name: "title".into(),
+                },
+            ],
+            additions: vec![ColumnAddition {
+                name: "author".into(),
+                data_type: ColumnType::String,
+                default: "unassigned".into(),
+            }],
+            write_defaults: BTreeMap::new(),
+        })
+        .await
+        .unwrap();
+
+    type EvolvedInputRow<'a> = (i64, Option<i64>, Option<&'a str>, Option<&'a str>);
+    type StoredDocRow = (Option<i64>, Option<String>, Option<String>, bool);
+
+    let evolved_schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("updated_at", DataType::Int64, true),
+        Field::new("title", DataType::Utf8, true),
+        Field::new("author", DataType::Utf8, true),
+    ]));
+    let write_with_author = |name: &str, rows: &[EvolvedInputRow<'_>]| -> InputSpec {
+        let batch = RecordBatch::try_new(
+            evolved_schema.clone(),
+            vec![
+                Arc::new(Int64Array::from_iter_values(rows.iter().map(|r| r.0))),
+                Arc::new(Int64Array::from(
+                    rows.iter().map(|r| r.1).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.2).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter().map(|r| r.3).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .unwrap();
+        write_batch(&root.path().join(format!("{name}.parquet")), &batch)
+    };
+
+    let merge_spec = UpdateMergeSpec {
+        order_by: Some("updated_at".into()),
+        columns: BTreeMap::from([
+            ("updated_at".into(), UpdateMergeStrategy::Max),
+            ("title".into(), UpdateMergeStrategy::Replace),
+            ("author".into(), UpdateMergeStrategy::LatestOrBackfill),
+        ]),
+    };
+
+    // Step 1: Supply `author = "Alice"` on id=1 at updated_at=150, and backfill `author = "Bob"`
+    // on id=2 at older updated_at=50 (where prior id=2 had unsupplied default "unassigned" at 100),
+    // plus update ids 3..=16 (> batch_rows = 3) to exercise multi-batch chunking.
+    let mut step1_rows: Vec<EvolvedInputRow<'_>> = vec![
+        (1, Some(150), Some("Title 1 v2"), Some("Alice")),
+        (2, Some(50), Some("Title 2 older"), Some("Bob")),
+    ];
+    for i in 3..=16 {
+        step1_rows.push((i, Some(120), Some("Updated"), Some("Contributor")));
+    }
+    let step1_input = write_with_author("step1", &step1_rows);
+    let after_step1 = engine
+        .update(&UpdateSpec {
+            dataset: id("docs"),
+            operation: id("merge-step-1"),
+            base: evolved.id.clone(),
+            definition: "v2".into(),
+            keys: vec!["id".into()],
+            replacements: step1_input,
+            deletions: None,
+            merge: Some(merge_spec.clone()),
+            relationship: None,
+        })
+        .await
+        .unwrap();
+
+    verify_release_at(&after_step1, tight_limits.clone(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+
+    // Step 2: Update id=1 at newer updated_at=200 using a file that OMITS `author`
+    // (`__docspec_supplied_4 = false`, value defaults to "unassigned").
+    // `LatestOrBackfill` must retain `author = "Alice"` AND `__docspec_supplied_4 = true`!
+    // Also update id=2 at older updated_at=40 omitting `author`; id=2 must retain `author = "Bob"`
+    // and `__docspec_supplied_4 = true`.
+    let step2_input = write_base_rows(
+        "step2-omitted-author",
+        &[
+            (1, Some(200), Some("Title 1 v3")),
+            (2, Some(40), Some("Title 2 ancient")),
+        ],
+    );
+    let after_step2 = engine
+        .update(&UpdateSpec {
+            dataset: id("docs"),
+            operation: id("merge-step-2"),
+            base: after_step1.id.clone(),
+            definition: "v2".into(),
+            keys: vec!["id".into()],
+            replacements: step2_input,
+            deletions: None,
+            merge: Some(merge_spec),
+            relationship: None,
+        })
+        .await
+        .unwrap();
+
+    verify_release_at(&after_step2, tight_limits.clone(), VerificationLevel::Deep)
+        .await
+        .unwrap();
+    let cert2 = engine
+        .change_certificate(&after_step2.version_ref())
+        .await
+        .unwrap()
+        .unwrap();
+    verify_applied_changes(&after_step1, &after_step2, &cert2.changes, tight_limits.clone())
+        .await
+        .unwrap();
+
+    // Inspect physical native table including `__docspec_supplied_4`
+    let budget = docspec::budget::Budget::new(tight_limits).unwrap();
+    let native = storage::open_pin(&after_step2.dataset.groups["source"], &budget)
+        .await
+        .unwrap();
+    let stream = storage::read_batches(&native, &budget).await.unwrap();
+    futures::pin_mut!(stream);
+    let mut by_id: BTreeMap<i64, StoredDocRow> = BTreeMap::new();
+    while let Some(batch) = stream.try_next().await.unwrap() {
+        let ids = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let ts = batch
+            .column_by_name("updated_at")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let titles = batch
+            .column_by_name("title")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let authors = batch
+            .column_by_name("author")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let supplied = batch
+            .column_by_name("__docspec_supplied_4")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        for i in 0..batch.num_rows() {
+            by_id.insert(
+                ids.value(i),
+                (
+                    (!ts.is_null(i)).then(|| ts.value(i)),
+                    (!titles.is_null(i)).then(|| titles.value(i).to_owned()),
+                    (!authors.is_null(i)).then(|| authors.value(i).to_owned()),
+                    supplied.value(i),
+                ),
+            );
+        }
+    }
+    assert_eq!(by_id.len(), 16);
+    assert_eq!(
+        by_id[&1],
+        (
+            Some(200),
+            Some("Title 1 v3".into()),
+            Some("Alice".into()),
+            true
+        )
+    );
+    assert_eq!(
+        by_id[&2],
+        (Some(100), Some("Init".into()), Some("Bob".into()), true)
+    );
+}
