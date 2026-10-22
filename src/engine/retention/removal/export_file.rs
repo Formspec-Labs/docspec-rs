@@ -104,7 +104,12 @@ impl Engine {
             let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[key])?;
             let pin: crate::export::ExportPin = serde_json::from_str(json)?;
             crate::engine::export::check_pin(&pin)?;
-            if pin.object.path == path {
+            if pin.object.path == path
+                || pin
+                    .child_tables
+                    .values()
+                    .any(|child| child.object.path == path)
+            {
                 return Err(Error::refusal(
                     "export_stage_protected",
                     "an immutable export pin still promises these exact payload bytes",

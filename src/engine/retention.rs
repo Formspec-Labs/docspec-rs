@@ -1560,6 +1560,7 @@ mod tests {
                     group: "source".into(),
                     rows: crate::export::ExportRows::All,
                     columns: vec!["id".into(), "val".into()],
+                    ..crate::export::ExportPolicy::default()
                 },
             })
             .await

@@ -2275,6 +2275,12 @@ pub struct WriteMetrics {
     pub files_skipped_by_pruning: u64,
 }
 
+pub use crate::export::{
+    ChildTableExport, ChildTableExportSpec, ExportKeyRange, FacetCountEntry, Predicate,
+    ReadingsFoldSpec, ScalarExpr, SortColumn, SortDirection, TaggedPredicate, TaggedScalarExpr,
+    WhenThen,
+};
+
 #[cfg(test)]
 mod unknown_field_tests {
     use super::*;

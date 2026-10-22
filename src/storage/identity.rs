@@ -164,7 +164,7 @@ pub(crate) fn materialize(
         .len()
         .saturating_add(12)
         .saturating_mul(files.null_count());
-    if batch.get_array_memory_size().saturating_add(extra) > limit {
+    if super::effective_batch_bytes(&batch).saturating_add(extra) > limit {
         return Err(Error::refusal(
             "oversized_batch",
             "stored occurrence identity exceeds the batch allowance",
@@ -193,7 +193,7 @@ pub(crate) fn materialize(
     columns[file_index] = Arc::new(new_files);
     columns[row_index] = Arc::new(new_rows);
     let result = RecordBatch::try_new(schema, columns)?;
-    if result.get_array_memory_size() > limit {
+    if super::effective_batch_bytes(&result) > limit {
         return Err(Error::refusal(
             "oversized_batch",
             "stored occurrence identity exceeds the batch allowance",

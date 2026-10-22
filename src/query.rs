@@ -673,18 +673,35 @@ pub(crate) fn bounded(
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
     let limit = budget.limits.max_batch_bytes;
     let stream = futures::stream::try_unfold(
-        (stream, reservation),
-        move |(mut stream, reservation)| async move {
-            let Some(batch) = stream.try_next().await? else {
-                return Ok(None);
-            };
-            if batch.get_array_memory_size() > limit {
-                return Err(external(crate::Error::refusal(
-                    "oversized_batch",
-                    "combined result exceeds the consumer batch allowance",
-                )));
+        (
+            stream,
+            std::collections::VecDeque::<arrow::record_batch::RecordBatch>::new(),
+            reservation,
+        ),
+        move |(mut stream, mut pending, reservation)| async move {
+            loop {
+                if let Some(batch) = pending.pop_front() {
+                    return Ok(Some((batch, (stream, pending, reservation))));
+                }
+                let Some(batch) = stream.try_next().await? else {
+                    return Ok(None);
+                };
+                if crate::storage::has_list_of_struct(batch.schema().as_ref()) {
+                    for slice in crate::storage::split_oversized_batch(batch, limit)
+                        .map_err(external)?
+                    {
+                        pending.push_back(slice);
+                    }
+                    continue;
+                }
+                if batch.get_array_memory_size() > limit {
+                    return Err(external(crate::Error::refusal(
+                        "oversized_batch",
+                        "combined result exceeds the consumer batch allowance",
+                    )));
+                }
+                return Ok(Some((batch, (stream, pending, reservation))));
             }
-            Ok(Some((batch, (stream, reservation))))
         },
     );
     Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))

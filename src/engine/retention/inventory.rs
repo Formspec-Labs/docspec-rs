@@ -1404,6 +1404,9 @@ impl Inventory {
                 }
                 if !ended {
                     self.object(&closed.object, origin)?;
+                    for child in closed.child_tables.values() {
+                        self.object(&child.object, origin)?;
+                    }
                 }
             } else if !ended {
                 self.path(&file.path, origin)?;
@@ -1421,6 +1424,12 @@ impl Inventory {
                 crate::engine::export::remote::validate_record(key, json, rows, None)?
             {
                 self.object(&staged, origin)?;
+                if key.starts_with("export-staged/") {
+                    let record: crate::engine::export::ExportMaterialized = decode(json)?;
+                    for child in record.child_tables.values() {
+                        self.object(&child.object, origin)?;
+                    }
+                }
             }
         } else if let Some(id) = key.strip_prefix("export-operation/") {
             let operation: crate::engine::export::ExportOperation = decode(json)?;
@@ -1456,6 +1465,9 @@ impl Inventory {
                 )?;
             }
             self.object(&output.object, origin)?;
+            for child in output.child_tables.values() {
+                self.object(&child.object, origin)?;
+            }
         } else if let Some(id) = key.strip_prefix("export-validation/") {
             let validation: crate::export::ExportValidation = decode(json)?;
             let output: crate::engine::export::ExportMaterialized =
@@ -1486,6 +1498,9 @@ impl Inventory {
                 crate::engine::export::remote::check_pin_binding(&pin, &operation, rows, None)?;
             }
             self.object(&pin.object, origin)?;
+            for child in pin.child_tables.values() {
+                self.object(&child.object, origin)?;
+            }
             self.release(&pin.source.manifest, origin)?;
         } else if key.starts_with("phase/backfill/") {
             let phase: FileCompletion = decode(json)?;

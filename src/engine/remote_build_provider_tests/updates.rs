@@ -304,6 +304,7 @@ async fn prepare(engine: &Engine, dataset: &Id, producer: &Path) -> Result<Prepa
                 group: "source".into(),
                 rows: ExportRows::All,
                 columns: vec!["counter".into(), "text".into()],
+                ..ExportPolicy::default()
             },
         })
         .await?;

@@ -174,6 +174,7 @@ async fn qualify_export() -> Result<()> {
             group: "source".into(),
             rows: ExportRows::All,
             columns: vec!["counter".into(), "text".into()],
+            ..ExportPolicy::default()
         },
     };
     let stopped = match engine.export_until(&spec, "transfer-uncommitted").await {

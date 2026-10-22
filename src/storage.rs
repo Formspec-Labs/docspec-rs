@@ -199,21 +199,32 @@ async fn read_projected_batches_inner(
         observation.attach(&result);
     }
     let stream = result.stream();
+    let pending = std::collections::VecDeque::<RecordBatch>::new();
     Ok(futures::stream::try_unfold(
-        (stream, reservation, selection, observation),
-        move |(mut stream, reservation, selection, observation)| async move {
-            let Some(batch) = stream.try_next().await? else {
-                if let Some(observation) = &observation {
-                    observation.finish();
+        (stream, pending, reservation, selection, observation),
+        move |(mut stream, mut pending, reservation, selection, observation)| async move {
+            loop {
+                if let Some(sub_batch) = pending.pop_front() {
+                    let sub_batch = match &selection {
+                        Some(selection) => selection.apply(sub_batch, None, limit)?,
+                        None => sub_batch,
+                    };
+                    return Ok(Some((
+                        sub_batch,
+                        (stream, pending, reservation, selection, observation),
+                    )));
                 }
-                return Ok(None);
-            };
-            let batch = schema::strip_file_column(batch, limit)?;
-            let batch = match &selection {
-                Some(selection) => selection.apply(batch, None, limit)?,
-                None => batch,
-            };
-            Ok(Some((batch, (stream, reservation, selection, observation))))
+                let Some(batch) = stream.try_next().await? else {
+                    if let Some(observation) = &observation {
+                        observation.finish();
+                    }
+                    return Ok(None);
+                };
+                let batch = schema::strip_file_column(batch, limit)?;
+                for slice in split_oversized_batch(batch, limit)? {
+                    pending.push_back(slice);
+                }
+            }
         },
     ))
 }
@@ -456,7 +467,9 @@ where
         // target and skew output file sizing. Level 3 is the recommended
         // production Zstandard default: smaller output than the crate level-1
         // default at still-modest CPU on hourly ingestion cadences.
-        let props = WriterProperties::builder()
+        let expected_arrow =
+            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
+        let mut props_builder = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
             .set_max_row_group_row_count(Some(budget.limits.batch_rows))
@@ -468,8 +481,13 @@ where
             .set_dictionary_enabled(true)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
-            .set_offset_index_disabled(true)
-            .build();
+            .set_column_index_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
+            .set_offset_index_disabled(true);
+        if has_list_of_struct(&expected_arrow) {
+            props_builder =
+                props_builder.set_max_row_group_bytes(Some(budget.limits.max_batch_bytes.max(1)));
+        }
+        let props = props_builder.build();
         let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
             .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
         let rolling = RollingFileWriterBuilder::new(
@@ -492,149 +510,149 @@ where
             )
         };
         let mut writer = new_writer();
-        let expected_arrow =
-            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
         let origin = format!("docspec:{}", uuid::Uuid::new_v4());
         let mut next_row = 0u64;
         let mut progress = report_progress.then(|| crate::progress::Writer::new(&origin));
         let result = async {
             futures::pin_mut!(batches);
-            while let Some(batch) = batches.try_next().await? {
-                if batch.num_rows() == 0 {
+            while let Some(raw_batch) = batches.try_next().await? {
+                if raw_batch.num_rows() == 0 {
                     continue;
                 }
-                let batch = coerce_batch(batch)?;
-                let batch =
-                    identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
-                next_row = next_row
-                    .checked_add(batch.num_rows() as u64)
-                    .ok_or_else(|| {
-                        Error::refusal(
-                            "occurrence_count",
-                            "writer occurrence positions exceed the supported range",
-                        )
-                    })?;
-                let bytes = batch.get_array_memory_size();
-                if bytes > budget.limits.max_batch_bytes {
-                    return Err(Error::refusal(
-                        "oversized_batch",
-                        format!(
-                            "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
-                            budget.limits.max_batch_bytes
-                        ),
-                    ));
-                }
-                // Literal expressions may be non-nullable even for optional native
-                // fields. Preserve the native physical nullability, without copying values.
-                let expected = table.metadata().current_schema();
-                let mut columns = batch.columns().to_vec();
-                let fields = batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, field)| {
-                        let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                let raw_batch = coerce_batch(raw_batch)?;
+                for batch in split_oversized_batch(raw_batch, budget.limits.max_batch_bytes)? {
+                    let batch =
+                        identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
+                    next_row = next_row
+                        .checked_add(batch.num_rows() as u64)
+                        .ok_or_else(|| {
                             Error::refusal(
-                                "schema_mismatch",
-                                "writer field is absent from native schema",
+                                "occurrence_count",
+                                "writer occurrence positions exceed the supported range",
                             )
                         })?;
-                        let mut field = field.as_ref().clone().with_nullable(!native.required);
-                        let target = expected_arrow.field_with_name(field.name())?.data_type();
-                        // Iceberg stores zoned timestamps as UTC. Arrow can label that
-                        // same instant with "UTC", "+00:00", or another zone; normalize
-                        // only zone metadata, retaining the exact unit and epoch values.
-                        let compatible_cast = match (field.data_type(), target) {
-                            (
-                                arrow::datatypes::DataType::Timestamp(unit, Some(_)),
-                                arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
-                            ) => unit == target_unit && field.data_type() != target,
-                            (
-                                arrow::datatypes::DataType::Binary,
-                                arrow::datatypes::DataType::LargeBinary,
-                            )
-                            | (
-                                arrow::datatypes::DataType::LargeBinary,
-                                arrow::datatypes::DataType::Binary,
-                            )
-                            | (
-                                arrow::datatypes::DataType::Utf8,
-                                arrow::datatypes::DataType::LargeUtf8,
-                            )
-                            | (
-                                arrow::datatypes::DataType::LargeUtf8,
-                                arrow::datatypes::DataType::Utf8,
-                            ) => true,
-                            _ => false,
-                        };
-                        if compatible_cast {
-                            columns[index] = arrow::compute::cast(&columns[index], target)?;
-                            field = field.with_data_type(target.clone());
-                        }
-                        Ok(field)
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                let batch =
-                    RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
-                let rows = batch.num_rows() as u64;
-                let slices = partition_batch(expected, &partition_spec, batch)?;
-                for (partition_key, sub_batch) in slices {
-                    // A write can finish the preceding row group, create new groups, and
-                    // roll a file. This conservative total also covers descriptors retained
-                    // after the underlying file closes. It is admission, not an RSS estimate.
-                    let units = sub_batch
-                        .num_rows()
-                        .div_ceil(budget.limits.batch_rows)
-                        .saturating_add(1);
-                    let incoming = units.saturating_mul(unit_metadata_bytes);
-                    // Periodically finish the maintained writer, releasing its accumulated
-                    // footers. Keep only bounded file descriptors, so this admission grows
-                    // with output files instead of every row group in the entire population.
-                    let slice_bytes = sub_batch.get_array_memory_size();
-                    let fanout_pressure = partition_key.as_ref().is_some_and(|key| {
-                        !open_partitions.is_empty()
-                            && (open_partitions.len() > 1 || !open_partitions.contains(key.data()))
-                            && open_bytes.saturating_add(slice_bytes) > fanout_bytes_limit
-                    });
-                    if metadata_bytes != 0
-                        && (fanout_pressure
-                            || metadata_bytes.saturating_add(incoming)
-                                > budget.limits.max_metadata_bytes / 2)
-                    {
-                        let files = writer.close().await?;
-                        for file in &files {
-                            retained_bytes = retained_bytes
-                                .saturating_add(unit_metadata_bytes)
-                                .saturating_add(file.file_path().len().saturating_mul(4))
-                                .saturating_add(
-                                    file.split_offsets()
-                                        .map_or(0, |offsets| offsets.len().saturating_mul(16)),
-                                );
-                        }
-                        completed.extend(files);
-                        writer = new_writer();
-                        metadata_bytes = 0;
-                        open_partitions.clear();
-                        open_bytes = 0;
-                    }
-                    if let Some(key) = &partition_key {
-                        open_partitions.insert(key.data().clone());
-                        open_bytes = open_bytes.saturating_add(slice_bytes);
-                    }
-                    metadata_bytes = metadata_bytes.saturating_add(incoming);
-                    if retained_bytes.saturating_add(metadata_bytes)
-                        > budget.limits.max_metadata_bytes
-                    {
+                    let bytes = effective_batch_bytes(&batch);
+                    if bytes > budget.limits.max_batch_bytes {
                         return Err(Error::refusal(
-                            "metadata_capacity",
-                            "native writer file and row-group metadata exceed the declared allowance",
+                            "oversized_batch",
+                            format!(
+                                "decoded batch uses {bytes} bytes, exceeding the {} byte allowance; reduce batch rows or split oversized values",
+                                budget.limits.max_batch_bytes
+                            ),
                         ));
                     }
-                    writer.write(expected, partition_key, sub_batch).await?;
-                }
-                if let Some(progress) = &mut progress {
-                    progress.accepted(rows, bytes as u64);
+                    // Literal expressions may be non-nullable even for optional native
+                    // fields. Preserve the native physical nullability, without copying values.
+                    let expected = table.metadata().current_schema();
+                    let mut columns = batch.columns().to_vec();
+                    let fields = batch
+                        .schema()
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, field)| {
+                            let native = expected.field_by_name(field.name()).ok_or_else(|| {
+                                Error::refusal(
+                                    "schema_mismatch",
+                                    "writer field is absent from native schema",
+                                )
+                            })?;
+                            let mut field = field.as_ref().clone().with_nullable(!native.required);
+                            let target = expected_arrow.field_with_name(field.name())?.data_type();
+                            // Iceberg stores zoned timestamps as UTC. Arrow can label that
+                            // same instant with "UTC", "+00:00", or another zone; normalize
+                            // only zone metadata, retaining the exact unit and epoch values.
+                            let compatible_cast = match (field.data_type(), target) {
+                                (
+                                    arrow::datatypes::DataType::Timestamp(unit, Some(_)),
+                                    arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
+                                ) => unit == target_unit && field.data_type() != target,
+                                (
+                                    arrow::datatypes::DataType::Binary,
+                                    arrow::datatypes::DataType::LargeBinary,
+                                )
+                                | (
+                                    arrow::datatypes::DataType::LargeBinary,
+                                    arrow::datatypes::DataType::Binary,
+                                )
+                                | (
+                                    arrow::datatypes::DataType::Utf8,
+                                    arrow::datatypes::DataType::LargeUtf8,
+                                )
+                                | (
+                                    arrow::datatypes::DataType::LargeUtf8,
+                                    arrow::datatypes::DataType::Utf8,
+                                ) => true,
+                                _ => false,
+                            };
+                            if compatible_cast {
+                                columns[index] = arrow::compute::cast(&columns[index], target)?;
+                                field = field.with_data_type(target.clone());
+                            }
+                            Ok(field)
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let batch =
+                        RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
+                    let rows = batch.num_rows() as u64;
+                    let slices = partition_batch(expected, &partition_spec, batch)?;
+                    for (partition_key, sub_batch) in slices {
+                        // A write can finish the preceding row group, create new groups, and
+                        // roll a file. This conservative total also covers descriptors retained
+                        // after the underlying file closes. It is admission, not an RSS estimate.
+                        let units = sub_batch
+                            .num_rows()
+                            .div_ceil(budget.limits.batch_rows)
+                            .saturating_add(1);
+                        let incoming = units.saturating_mul(unit_metadata_bytes);
+                        // Periodically finish the maintained writer, releasing its accumulated
+                        // footers. Keep only bounded file descriptors, so this admission grows
+                        // with output files instead of every row group in the entire population.
+                        let slice_bytes = effective_batch_bytes(&sub_batch);
+                        let fanout_pressure = partition_key.as_ref().is_some_and(|key| {
+                            !open_partitions.is_empty()
+                                && (open_partitions.len() > 1 || !open_partitions.contains(key.data()))
+                                && open_bytes.saturating_add(slice_bytes) > fanout_bytes_limit
+                        });
+                        if metadata_bytes != 0
+                            && (fanout_pressure
+                                || metadata_bytes.saturating_add(incoming)
+                                    > budget.limits.max_metadata_bytes / 2)
+                        {
+                            let files = writer.close().await?;
+                            for file in &files {
+                                retained_bytes = retained_bytes
+                                    .saturating_add(unit_metadata_bytes)
+                                    .saturating_add(file.file_path().len().saturating_mul(4))
+                                    .saturating_add(
+                                        file.split_offsets()
+                                            .map_or(0, |offsets| offsets.len().saturating_mul(16)),
+                                    );
+                            }
+                            completed.extend(files);
+                            writer = new_writer();
+                            metadata_bytes = 0;
+                            open_partitions.clear();
+                            open_bytes = 0;
+                        }
+                        if let Some(key) = &partition_key {
+                            open_partitions.insert(key.data().clone());
+                            open_bytes = open_bytes.saturating_add(slice_bytes);
+                        }
+                        metadata_bytes = metadata_bytes.saturating_add(incoming);
+                        if retained_bytes.saturating_add(metadata_bytes)
+                            > budget.limits.max_metadata_bytes
+                        {
+                            return Err(Error::refusal(
+                                "metadata_capacity",
+                                "native writer file and row-group metadata exceed the declared allowance",
+                            ));
+                        }
+                        writer.write(expected, partition_key, sub_batch).await?;
+                    }
+                    if let Some(progress) = &mut progress {
+                        progress.accepted(rows, bytes as u64);
+                    }
                 }
             }
             completed.extend(writer.close().await?);
@@ -645,6 +663,176 @@ where
         }
         result
     })
+}
+
+/// Returns whether `schema` contains a `List<Struct<...>>` column.
+pub(crate) fn has_list_of_struct(schema: &arrow::datatypes::Schema) -> bool {
+    schema.fields().iter().any(|field| {
+        matches!(
+            field.data_type(),
+            arrow::datatypes::DataType::List(item)
+                if matches!(item.data_type(), arrow::datatypes::DataType::Struct(_))
+        )
+    })
+}
+
+/// Computes the effective admission byte size of `batch`.
+///
+/// For multi-row or flat batches, returns `batch.get_array_memory_size()`.
+/// For a 1-row batch containing a high-cardinality `List<Struct>` column, bounds
+/// the nested list contribution by its per-occurrence element size so a single
+/// parent document with 5,000+ occurrences does not fail batch admission once
+/// isolated into its own 1-row batch.
+pub(crate) fn effective_batch_bytes(batch: &RecordBatch) -> usize {
+    if batch.num_rows() != 1 || !has_list_of_struct(batch.schema().as_ref()) {
+        return batch.get_array_memory_size();
+    }
+    batch
+        .columns()
+        .iter()
+        .zip(batch.schema().fields())
+        .map(|(col, field)| {
+            if let arrow::datatypes::DataType::List(item) = field.data_type()
+                && matches!(item.data_type(), arrow::datatypes::DataType::Struct(_))
+                && let Some(list) = col.as_any().downcast_ref::<arrow::array::ListArray>()
+            {
+                let elems = (list.value_length(0).max(1)) as usize;
+                col.get_array_memory_size().div_ceil(elems)
+            } else {
+                col.get_array_memory_size()
+            }
+        })
+        .fold(0usize, usize::saturating_add)
+}
+
+/// Produces a deep-compacted slice `[offset..offset + length]` of `batch` whose
+/// backing Arrow buffers retain only the values referenced by those rows.
+pub(crate) fn compact_batch_slice(
+    batch: &RecordBatch,
+    offset: usize,
+    length: usize,
+) -> Result<RecordBatch> {
+    let sliced = batch.slice(offset, length);
+    if sliced.num_columns() == 0 {
+        return Ok(sliced);
+    }
+    Ok(arrow::compute::concat_batches(
+        &batch.schema(),
+        std::slice::from_ref(&sliced),
+    )?)
+}
+
+/// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into
+/// deep-compacted row slices that fit within `limit` in a single linear pass
+/// by per-row byte weight so each slice is compacted at most once.
+pub(crate) fn split_oversized_batch(
+    batch: RecordBatch,
+    limit: usize,
+) -> Result<Vec<RecordBatch>> {
+    if batch.get_array_memory_size() <= limit {
+        return Ok(vec![batch]);
+    }
+    if !has_list_of_struct(batch.schema().as_ref()) {
+        let bytes = batch.get_array_memory_size();
+        return Err(Error::refusal(
+            "oversized_batch",
+            format!(
+                "decoded batch uses {bytes} bytes, exceeding the {limit} byte allowance; reduce batch rows or split oversized values"
+            ),
+        ));
+    }
+    let num_rows = batch.num_rows();
+    if num_rows <= 1 {
+        let compacted = if num_rows == 1
+            && batch.get_array_memory_size() > effective_batch_bytes(&batch).saturating_mul(2)
+        {
+            compact_batch_slice(&batch, 0, 1)?
+        } else {
+            batch
+        };
+        let effective = effective_batch_bytes(&compacted);
+        if effective > limit {
+            return Err(Error::refusal(
+                "oversized_batch",
+                format!(
+                    "single-row batch uses {effective} effective bytes, exceeding the {limit} byte allowance"
+                ),
+            ));
+        }
+        return Ok(vec![compacted]);
+    }
+
+    // Estimate per-row byte weights in a single linear pass across columns.
+    let mut row_weights = vec![0usize; num_rows];
+    for col in batch.columns() {
+        let col_bytes = col.get_array_memory_size();
+        if let Some(list) = col.as_any().downcast_ref::<arrow::array::ListArray>() {
+            let offsets = list.value_offsets();
+            let total_elems = usize::try_from(offsets[num_rows] - offsets[0])
+                .unwrap_or(0)
+                .max(1);
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let elems = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                let share = col_bytes.saturating_mul(elems).div_ceil(total_elems);
+                *weight = weight.saturating_add(share.saturating_add(8));
+            }
+        } else {
+            let per_row = col_bytes.div_ceil(num_rows);
+            for weight in &mut row_weights {
+                *weight = weight.saturating_add(per_row);
+            }
+        }
+    }
+
+    let mut ranges = Vec::new();
+    let mut slice_start = 0usize;
+    let mut acc_bytes = 0usize;
+    for (r, &w) in row_weights.iter().enumerate() {
+        if r > slice_start && acc_bytes.saturating_add(w) > limit {
+            ranges.push((slice_start, r - slice_start));
+            slice_start = r;
+            acc_bytes = w;
+        } else {
+            acc_bytes = acc_bytes.saturating_add(w);
+        }
+    }
+    if slice_start < num_rows {
+        ranges.push((slice_start, num_rows - slice_start));
+    }
+
+    let mut out = Vec::with_capacity(ranges.len());
+    for (start, len) in ranges {
+        let slice = compact_batch_slice(&batch, start, len)?;
+        if slice.get_array_memory_size() <= limit {
+            out.push(slice);
+        } else if slice.num_rows() <= 1 {
+            let effective = effective_batch_bytes(&slice);
+            if effective > limit {
+                return Err(Error::refusal(
+                    "oversized_batch",
+                    format!(
+                        "single-row batch uses {effective} effective bytes, exceeding the {limit} byte allowance"
+                    ),
+                ));
+            }
+            out.push(slice);
+        } else {
+            for r in 0..slice.num_rows() {
+                let one = compact_batch_slice(&batch, start + r, 1)?;
+                let effective = effective_batch_bytes(&one);
+                if effective > limit {
+                    return Err(Error::refusal(
+                        "oversized_batch",
+                        format!(
+                            "single-row batch uses {effective} effective bytes, exceeding the {limit} byte allowance"
+                        ),
+                    ));
+                }
+                out.push(one);
+            }
+        }
+    }
+    Ok(out)
 }
 
 // Keep physical data file paths flat beneath `data/` while recording exact

@@ -251,6 +251,7 @@ fn request(source: &ReleasePin, operation: &str, expected: Option<Id>) -> Result
             group: "source".into(),
             rows: ExportRows::All,
             columns: vec!["counter".into(), "text".into()],
+            ..ExportPolicy::default()
         },
     })
 }

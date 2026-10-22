@@ -112,8 +112,9 @@ pub(super) async fn plan_selected_files(
 }
 
 pub(super) fn strip_file_column(batch: RecordBatch, limit: usize) -> Result<RecordBatch> {
-    // Include the transient native column in the admission check.
-    if batch.get_array_memory_size() > limit {
+    // Include the transient native column in the admission check for flat schemas;
+    // schemas with List<Struct> columns may split multi-row batches after stripping.
+    if !super::has_list_of_struct(batch.schema().as_ref()) && batch.get_array_memory_size() > limit {
         return Err(Error::refusal(
             "oversized_batch",
             "native reader exceeded its byte allowance",

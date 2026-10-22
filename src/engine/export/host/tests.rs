@@ -62,6 +62,7 @@ async fn fixture() -> (tempfile::TempDir, Engine, ExportSpec) {
             group: "source".into(),
             rows: ExportRows::All,
             columns: vec!["value".into()],
+            ..ExportPolicy::default()
         },
     };
     (root, engine, spec)
