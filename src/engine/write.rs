@@ -948,45 +948,63 @@ impl Engine {
             metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
             let small_threshold =
                 (budget.limits.max_batch_bytes as u64 / 8).clamp(64 << 10, 512 << 10);
-            let small_files = shared
-                .iter()
-                .filter(|file| file.file_size_in_bytes() < small_threshold)
-                .count();
-            let small_dirs = shared
-                .iter()
-                .filter(|file| file.file_size_in_bytes() < small_threshold)
-                .filter_map(|file| Path::new(file.file_path()).parent())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            let total_files = shared.len();
+            let mut partition_groups: Vec<Vec<usize>> = Vec::new();
+            let mut partition_index: std::collections::HashMap<iceberg::spec::Struct, usize> =
+                std::collections::HashMap::new();
+            for (idx, file) in shared.iter().enumerate() {
+                if let Some(&pos) = partition_index.get(file.partition()) {
+                    partition_groups[pos].push(idx);
+                } else {
+                    let pos = partition_groups.len();
+                    partition_index.insert(file.partition().clone(), pos);
+                    partition_groups.push(vec![idx]);
+                }
+            }
             let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
                 && storage::identity::has_origins(native.metadata().current_schema())?
-                && ((small_files >= 24 && small_dirs >= 2) || total_files > 48)
             {
-                let mut indices = if small_files >= 24 && small_dirs >= 2 {
-                    shared
+                let mut indices = Vec::new();
+                for group in partition_groups {
+                    let small_files = group
                         .iter()
-                        .enumerate()
-                        .filter(|(_, file)| file.file_size_in_bytes() < small_threshold)
-                        .map(|(idx, _)| idx)
-                        .take(32)
-                        .collect::<Vec<_>>()
-                } else {
-                    let mut by_size = shared
+                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                        .count();
+                    let small_dirs = group
                         .iter()
-                        .enumerate()
-                        .map(|(idx, file)| (file.file_size_in_bytes(), idx))
-                        .collect::<Vec<_>>();
-                    by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
-                    let take = (shared.len().saturating_sub(32)).clamp(16, 32);
-                    let mut selected = by_size
-                        .into_iter()
-                        .take(take)
-                        .map(|(_, idx)| idx)
-                        .collect::<Vec<_>>();
-                    selected.sort_unstable();
-                    selected
-                };
+                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    let part_files = group.len();
+                    let part_dirs = group
+                        .iter()
+                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    if small_files >= 24 && small_dirs >= 2 {
+                        indices = group
+                            .into_iter()
+                            .filter(|&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                            .take(32)
+                            .collect();
+                        break;
+                    } else if part_files > 48 && part_dirs >= 2 {
+                        let mut by_size = group
+                            .iter()
+                            .map(|&idx| (shared[idx].file_size_in_bytes(), idx))
+                            .collect::<Vec<_>>();
+                        by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
+                        let take = (group.len().saturating_sub(32)).clamp(16, 32);
+                        let mut selected = by_size
+                            .into_iter()
+                            .take(take)
+                            .map(|(_, idx)| idx)
+                            .collect::<Vec<_>>();
+                        selected.sort_unstable();
+                        indices = selected;
+                        break;
+                    }
+                }
                 let coalesce_bytes = indices
                     .iter()
                     .map(|&idx| shared[idx].file_size_in_bytes())

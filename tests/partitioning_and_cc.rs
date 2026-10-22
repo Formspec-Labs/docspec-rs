@@ -334,6 +334,43 @@ async fn bucket_day_and_year_transforms_prune_point_updates_and_key_reads() {
     let count: usize = out.iter().map(RecordBatch::num_rows).sum();
     assert_eq!(count, 1);
 
+    // Point lookup on `published_date` (Date32) using ISO-8601 `YYYY-MM-DD` (19738 == 2024-01-16):
+    let date_stream = engine
+        .read_keys(
+            &release,
+            &KeyReadSpec {
+                key: "published_date".into(),
+                values: vec!["2024-01-16".into()],
+                columns: Some(vec!["doc_id".into(), "published_date".into()]),
+            },
+        )
+        .await
+        .unwrap();
+    let date_out: Vec<RecordBatch> = date_stream.try_collect().await.unwrap();
+    let date_count: usize = date_out.iter().map(RecordBatch::num_rows).sum();
+    assert_eq!(date_count, 1);
+    let doc_col = date_out[0]
+        .column_by_name("doc_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(doc_col.value(0), "doc-beta");
+
+    // Verify `verify_release` checks partition_by against source table metadata:
+    docspec::engine::verify_release(&release, limits())
+        .await
+        .unwrap();
+    let mut tampered = release.clone();
+    tampered.dataset.partition_by.clear();
+    assert_eq!(
+        docspec::engine::verify_release(&tampered, limits())
+            .await
+            .unwrap_err()
+            .code(),
+        "release_mismatch"
+    );
+
     // Also test UpdateSpec pruning via Bucket(64): updating only "doc-alpha" must reuse the other 3 files!
     let repl = write_partitioned_input(
         &root.path().join("bucket_repl.parquet"),
@@ -1013,11 +1050,15 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
     // - Rows with non-null `body_hash` get `document_id = sha256(["bodies", sorted_bodies])`
     // - Rows with NULL `body_hash` (e.g. HTML/404 pages) never connect to each other and get
     //   `document_id = sha256(["sources", sorted_sources])`
+    // - Rows with empty `source_id` and no edges fall back to `file:row` occurrence identity
+    //   instead of colliding on `sha256(["sources", []])`.
     let rows = [
         ("src-a", Some("canon-1"), Some("body-xyz"), &[][..], 10, "Draft A"),
         ("src-b", Some("canon-2"), Some("body-xyz"), &[][..], 20, "Draft B"),
         ("html-404-1", Some("canon-404-1"), None, &[][..], 1, "Not Found 1"),
         ("html-404-2", Some("canon-404-2"), None, &[][..], 1, "Not Found 2"),
+        ("", None, None, &[][..], 50, "Empty Key 1"),
+        ("", None, None, &[][..], 60, "Empty Key 2"),
     ];
     let file = write_cc_input(&root.path().join("body_initial.parquet"), &rows);
     let captures = engine
@@ -1103,7 +1144,7 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
     let expected_404_1 = expected_doc_id(&["html-404-1"]);
     let expected_404_2 = expected_doc_id(&["html-404-2"]);
 
-    assert_eq!(actual1.len(), 3);
+    assert_eq!(actual1.len(), 5);
     assert_eq!(actual1[&expected_body_doc_id].title, "Draft A");
     assert_eq!(
         actual1[&expected_body_doc_id].sources,
@@ -1141,7 +1182,7 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
         .await
         .unwrap();
     let actual2 = read_components(&engine, &docs2).await;
-    assert_eq!(actual2.len(), 3);
+    assert_eq!(actual2.len(), 5);
     assert_eq!(actual2[&expected_body_doc_id].title, "Final B");
     assert_eq!(
         actual2[&expected_body_doc_id].sources,

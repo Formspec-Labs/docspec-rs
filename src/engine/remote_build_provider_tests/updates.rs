@@ -564,6 +564,79 @@ async fn source_update_location_path_reuses_processing_and_shares_files() {
 }
 
 #[tokio::test]
+async fn partitioned_source_update_preserves_partition_spec_and_verifies_release_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let producer = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let dataset = Id::new("partitioned-source-updates").unwrap();
+    let original = input(
+        &producer.path().join("initial.parquet"),
+        &[
+            (1, Some("same")),
+            (2, None),
+            (3, Some("")),
+            (4, Some("keep")),
+        ],
+        false,
+    )
+    .unwrap();
+    let partition_by = vec![PartitionFieldSpec {
+        column: "counter".into(),
+        name: None,
+        transform: PartitionTransformSpec::Bucket { num_buckets: 4 },
+    }];
+    let initial = engine
+        .run(&RunSpec {
+            dataset: dataset.clone(),
+            operation: Id::new("initial").unwrap(),
+            base: None,
+            relationship: None,
+            input: original.path,
+            expected_digest: original.digest,
+            sql: "SELECT * FROM input".into(),
+            definition: "part-update-v1".into(),
+            partition_by: partition_by.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(initial.dataset.partition_by, partition_by);
+    verify_release(&initial, limits()).await.unwrap();
+
+    let updated = engine
+        .update(&UpdateSpec {
+            dataset: dataset.clone(),
+            operation: Id::new("update-one").unwrap(),
+            definition: "part-update-v1".into(),
+            base: initial.id.clone(),
+            keys: vec!["counter".into()],
+            replacements: input(
+                &producer.path().join("first.parquet"),
+                &[(1, Some("changed"))],
+                false,
+            )
+            .unwrap(),
+            deletions: None,
+            relationship: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(updated.dataset.partition_by, partition_by);
+    verify_release(&updated, limits()).await.unwrap();
+
+    let mut tampered = updated.clone();
+    tampered.dataset.partition_by.clear();
+    let mut checks = verification::Checks::routine(engine.inner.objects.clone());
+    assert_eq!(
+        verify_local_release(&tampered, &engine.inner.lifecycle.budget, &mut checks)
+            .await
+            .unwrap_err()
+            .code(),
+        "release_mismatch"
+    );
+    engine.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 #[ignore = "requires a fresh qualification UUID and isolated live R2/Basin configuration"]
 async fn native_remote_updates_export_and_read_from_a_fresh_host() {
     provider_updates(false).await;

@@ -2046,7 +2046,11 @@ impl Engine {
                 if declared.is_some_and(|d| !d.is_empty())
                     || base.as_ref().is_some_and(|b| !b.dataset.partition_by.is_empty())
                 {
-                    let native = storage::open_pin(source, &lifecycle.budget).await?;
+                    let native = self
+                        .inner
+                        .objects
+                        .open_pin(source, &lifecycle.budget)
+                        .await?;
                     storage::partition_specs_from_metadata(native.metadata(), declared)
                 } else {
                     Vec::new()
@@ -3083,6 +3087,45 @@ async fn verify_local_release(
         .get("source")
         .ok_or_else(|| Error::refusal("release_mismatch", "release has no source table"))?;
     checks.table(source, budget).await?;
+    if checks.inspects_tables() || !decoded.partition_by.is_empty() {
+        let native_source = checks.objects().open_pin(source, budget).await?;
+        storage::check_partition_by_matches(
+            native_source.metadata().current_schema(),
+            native_source.metadata().default_partition_spec(),
+            &decoded.partition_by,
+        )
+        .map_err(|_| {
+            Error::refusal(
+                "release_mismatch",
+                "release partition_by does not match source table metadata",
+            )
+        })?;
+        let declared = match &decoded.request {
+            OperationRequest::Build(build) if !build.partition_by.is_empty() => {
+                storage::check_partition_by_matches(
+                    native_source.metadata().current_schema(),
+                    native_source.metadata().default_partition_spec(),
+                    &build.partition_by,
+                )
+                .map_err(|_| {
+                    Error::refusal(
+                        "release_mismatch",
+                        "build request partition_by does not match source table metadata",
+                    )
+                })?;
+                Some(build.partition_by.as_slice())
+            }
+            _ => Some(decoded.partition_by.as_slice()),
+        };
+        if decoded.partition_by
+            != storage::partition_specs_from_metadata(native_source.metadata(), declared)
+        {
+            return Err(Error::refusal(
+                "release_mismatch",
+                "release partition_by does not match source table metadata",
+            ));
+        }
+    }
     backfill::verify_groups(decoded, budget, checks).await?;
     evidence::verify(decoded, budget, checks).await?;
     Ok(())

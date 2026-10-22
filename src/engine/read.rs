@@ -323,12 +323,15 @@ pub(super) async fn read_keys_with_objects(
         public_schema.field(key_public_idx).data_type(),
         arrow::datatypes::DataType::Utf8
             | arrow::datatypes::DataType::LargeUtf8
+            | arrow::datatypes::DataType::Utf8View
             | arrow::datatypes::DataType::Int32
             | arrow::datatypes::DataType::Int64
+            | arrow::datatypes::DataType::Date32
+            | arrow::datatypes::DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, _)
     ) {
         return Err(Error::refusal(
             "invalid_key_read",
-            "key read requires a scalar Utf8, Int32, or Int64 key column",
+            "key read requires a scalar Utf8, Int32, Int64, Date32, or TimestampMicrosecond key column",
         ));
     }
     let out_indices: Vec<usize> = match &spec.columns {
@@ -440,11 +443,16 @@ pub(super) async fn read_keys_with_objects(
 enum KeyTargets {
     Strings(BTreeSet<String>),
     Ints(BTreeSet<i64>),
+    Dates(BTreeSet<i32>),
+    Timestamps(BTreeSet<i64>),
 }
 
 impl KeyTargets {
     fn parse(data_type: &arrow::datatypes::DataType, values: &[String]) -> Self {
-        use arrow::datatypes::DataType;
+        use arrow::{
+            array::Array,
+            datatypes::{DataType, TimeUnit},
+        };
         match data_type {
             DataType::Int64 => Self::Ints(values.iter().filter_map(|v| v.parse().ok()).collect()),
             DataType::Int32 => Self::Ints(
@@ -452,6 +460,46 @@ impl KeyTargets {
                     .iter()
                     .filter_map(|v| v.parse::<i32>().ok())
                     .map(i64::from)
+                    .collect(),
+            ),
+            DataType::Date32 => Self::Dates(
+                values
+                    .iter()
+                    .filter_map(|v| {
+                        if let Ok(days) = v.parse::<i32>() {
+                            return Some(days);
+                        }
+                        let src = arrow::array::StringArray::from(vec![v.as_str()]);
+                        let casted = arrow::compute::cast(&src, &DataType::Date32).ok()?;
+                        let arr = casted.as_any().downcast_ref::<arrow::array::Date32Array>()?;
+                        (!arr.is_null(0)).then(|| arr.value(0))
+                    })
+                    .collect(),
+            ),
+            DataType::Timestamp(TimeUnit::Microsecond, tz) => Self::Timestamps(
+                values
+                    .iter()
+                    .filter_map(|v| {
+                        if let Ok(micros) = v.parse::<i64>() {
+                            return Some(micros);
+                        }
+                        let src = arrow::array::StringArray::from(vec![v.as_str()]);
+                        let casted = arrow::compute::cast(
+                            &src,
+                            &DataType::Timestamp(TimeUnit::Microsecond, tz.clone()),
+                        )
+                        .or_else(|_| {
+                            arrow::compute::cast(
+                                &src,
+                                &DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                            )
+                        })
+                        .ok()?;
+                        let arr = casted
+                            .as_any()
+                            .downcast_ref::<arrow::array::TimestampMicrosecondArray>()?;
+                        (!arr.is_null(0)).then(|| arr.value(0))
+                    })
                     .collect(),
             ),
             _ => Self::Strings(values.iter().cloned().collect()),
@@ -462,6 +510,8 @@ impl KeyTargets {
         match self {
             Self::Strings(set) => set.is_empty(),
             Self::Ints(set) => set.is_empty(),
+            Self::Dates(set) => set.is_empty(),
+            Self::Timestamps(set) => set.is_empty(),
         }
     }
 
@@ -513,6 +563,35 @@ impl KeyTargets {
                     }
                 }
                 (Self::Ints(values), PrimitiveType::Long) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Long(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Dates(values), PrimitiveType::Date) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Int(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (
+                    Self::Timestamps(values),
+                    PrimitiveType::Timestamp | PrimitiveType::Timestamptz,
+                ) => {
                     for value in values {
                         let lit = PrimitiveLiteral::Long(*value);
                         if let Some(part) =
@@ -587,6 +666,12 @@ impl KeyTargets {
                     _ => true,
                 }
             }
+            (Self::Dates(set), PrimitiveLiteral::Int(low), PrimitiveLiteral::Int(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
+            (Self::Timestamps(set), PrimitiveLiteral::Long(low), PrimitiveLiteral::Long(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
             _ => true,
         }
     }
@@ -599,7 +684,8 @@ fn filter_batch_by_keys(
     out_indices: &[usize],
 ) -> Result<RecordBatch> {
     use arrow::array::{
-        Array, BooleanArray, Int32Array, Int64Array, LargeStringArray, StringArray,
+        Array, BooleanArray, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray,
+        StringViewArray, TimestampMicrosecondArray,
     };
     let col = batch.column(key_idx);
     let any = col.as_any();
@@ -610,6 +696,10 @@ fn filter_batch_by_keys(
                     .map(|v| Some(v.is_some_and(|v| set.contains(v))))
                     .collect()
             } else if let Some(arr) = any.downcast_ref::<LargeStringArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<StringViewArray>() {
                 arr.iter()
                     .map(|v| Some(v.is_some_and(|v| set.contains(v))))
                     .collect()
@@ -628,6 +718,30 @@ fn filter_batch_by_keys(
             } else if let Some(arr) = any.downcast_ref::<Int32Array>() {
                 arr.iter()
                     .map(|v| Some(v.is_some_and(|v| set.contains(&i64::from(v)))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Dates(set) => {
+            if let Some(arr) = any.downcast_ref::<Date32Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Timestamps(set) => {
+            if let Some(arr) = any.downcast_ref::<TimestampMicrosecondArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
                     .collect()
             } else {
                 return Err(Error::refusal(
