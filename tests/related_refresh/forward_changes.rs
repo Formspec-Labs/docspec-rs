@@ -185,7 +185,11 @@ async fn join_and_summary_forward_chains_match_full_typed_changes_and_addresses(
                     name: "rows".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let mut summary = engine.refresh(&summary_spec).await.unwrap();

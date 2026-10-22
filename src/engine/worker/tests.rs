@@ -609,7 +609,11 @@ async fn queued_writer_does_not_deadlock_public_build_or_refresh_internal_reads(
                     field: "id".into(),
                     name: "joined_id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let joined = with_queued_writer(&engine, &refresh.dataset, engine.refresh(&refresh)).await;

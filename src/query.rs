@@ -31,7 +31,7 @@ pub(crate) fn table(
     budget: Budget,
     rows: Option<u64>,
 ) -> Result<Arc<dyn TableProvider>> {
-    provider(native, budget, false, rows)
+    provider(native, budget, false, rows, None)
 }
 
 pub(crate) fn occurrences(
@@ -39,7 +39,16 @@ pub(crate) fn occurrences(
     budget: Budget,
     rows: Option<u64>,
 ) -> Result<Arc<dyn TableProvider>> {
-    provider(native, budget, true, rows)
+    provider(native, budget, true, rows, None)
+}
+
+pub(crate) fn pruned_occurrences(
+    native: Table,
+    budget: Budget,
+    rows: Option<u64>,
+    retained_files: Arc<std::collections::BTreeSet<String>>,
+) -> Result<Arc<dyn TableProvider>> {
+    provider(native, budget, true, rows, Some(retained_files))
 }
 
 fn provider(
@@ -47,6 +56,7 @@ fn provider(
     budget: Budget,
     located: bool,
     rows: Option<u64>,
+    retained_files: Option<Arc<std::collections::BTreeSet<String>>>,
 ) -> Result<Arc<dyn TableProvider>> {
     let schema = if located {
         storage::occurrence_schema(&native)?
@@ -60,6 +70,7 @@ fn provider(
             table: native,
             located,
             projection: None,
+            retained_files,
             _projection_memory: None,
         }),
         schema: schema.clone(),
@@ -207,6 +218,7 @@ enum NativeSource {
         table: Table,
         located: bool,
         projection: Option<Vec<usize>>,
+        retained_files: Option<Arc<std::collections::BTreeSet<String>>>,
         _projection_memory: Option<OwnedSemaphorePermit>,
     },
     File {
@@ -271,10 +283,16 @@ impl NativePartition {
                 .collect(),
         );
         let source = match self.source.as_ref() {
-            NativeSource::Table { table, located, .. } => NativeSource::Table {
+            NativeSource::Table {
+                table,
+                located,
+                retained_files,
+                ..
+            } => NativeSource::Table {
                 table: table.clone(),
                 located: *located,
                 projection,
+                retained_files: retained_files.clone(),
                 _projection_memory: Some(memory),
             },
             NativeSource::File { scan, path, .. } => NativeSource::File {
@@ -382,10 +400,16 @@ impl PartitionStream for NativePartition {
                     table,
                     located: true,
                     projection,
+                    retained_files,
                     ..
-                } => storage::read_projected_occurrences(table, &budget, projection.as_deref())
-                    .await?
-                    .boxed(),
+                } => storage::read_projected_occurrences_pruned(
+                    table,
+                    &budget,
+                    projection.as_deref(),
+                    retained_files.as_deref(),
+                )
+                .await?
+                .boxed(),
                 NativeSource::Table {
                     table,
                     located: false,
@@ -741,6 +765,7 @@ mod tests {
                 table: native,
                 located: false,
                 projection: None,
+                retained_files: None,
                 _projection_memory: None,
             }),
             schema,

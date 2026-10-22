@@ -24,3 +24,11 @@ pub use engine::BackendCapability;
 pub use engine::Engine;
 #[doc(inline)]
 pub use error::{Error, Result};
+#[doc(inline)]
+pub use model::{
+    AggregateField, AggregateFunction, AggregateTransform, AggregationDefinition, BinaryOp,
+    CaseWhen, ComparisonOp, JoinCardinality, JoinDefinition, JoinField, JoinKey, JoinKind,
+    JoinSide, JoinTransform, LiteralValue, NullMatching, NullOrdering, Predicate, RefreshMode,
+    RefreshPolicy, RefreshSpec, RefreshTransform, ScalarExpr, SortColumn, SortDirection,
+    UpdateMergeSpec, UpdateMergeStrategy, UpdateSpec,
+};

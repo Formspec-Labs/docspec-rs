@@ -35,6 +35,7 @@ async fn saved_http_plan_retires_optional_changes_and_reconciles_retry() {
                 &[(Some(1), Some("new text".into()))],
             ),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

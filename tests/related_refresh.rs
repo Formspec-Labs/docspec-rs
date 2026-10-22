@@ -153,7 +153,11 @@ fn recipe(left: &ReleasePin, right: &ReleasePin) -> RefreshSpec {
                         name: "right_text".into(),
                     },
                 ],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     }
 }
@@ -992,6 +996,7 @@ async fn offline_parent_rules_reject_related_conversion_and_role_rebinding() {
             digest: raw.expected_digest.clone(),
         },
         deletions: None,
+        merge: None,
         relationship: None,
     };
     assert_eq!(
@@ -1449,7 +1454,11 @@ async fn collect_set_grouped_and_global_refresh_full_and_incrementally_with_refu
                             },
                         },
                     ],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
         }
     }
@@ -1712,7 +1721,11 @@ async fn collect_set_grouped_and_global_refresh_full_and_incrementally_with_refu
                         function: F::CollectSet { field: "ts".into() },
                     },
                 ],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let typed_release = engine.refresh(&typed_spec).await.unwrap();
@@ -2257,7 +2270,11 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                         field: "a".into(),
                         name: "left_a".into(),
                     }],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
         };
         assert_eq!(
@@ -2283,7 +2300,11 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                             field: bad_key.into(),
                         },
                     }],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
         };
         assert_eq!(
@@ -2341,7 +2362,11 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                             name: "right_occurrences".into(),
                         },
                     ],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
         };
 
@@ -2394,6 +2419,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                 &[(Some(9), Some(9), None, None)],
                 true,
             )),
+            merge: None,
             relationship: None,
         })
         .await
@@ -2417,6 +2443,7 @@ async fn nested_struct_and_list_struct_join_fields_refresh_full_and_incrementall
                 false,
             ),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

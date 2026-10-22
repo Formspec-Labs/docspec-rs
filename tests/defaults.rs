@@ -391,6 +391,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
         keys: vec!["id".into()],
         replacements: replacements(&root.path().join("updates.parquet"), &incoming),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let updated = engine.update(&update).await.unwrap();
@@ -776,6 +777,7 @@ async fn update_scope_refuses_omitted_keys_without_changing_selection() {
                 ..initial_values(Some(42))
             }],
         ),
+        merge: None,
         relationship: None,
     };
     assert_eq!(

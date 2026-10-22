@@ -326,6 +326,7 @@ async fn reads_across_updates(trusted: bool) {
                 &[(Some(2), None, String::new())],
                 true,
             )),
+            merge: None,
             relationship: None,
         })
         .await

@@ -170,6 +170,7 @@ async fn main() {
                 replacements: input.clone(),
                 relationship: None,
                 deletions: None,
+                merge: None,
             })
             .await
             .unwrap();

@@ -29,7 +29,7 @@ pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};
 pub use occurrences::read_occurrences_observed;
 #[doc(inline)]
 pub use occurrences::{OCCURRENCE_FILE, OCCURRENCE_ROW, occurrence_schema, read_occurrences};
-pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences};
+pub(crate) use occurrences::{OccurrenceScan, read_projected_occurrences_pruned};
 #[allow(unused_imports)]
 pub(crate) use tables::{
     CandidateWriter, bounded_json, fresh_metadata, fresh_metadata_at, fresh_partitioned_metadata,
@@ -404,8 +404,14 @@ where
                 DataFileFormat::Parquet,
             ),
         );
-        let new_writer =
-            || ActiveWriter::new(DataFileWriterBuilder::new(rolling.clone()), is_partitioned);
+        let spec_id = partition_spec.spec_id();
+        let new_writer = || {
+            ActiveWriter::new(
+                DataFileWriterBuilder::new(rolling.clone()),
+                is_partitioned,
+                spec_id,
+            )
+        };
         let mut writer = new_writer();
         let expected_arrow =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
@@ -528,7 +534,7 @@ where
                             "native writer file and row-group metadata exceed the declared allowance",
                         ));
                     }
-                    writer.write(partition_key, sub_batch).await?;
+                    writer.write(expected, partition_key, sub_batch).await?;
                 }
                 if let Some(progress) = &mut progress {
                     progress.accepted(rows, bytes as u64);
@@ -560,42 +566,146 @@ impl iceberg::writer::file_writer::location_generator::LocationGenerator for Dat
     }
 }
 
-enum ActiveWriter<B: iceberg::writer::IcebergWriterBuilder> {
+enum ActiveWriterInner<B: iceberg::writer::IcebergWriterBuilder> {
     Unpartitioned(UnpartitionedWriter<B>),
     Partitioned(iceberg::writer::partitioning::fanout_writer::FanoutWriter<B>),
 }
 
+struct ActiveWriter<B: iceberg::writer::IcebergWriterBuilder> {
+    inner: ActiveWriterInner<B>,
+    truncated_fields: BTreeSet<i32>,
+    spec_id: i32,
+}
+
 impl<B: iceberg::writer::IcebergWriterBuilder> ActiveWriter<B> {
-    fn new(builder: B, partitioned: bool) -> Self {
-        if partitioned {
-            Self::Partitioned(
+    fn new(builder: B, partitioned: bool, spec_id: i32) -> Self {
+        let inner = if partitioned {
+            ActiveWriterInner::Partitioned(
                 iceberg::writer::partitioning::fanout_writer::FanoutWriter::new(builder),
             )
         } else {
-            Self::Unpartitioned(UnpartitionedWriter::new(builder))
+            ActiveWriterInner::Unpartitioned(UnpartitionedWriter::new(builder))
+        };
+        Self {
+            inner,
+            truncated_fields: BTreeSet::new(),
+            spec_id,
         }
     }
 
     async fn write(
         &mut self,
+        schema: &iceberg::spec::Schema,
         partition_key: Option<iceberg::spec::PartitionKey>,
         batch: RecordBatch,
     ) -> iceberg::Result<()> {
         use iceberg::writer::partitioning::PartitioningWriter;
-        match (self, partition_key) {
-            (Self::Unpartitioned(writer), None) => writer.write(batch).await,
-            (Self::Partitioned(writer), Some(key)) => writer.write(key, batch).await,
+        for (index, field) in batch.schema().fields().iter().enumerate() {
+            if let Some(native_field) = schema.field_by_name(field.name())
+                && !self.truncated_fields.contains(&native_field.id)
+                && column_has_truncated_stat_value(batch.column(index).as_ref())
+            {
+                self.truncated_fields.insert(native_field.id);
+            }
+        }
+        match (&mut self.inner, partition_key) {
+            (ActiveWriterInner::Unpartitioned(writer), None) => writer.write(batch).await,
+            (ActiveWriterInner::Partitioned(writer), Some(key)) => writer.write(key, batch).await,
             _ => unreachable!("writer mode matches partition key presence"),
         }
     }
 
     async fn close(self) -> iceberg::Result<Vec<DataFile>> {
         use iceberg::writer::partitioning::PartitioningWriter;
-        match self {
-            Self::Unpartitioned(writer) => writer.close().await,
-            Self::Partitioned(writer) => writer.close().await,
+        let files = match self.inner {
+            ActiveWriterInner::Unpartitioned(writer) => writer.close().await?,
+            ActiveWriterInner::Partitioned(writer) => writer.close().await?,
+        };
+        if self.truncated_fields.is_empty() {
+            return Ok(files);
         }
+        files
+            .into_iter()
+            .map(|file| strip_truncated_bounds(file, &self.truncated_fields, self.spec_id))
+            .collect()
     }
+}
+
+fn column_has_truncated_stat_value(array: &dyn arrow::array::Array) -> bool {
+    use arrow::array::{Array, BinaryArray, LargeBinaryArray, LargeStringArray, StringArray};
+    let any = array.as_any();
+    if let Some(arr) = any.downcast_ref::<StringArray>() {
+        (0..arr.len()).any(|i| !arr.is_null(i) && arr.value(i).len() >= STATISTICS_TRUNCATE_BYTES)
+    } else if let Some(arr) = any.downcast_ref::<LargeStringArray>() {
+        (0..arr.len()).any(|i| !arr.is_null(i) && arr.value(i).len() >= STATISTICS_TRUNCATE_BYTES)
+    } else if let Some(arr) = any.downcast_ref::<BinaryArray>() {
+        (0..arr.len()).any(|i| !arr.is_null(i) && arr.value(i).len() >= STATISTICS_TRUNCATE_BYTES)
+    } else if let Some(arr) = any.downcast_ref::<LargeBinaryArray>() {
+        (0..arr.len()).any(|i| !arr.is_null(i) && arr.value(i).len() >= STATISTICS_TRUNCATE_BYTES)
+    } else {
+        false
+    }
+}
+
+fn strip_truncated_bounds(
+    file: DataFile,
+    truncated_fields: &BTreeSet<i32>,
+    spec_id: i32,
+) -> iceberg::Result<DataFile> {
+    if !file
+        .lower_bounds()
+        .keys()
+        .any(|id| truncated_fields.contains(id))
+        && !file
+            .upper_bounds()
+            .keys()
+            .any(|id| truncated_fields.contains(id))
+    {
+        return Ok(file);
+    }
+    let lower_bounds = file
+        .lower_bounds()
+        .iter()
+        .filter(|(id, _)| !truncated_fields.contains(id))
+        .map(|(id, datum)| (*id, datum.clone()))
+        .collect();
+    let upper_bounds = file
+        .upper_bounds()
+        .iter()
+        .filter(|(id, _)| !truncated_fields.contains(id))
+        .map(|(id, datum)| (*id, datum.clone()))
+        .collect();
+    let mut builder = iceberg::spec::DataFileBuilder::default();
+    builder
+        .content(file.content_type())
+        .file_path(file.file_path().to_owned())
+        .file_format(file.file_format())
+        .partition(file.partition().clone())
+        .record_count(file.record_count())
+        .file_size_in_bytes(file.file_size_in_bytes())
+        .column_sizes(file.column_sizes().clone())
+        .value_counts(file.value_counts().clone())
+        .null_value_counts(file.null_value_counts().clone())
+        .nan_value_counts(file.nan_value_counts().clone())
+        .lower_bounds(lower_bounds)
+        .upper_bounds(upper_bounds)
+        .key_metadata(file.key_metadata().map(ToOwned::to_owned))
+        .split_offsets(file.split_offsets().map(ToOwned::to_owned))
+        .equality_ids(file.equality_ids())
+        .first_row_id(file.first_row_id())
+        .partition_spec_id(spec_id)
+        .referenced_data_file(file.referenced_data_file())
+        .content_offset(file.content_offset())
+        .content_size_in_bytes(file.content_size_in_bytes());
+    if let Some(sort_order_id) = file.sort_order_id() {
+        builder.sort_order_id(sort_order_id);
+    }
+    builder.build().map_err(|err| {
+        iceberg::Error::new(
+            iceberg::ErrorKind::DataInvalid,
+            format!("failed to rebuild data file descriptor: {err}"),
+        )
+    })
 }
 
 fn partition_batch(

@@ -14,7 +14,10 @@
 //! interval test; pruning stays conservative and correctness never depends on it.
 
 use crate::{Result, budget::Budget};
-use arrow::array::{Array, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray};
+use arrow::array::{
+    Array, Date32Array, Int32Array, Int64Array, LargeStringArray, StringArray,
+    TimestampMicrosecondArray,
+};
 use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
 use iceberg::spec::{DataFile, PrimitiveLiteral, Schema};
@@ -39,7 +42,7 @@ struct Column {
 
 /// Distinct affected values per key column, retained under one reservation.
 #[derive(Debug)]
-pub(super) struct KeyPoints {
+pub(in crate::engine) struct KeyPoints {
     /// `None` marks a key column whose type has no exact point representation.
     columns: Vec<Option<Column>>,
     _reservation: OwnedSemaphorePermit,
@@ -52,11 +55,24 @@ impl KeyPoints {
     /// Streams the registered `affected_keys` table once and keeps its distinct
     /// key values. Returns `Ok(None)` when the reservation is unavailable or the
     /// distinct values outgrow it; the caller then keeps the interval test.
-    pub(super) async fn collect(
+    pub(in crate::engine) async fn collect(
         context: &SessionContext,
         keys: &[String],
         budget: &Budget,
     ) -> Result<Option<Self>> {
+        Self::collect_table(context, "affected_keys", keys, budget).await
+    }
+
+    /// Streams any registered key table once and keeps its distinct key values.
+    pub(in crate::engine) async fn collect_table(
+        context: &SessionContext,
+        table_name: &str,
+        keys: &[String],
+        budget: &Budget,
+    ) -> Result<Option<Self>> {
+        if keys.is_empty() {
+            return Ok(None);
+        }
         // One batch allowance bounds the retained set. This is a pruning aid, not
         // a correctness requirement, so contention or overflow declines quietly.
         let allowance = budget.limits.max_batch_bytes;
@@ -67,7 +83,7 @@ impl KeyPoints {
             keys.iter().map(|_| Some(Column::default())).collect();
         let mut bytes = 0usize;
         let mut stream = context
-            .table("affected_keys")
+            .table(table_name)
             .await?
             .select_columns(&keys.iter().map(String::as_str).collect::<Vec<_>>())?
             .execute_stream()
@@ -100,7 +116,7 @@ impl KeyPoints {
     /// Returns `false` only when manifest bounds prove that no affected tuple can
     /// occur in `file`. Unknown types, truncated or absent bounds, and possible
     /// NULL-to-NULL matches keep the file.
-    pub(super) fn may_contain(
+    pub(in crate::engine) fn may_contain(
         &self,
         native_schema: &Schema,
         keys: &[String],
@@ -110,6 +126,9 @@ impl KeyPoints {
             let Some(column) = column else {
                 continue;
             };
+            if column.values.is_empty() && !column.has_null {
+                return false;
+            }
             let Some(field) = native_schema.field_by_name(key) else {
                 continue;
             };
@@ -173,6 +192,8 @@ fn insert(column: &mut Column, array: &dyn Array) -> Option<usize> {
         each!(array, |value: i32| Point::Int(i64::from(value)));
     } else if let Some(array) = any.downcast_ref::<Date32Array>() {
         each!(array, |value: i32| Point::Int(i64::from(value)));
+    } else if let Some(array) = any.downcast_ref::<TimestampMicrosecondArray>() {
+        each!(array, Point::Int);
     } else {
         return None;
     }

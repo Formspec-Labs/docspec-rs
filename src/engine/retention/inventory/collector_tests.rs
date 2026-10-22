@@ -309,7 +309,11 @@ async fn closure_collects_history_computation_coverage_and_seals_without_payload
                 grouping: AggregationDefinition {
                     keys: Vec::new(),
                     aggregates: Vec::new(),
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Full,

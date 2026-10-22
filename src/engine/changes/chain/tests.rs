@@ -70,6 +70,7 @@ async fn limits_and_wrong_revisions_do_not_become_empty_changes() {
                 keys: vec!["id".into()],
                 replacements: self::input(root.path(), value),
                 deletions: None,
+                merge: None,
                 relationship: None,
             })
             .await

@@ -9,6 +9,7 @@ use arrow::{
 use iceberg::{spec::Schema, table::Table};
 
 pub(super) mod build;
+pub(super) mod merge;
 mod verification;
 pub(super) use verification::verify_update;
 
@@ -490,6 +491,9 @@ impl Engine {
                 })?;
             field_ids.push(field.id);
         }
+        if let Some(merge_spec) = &spec.merge {
+            merge::validate(merge_spec, native.metadata().current_schema(), &spec.keys)?;
+        }
         let keys = spec
             .keys
             .iter()
@@ -556,20 +560,23 @@ impl Engine {
         };
         let scope = context.sql(&scope_sql).await?;
         let applied = self
-            .replace_keys(Replacement {
-                dataset: &spec.dataset,
-                directory: directory.clone(),
-                before,
-                keys: &spec.keys,
-                scope,
-                replacement,
-                replacement_bytes: Some(
-                    admission
-                        .outputs
-                        .iter()
-                        .fold(0_u64, |sum, object| sum.saturating_add(object.bytes)),
-                ),
-            })
+            .replace_keys_with_merge(
+                Replacement {
+                    dataset: &spec.dataset,
+                    directory: directory.clone(),
+                    before,
+                    keys: &spec.keys,
+                    scope,
+                    replacement,
+                    replacement_bytes: Some(
+                        admission
+                            .outputs
+                            .iter()
+                            .fold(0_u64, |sum, object| sum.saturating_add(object.bytes)),
+                    ),
+                },
+                spec.merge.as_ref(),
+            )
             .await?;
         let Applied {
             table,
@@ -648,6 +655,14 @@ impl Engine {
     pub(super) fn replace_keys<'a>(
         &'a self,
         request: Replacement<'a>,
+    ) -> futures::future::BoxFuture<'a, Result<Applied>> {
+        self.replace_keys_with_merge(request, None)
+    }
+
+    pub(super) fn replace_keys_with_merge<'a>(
+        &'a self,
+        request: Replacement<'a>,
+        merge: Option<&'a UpdateMergeSpec>,
     ) -> futures::future::BoxFuture<'a, Result<Applied>> {
         Box::pin(async move {
             let Replacement {
@@ -729,7 +744,9 @@ impl Engine {
             let mut changed = Vec::new();
             let mut rewrite_bytes = 0_u64;
             let mut files_probed = 0_u64;
+            let mut files_skipped_by_pruning = 0_u64;
             if key_files.is_empty() {
+                files_skipped_by_pruning = scan.files().count() as u64;
                 shared.extend(scan.files().cloned());
             } else {
                 let native_schema = native.metadata().current_schema();
@@ -748,6 +765,7 @@ impl Engine {
                         .as_ref()
                         .is_some_and(|points| !points.may_contain(native_schema, keys, file))
                     {
+                        files_skipped_by_pruning = files_skipped_by_pruning.saturating_add(1);
                         shared.push(file.clone());
                         continue;
                     }
@@ -837,6 +855,8 @@ impl Engine {
                 files_scanned: files_probed.saturating_add(changed.len() as u64),
                 files_reused: shared.len() as u64,
                 bytes_reused: shared.iter().map(|file| file.file_size_in_bytes()).sum(),
+                candidate_files_probed: files_probed,
+                files_skipped_by_pruning,
                 ..WriteMetrics::default()
             };
             let (sender, receiver) = tokio::sync::mpsc::channel(1);
@@ -874,6 +894,34 @@ impl Engine {
                 storage::write_batches(&candidate, kept, budget),
                 storage::write_batches(&removed, removed_rows, budget)
             )?;
+            let replacement = if let Some(merge_spec) = merge {
+                let prior_df = if removed_files.is_empty() {
+                    let empty = datafusion::datasource::empty::EmptyTable::new(Arc::new(
+                        schema.clone(),
+                    ));
+                    context.read_table(Arc::new(empty))?
+                } else {
+                    let paths = removed_files
+                        .iter()
+                        .map(|file| file.file_path().to_owned())
+                        .collect::<Vec<_>>();
+                    context
+                        .read_parquet(paths, ParquetReadOptions::default().schema(&schema))
+                        .await?
+                };
+                merge::apply_merge(
+                    &context,
+                    prior_df,
+                    replacement,
+                    native.metadata().current_schema(),
+                    keys,
+                    merge_spec,
+                    budget,
+                )
+                .await?
+            } else {
+                replacement
+            };
             let added_files = storage::write_batches(
                 &candidate,
                 replacement.execute_stream().await?.map(|batch| {
@@ -915,10 +963,16 @@ impl Engine {
                 .filter_map(|file| Path::new(file.file_path()).parent())
                 .collect::<std::collections::BTreeSet<_>>()
                 .len();
+            let total_dirs = shared
+                .iter()
+                .filter_map(|file| Path::new(file.file_path()).parent())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
             let total_files = shared.len();
             let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
                 && storage::identity::has_origins(native.metadata().current_schema())?
-                && ((small_files >= 24 && small_dirs >= 2) || total_files > 48)
+                && ((small_files >= 24 && small_dirs >= 2)
+                    || (total_files > 48 && total_dirs >= 2))
             {
                 let mut indices = if small_files >= 24 && small_dirs >= 2 {
                     shared
@@ -1150,13 +1204,24 @@ fn file_may_overlap_key_files(
     key_files: &[iceberg::spec::DataFile],
     file: &iceberg::spec::DataFile,
 ) -> bool {
+    file_may_overlap_mapped_key_files(native_schema, scope_schema, keys, keys, key_files, file)
+}
+
+pub(super) fn file_may_overlap_mapped_key_files(
+    native_schema: &iceberg::spec::Schema,
+    scope_schema: &iceberg::spec::Schema,
+    native_keys: &[String],
+    scope_keys: &[String],
+    key_files: &[iceberg::spec::DataFile],
+    file: &iceberg::spec::DataFile,
+) -> bool {
     if key_files.is_empty() {
         return false;
     }
-    for key in keys {
+    for (native_key, scope_key) in native_keys.iter().zip(scope_keys) {
         let (Some(native_field), Some(scope_field)) = (
-            native_schema.field_by_name(key),
-            scope_schema.field_by_name(key),
+            native_schema.field_by_name(native_key),
+            scope_schema.field_by_name(scope_key),
         ) else {
             continue;
         };
@@ -1203,7 +1268,7 @@ fn file_may_overlap_key_files(
     true
 }
 
-mod key_points;
+pub(super) mod key_points;
 
 #[cfg(test)]
 mod tests;

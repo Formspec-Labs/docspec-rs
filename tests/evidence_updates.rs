@@ -328,6 +328,7 @@ async fn first_value_update_preserves_receipts_for_unrelated_rows_in_the_same_fi
         keys: vec!["id".into()],
         replacements: values(&root.path().join("correction.parquet"), &[(1, Some("new"))]),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let changed = engine.update(&update).await.unwrap();
@@ -529,7 +530,11 @@ fn summary(input: &ReleasePin, base: Option<Id>, operation: &str) -> RefreshSpec
                     name: "count".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
         policy: RefreshPolicy::Captured,
         mode: if base.is_some() {
@@ -788,6 +793,7 @@ async fn one_receipt_on_many_origin_files_uses_a_fixed_reader_budget() {
             keys: vec!["id".into()],
             replacements: values(&root.path().join("append.parquet"), &[(999, Some("new"))]),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

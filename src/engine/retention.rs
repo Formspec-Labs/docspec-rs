@@ -1533,6 +1533,7 @@ mod tests {
                     keys: vec!["id".into()],
                     replacements: upd,
                     deletions: None,
+                    merge: None,
                     relationship: None,
                 })
                 .await
@@ -1572,7 +1573,11 @@ mod tests {
                             name: "rows".into(),
                             function: AggregateFunction::CountRows,
                         }],
+                        filter: None,
+                        projections: BTreeMap::new(),
                     },
+                    filter: None,
+                    projections: BTreeMap::new(),
                 }),
                 policy: RefreshPolicy::default(),
                 mode: RefreshMode::default(),
@@ -1743,6 +1748,7 @@ mod tests {
                     keys: vec!["id".into()],
                     replacements: upd,
                     deletions: None,
+                    merge: None,
                     relationship: None,
                 })
                 .await

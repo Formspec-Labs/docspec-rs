@@ -243,6 +243,7 @@ async fn redirected_rehashed_ancestor_does_not_change_an_authored_expression() {
                     digest: first_request.expected_digest.clone(),
                 },
                 deletions: None,
+                merge: None,
                 relationship: None,
             });
         }

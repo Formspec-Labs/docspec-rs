@@ -32,7 +32,11 @@ pub(super) fn summary(input: &ReleasePin, global: bool) -> RefreshSpec {
                     function,
                 })
                 .collect(),
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     }
 }
