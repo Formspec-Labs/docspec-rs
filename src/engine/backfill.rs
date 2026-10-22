@@ -539,6 +539,8 @@ impl Engine {
             let _guard = lock.lock().await;
             let lifecycle = &self.inner.lifecycle;
             if let Ok(view) = self.read_view(&spec.dataset).await {
+                self.check_operation_available(&view, &spec.operation)
+                    .await?;
                 let operation: Option<Operation> = lifecycle
                     .get(&view, &format!("operation/{}", spec.operation))
                     .await?;

@@ -9,16 +9,17 @@ impl Engine {
         clippy::too_many_arguments,
         reason = "History discovery binds canonical endpoints separately from physical scans"
     )]
-    pub(super) async fn history_keys(
-        &self,
-        dataset: &Id,
-        output: &iceberg::table::Table,
-        versions: (&ReleasePin, &ReleasePin),
-        canonical: (&TablePin, &TablePin),
-        old_native: &iceberg::table::Table,
-        keys: &[String],
+    pub(super) fn history_keys<'a>(
+        &'a self,
+        dataset: &'a Id,
+        output: &'a iceberg::table::Table,
+        versions: (&'a ReleasePin, &'a ReleasePin),
+        canonical: (&'a TablePin, &'a TablePin),
+        old_native: &'a iceberg::table::Table,
+        keys: &'a [String],
         key_schema: SchemaRef,
-    ) -> Result<Option<(TablePin, u64)>> {
+    ) -> futures::future::BoxFuture<'a, Result<Option<(TablePin, u64)>>> {
+        Box::pin(async move {
         let budget = &self.inner.lifecycle.budget;
         let view = self
             .inner
@@ -90,5 +91,6 @@ impl Engine {
             self.pin_output(dataset, &output, rows, &[]).await?,
             scanned.load(Ordering::Relaxed),
         )))
+        })
     }
 }

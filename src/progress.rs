@@ -12,39 +12,41 @@ use tracing::Instrument;
 // terminal events are always reported; a blocked writer has no invented heartbeat.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
-pub(crate) async fn phase<T>(
-    dataset: &Id,
-    operation: &Id,
+pub(crate) fn phase<'a, T: 'a>(
+    dataset: &'a Id,
+    operation: &'a Id,
     phase: &'static str,
-    work: impl Future<Output = Result<T>>,
-) -> Result<T> {
-    async {
-        let mut timer = PhaseTimer {
-            started: Instant::now(),
-            finished: false,
-        };
-        tracing::info!(event = "phase_work_started", "phase work started");
-        let result = work.await;
-        timer.finished = true;
-        match &result {
-            Ok(_) => tracing::info!(
-                event = "phase_work_finished",
-                elapsed_seconds = timer.started.elapsed().as_secs_f64(),
-                "phase work finished"
-            ),
-            Err(error) => tracing::info!(
-                event = "phase_work_failed",
-                elapsed_seconds = timer.started.elapsed().as_secs_f64(),
-                code = error.code(),
-                "phase work failed; consult retained completions before retry"
-            ),
+    work: impl Future<Output = Result<T>> + Send + 'a,
+) -> futures::future::BoxFuture<'a, Result<T>> {
+    let work: futures::future::BoxFuture<'a, Result<T>> = Box::pin(work);
+    Box::pin(
+        async move {
+            let mut timer = PhaseTimer {
+                started: Instant::now(),
+                finished: false,
+            };
+            tracing::info!(event = "phase_work_started", "phase work started");
+            let result = work.await;
+            timer.finished = true;
+            match &result {
+                Ok(_) => tracing::info!(
+                    event = "phase_work_finished",
+                    elapsed_seconds = timer.started.elapsed().as_secs_f64(),
+                    "phase work finished"
+                ),
+                Err(error) => tracing::info!(
+                    event = "phase_work_failed",
+                    elapsed_seconds = timer.started.elapsed().as_secs_f64(),
+                    code = error.code(),
+                    "phase work failed; consult retained completions before retry"
+                ),
+            }
+            result
         }
-        result
-    }
-    .instrument(
-        tracing::info_span!("phase_work", dataset = %dataset, operation = %operation, phase),
+        .instrument(
+            tracing::info_span!("phase_work", dataset = %dataset, operation = %operation, phase),
+        ),
     )
-    .await
 }
 
 struct PhaseTimer {

@@ -338,12 +338,13 @@ impl Engine {
         .await
     }
 
-    pub(super) async fn process_build(
-        &self,
-        spec: &RunSpec,
-        directory: &Path,
-        admission: &PhaseResult,
-    ) -> Result<Prepared> {
+    pub(super) fn process_build<'a>(
+        &'a self,
+        spec: &'a RunSpec,
+        directory: &'a Path,
+        admission: &'a PhaseResult,
+    ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        Box::pin(async move {
         let input = admission
             .outputs
             .first()
@@ -403,6 +404,7 @@ impl Engine {
             return self.write_output(&spec.dataset, table, dataframe).await;
         }
         self.write_frame(&spec.dataset, directory, dataframe).await
+        })
     }
 
     pub(super) async fn write_frame(
@@ -476,13 +478,14 @@ impl Engine {
         })
     }
 
-    pub(super) async fn process_update(
-        &self,
-        spec: &UpdateSpec,
-        directory: &locations::Location,
-        admission: &PhaseResult,
-        captured_source: Option<&TablePin>,
-    ) -> Result<Prepared> {
+    pub(super) fn process_update<'a>(
+        &'a self,
+        spec: &'a UpdateSpec,
+        directory: &'a locations::Location,
+        admission: &'a PhaseResult,
+        captured_source: Option<&'a TablePin>,
+    ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        Box::pin(async move {
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         let canonical_before = base
             .dataset
@@ -674,6 +677,7 @@ impl Engine {
             changes: Some(changes),
             metrics,
             schema_input: None,
+        })
         })
     }
 

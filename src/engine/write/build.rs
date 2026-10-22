@@ -183,12 +183,13 @@ impl InitialSource {
 }
 
 impl Engine {
-    pub(in crate::engine) async fn process_initial_build(
-        &self,
-        spec: &RunSpec,
-        operation: &Operation,
-        admission: &PhaseResult,
-    ) -> Result<Prepared> {
+    pub(in crate::engine) fn process_initial_build<'a>(
+        &'a self,
+        spec: &'a RunSpec,
+        operation: &'a Operation,
+        admission: &'a PhaseResult,
+    ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        Box::pin(async move {
         let input = admission
             .outputs
             .first()
@@ -278,6 +279,7 @@ impl Engine {
                 }
             }
         }
+        })
     }
 
     async fn recover_initial_output(

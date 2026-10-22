@@ -488,16 +488,17 @@ impl Engine {
         if old.logical_metadata() == new.logical_metadata() {
             return Ok((self.pin_output(dataset, &table, 0, &[]).await?, 0));
         }
-        if let Some(discovered) = Box::pin(self.history_keys(
-            dataset,
-            &table,
-            versions,
-            canonical,
-            &old_native,
-            keys,
-            key_schema.clone(),
-        ))
-        .await?
+        if let Some(discovered) = self
+            .history_keys(
+                dataset,
+                &table,
+                versions,
+                canonical,
+                &old_native,
+                keys,
+                key_schema.clone(),
+            )
+            .await?
         {
             return Ok(discovered);
         }

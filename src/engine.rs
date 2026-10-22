@@ -1153,7 +1153,7 @@ impl Engine {
             let admission = if let Some(phase) = self.phase(spec, operation, "admission").await? {
                 phase
             } else if let OperationRequest::Refresh(refresh) = spec {
-                Box::pin(self.admit_refresh(refresh, operation)).await?
+                self.admit_refresh(refresh, operation).await?
             } else if let OperationRequest::Schema(schema) = spec {
                 self.admit_schema(schema, operation).await?
             } else {
@@ -1290,7 +1290,7 @@ impl Engine {
                             && build.base.is_none()
                         {
                             (
-                                Box::pin(self.process_initial_build(build, operation, &admission))
+                                self.process_initial_build(build, operation, &admission)
                                     .await?,
                                 None,
                                 None,
@@ -1315,20 +1315,20 @@ impl Engine {
                                 };
                             let prepared = match spec {
                                 OperationRequest::Build(build) => {
-                                    Box::pin(self.process_build(
+                                    self.process_build(
                                         build,
                                         directory.local_path()?,
                                         &admission,
-                                    ))
+                                    )
                                     .await?
                                 }
                                 OperationRequest::Update(update) => {
-                                    Box::pin(self.process_update(
+                                    self.process_update(
                                         update,
                                         &directory,
                                         &admission,
                                         update_source.as_ref(),
-                                    ))
+                                    )
                                     .await?
                                 }
                                 OperationRequest::Schema(schema) => {
@@ -1340,19 +1340,17 @@ impl Engine {
                                     .await?
                                 }
                                 OperationRequest::Evidence(evidence) => {
-                                    Box::pin(
-                                        self.process_receipts(evidence, &directory, &admission),
-                                    )
-                                    .await?
+                                    self.process_receipts(evidence, &directory, &admission)
+                                        .await?
                                 }
                                 OperationRequest::Refresh(refresh) => {
-                                    Box::pin(self.process_refresh(
+                                    self.process_refresh(
                                         refresh,
                                         &directory,
                                         &admission,
                                         operation,
                                         update_source.as_ref(),
-                                    ))
+                                    )
                                     .await?
                                 }
                                 OperationRequest::Backfill(_) => {
@@ -1541,13 +1539,13 @@ impl Engine {
                         let boundary = view.table.metadata_location_result()?.to_owned();
                         drop(guards);
                         prepared = Some(
-                            Box::pin(self.protect_admission(
+                            self.protect_admission(
                                 spec,
                                 boundary,
                                 base,
                                 update_source,
                                 decoding,
-                            ))
+                            )
                             .await?,
                         );
                         continue;
@@ -1713,7 +1711,7 @@ impl Engine {
                 processed.clone()
             };
             let related = if let OperationRequest::Refresh(refresh) = spec {
-                Some(Box::pin(self.prepare_evidence(refresh, &operation, &processing, stop)).await?)
+                Some(self.prepare_evidence(refresh, &operation, &processing, stop).await?)
             } else if evidence_only {
                 base.as_ref()
                     .and_then(|base| base.dataset.related.as_ref())
@@ -1747,7 +1745,8 @@ impl Engine {
                         .transpose()?,
                 })
             } else if let Some(base) = &base {
-                Box::pin(self.inherit_receipts(spec, &operation, &processing, base, stop)).await?
+                self.inherit_receipts(spec, &operation, &processing, base, stop)
+                    .await?
             } else {
                 None
             };

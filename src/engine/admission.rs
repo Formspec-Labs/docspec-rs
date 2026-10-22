@@ -160,14 +160,15 @@ impl Engine {
     }
 
     /// Caller releases all dataset locks before acquiring this protection.
-    pub(super) async fn protect_admission(
-        &self,
-        spec: &OperationRequest,
+    pub(super) fn protect_admission<'a>(
+        &'a self,
+        spec: &'a OperationRequest,
         boundary: String,
         base: Option<ReleasePin>,
         update_source: Option<TablePin>,
         mut memory: OwnedSemaphorePermit,
-    ) -> Result<PreparedAdmission> {
+    ) -> futures::future::BoxFuture<'a, Result<PreparedAdmission>> {
+        Box::pin(async move {
         let budget = &self.inner.lifecycle.budget;
         let limit = budget.limits.max_metadata_bytes;
         let coverage = if let OperationRequest::Refresh(refresh) = spec {
@@ -351,6 +352,7 @@ impl Engine {
             dependencies,
             protections,
             _memory: retained,
+        })
         })
     }
 }
