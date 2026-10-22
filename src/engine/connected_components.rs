@@ -506,6 +506,7 @@ impl GraphTopology {
         let mut key_owner: HashMap<String, usize> = HashMap::new();
         let mut token_owner: HashMap<(String, String), usize> = HashMap::new();
         let mut retained_bytes = 0usize;
+        let mut reserved_bytes = 0usize;
         let mut permit: Option<tokio::sync::OwnedSemaphorePermit> = None;
 
         while let Some(batch) = stream.try_next().await? {
@@ -593,8 +594,15 @@ impl GraphTopology {
                 row_body_tokens.push(bodies);
             }
 
-            drop(permit.take());
-            permit = Some(budget.reserve(retained_bytes.min(budget.limits.max_batch_bytes))?);
+            let delta = retained_bytes.saturating_sub(reserved_bytes);
+            if delta > 0 {
+                let extra = budget.reserve(delta)?;
+                reserved_bytes = reserved_bytes.saturating_add(delta);
+                match &mut permit {
+                    Some(existing) => existing.merge(extra),
+                    None => permit = Some(extra),
+                }
+            }
         }
 
         let total_rows = row_keys.len();
@@ -792,6 +800,7 @@ impl EvaluatedGraph {
         let mut occ_files: Vec<Vec<String>> = Vec::new();
         let mut occ_rows: Vec<Vec<i64>> = Vec::new();
         let mut retained_bytes = 0usize;
+        let mut reserved_bytes = 0usize;
         let mut permit: Option<tokio::sync::OwnedSemaphorePermit> = topo._permit;
 
         while let Some(batch) = stream.try_next().await? {
@@ -868,8 +877,15 @@ impl EvaluatedGraph {
             }
 
             retained_bytes = retained_bytes.saturating_add(batch.get_array_memory_size());
-            drop(permit.take());
-            permit = Some(budget.reserve(retained_bytes.min(budget.limits.max_batch_bytes))?);
+            let delta = retained_bytes.saturating_sub(reserved_bytes);
+            if delta > 0 {
+                let extra = budget.reserve(delta)?;
+                reserved_bytes = reserved_bytes.saturating_add(delta);
+                match &mut permit {
+                    Some(existing) => existing.merge(extra),
+                    None => permit = Some(extra),
+                }
+            }
             occ_files.push(b_files);
             occ_rows.push(b_rows);
             batches.push(batch);
