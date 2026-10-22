@@ -37,14 +37,15 @@ impl Engine {
         .await
     }
 
-    pub(super) async fn process_incremental(
-        &self,
-        spec: &RefreshSpec,
-        directory: &locations::Location,
-        admission: &PhaseResult,
-        operation: &Operation,
-        captured_source: Option<&TablePin>,
-    ) -> Result<write::Prepared> {
+    pub(super) fn process_incremental<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        directory: &'a locations::Location,
+        admission: &'a PhaseResult,
+        operation: &'a Operation,
+        captured_source: Option<&'a TablePin>,
+    ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        Box::pin(async move {
         let coverage = admission.coverage.as_ref().ok_or_else(full_refresh)?;
         if coverage.inputs != spec.inputs() {
             return Err(full_refresh());
@@ -120,39 +121,41 @@ impl Engine {
         }
         match &spec.transform {
             RefreshTransform::Join(_) => {
-                Box::pin(self.process_incremental_join(
+                self.process_incremental_join(
                     spec,
                     directory,
                     &base,
                     &previous,
                     &current,
                     (captured, &native),
-                ))
+                )
                 .await
             }
             RefreshTransform::Aggregate(_) => {
-                Box::pin(self.process_aggregation(
+                self.process_aggregation(
                     spec,
                     directory,
                     &base,
                     &previous,
                     &current,
                     (captured, &native),
-                ))
+                )
                 .await
             }
         }
+        })
     }
 
-    async fn process_incremental_join(
-        &self,
-        spec: &RefreshSpec,
-        directory: &locations::Location,
-        base: &ReleasePin,
-        previous: &refresh::LoadedInputs,
-        current: &refresh::LoadedInputs,
-        captured: (&TablePin, &iceberg::table::Table),
-    ) -> Result<write::Prepared> {
+    fn process_incremental_join<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        directory: &'a locations::Location,
+        base: &'a ReleasePin,
+        previous: &'a refresh::LoadedInputs,
+        current: &'a refresh::LoadedInputs,
+        captured: (&'a TablePin, &'a iceberg::table::Table),
+    ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        Box::pin(async move {
         let (captured_source, native) = captured;
         let budget = &self.inner.lifecycle.budget;
         let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
@@ -210,16 +213,7 @@ impl Engine {
                 format!("keys_{index}"),
                 crate::query::table(native, budget.clone(), Some(pin.rows))?,
             )?;
-            for (prefix, pin) in [("old", old), ("new", new)] {
-                context.register_table(
-                    format!("{prefix}_{index}"),
-                    crate::query::occurrences(
-                        storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
-                        budget.clone(),
-                        Some(pin.rows),
-                    )?,
-                )?;
-            }
+            let _ = (old, new);
         }
         let keys = self
             .write_frame_at(
@@ -232,14 +226,94 @@ impl Engine {
             .await?;
         discovery.data_files_written += keys.metrics.data_files_written;
         discovery.bytes_written += keys.metrics.bytes_written;
+        let affected_native = storage::open_pin(&keys.table, &self.inner.lifecycle.budget).await?;
+        let affected_schema = affected_native.metadata().current_schema().clone();
+        let affected_data = {
+            let inv = storage::current_snapshot_files(&affected_native, budget).await?;
+            inv.data
+        };
         context.register_table(
             "affected",
             crate::query::table(
-                storage::open_pin(&keys.table, &self.inner.lifecycle.budget).await?,
+                affected_native,
                 budget.clone(),
                 Some(keys.table.rows),
             )?,
         )?;
+        let k_cols: Vec<String> = (0..join.join.keys.len())
+            .map(|i| format!("k{i}"))
+            .collect();
+        let affected_points = if keys.table.rows == 0 {
+            None
+        } else {
+            write::key_points::KeyPoints::collect_table(&context, "affected", &k_cols, budget)
+                .await?
+        };
+        for (index, old_version, new_version) in [
+            (0, &previous_join.left, &join.left),
+            (1, &previous_join.right, &join.right),
+        ] {
+            let old = source(&previous.releases[&old_version.dataset])?;
+            let new = source(&current.releases[&new_version.dataset])?;
+            let side_keys: Vec<String> = join
+                .join
+                .keys
+                .iter()
+                .map(|key| {
+                    if index == 0 {
+                        key.left.clone()
+                    } else {
+                        key.right.clone()
+                    }
+                })
+                .collect();
+            for (prefix, pin) in [("old", old), ("new", new)] {
+                let side_native =
+                    storage::open_pin(pin, &self.inner.lifecycle.budget).await?;
+                if keys.table.rows == 0 {
+                    let occ_schema = storage::occurrence_schema(&side_native)?;
+                    context.register_table(
+                        format!("{prefix}_{index}"),
+                        Arc::new(datafusion::datasource::empty::EmptyTable::new(occ_schema)),
+                    )?;
+                } else {
+                    let side_schema = side_native.metadata().current_schema().clone();
+                    let (retained, retained_rows) = {
+                        let inv = storage::current_snapshot_files(&side_native, budget).await?;
+                        let mut set = std::collections::BTreeSet::new();
+                        let mut rows = 0u64;
+                        for file in &inv.data {
+                            if write::file_may_overlap_mapped_key_files(
+                                &side_schema,
+                                &affected_schema,
+                                &side_keys,
+                                &k_cols,
+                                &affected_data,
+                                file,
+                            ) && affected_points
+                                .as_ref()
+                                .is_none_or(|p| p.may_contain(&side_schema, &side_keys, file))
+                            {
+                                set.insert(file.file_path().to_owned());
+                                rows = rows.saturating_add(file.record_count());
+                            }
+                        }
+                        (set, rows)
+                    };
+                    context.register_table(
+                        format!("{prefix}_{index}"),
+                        crate::query::pruned_occurrences(
+                            side_native,
+                            budget.clone(),
+                            Some(retained_rows),
+                            Arc::new(retained),
+                        )?,
+                    )?;
+                }
+            }
+        }
+        drop(affected_data);
+        drop(affected_points);
         // Null-safe membership also includes unmatched partial-null groups under
         // ordinary SQL equality. The actual join keeps its declared null policy.
         for side in 0..2 {
@@ -267,7 +341,11 @@ impl Engine {
         }
         context.register_table(
             "before",
-            crate::query::table(native.clone(), budget.clone(), Some(captured_source.rows))?,
+            crate::query::table(
+                native.clone(),
+                budget.clone(),
+                Some(captured_source.rows),
+            )?,
         )?;
         let mut joins = Vec::new();
         for side in 0..2 {
@@ -342,18 +420,20 @@ impl Engine {
             metrics: applied.metrics,
             schema_input: None,
         })
+        })
     }
 
     // Capture each native inventory once, read only changed files, and stream
     // typed keys. Paths identify occurrences even when two files contain equal bytes.
-    pub(super) async fn changed_keys(
-        &self,
-        dataset: &Id,
-        directory: &locations::Location,
-        versions: (&ReleasePin, &ReleasePin),
-        canonical: (&TablePin, &TablePin),
-        keys: &[String],
-    ) -> Result<(TablePin, u64)> {
+    pub(super) fn changed_keys<'a>(
+        &'a self,
+        dataset: &'a Id,
+        directory: &'a locations::Location,
+        versions: (&'a ReleasePin, &'a ReleasePin),
+        canonical: (&'a TablePin, &'a TablePin),
+        keys: &'a [String],
+    ) -> futures::future::BoxFuture<'a, Result<(TablePin, u64)>> {
+        Box::pin(async move {
         let budget = &self.inner.lifecycle.budget;
         let old = source(versions.0)?;
         let new = source(versions.1)?;
@@ -499,15 +579,17 @@ impl Engine {
             self.pin_output(dataset, &table, rows, &[]).await?,
             if keys.is_empty() { 0 } else { scanned },
         ))
+        })
     }
 
-    pub(super) async fn incremental_evidence(
-        &self,
-        spec: &RefreshSpec,
-        directory: &locations::Location,
-        processing: &PhaseResult,
-        operation: &Operation,
-    ) -> Result<write::Prepared> {
+    pub(super) fn incremental_evidence<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        directory: &'a locations::Location,
+        processing: &'a PhaseResult,
+        operation: &'a Operation,
+    ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        Box::pin(async move {
         let base = self
             .release_admitted(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
             .await?;
@@ -542,10 +624,9 @@ impl Engine {
             )?;
         }
         if let RefreshTransform::Aggregate(_) = &spec.transform {
-            return Box::pin(
-                self.aggregate_evidence(spec, directory, processing, before, &context),
-            )
-            .await;
+            return self
+                .aggregate_evidence(spec, directory, processing, before, &context)
+                .await;
         }
         let columns = tuple_columns(None);
         let keys = TUPLE.map(str::to_owned);
@@ -572,6 +653,7 @@ impl Engine {
             changes: None,
             metrics: applied.metrics,
             schema_input: None,
+        })
         })
     }
 }

@@ -210,7 +210,11 @@ async fn quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly
                     function,
                 })
                 .collect(),
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let first = engine.refresh(&spec).await.unwrap();
@@ -228,6 +232,7 @@ async fn quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly
             keys: vec!["id".into()],
             replacements: typed_file(&root.path().join("moved.parquet"), &changed),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

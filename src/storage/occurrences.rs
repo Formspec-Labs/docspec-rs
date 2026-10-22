@@ -68,7 +68,16 @@ pub(crate) async fn read_projected_occurrences(
     budget: &Budget,
     projection: Option<&[usize]>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    read_projected_occurrences_inner(table, budget, projection, None).await
+    read_projected_occurrences_inner(table, budget, projection, None, None).await
+}
+
+pub(crate) async fn read_projected_occurrences_pruned(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+    retained_files: Option<&std::collections::BTreeSet<String>>,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    read_projected_occurrences_inner(table, budget, projection, None, retained_files).await
 }
 
 /// Reads selected occurrences while observing attempted native data ranges.
@@ -88,9 +97,14 @@ pub async fn read_occurrences_observed(
     super::scan_metrics::NativeScanObservation,
 )> {
     let observation = super::scan_metrics::NativeScanObservation::default();
-    let stream =
-        read_projected_occurrences_inner(table, budget, projection, Some(observation.clone()))
-            .await?;
+    let stream = read_projected_occurrences_inner(
+        table,
+        budget,
+        projection,
+        Some(observation.clone()),
+        None,
+    )
+    .await?;
     Ok((stream, observation))
 }
 
@@ -99,8 +113,15 @@ async fn read_projected_occurrences_inner(
     budget: &Budget,
     projection: Option<&[usize]>,
     observation: Option<super::scan_metrics::NativeScanObservation>,
+    retained_files: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    let inventory = super::current_snapshot_files(table, budget).await?;
+    let mut inventory = super::current_snapshot_files(table, budget).await?;
+    if let Some(retained) = retained_files {
+        inventory
+            .data
+            .retain(|file| retained.contains(file.file_path()));
+        inventory.paths.retain(|path| retained.contains(path));
+    }
     let mut state =
         Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
     state.observation = observation;

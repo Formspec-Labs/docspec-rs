@@ -66,6 +66,7 @@ fn update(
             &root.join(format!("{operation}-keys.parquet")),
             deleted.iter().copied(),
         )),
+        merge: None,
         relationship: None,
     }
 }

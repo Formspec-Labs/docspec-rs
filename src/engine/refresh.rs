@@ -56,11 +56,12 @@ impl Engine {
         .await
     }
 
-    pub(super) async fn admit_refresh(
-        &self,
-        spec: &RefreshSpec,
-        operation: &Operation,
-    ) -> Result<Retained<PhaseResult>> {
+    pub(super) fn admit_refresh<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        operation: &'a Operation,
+    ) -> futures::future::BoxFuture<'a, Result<Retained<PhaseResult>>> {
+        Box::pin(async move {
         #[cfg(feature = "test-util")]
         work_started("admission");
         let budget = &self.inner.lifecycle.budget;
@@ -113,25 +114,28 @@ impl Engine {
             protections,
         )
         .await
+        })
     }
 
-    pub(super) async fn process_refresh(
-        &self,
-        spec: &RefreshSpec,
-        directory: &locations::Location,
-        admission: &PhaseResult,
-        operation: &Operation,
-        captured_source: Option<&TablePin>,
-    ) -> Result<Prepared> {
+    pub(super) fn process_refresh<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        directory: &'a locations::Location,
+        admission: &'a PhaseResult,
+        operation: &'a Operation,
+        captured_source: Option<&'a TablePin>,
+    ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        Box::pin(async move {
         if spec.mode == RefreshMode::Incremental {
-            return Box::pin(self.process_incremental(
-                spec,
-                directory,
-                admission,
-                operation,
-                captured_source,
-            ))
-            .await;
+            return self
+                .process_incremental(
+                    spec,
+                    directory,
+                    admission,
+                    operation,
+                    captured_source,
+                )
+                .await;
         }
         let coverage = admission.coverage.as_ref().ok_or_else(invalid)?;
         if coverage.inputs != spec.inputs() {
@@ -157,15 +161,17 @@ impl Engine {
         )
         .await?;
         self.write_frame_at(&spec.dataset, directory, frame).await
+        })
     }
 
-    pub(super) async fn prepare_evidence(
-        &self,
-        spec: &RefreshSpec,
-        operation: &Operation,
-        processing: &Retained<PhaseResult>,
-        stop: Option<&str>,
-    ) -> Result<Retained<RelatedResult>> {
+    pub(super) fn prepare_evidence<'a>(
+        &'a self,
+        spec: &'a RefreshSpec,
+        operation: &'a Operation,
+        processing: &'a Retained<PhaseResult>,
+        stop: Option<&'a str>,
+    ) -> futures::future::BoxFuture<'a, Result<Retained<RelatedResult>>> {
+        Box::pin(async move {
         let request = OperationRequest::Refresh(Box::new(spec.clone()));
         let dependencies = processing.dependencies.clone().map(|mut dependencies| {
             if spec.mode == RefreshMode::Full
@@ -191,7 +197,7 @@ impl Engine {
                 .reserve_location(&request, operation, "evidence")
                 .await?;
             let prepared = if spec.mode == RefreshMode::Incremental {
-                Box::pin(self.incremental_evidence(spec, &directory, processing, operation)).await?
+                self.incremental_evidence(spec, &directory, processing, operation).await?
             } else {
                 let context = self.context();
                 match &spec.transform {
@@ -259,6 +265,7 @@ impl Engine {
                 evidence: evidence.value.table.ok_or_else(invalid)?,
             },
             protections: evidence.protections,
+        })
         })
     }
 
@@ -385,7 +392,7 @@ pub(super) fn validate(spec: &RefreshSpec) -> Result<()> {
     }
     let spec = match &spec.transform {
         RefreshTransform::Join(spec) => spec,
-        RefreshTransform::Aggregate(spec) => return aggregation::validate(&spec.grouping),
+        RefreshTransform::Aggregate(spec) => return aggregation::validate_transform(spec),
     };
     if (spec.left.dataset == spec.right.dataset && spec.left != spec.right)
         || spec.join.keys.is_empty()
@@ -426,6 +433,12 @@ pub(super) fn validate(spec: &RefreshSpec) -> Result<()> {
             "invalid_refresh",
             "join fields and keys must be distinct, named, and outside reserved occurrence fields",
         ));
+    }
+    expr::validate_projections(&spec.join.projections)?;
+    expr::validate_projections(&spec.projections)?;
+    expr::validate_projections(&spec.effective_projections())?;
+    if let Some(filter) = &spec.effective_filter() {
+        expr::validate_predicate(filter)?;
     }
     Ok(())
 }
@@ -756,13 +769,9 @@ async fn join_queries(
             quote(TUPLE[3])
         ),
     ];
-    columns.extend(spec.join.fields.iter().map(|field| {
-        let side = match field.side {
-            JoinSide::Left => "l",
-            JoinSide::Right => "r",
-        };
-        format!("{side}.{} AS {}", quote(&field.field), quote(&field.name))
-    }));
+    let (projected_columns, filter_clause) =
+        expr::compile_join_sql(spec, &schemas[0], &schemas[1])?;
+    columns.extend(projected_columns);
     let comparison = match spec.join.nulls {
         NullMatching::Never => "=",
         NullMatching::Equal => "IS NOT DISTINCT FROM",
@@ -823,32 +832,39 @@ async fn join_queries(
             ),
         ));
     }
+    let where_sql = match filter_clause {
+        Some(f) => format!(" WHERE {f}"),
+        None => String::new(),
+    };
     Ok((
         probes,
         format!(
-            "SELECT {} FROM join_left l {kind} JOIN join_right r ON {predicate}",
+            "SELECT {} FROM join_left l {kind} JOIN join_right r ON {predicate}{where_sql}",
             columns.join(", ")
         ),
     ))
 }
 
-pub(super) async fn verify_related(
-    source: &TablePin,
-    related: &RelatedResult,
-    budget: &Budget,
-    checks: &mut verification::Checks,
-) -> Result<()> {
-    let loaded = load_inputs(&related.coverage, &BTreeMap::new(), budget).await?;
-    verify_related_with_inputs(source, related, &loaded.borrowed(), budget, checks).await
+pub(super) fn verify_related<'a>(
+    source: &'a TablePin,
+    related: &'a RelatedResult,
+    budget: &'a Budget,
+    checks: &'a mut verification::Checks,
+) -> futures::future::BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        let loaded = load_inputs(&related.coverage, &BTreeMap::new(), budget).await?;
+        verify_related_with_inputs(source, related, &loaded.borrowed(), budget, checks).await
+    })
 }
 
-pub(super) async fn verify_related_with_inputs(
-    source: &TablePin,
-    related: &RelatedResult,
-    releases: &BTreeMap<Id, &ReleasePin>,
-    budget: &Budget,
-    checks: &mut verification::Checks,
-) -> Result<()> {
+pub(super) fn verify_related_with_inputs<'a>(
+    source: &'a TablePin,
+    related: &'a RelatedResult,
+    releases: &'a BTreeMap<Id, &'a ReleasePin>,
+    budget: &'a Budget,
+    checks: &'a mut verification::Checks,
+) -> futures::future::BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
     if related.coverage.inputs != related.request.inputs() {
         return Err(invalid());
     }
@@ -991,6 +1007,7 @@ pub(super) async fn verify_related_with_inputs(
         }
     }
     Ok(())
+    })
 }
 
 async fn equal_multisets(
@@ -1049,7 +1066,7 @@ async fn source_frame(
         }
         RefreshTransform::Aggregate(aggregate) => {
             aggregation::register_input(context, aggregate, releases, budget).await?;
-            aggregation::aggregate_frame(context, &aggregate.grouping, "aggregate_input").await
+            aggregation::aggregate_frame_with_transform(context, aggregate, "aggregate_input").await
         }
     }
 }
@@ -1063,7 +1080,7 @@ async fn evidence_frame(
             .sql(&format!("SELECT {} FROM {source}", tuple_columns(None)))
             .await?),
         RefreshTransform::Aggregate(aggregate) => {
-            aggregation::evidence_frame(context, &aggregate.grouping, "aggregate_input").await
+            aggregation::evidence_frame_with_transform(context, aggregate, "aggregate_input").await
         }
     }
 }
@@ -1167,7 +1184,11 @@ mod cardinality_scans {
                 nulls: NullMatching::Equal,
                 cardinality,
                 fields: vec![],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }
     }
 

@@ -65,7 +65,11 @@ async fn fixture() -> (TempDir, Engine, ReleasePin, JoinTransform) {
                 field: "id".into(),
                 name: "id".into(),
             }],
+            filter: None,
+            projections: BTreeMap::new(),
         },
+        filter: None,
+        projections: BTreeMap::new(),
     };
     (root, engine, release, join)
 }

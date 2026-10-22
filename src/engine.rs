@@ -38,6 +38,7 @@ mod comparison;
 mod corrections;
 mod evidence;
 mod export;
+mod expr;
 #[doc(inline)]
 pub use evidence::read_receipts;
 mod history;
@@ -2598,7 +2599,11 @@ fn fingerprint(spec: &OperationRequest) -> Result<String> {
             serde_json::json!({"build": {"input": spec.expected_digest, "sql": spec.sql, "definition": spec.definition, "base": spec.base, "relationship": spec.relationship}})
         }
         OperationRequest::Update(spec) => {
-            serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition, "relationship": spec.relationship}})
+            let mut value = serde_json::json!({"update": {"base": spec.base, "keys": spec.keys, "replacements": spec.replacements.digest, "deletions": spec.deletions.as_ref().map(|input| &input.digest), "definition": spec.definition, "relationship": spec.relationship}});
+            if let Some(merge) = &spec.merge {
+                value["update"]["merge"] = serde_json::to_value(merge)?;
+            }
+            value
         }
         OperationRequest::Backfill(spec) => {
             serde_json::json!({"backfill": {"base": spec.base, "definition": spec.definition, "group": spec.group, "group_definition": spec.group_definition, "fields": spec.fields}})

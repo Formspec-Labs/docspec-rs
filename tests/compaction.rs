@@ -37,6 +37,7 @@ pub(super) fn update_request(
         keys: vec!["id".into()],
         replacements: scalar::input(&root.join(format!("{operation}.parquet")), rows),
         deletions: None,
+        merge: None,
         relationship: None,
     }
 }
@@ -788,6 +789,7 @@ async fn schema_defaults_and_supplied_state_remain_native_and_exact() {
                 digest: storage::digest(&explicit_path).unwrap().0,
             },
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

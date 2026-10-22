@@ -138,6 +138,7 @@ async fn update(
             replacements: input(&root.join(format!("{operation}.parquet")), replacements),
             deletions: deletions
                 .map(|keys| key_input(&root.join(format!("{operation}-deletions.parquet")), keys)),
+            merge: None,
             relationship: None,
         })
         .await
@@ -350,6 +351,7 @@ async fn sha256_string_keys_prune_disjoint_files_on_update() {
                 keys: vec!["source_id".into()],
                 replacements: repl,
                 deletions: None,
+                merge: None,
                 relationship: None,
             })
             .await
@@ -370,6 +372,7 @@ async fn sha256_string_keys_prune_disjoint_files_on_update() {
             keys: vec!["source_id".into()],
             replacements: touch,
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

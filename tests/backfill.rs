@@ -999,6 +999,7 @@ async fn failed_files_remain_distinct_from_successful_nulls_and_completed_files_
             keys: vec!["id".into()],
             replacements: correction,
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

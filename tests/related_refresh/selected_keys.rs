@@ -131,7 +131,11 @@ async fn reversed_nonleading_keys_refresh_joins_and_summaries_with_exact_evidenc
                     name: "rows".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let summary = engine.refresh(&summary_spec).await.unwrap();
@@ -152,6 +156,7 @@ async fn reversed_nonleading_keys_refresh_joins_and_summaries_with_exact_evidenc
                 ],
             ),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

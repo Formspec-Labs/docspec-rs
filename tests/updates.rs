@@ -141,6 +141,7 @@ fn update(
             deletions,
             true,
         )),
+        merge: None,
         relationship: None,
     }
 }
@@ -685,6 +686,7 @@ async fn composite_nullable_quoted_keys_match_as_tuples() {
             false,
             names,
         )),
+        merge: None,
         relationship: None,
     };
     let result = engine.update(&spec).await.unwrap();
@@ -830,6 +832,7 @@ async fn nested_replacements_preserve_values_and_native_field_ids() {
         keys: vec!["id".into()],
         replacements: replacement,
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let result = engine.update(&spec).await.unwrap();

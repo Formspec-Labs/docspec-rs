@@ -92,7 +92,11 @@ fn related(result: &mut ReleasePin, target: &ReleasePin) {
             grouping: AggregationDefinition {
                 keys: Vec::new(),
                 aggregates: Vec::new(),
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
         policy: RefreshPolicy::Captured,
         mode: RefreshMode::Full,

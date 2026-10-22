@@ -242,6 +242,7 @@ async fn allows_coordinated_updates_siblings_schema_and_evidence_after_retiremen
             digest: "0".repeat(64),
         },
         deletions: None,
+        merge: None,
         relationship: None,
     });
     let mut current = candidate(&update, Some(&original));

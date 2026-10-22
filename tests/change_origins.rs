@@ -32,6 +32,7 @@ fn update(
         keys: vec!["id".into()],
         replacements: scalar::input(&root.join(format!("{operation}.parquet")), rows),
         deletions: None,
+        merge: None,
         relationship: None,
     }
 }
@@ -73,7 +74,11 @@ fn join(
                         name: field.into(),
                     })
                     .collect(),
+                filter: None,
+                projections: std::collections::BTreeMap::new(),
             },
+            filter: None,
+            projections: std::collections::BTreeMap::new(),
         }),
     }
 }

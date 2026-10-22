@@ -318,6 +318,7 @@ async fn hidden_fields_stay_historical_and_new_writes_use_the_selected_schema() 
             digest: storage::digest(&path).unwrap().0,
         },
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let updated = engine.update(&update).await.unwrap();

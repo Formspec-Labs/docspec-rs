@@ -215,6 +215,7 @@ async fn full_rebuild_requalifies_source_and_every_group_without_changing_histor
         keys: vec!["id".into()],
         replacements: input(&root.path().join("update.parquet"), &[]),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let refreshed = engine.update(&update).await.unwrap();

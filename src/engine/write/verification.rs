@@ -36,6 +36,14 @@ pub(in crate::engine) async fn verify_update(
     {
         return Err(invalid());
     }
+    if let Some(merge_spec) = &spec.merge {
+        super::merge::validate(
+            merge_spec,
+            native_after.metadata().current_schema(),
+            &spec.keys,
+        )
+        .map_err(|_| invalid())?;
+    }
     if !checks.deep() {
         return Ok(());
     }
@@ -45,7 +53,8 @@ pub(in crate::engine) async fn verify_update(
     let context = budget.context();
     let (replacement, scope) =
         replacement_inputs(&context, dataset, spec, &native_after, budget).await?;
-    let located = storage::identity::has_origins(native_after.metadata().current_schema())?;
+    let after_ice_schema = native_after.metadata().current_schema().clone();
+    let located = storage::identity::has_origins(&after_ice_schema)?;
     for (name, native, pin) in [
         ("before", native_before, before),
         ("after", native_after, after),
@@ -70,6 +79,27 @@ pub(in crate::engine) async fn verify_update(
         &spec.keys,
         JoinType::LeftAnti,
     )?;
+    let replacement = if let Some(merge_spec) = &spec.merge {
+        let prior = key_join(
+            context.table("before").await?,
+            scope.clone(),
+            &spec.keys,
+            JoinType::LeftSemi,
+        )?;
+        super::merge::apply_merge(
+            &context,
+            prior,
+            replacement,
+            &after_ice_schema,
+            &spec.keys,
+            merge_spec,
+            budget,
+        )
+        .await
+        .map_err(|_| invalid())?
+    } else {
+        replacement
+    };
     let kept = members(kept, &fields, located, false, 1)?;
     let added = members(replacement, &fields, located, true, 1)?;
     let actual = context.table("after").await?;

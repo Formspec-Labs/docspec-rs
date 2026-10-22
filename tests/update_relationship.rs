@@ -123,6 +123,7 @@ async fn update_can_advance_a_coupled_generation() {
         keys: vec!["id".into()],
         replacements: replacement,
         deletions: None,
+        merge: None,
         relationship: Some(coupled("g2")),
     };
     let second = engine.update(&update).await.unwrap();
@@ -192,6 +193,7 @@ async fn omitting_update_relationship_retains_the_base_declaration() {
             false,
         ),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let second = engine.update(&update).await.unwrap();
@@ -236,6 +238,7 @@ async fn read_keys_and_update_prune_non_overlapping_files_and_project_columns() 
             keys: vec!["id".into()],
             replacements: source2,
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await
