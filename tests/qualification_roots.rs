@@ -55,6 +55,7 @@ async fn qualified(
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -221,6 +222,7 @@ async fn qualification_only_owner_acquires_original_creations_without_direct_pha
             expected_digest: object.digest.clone(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         let mut mismatched = request.clone();
         mismatched.expected_digest = "f".repeat(64);
@@ -317,6 +319,7 @@ async fn qualification_lifetime(foreign_consumer: bool) {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -446,6 +449,7 @@ async fn qualification_lifetime(foreign_consumer: bool) {
             expected_digest: witness.digest.clone(),
             sql: "SELECT CAST(text_length AS BIGINT) AS value FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         let consumer = engine.run(&request).await.unwrap();
         assert_eq!(consumer.dataset.inputs["input"], witness);
@@ -498,6 +502,7 @@ async fn qualification_lifetime(foreign_consumer: bool) {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let selected = engine.run(&request).await.unwrap();
     assert!(selected.dataset.parent_manifest.is_none());
@@ -632,6 +637,7 @@ async fn qualification_lifetime(foreign_consumer: bool) {
                 expected_digest: input.digest,
                 sql: "SELECT id + 100 AS value FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();

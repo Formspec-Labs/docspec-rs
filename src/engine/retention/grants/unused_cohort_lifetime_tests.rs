@@ -37,6 +37,7 @@ async fn subset_coverage_reclaims_unused_member_after_standalone_promises_end() 
                     expected_digest: storage::digest(&input).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),
@@ -75,7 +76,11 @@ async fn subset_coverage_reclaims_unused_member_after_standalone_promises_end() 
                     field: "id".into(),
                     name: "id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     let derived = engine.refresh(&request).await.unwrap();
@@ -107,6 +112,7 @@ async fn subset_coverage_reclaims_unused_member_after_standalone_promises_end() 
             expected_digest: storage::digest(&replacement).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

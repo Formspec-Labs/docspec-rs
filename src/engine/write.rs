@@ -271,6 +271,24 @@ impl Engine {
         .await
     }
 
+    pub(super) async fn create_partitioned_output(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        schema: Schema,
+        partition_by: &[PartitionFieldSpec],
+    ) -> Result<Table> {
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(dataset).await?;
+        let directory = directory.to_owned();
+        let partition_by = partition_by.to_vec();
+        self.register_output(view.identifier().namespace(), move || {
+            let unbound = storage::build_unbound_partition_spec(&schema, &partition_by)?;
+            storage::fresh_partitioned_metadata(&schema, &directory, unbound)
+        })
+        .await
+    }
+
     pub(super) async fn replacement_output(
         &self,
         dataset: &Id,
@@ -348,6 +366,13 @@ impl Engine {
                 &self.inner.lifecycle.budget,
             )
             .await?;
+            if !spec.partition_by.is_empty() {
+                storage::check_partition_by_matches(
+                    native.metadata().current_schema(),
+                    native.metadata().default_partition_spec(),
+                    &spec.partition_by,
+                )?;
+            }
             // An explicit base fixes field meaning, order and allocation history.
             // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
             let expected =
@@ -368,6 +393,15 @@ impl Engine {
             return Ok(prepared);
         }
         check_build_fields(&dataframe)?;
+        if !spec.partition_by.is_empty() {
+            let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                dataframe.schema().as_arrow(),
+            )?;
+            let table = self
+                .create_partitioned_output(&spec.dataset, directory, schema, &spec.partition_by)
+                .await?;
+            return self.write_output(&spec.dataset, table, dataframe).await;
+        }
         self.write_frame(&spec.dataset, directory, dataframe).await
     }
 
@@ -773,16 +807,25 @@ impl Engine {
                 shared.extend(scan.files().cloned());
             } else {
                 let native_schema = native.metadata().current_schema();
+                let partition_spec = native.metadata().default_partition_spec();
                 let key_table_schema = scope_table.metadata().current_schema();
                 // Exact affected points when they fit one batch allowance; otherwise
                 // only the coarser affected-interval test below applies.
-                let points = key_points::KeyPoints::collect(&context, keys, budget).await?;
+                let points = key_points::KeyPoints::collect(
+                    &context,
+                    native_schema,
+                    partition_spec,
+                    keys,
+                    budget,
+                )
+                .await?;
                 let affected_keys_df = context.table("affected_keys").await?;
                 let mut outcomes = Vec::new();
                 let mut candidates = Vec::new();
                 for (index, file) in scan.files().enumerate() {
                     if !file_may_overlap_key_files(
                         native_schema,
+                        partition_spec,
                         key_table_schema,
                         keys,
                         &key_files,
@@ -999,51 +1042,63 @@ impl Engine {
             metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
             let small_threshold =
                 (budget.limits.max_batch_bytes as u64 / 8).clamp(64 << 10, 512 << 10);
-            let small_files = shared
-                .iter()
-                .filter(|file| file.file_size_in_bytes() < small_threshold)
-                .count();
-            let small_dirs = shared
-                .iter()
-                .filter(|file| file.file_size_in_bytes() < small_threshold)
-                .filter_map(|file| Path::new(file.file_path()).parent())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            let total_dirs = shared
-                .iter()
-                .filter_map(|file| Path::new(file.file_path()).parent())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            let total_files = shared.len();
+            let mut partition_groups: Vec<Vec<usize>> = Vec::new();
+            let mut partition_index: std::collections::HashMap<iceberg::spec::Struct, usize> =
+                std::collections::HashMap::new();
+            for (idx, file) in shared.iter().enumerate() {
+                if let Some(&pos) = partition_index.get(file.partition()) {
+                    partition_groups[pos].push(idx);
+                } else {
+                    let pos = partition_groups.len();
+                    partition_index.insert(file.partition().clone(), pos);
+                    partition_groups.push(vec![idx]);
+                }
+            }
             let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
                 && storage::identity::has_origins(native.metadata().current_schema())?
-                && ((small_files >= 24 && small_dirs >= 2)
-                    || (total_files > 48 && total_dirs >= 2))
             {
-                let mut indices = if small_files >= 24 && small_dirs >= 2 {
-                    shared
+                let mut indices = Vec::new();
+                for group in partition_groups {
+                    let small_files = group
                         .iter()
-                        .enumerate()
-                        .filter(|(_, file)| file.file_size_in_bytes() < small_threshold)
-                        .map(|(idx, _)| idx)
-                        .take(32)
-                        .collect::<Vec<_>>()
-                } else {
-                    let mut by_size = shared
+                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                        .count();
+                    let small_dirs = group
                         .iter()
-                        .enumerate()
-                        .map(|(idx, file)| (file.file_size_in_bytes(), idx))
-                        .collect::<Vec<_>>();
-                    by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
-                    let take = (shared.len().saturating_sub(32)).clamp(16, 32);
-                    let mut selected = by_size
-                        .into_iter()
-                        .take(take)
-                        .map(|(_, idx)| idx)
-                        .collect::<Vec<_>>();
-                    selected.sort_unstable();
-                    selected
-                };
+                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    let part_files = group.len();
+                    let part_dirs = group
+                        .iter()
+                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    if small_files >= 24 && small_dirs >= 2 {
+                        indices = group
+                            .into_iter()
+                            .filter(|&idx| shared[idx].file_size_in_bytes() < small_threshold)
+                            .take(32)
+                            .collect();
+                        break;
+                    } else if part_files > 48 && part_dirs >= 2 {
+                        let mut by_size = group
+                            .iter()
+                            .map(|&idx| (shared[idx].file_size_in_bytes(), idx))
+                            .collect::<Vec<_>>();
+                        by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
+                        let take = (group.len().saturating_sub(32)).clamp(16, 32);
+                        let mut selected = by_size
+                            .into_iter()
+                            .take(take)
+                            .map(|(_, idx)| idx)
+                            .collect::<Vec<_>>();
+                        selected.sort_unstable();
+                        indices = selected;
+                        break;
+                    }
+                }
                 let coalesce_bytes = indices
                     .iter()
                     .map(|&idx| shared[idx].file_size_in_bytes())
@@ -1304,16 +1359,26 @@ pub(super) fn untruncated_bound(
 
 fn file_may_overlap_key_files(
     native_schema: &iceberg::spec::Schema,
+    partition_spec: &iceberg::spec::PartitionSpec,
     scope_schema: &iceberg::spec::Schema,
     keys: &[String],
     key_files: &[iceberg::spec::DataFile],
     file: &iceberg::spec::DataFile,
 ) -> bool {
-    file_may_overlap_mapped_key_files(native_schema, scope_schema, keys, keys, key_files, file)
+    file_may_overlap_mapped_key_files(
+        native_schema,
+        partition_spec,
+        scope_schema,
+        keys,
+        keys,
+        key_files,
+        file,
+    )
 }
 
 pub(super) fn file_may_overlap_mapped_key_files(
     native_schema: &iceberg::spec::Schema,
+    partition_spec: &iceberg::spec::PartitionSpec,
     scope_schema: &iceberg::spec::Schema,
     native_keys: &[String],
     scope_keys: &[String],
@@ -1340,6 +1405,52 @@ pub(super) fn file_may_overlap_mapped_key_files(
         let keys_may_have_null = key_files
             .iter()
             .any(|kf| kf.null_value_counts().get(&scope_id).copied().unwrap_or(1) > 0);
+        // Check order-preserving partition tuple bounds first so files whose column
+        // bounds are absent or truncated still prune in O(1) from partition metadata.
+        for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+            if pf.source_id != native_id || !storage::is_order_preserving_transform(pf.transform) {
+                continue;
+            }
+            let Some(slot) = file.partition().fields().get(part_idx) else {
+                continue;
+            };
+            match slot {
+                None => {
+                    if !keys_may_have_null {
+                        return false;
+                    }
+                }
+                Some(iceberg::spec::Literal::Primitive(file_part)) => {
+                    let all_disjoint = key_files.iter().all(|kf| {
+                        let (Some(kf_low), Some(kf_high)) = (
+                            kf.lower_bounds().get(&scope_id).and_then(untruncated_bound),
+                            kf.upper_bounds().get(&scope_id).and_then(untruncated_bound),
+                        ) else {
+                            return false;
+                        };
+                        let (Some(part_low), Some(part_high)) = (
+                            storage::compute_partition_literal(
+                                pf.transform,
+                                &native_field.field_type,
+                                &kf_low,
+                            ),
+                            storage::compute_partition_literal(
+                                pf.transform,
+                                &native_field.field_type,
+                                &kf_high,
+                            ),
+                        ) else {
+                            return false;
+                        };
+                        part_low <= part_high && (&part_high < file_part || &part_low > file_part)
+                    });
+                    if all_disjoint {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
         // `key_join` uses `IsNotDistinctFrom`, so a possible NULL on both sides can match.
         if file_may_have_null && keys_may_have_null {
             continue;

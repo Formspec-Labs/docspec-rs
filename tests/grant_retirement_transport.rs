@@ -41,6 +41,7 @@ async fn grant_retirement_matches_cli_http_and_preserves_files_after_cold_retry(
             expected_digest: source.digest.clone(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -225,6 +226,7 @@ async fn foreign_seal_protects_old_scalar_origins_after_cache_keys_are_recompute
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

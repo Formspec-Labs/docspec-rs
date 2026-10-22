@@ -332,6 +332,7 @@ async fn schema_admission_and_evolved_group_metadata_preserve_native_interpretat
         expected_digest: incoming.digest,
         sql: "SELECT * FROM input".into(),
         relationship: None,
+        partition_by: Vec::new(),
     };
     assert!(engine.run_until(&request, "groups").await.is_err());
     let records = engine.inspect(&group.dataset).await.unwrap();

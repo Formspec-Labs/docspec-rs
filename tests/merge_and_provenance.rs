@@ -366,6 +366,7 @@ async fn update_merge_strategies_preserve_history_set_union_and_fold_intra_batch
             expected_digest: init_spec.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -707,6 +708,7 @@ async fn first_value_by_and_collect_distinct_with_provenance_full_and_incrementa
             expected_digest: init_input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1058,6 +1060,7 @@ async fn merge_multi_batch_chunking_and_schema_evolved_supply_flags() {
             expected_digest: init_input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

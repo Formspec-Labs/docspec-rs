@@ -163,6 +163,9 @@ pub struct DatasetPin {
     /// Validation scope completed before selection. Older releases meet at least routine scope.
     #[serde(default)]
     pub validation: VerificationLevel,
+    /// Active partition layout for the source group, empty when unpartitioned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partition_by: Vec<PartitionFieldSpec>,
 }
 
 /// An immutable consumer release selected through the lifecycle table.
@@ -1260,6 +1263,10 @@ pub enum AggregateFunction {
         #[serde(alias = "column")]
         field: String,
     },
+    /// Selects the deterministic first value according to the transform's row order.
+    FirstValue {
+        field: String,
+    },
 }
 
 /// One named aggregate output.
@@ -1322,18 +1329,41 @@ impl AggregateTransform {
     }
 }
 
+/// Bipartite edge namespace and source column for connected-components clustering.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectedEdgeSpec {
+    pub namespace: String,
+    pub column: String,
+}
+
+/// Bipartite connected-components clustering and representative aggregation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectedComponentsTransform {
+    pub input: VersionRef,
+    pub row_key: String,
+    pub edges: Vec<ConnectedEdgeSpec>,
+    #[serde(default)]
+    pub order_by: Vec<SortColumn>,
+    pub document_id_column: String,
+    pub aggregates: Vec<AggregateField>,
+}
+
 /// Qualified related computations sharing the same refresh lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RefreshTransform {
     Join(JoinTransform),
     Aggregate(AggregateTransform),
+    ConnectedComponents(ConnectedComponentsTransform),
 }
 impl RefreshTransform {
     pub(crate) fn versions(&self) -> Vec<&VersionRef> {
         match self {
             Self::Join(join) => vec![&join.left, &join.right],
             Self::Aggregate(aggregate) => vec![&aggregate.input],
+            Self::ConnectedComponents(cc) => vec![&cc.input],
         }
     }
     pub(crate) fn same_roles(&self, other: &Self) -> bool {
@@ -1354,6 +1384,13 @@ impl RefreshTransform {
                     a.grouping == b.grouping
                         && a.filter == b.filter
                         && a.projections == b.projections
+                }
+                (Self::ConnectedComponents(a), Self::ConnectedComponents(b)) => {
+                    a.row_key == b.row_key
+                        && a.edges == b.edges
+                        && a.order_by == b.order_by
+                        && a.document_id_column == b.document_id_column
+                        && a.aggregates == b.aggregates
                 }
                 _ => false,
             }
@@ -1812,6 +1849,28 @@ pub struct Comparison {
     pub removed_rows: Option<u64>,
 }
 
+/// Partition transform applied to a source column.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PartitionTransformSpec {
+    Identity,
+    Bucket { num_buckets: u32 },
+    Year,
+    Month,
+    Day,
+    Truncate { width: u32 },
+}
+
+/// One declared partition field on a dataset's source table.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartitionFieldSpec {
+    pub column: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub transform: PartitionTransformSpec,
+}
+
 /// A reproducible local run, with trusted expected digests for supplied inputs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1829,6 +1888,9 @@ pub struct RunSpec {
     pub expected_digest: String,
     pub sql: String,
     pub definition: String,
+    /// Optional Iceberg partition layout for the source table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partition_by: Vec<PartitionFieldSpec>,
 }
 
 /// A selected local input with an expected immutable byte identity.
@@ -2276,9 +2338,8 @@ pub struct WriteMetrics {
 }
 
 pub use crate::export::{
-    ChildTableExport, ChildTableExportSpec, ExportKeyRange, FacetCountEntry, Predicate,
-    ReadingsFoldSpec, ScalarExpr, SortColumn, SortDirection, TaggedPredicate, TaggedScalarExpr,
-    WhenThen,
+    ChildTableExport, ChildTableExportSpec, ExportKeyRange, FacetCountEntry, ReadingsFoldSpec,
+    TaggedPredicate, TaggedScalarExpr, WhenThen,
 };
 
 #[cfg(test)]

@@ -45,6 +45,7 @@ async fn fixture() -> (tempfile::TempDir, Engine, RunSpec) {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await
@@ -413,7 +414,11 @@ async fn related_readback_requalifies_current_check_without_rewriting_values_or_
                     name: "rows".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     assert_eq!(

@@ -1583,6 +1583,7 @@ mod tests {
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1703,6 +1704,7 @@ mod tests {
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1790,6 +1792,7 @@ mod tests {
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1895,6 +1898,7 @@ mod tests {
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();

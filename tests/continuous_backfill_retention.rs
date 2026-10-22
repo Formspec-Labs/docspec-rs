@@ -79,6 +79,7 @@ async fn superseded_child_promises_retire_independently_before_exact_removal() {
             keys: vec!["id".into()],
             replacements: input(&root.path().join("replacement.parquet"), &replacement),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

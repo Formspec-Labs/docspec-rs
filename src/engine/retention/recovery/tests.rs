@@ -45,6 +45,7 @@ pub(in crate::engine::retention) async fn fixture(root: &Path) -> (Engine, RunSp
         expected_digest: storage::digest(&input).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let result = engine.run(&request).await.unwrap();
     (engine, request, result)

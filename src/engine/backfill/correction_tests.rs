@@ -53,6 +53,7 @@ fn input(root: &Path) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT value, language FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

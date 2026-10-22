@@ -43,6 +43,7 @@ fn request(root: &Path, operation: &str, values: Vec<i64>) -> RunSpec {
         expected_digest: storage::digest(&input).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

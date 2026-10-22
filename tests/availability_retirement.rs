@@ -66,6 +66,7 @@ fn request(root: &Path, dataset: &str, operation: &str, values: Vec<i64>) -> Run
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -102,7 +103,11 @@ fn summary(input: &ReleasePin, dataset: &str) -> RefreshSpec {
                     name: "rows".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     }
 }

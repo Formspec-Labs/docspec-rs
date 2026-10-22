@@ -93,6 +93,7 @@ async fn fixture(root: &Path) -> (Engine, ReleasePin) {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             relationship: None,
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -757,6 +758,7 @@ async fn one_receipt_on_many_origin_files_uses_a_fixed_reader_budget() {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             relationship: None,
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -862,6 +864,7 @@ async fn adopted_receipts_do_not_appear_as_pending_after_cold_validation_recover
         keys: vec!["id".into()],
         replacements: values(&root.path().join("append.parquet"), &[(4, Some("new"))]),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     engine.shutdown().await.unwrap();
@@ -927,6 +930,7 @@ async fn inherited_receipt_deletions_survive_process_loss_without_repeating_work
             &[(1, Some("corrected"))],
         ),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     engine.shutdown().await.unwrap();

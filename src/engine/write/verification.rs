@@ -23,7 +23,10 @@ pub(in crate::engine) async fn verify_update(
     if !storage::identity::preserves_schema(
         native_before.metadata().current_schema(),
         native_after.metadata().current_schema(),
-    )? {
+    )? || native_before.metadata().default_partition_spec()
+        != native_after.metadata().default_partition_spec()
+        || base.partition_by != dataset.partition_by
+    {
         return Err(invalid());
     }
     let public = storage::identity::public_schema(&native_after)?;

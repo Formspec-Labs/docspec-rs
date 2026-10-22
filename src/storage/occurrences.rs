@@ -146,6 +146,7 @@ struct Occurrences {
     observation: Option<super::scan_metrics::NativeScanObservation>,
     schema: SchemaRef,
     native_schema: iceberg::spec::SchemaRef,
+    partition_spec: iceberg::spec::PartitionSpecRef,
     selection: Option<super::selection::Selection>,
     located: bool,
     limit: usize,
@@ -263,6 +264,7 @@ impl Occurrences {
             observation: None,
             schema,
             native_schema,
+            partition_spec: table.metadata().default_partition_spec().clone(),
             selection,
             located,
             limit: budget.limits.max_batch_bytes,
@@ -368,6 +370,7 @@ pub(crate) struct OccurrenceScan {
     reader: ArrowReader,
     schema: SchemaRef,
     native_schema: iceberg::spec::SchemaRef,
+    partition_spec: iceberg::spec::PartitionSpecRef,
     located: bool,
     _metadata: Arc<OwnedSemaphorePermit>,
 }
@@ -409,6 +412,10 @@ impl OccurrenceScan {
 
     pub fn native_schema(&self) -> &iceberg::spec::SchemaRef {
         &self.native_schema
+    }
+
+    pub fn partition_spec(&self) -> &iceberg::spec::PartitionSpecRef {
+        &self.partition_spec
     }
 
     pub fn is_located(&self) -> bool {
@@ -455,6 +462,7 @@ impl OccurrenceScan {
             reader: state.reader,
             schema: state.schema,
             native_schema: state.native_schema,
+            partition_spec: state.partition_spec,
             located: state.located,
             _metadata: state._metadata,
         })
@@ -597,6 +605,7 @@ impl OccurrenceScan {
             reader: self.reader.clone(),
             schema: self.schema.clone(),
             native_schema: self.native_schema.clone(),
+            partition_spec: self.partition_spec.clone(),
             selection,
             located: self.located,
             expected,

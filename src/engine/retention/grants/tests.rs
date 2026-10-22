@@ -51,6 +51,7 @@ async fn fixture() -> (tempfile::TempDir, Engine, ReleasePin) {
             expected_digest: storage::digest(&input).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -369,6 +370,7 @@ async fn sealed_generation_binding_blocks_retirement_of_its_exact_owner_grants()
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -501,6 +503,7 @@ async fn retiring_last_consumer_and_owner_promises_releases_the_foreign_object()
             expected_digest: object.digest.clone(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -546,6 +549,7 @@ async fn retiring_last_consumer_and_owner_promises_releases_the_foreign_object()
                 expected_digest: storage::digest(&input).unwrap().0,
                 sql: "SELECT id + 10 AS id FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -727,6 +731,7 @@ async fn exercise_seal_retirement(retain_consumer: bool) {
                     expected_digest: storage::digest(&input).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),
@@ -775,7 +780,11 @@ async fn exercise_seal_retirement(retain_consumer: bool) {
                     field: "id".into(),
                     name: "id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     if retain_consumer {
@@ -867,6 +876,7 @@ async fn exercise_seal_retirement(retain_consumer: bool) {
             expected_digest: storage::digest(&input).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         let bridge = engine.run(&bridge_spec).await.unwrap();
         assert_eq!(

@@ -99,6 +99,7 @@ async fn receipt_free_related_refresh_preserves_partial_file_survivors_and_noop(
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

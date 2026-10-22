@@ -38,6 +38,7 @@ fn build(root: &Path, operation: &str, base: &ReleasePin, rows: &[scalar::Row]) 
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -219,6 +220,7 @@ async fn interrupted_parent_catches_up_replacements_deletions_and_insertions() {
                     &root.path().join("deletions.parquet"),
                     vec![Some(1)],
                 )),
+                merge: None,
                 relationship: None,
             })
             .await
@@ -307,6 +309,7 @@ async fn retained_child_catches_up_correction_with_sibling_and_compaction_in_fli
             &root.path().join("deletions.parquet"),
             vec![Some(9)],
         )),
+        merge: None,
         relationship: None,
     };
     assert_eq!(
@@ -496,6 +499,7 @@ async fn repeated_corrections_preserve_one_backfill_intent_during_compaction() {
                     std::slice::from_ref(&replacement),
                 ),
                 deletions: None,
+                merge: None,
                 relationship: None,
             })
             .await

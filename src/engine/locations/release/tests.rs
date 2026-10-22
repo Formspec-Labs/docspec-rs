@@ -47,6 +47,7 @@ async fn interrupted_release_reuses_exact_uri_and_completed_readback_without_sec
         expected_digest: storage::digest(&source).unwrap().0,
         sql: "SELECT value FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let error = engine.run_until(&spec, "release-create").await.unwrap_err();
     assert_eq!(error.code(), "injected_failure");

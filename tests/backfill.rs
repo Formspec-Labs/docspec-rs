@@ -351,6 +351,7 @@ async fn stale_source_retains_files_and_catchup_reuses_unchanged_objects() {
         keys: vec!["id".into()],
         replacements: input(&root.path().join("replacement.parquet"), &replacement),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     let latest = engine.update(&update).await.unwrap();
@@ -584,6 +585,7 @@ async fn refused_full_build_leaves_groups_usable_and_invalidation_refuses_stale_
         expected_digest: replacement.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     assert_eq!(
         engine.run(&build).await.unwrap_err().code(),
@@ -708,6 +710,7 @@ async fn joined_output_respects_a_limit_that_each_individual_input_fits() {
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -893,6 +896,7 @@ async fn native_malformed_group_coverage_and_field_mapping_refuse() {
                     expected_digest: storage::digest(&path).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap();

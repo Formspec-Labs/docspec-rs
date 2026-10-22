@@ -54,6 +54,7 @@ fn request(root: &Path, dataset: &str) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -76,6 +77,7 @@ fn consumer(source: &ObjectRef, dataset: &str) -> RunSpec {
         expected_digest: source.digest.clone(),
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -334,7 +336,11 @@ async fn refresh_request_captures_and_protects_unused_members_of_its_producer_se
                     field: "id".into(),
                     name: "id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     assert_eq!(

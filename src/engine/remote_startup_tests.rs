@@ -57,6 +57,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         expected_digest: "0".repeat(64),
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let refused = |error: Error| assert_eq!(error.code(), "remote_build_unavailable");
     refused(engine.plan(&build).await.unwrap_err());
@@ -149,6 +150,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
             digest: "0".repeat(64),
         },
         deletions: None,
+        merge: None,
         relationship: None,
     };
     assert_eq!(
@@ -185,6 +187,7 @@ async fn remote_constructor_keeps_host_custody_and_refuses_before_catalog_effect
         parent_manifest: None,
         processor: PROCESSOR.into(),
         validation: VerificationLevel::Routine,
+        partition_by: Vec::new(),
     };
     let view = engine.inner.lifecycle.open(&dataset).await.unwrap();
     engine
@@ -285,6 +288,7 @@ async fn remote_selection_refuses_second_prepared_initial_but_reuses_completed_f
         expected_digest: storage::digest(&source).unwrap().0,
         sql: "SELECT value FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let mut second = first.clone();
     second.operation = Id::new("second").unwrap();
@@ -761,6 +765,7 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                 expected_digest: left_digest,
                 sql: "SELECT id, label FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -778,6 +783,7 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                 expected_digest: right_digest,
                 sql: "SELECT id, label FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -919,6 +925,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                     name: "right_label".into(),
                 },
             ],
+            filter: None,
+            projections: BTreeMap::new(),
         };
         let join_full = RefreshSpec {
             dataset: joined_ds.clone(),
@@ -929,6 +937,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                 left: left_ev.version_ref(),
                 right: right_rel1.version_ref(),
                 join: join_def.clone(),
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Full,
@@ -953,6 +963,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                     function: AggregateFunction::Sum { field: "id".into() },
                 },
             ],
+            filter: None,
+            projections: BTreeMap::new(),
         };
         let agg_full = RefreshSpec {
             dataset: agg_ds.clone(),
@@ -962,6 +974,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
             transform: RefreshTransform::Aggregate(AggregateTransform {
                 input: joined_rel1.version_ref(),
                 grouping: agg_def.clone(),
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Full,
@@ -984,6 +998,7 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                     digest: left_upd_digest,
                 },
                 deletions: None,
+                merge: None,
                 relationship: Some(SourceRelationship::Coupled {
                     family: family.clone(),
                     generation: gen2.clone(),
@@ -1004,6 +1019,7 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                     digest: right_upd_digest,
                 },
                 deletions: None,
+                merge: None,
                 relationship: Some(SourceRelationship::Coupled {
                     family: family.clone(),
                     generation: gen2.clone(),
@@ -1030,6 +1046,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
                 left: left_rel2.version_ref(),
                 right: right_rel2.version_ref(),
                 join: join_def,
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Incremental,
@@ -1045,6 +1063,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
             transform: RefreshTransform::Aggregate(AggregateTransform {
                 input: joined_rel2.version_ref(),
                 grouping: agg_def,
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Incremental,
@@ -1157,6 +1177,7 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
             expected_digest: left_d1,
             sql: "SELECT id, grp, payload FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1170,6 +1191,7 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
             expected_digest: right_d1,
             sql: "SELECT id, grp, payload FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1188,6 +1210,7 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
                 digest: left_d2,
             },
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await
@@ -1234,7 +1257,11 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
                             name: "r_payload".into(),
                         },
                     ],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Full,
@@ -1265,7 +1292,11 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
                             function: AggregateFunction::Sum { field: "id".into() },
                         },
                     ],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
             policy: RefreshPolicy::Captured,
             mode: RefreshMode::Full,
@@ -1286,6 +1317,7 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
                 group: "source".into(),
                 rows: ExportRows::All,
                 columns: vec!["grp".into(), "cnt".into(), "sum_id".into()],
+                ..ExportPolicy::default()
             },
         })
         .await

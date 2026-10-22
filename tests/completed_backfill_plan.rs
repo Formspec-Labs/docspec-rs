@@ -108,6 +108,7 @@ async fn completed_plan_honors_own_availability_independently_of_base_availabili
             expected_digest: replacement.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

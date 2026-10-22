@@ -105,6 +105,7 @@ async fn update_can_advance_a_coupled_generation() {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "news-v1".into(),
+        partition_by: Vec::new(),
     };
     let first = engine.run(&build).await.unwrap();
     assert_eq!(first.dataset.relationship, coupled("g1"));
@@ -178,6 +179,7 @@ async fn omitting_update_relationship_retains_the_base_declaration() {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "news-v1".into(),
+        partition_by: Vec::new(),
     };
     let first = engine.run(&build).await.unwrap();
 
@@ -221,6 +223,7 @@ async fn read_keys_and_update_prune_non_overlapping_files_and_project_columns() 
             expected_digest: source1.digest,
             sql: "SELECT * FROM input".into(),
             definition: "news-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

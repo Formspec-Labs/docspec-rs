@@ -484,6 +484,7 @@ async fn additions_updates_defaults_and_rebuild_preserve_supplied_state_and_hist
         expected_digest: fresh.digest,
         sql: "SELECT text, id FROM input".into(),
         definition: updated.dataset.definition.clone(),
+        partition_by: Vec::new(),
     };
     let rebuilt = engine.run(&rebuild).await.unwrap();
     assert_eq!(
@@ -653,6 +654,7 @@ async fn invalid_additions_refuse_before_admission_and_empty_sources_keep_typed_
         expected_digest: incoming.digest,
         sql: "SELECT text, id FROM input".into(),
         definition: dropped.dataset.definition.clone(),
+        partition_by: Vec::new(),
     };
     assert_eq!(
         engine.run(&request).await.unwrap_err().code(),

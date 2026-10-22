@@ -168,6 +168,7 @@ async fn quoted_utf8_boolean_composite_groups_and_int32_measures_refresh_exactly
             expected_digest: input.digest,
             sql: "SELECT * FROM input".into(),
             relationship: None,
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

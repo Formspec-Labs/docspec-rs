@@ -85,6 +85,7 @@ async fn fixture(root: &Path) -> (Engine, ReleasePin, Vec<Row>) {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -358,6 +359,7 @@ async fn primitive_exports_preserve_types_values_nulls_and_authorized_column_ord
             expected_digest: storage::digest(&input_path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -474,6 +476,7 @@ async fn small_read_batches_export_exact_data_with_bounded_footer() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -556,6 +559,7 @@ async fn memory_driven_footer_limit_preserves_prior_selection_and_can_resume() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -742,6 +746,7 @@ async fn empty_snapshot_keeps_standalone_schema_and_explicit_policy() {
             expected_digest: source.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1229,6 +1234,7 @@ async fn multi_group_filtered_computed_folded_sorted_and_faceted_export_preserve
             expected_digest: storage::digest(&input_path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1667,6 +1673,7 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
             expected_digest: storage::digest(&input_path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -1684,6 +1691,7 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
                 digest: storage::digest(&input_path).unwrap().0,
             },
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await
@@ -1933,6 +1941,7 @@ async fn export_wide_353_column_schema_and_74_byte_body_key_column_index() {
             expected_digest: storage::digest(&input_path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "wide353-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

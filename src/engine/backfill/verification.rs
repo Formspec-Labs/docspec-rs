@@ -58,6 +58,9 @@ pub(crate) async fn verify_groups(
                     || dataset.eligibility < base.eligibility
                     || (dataset.definition != base.definition
                         && dataset.eligibility == base.eligibility)
+                    || (spec.partition_by.is_empty() && dataset.partition_by != base.partition_by)
+                    || (!spec.partition_by.is_empty()
+                        && dataset.partition_by.len() != spec.partition_by.len())
                 {
                     return Err(invalid_group());
                 }
@@ -72,7 +75,12 @@ pub(crate) async fn verify_groups(
                 if dataset.relationship != inputs::relationship(&dataset.request, Some(&base)) {
                     return Err(inputs::invalid_relationship());
                 }
-            } else if !dataset.computed.is_empty() || dataset.parent_manifest.is_some() {
+            } else if !dataset.computed.is_empty()
+                || dataset.parent_manifest.is_some()
+                || (spec.partition_by.is_empty() && !dataset.partition_by.is_empty())
+                || (!spec.partition_by.is_empty()
+                    && dataset.partition_by.len() != spec.partition_by.len())
+            {
                 return Err(invalid_group());
             } else if dataset.relationship != inputs::relationship(&dataset.request, None) {
                 return Err(inputs::invalid_relationship());
@@ -165,6 +173,8 @@ pub(crate) async fn verify_groups(
                 || parent.groups.get(spec.group.as_str()) != base.groups.get(spec.group.as_str())
                 || parent.computed.get(spec.group.as_str())
                     != base.computed.get(spec.group.as_str())
+                || parent.partition_by != dataset.partition_by
+                || base.partition_by != dataset.partition_by
             {
                 return Err(invalid_group());
             }
@@ -187,6 +197,7 @@ pub(crate) async fn verify_groups(
             if &related.request != spec.as_ref()
                 || related.coverage.inputs != spec.inputs()
                 || !dataset.inputs.is_empty()
+                || !dataset.partition_by.is_empty()
             {
                 return Err(invalid_group());
             }
@@ -223,6 +234,9 @@ pub(crate) async fn verify_groups(
         OperationRequest::Schema(spec) => {
             let parent = dataset.parent_manifest.as_ref().ok_or_else(invalid_group)?;
             let base = history.read(parent).await?;
+            if base.partition_by != dataset.partition_by {
+                return Err(invalid_group());
+            }
             super::super::schema::verify_transition(spec, &base, dataset, budget).await?;
             check_refreshed_groups(dataset, &base, parent)?;
         }
@@ -246,6 +260,7 @@ pub(crate) async fn verify_groups(
                 || dataset.boundary != base.boundary
                 || dataset.eligibility != base.eligibility
                 || dataset.definition != base.definition
+                || dataset.partition_by != base.partition_by
             {
                 return Err(invalid_group());
             }
@@ -776,6 +791,7 @@ mod tests {
             expected_digest: "unused".into(),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         DatasetPin {
             format: FORMAT,
@@ -794,6 +810,7 @@ mod tests {
             parent_manifest: None,
             processor: "test".into(),
             validation: VerificationLevel::Routine,
+            partition_by: Vec::new(),
         }
     }
 

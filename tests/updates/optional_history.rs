@@ -280,7 +280,11 @@ async fn removed_optional_deltas_preserve_complete_state_and_independent_consume
                         name: "rows".into(),
                         function: AggregateFunction::CountRows,
                     }],
+                    filter: None,
+                    projections: std::collections::BTreeMap::new(),
                 },
+                filter: None,
+                projections: std::collections::BTreeMap::new(),
             }),
         })
         .await

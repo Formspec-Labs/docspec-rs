@@ -36,6 +36,7 @@ async fn fence_preserves_selection_and_completions_and_reconciles_exact_retry() 
             &[(Some(1), Some("corrected".into()))],
         ),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     assert_eq!(

@@ -176,6 +176,8 @@ struct IpcRunSpec {
     #[serde(default = "default_ipc_sql")]
     sql: String,
     definition: String,
+    #[serde(default)]
+    partition_by: Vec<crate::model::PartitionFieldSpec>,
 }
 
 fn default_ipc_sql() -> String {
@@ -206,6 +208,8 @@ struct IpcUpdateSpec {
     relationship: Option<SourceRelationship>,
     #[serde(default)]
     deletions: Option<InputSpec>,
+    #[serde(default)]
+    merge: Option<crate::model::UpdateMergeSpec>,
 }
 
 pub(super) async fn stage_run(
@@ -243,6 +247,7 @@ pub(super) async fn stage_run(
             ipc_spec.sql
         },
         definition: ipc_spec.definition,
+        partition_by: ipc_spec.partition_by,
     };
     Ok(StagedIpc { spec, staged_path })
 }
@@ -282,6 +287,7 @@ pub(super) async fn stage_update(
         },
         relationship: ipc_spec.relationship,
         deletions: ipc_spec.deletions,
+        merge: ipc_spec.merge,
     };
     Ok(StagedIpc { spec, staged_path })
 }

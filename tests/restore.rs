@@ -382,6 +382,7 @@ fn spec(root: &Path, operation: &str, rows: &[Row]) -> RunSpec {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

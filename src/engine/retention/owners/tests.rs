@@ -52,6 +52,7 @@ fn request(root: &Path, dataset: &str) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -191,7 +192,11 @@ async fn nested_release_grants_follow_each_actual_owner_without_rehashing_payloa
                         field: "id".into(),
                         name: "id".into(),
                     }],
+                    filter: None,
+                    projections: BTreeMap::new(),
                 },
+                filter: None,
+                projections: BTreeMap::new(),
             }),
         })
         .await

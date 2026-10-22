@@ -159,6 +159,7 @@ async fn qualify_export() -> Result<()> {
         expected_digest: storage::digest(&source)?.0,
         sql: "SELECT * FROM input WHERE counter < 3".into(),
         definition: "synthetic-export-v1".into(),
+        partition_by: Vec::new(),
     };
     let host = tempfile::tempdir()?;
     let engine = compose(host.path(), remote)?;

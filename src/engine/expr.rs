@@ -777,7 +777,8 @@ pub(super) fn compile_aggregate_sql(
             | AggregateFunction::CollectSet { field }
             | AggregateFunction::Sum { field }
             | AggregateFunction::Min { field }
-            | AggregateFunction::Max { field } => {
+            | AggregateFunction::Max { field }
+            | AggregateFunction::FirstValue { field } => {
                 if projections.contains_key(field) {
                     needed_pre.insert(field.clone());
                 }

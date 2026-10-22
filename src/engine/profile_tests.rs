@@ -82,6 +82,7 @@ async fn profile_hourly_polling_workspace() {
             expected_digest: initial_input.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -100,6 +101,7 @@ async fn profile_hourly_polling_workspace() {
                 keys: vec!["id".into()],
                 replacements: update_input,
                 deletions: None,
+                merge: None,
                 relationship: None,
             })
             .await
@@ -210,6 +212,7 @@ async fn capture_coverage_daily_aggregate_plan() {
             expected_digest: storage::digest(&input).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -229,7 +232,11 @@ async fn capture_coverage_daily_aggregate_plan() {
                     },
                 },
             ],
+            filter: None,
+            projections: BTreeMap::new(),
         },
+        filter: None,
+        projections: BTreeMap::new(),
     };
     let budget = &engine.inner.lifecycle.budget;
     let context = engine.context();
@@ -301,6 +308,7 @@ async fn profile_lifecycle_compaction_and_warm_commit_scaling() {
                 expected_digest: input_digest.clone(),
                 sql: "SELECT id, val FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -318,6 +326,7 @@ async fn profile_lifecycle_compaction_and_warm_commit_scaling() {
                 expected_digest: input_digest.clone(),
                 sql: format!("SELECT id, val FROM input WHERE id >= -{step}"),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             };
             let request_digest = fingerprint(&OperationRequest::Build(req.clone())).unwrap();
             let op = Operation {

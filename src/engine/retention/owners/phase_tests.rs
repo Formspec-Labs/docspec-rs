@@ -34,6 +34,7 @@ fn request(dataset: &str, operation: &str, input: &ObjectRef) -> RunSpec {
         expected_digest: input.digest.clone(),
         sql: "SELECT id FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -706,7 +707,11 @@ async fn refresh_evidence_inherits_the_exact_captured_producer_scope() {
                     field: "id".into(),
                     name: "id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     assert_eq!(

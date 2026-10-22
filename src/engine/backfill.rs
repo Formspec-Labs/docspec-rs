@@ -1476,6 +1476,7 @@ mod tests {
                     parent_manifest: None,
                     processor: PROCESSOR.into(),
                     validation: VerificationLevel::Routine,
+                    partition_by: Vec::new(),
                 },
                 manifest: missing,
                 verified: true,

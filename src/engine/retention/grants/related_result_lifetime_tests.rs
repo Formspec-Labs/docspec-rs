@@ -36,7 +36,11 @@ fn refresh(
                     field: "id".into(),
                     name: "id".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     }
 }
@@ -98,6 +102,7 @@ async fn full_refresh_reclaims_old_exclusive_input_after_execution_promises_end(
                     expected_digest: storage::digest(&input).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),
@@ -137,6 +142,7 @@ async fn full_refresh_reclaims_old_exclusive_input_after_execution_promises_end(
                     expected_digest: storage::digest(&replacement).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),

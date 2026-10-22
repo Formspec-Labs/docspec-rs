@@ -746,7 +746,6 @@ impl Engine {
                 stop_after(stop, "host-payload")?;
             }
         }
-        drop(stream);
 
         let owner = spec.dataset.clone();
         let max_metadata_bytes = budget.limits.max_metadata_bytes;
@@ -2112,7 +2111,7 @@ impl ChildAccumulator {
         let mut sort_exprs = Vec::new();
         let mut page_index_cols: Vec<String> = Vec::new();
         for ck in self.spec.effective_child_key_columns() {
-            sort_exprs.push(col(quote(&ck)).sort(true, false));
+            sort_exprs.push(col(quote(ck)).sort(true, false));
             page_index_cols.push(ck.clone());
         }
         sort_exprs.push(col(quote(&self.spec.ordinal_column)).sort(true, false));
@@ -2284,6 +2283,7 @@ impl ChildAccumulator {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prune_child_row_groups(
     num_rgs: usize,
     browse_ranges: &[ExportKeyRange],

@@ -1120,6 +1120,7 @@ mod tests {
             expected_digest: "0".repeat(64),
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         assert!(!Path::new(&request.input).exists());
         let operation = Operation {
@@ -1523,6 +1524,7 @@ mod tests {
                 expected_digest: init_input.digest,
                 sql: "SELECT id, val FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1739,6 +1741,7 @@ mod tests {
                 expected_digest: init_input.digest,
                 sql: "SELECT id, val FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1820,6 +1823,7 @@ mod tests {
                 expected_digest: init_input.digest.clone(),
                 sql: "SELECT id, val FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1938,6 +1942,7 @@ mod tests {
                 expected_digest: upd_input.digest,
                 sql: "SELECT id, val FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();

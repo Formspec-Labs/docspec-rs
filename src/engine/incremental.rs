@@ -142,6 +142,17 @@ impl Engine {
                 )
                 .await
             }
+            RefreshTransform::ConnectedComponents(_) => {
+                Box::pin(self.process_connected_components(
+                    spec,
+                    directory,
+                    &base,
+                    &previous,
+                    &current,
+                    (captured, &native),
+                ))
+                .await
+            }
         }
         })
     }
@@ -278,6 +289,8 @@ impl Engine {
                     )?;
                 } else {
                     let side_schema = side_native.metadata().current_schema().clone();
+                    let side_partition_spec =
+                        side_native.metadata().default_partition_spec().clone();
                     let (retained, retained_rows) = {
                         let inv = storage::current_snapshot_files(&side_native, budget).await?;
                         let mut set = std::collections::BTreeSet::new();
@@ -285,6 +298,7 @@ impl Engine {
                         for file in &inv.data {
                             if write::file_may_overlap_mapped_key_files(
                                 &side_schema,
+                                &side_partition_spec,
                                 &affected_schema,
                                 &side_keys,
                                 &k_cols,
@@ -627,6 +641,12 @@ impl Engine {
             return self
                 .aggregate_evidence(spec, directory, processing, before, &context)
                 .await;
+        }
+        if let RefreshTransform::ConnectedComponents(_) = &spec.transform {
+            return Box::pin(self.connected_components_evidence(
+                spec, directory, processing, before, &context,
+            ))
+            .await;
         }
         let columns = tuple_columns(None);
         let keys = TUPLE.map(str::to_owned);

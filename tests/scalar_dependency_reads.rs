@@ -89,6 +89,7 @@ async fn wide_fixture(root: &std::path::Path) -> (Engine, ReleasePin) {
             expected_digest: storage::digest(&path).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

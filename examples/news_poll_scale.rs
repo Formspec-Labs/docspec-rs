@@ -152,6 +152,7 @@ async fn main() {
             expected_digest: first.digest,
             sql: "SELECT * FROM input".into(),
             definition: "versions-v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

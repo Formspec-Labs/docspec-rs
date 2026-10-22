@@ -1,7 +1,11 @@
 //! Candidate metadata preserving native field identity without copying value files.
 // Rust guideline compliant 2026-02-21
 
-use crate::{Error, Result, budget::Budget};
+use crate::{
+    Error, Result,
+    budget::Budget,
+    model::{PartitionFieldSpec, PartitionTransformSpec},
+};
 use iceberg::{
     Catalog, MetadataLocation, TableIdent,
     spec::{
@@ -10,7 +14,143 @@ use iceberg::{
     },
     table::Table,
 };
-use std::{path::Path, sync::Arc};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
+
+pub(crate) fn to_iceberg_transform(spec: &PartitionTransformSpec) -> Transform {
+    match spec {
+        PartitionTransformSpec::Identity => Transform::Identity,
+        PartitionTransformSpec::Bucket { num_buckets } => Transform::Bucket(*num_buckets),
+        PartitionTransformSpec::Year => Transform::Year,
+        PartitionTransformSpec::Month => Transform::Month,
+        PartitionTransformSpec::Day => Transform::Day,
+        PartitionTransformSpec::Truncate { width } => Transform::Truncate(*width),
+    }
+}
+
+pub(crate) fn from_iceberg_transform(transform: Transform) -> Option<PartitionTransformSpec> {
+    match transform {
+        Transform::Identity => Some(PartitionTransformSpec::Identity),
+        Transform::Bucket(num_buckets) => Some(PartitionTransformSpec::Bucket { num_buckets }),
+        Transform::Year => Some(PartitionTransformSpec::Year),
+        Transform::Month => Some(PartitionTransformSpec::Month),
+        Transform::Day => Some(PartitionTransformSpec::Day),
+        Transform::Truncate(width) => Some(PartitionTransformSpec::Truncate { width }),
+        _ => None,
+    }
+}
+
+pub(crate) fn default_partition_field_name(
+    column: &str,
+    transform: &PartitionTransformSpec,
+) -> String {
+    match transform {
+        PartitionTransformSpec::Identity => column.to_owned(),
+        PartitionTransformSpec::Bucket { num_buckets } => {
+            format!("{column}_bucket_{num_buckets}")
+        }
+        PartitionTransformSpec::Year => format!("{column}_year"),
+        PartitionTransformSpec::Month => format!("{column}_month"),
+        PartitionTransformSpec::Day => format!("{column}_day"),
+        PartitionTransformSpec::Truncate { width } => format!("{column}_trunc_{width}"),
+    }
+}
+
+pub(crate) fn build_unbound_partition_spec(
+    schema: &Schema,
+    specs: &[PartitionFieldSpec],
+) -> Result<UnboundPartitionSpec> {
+    if specs.is_empty() {
+        return Ok(UnboundPartitionSpec::builder().build());
+    }
+    let mut builder = UnboundPartitionSpec::builder();
+    let mut names = BTreeSet::new();
+    for spec in specs {
+        let Some(source) = schema.field_by_name(&spec.column) else {
+            return Err(unsupported_partition_spec(
+                "partition spec references an unknown source column",
+            ));
+        };
+        if schema.as_struct().field_by_id(source.id).is_none() {
+            return Err(unsupported_partition_spec(
+                "partition spec must reference a top-level schema field",
+            ));
+        }
+        let field_name = spec
+            .name
+            .clone()
+            .unwrap_or_else(|| default_partition_field_name(&spec.column, &spec.transform));
+        if field_name.trim().is_empty() || !names.insert(field_name.to_ascii_lowercase()) {
+            return Err(unsupported_partition_spec(
+                "partition spec field names must be non-empty and distinct",
+            ));
+        }
+        builder = builder
+            .add_partition_field(source.id, field_name, to_iceberg_transform(&spec.transform))
+            .map_err(|_| {
+                unsupported_partition_spec("partition spec could not be constructed")
+            })?;
+    }
+    let unbound = builder.build();
+    validate_unbound_partition_spec(schema, &unbound)?;
+    Ok(unbound)
+}
+
+pub(crate) fn check_partition_by_matches(
+    schema: &Schema,
+    actual: &PartitionSpec,
+    expected: &[PartitionFieldSpec],
+) -> Result<()> {
+    let unbound = build_unbound_partition_spec(schema, expected)?;
+    let bound = unbound.bind(Arc::new(schema.clone())).map_err(|_| {
+        unsupported_partition_spec("partition spec is incompatible with table schema")
+    })?;
+    let same = actual.fields().len() == bound.fields().len()
+        && actual
+            .fields()
+            .iter()
+            .zip(bound.fields().iter())
+            .all(|(a, b)| {
+                a.source_id == b.source_id && a.name == b.name && a.transform == b.transform
+            });
+    if !same {
+        return Err(Error::refusal(
+            "partition_spec_mismatch",
+            "declared partition_by does not match the selected base partition spec",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn partition_specs_from_metadata(
+    metadata: &TableMetadata,
+    declared: Option<&[PartitionFieldSpec]>,
+) -> Vec<PartitionFieldSpec> {
+    let schema = metadata.current_schema();
+    let spec = metadata.default_partition_spec();
+    spec.fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, pf)| {
+            let source = schema.field_by_id(pf.source_id)?;
+            let transform = from_iceberg_transform(pf.transform)?;
+            let default_name = default_partition_field_name(&source.name, &transform);
+            let name = if let Some(decl) = declared.and_then(|d| d.get(idx))
+                && to_iceberg_transform(&decl.transform) == pf.transform
+            {
+                decl.name.clone()
+            } else if pf.name == default_name {
+                None
+            } else {
+                Some(pf.name.clone())
+            };
+            Some(PartitionFieldSpec {
+                column: source.name.clone(),
+                name,
+                transform,
+            })
+        })
+        .collect()
+}
 
 pub(crate) fn validate_partition_spec(schema: &Schema, spec: &PartitionSpec) -> Result<()> {
     if spec.fields().is_empty() {
@@ -22,7 +162,9 @@ pub(crate) fn validate_partition_spec(schema: &Schema, spec: &PartitionSpec) -> 
                 "partition spec must reference a top-level schema field",
             ));
         };
-        if super::identity::hidden(&source.name) {
+        if super::identity::hidden(&source.name)
+            || super::defaults::supplied_id(&source.name).is_some()
+        {
             return Err(unsupported_partition_spec(
                 "partition spec cannot reference internal occurrence identity fields",
             ));
@@ -32,19 +174,43 @@ pub(crate) fn validate_partition_spec(schema: &Schema, spec: &PartitionSpec) -> 
                 "partition spec requires a primitive source field",
             ));
         };
-        let supported = matches!(
-            (field.transform, primitive),
+        let supported = match (field.transform, primitive) {
             (
-                Transform::Month | Transform::Day,
-                PrimitiveType::Date | PrimitiveType::Timestamptz | PrimitiveType::Timestamp
-            ) | (
+                Transform::Year | Transform::Month | Transform::Day,
+                PrimitiveType::Date | PrimitiveType::Timestamptz | PrimitiveType::Timestamp,
+            ) => true,
+            (
                 Transform::Identity,
+                PrimitiveType::Boolean
+                | PrimitiveType::Date
+                | PrimitiveType::Int
+                | PrimitiveType::Long
+                | PrimitiveType::String
+                | PrimitiveType::Timestamptz
+                | PrimitiveType::Timestamp
+                | PrimitiveType::Uuid
+                | PrimitiveType::Binary,
+            ) => true,
+            (
+                Transform::Bucket(n),
                 PrimitiveType::Date
-                    | PrimitiveType::Int
-                    | PrimitiveType::Long
-                    | PrimitiveType::String
-            )
-        );
+                | PrimitiveType::Int
+                | PrimitiveType::Long
+                | PrimitiveType::String
+                | PrimitiveType::Timestamptz
+                | PrimitiveType::Timestamp
+                | PrimitiveType::Uuid
+                | PrimitiveType::Binary,
+            ) => n > 0,
+            (
+                Transform::Truncate(w),
+                PrimitiveType::Int
+                | PrimitiveType::Long
+                | PrimitiveType::String
+                | PrimitiveType::Binary,
+            ) => w > 0,
+            _ => false,
+        };
         if !supported {
             return Err(unsupported_partition_spec(
                 "partition spec uses an unqualified transform or source type",
@@ -521,15 +687,38 @@ mod tests {
             .build()
             .unwrap();
 
-        for invalid in [
-            // Bucket transform is not qualified.
+        for valid in [
             UnboundPartitionSpec::builder()
                 .add_partition_field(10, "observed_bucket", Transform::Bucket(16))
                 .unwrap()
                 .build(),
-            // Truncate transform is not qualified.
             UnboundPartitionSpec::builder()
                 .add_partition_field(20, "title_trunc", Transform::Truncate(4))
+                .unwrap()
+                .build(),
+            UnboundPartitionSpec::builder()
+                .add_partition_field(10, "observed_year", Transform::Year)
+                .unwrap()
+                .build(),
+        ] {
+            validate_unbound_partition_spec(&schema, &valid).unwrap();
+            fresh_partitioned_metadata_at(&schema, "/tmp/accepted", valid).unwrap();
+        }
+
+        for invalid in [
+            // Zero-bucket transform is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(10, "observed_bucket_zero", Transform::Bucket(0))
+                .unwrap()
+                .build(),
+            // Zero-width truncate transform is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(20, "title_trunc_zero", Transform::Truncate(0))
+                .unwrap()
+                .build(),
+            // Truncate on a Date column is not qualified.
+            UnboundPartitionSpec::builder()
+                .add_partition_field(10, "observed_trunc", Transform::Truncate(4))
                 .unwrap()
                 .build(),
             // Void transform must be rejected even though Iceberg treats all-void as is_unpartitioned().
@@ -572,8 +761,8 @@ mod tests {
             );
         }
 
-        // Also verify replacement_metadata_at rejects a bound Bucket or Void partition spec.
-        for bad_transform in [Transform::Bucket(8), Transform::Void] {
+        // Also verify replacement_metadata_at rejects an unqualified Bucket(0) or Void partition spec.
+        for bad_transform in [Transform::Bucket(0), Transform::Void] {
             let unvalidated = TableMetadataBuilder::new(
                 schema.clone(),
                 PartitionSpec::unpartition_spec(),

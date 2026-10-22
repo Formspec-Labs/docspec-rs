@@ -998,6 +998,7 @@ async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
         expected_digest: digest.clone(),
         sql: "SELECT id, text FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let pin = engine.run(&fast_spec).await.unwrap();
     assert_eq!(pin.dataset.groups["source"].rows, 3);
@@ -1016,6 +1017,7 @@ async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
         expected_digest: digest,
         sql: "SELECT id, text FROM input WHERE id >= 20".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let filtered_pin = engine.run(&filtered_spec).await.unwrap();
     assert_eq!(filtered_pin.dataset.groups["source"].rows, 2);
@@ -1079,6 +1081,7 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         expected_digest: storage::digest(&input_path).unwrap().0,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let release1 = engine.run(&build_spec).await.unwrap();
     assert_eq!(release1.dataset.groups["source"].rows, 3);
@@ -1114,6 +1117,7 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         },
         relationship: None,
         deletions: None,
+        merge: None,
     };
     let release2 = engine.update(&update_spec).await.unwrap();
     assert_eq!(release2.dataset.groups["source"].rows, 3);
@@ -1194,7 +1198,11 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
                         },
                     },
                 ],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
         policy: RefreshPolicy::Captured,
         mode: RefreshMode::Full,
@@ -1214,6 +1222,7 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
             group: "source".into(),
             rows: ExportRows::All,
             columns: vec!["uid".into(), "payload".into(), "large_payload".into()],
+            ..ExportPolicy::default()
         },
     };
     let export_pin = engine.export(&export_spec).await.unwrap();

@@ -333,6 +333,7 @@ pub(super) async fn read_keys_with_objects(
         public_schema.field(key_public_idx).data_type(),
         arrow::datatypes::DataType::Utf8
             | arrow::datatypes::DataType::LargeUtf8
+            | arrow::datatypes::DataType::Utf8View
             | arrow::datatypes::DataType::Int32
             | arrow::datatypes::DataType::Int64
             | arrow::datatypes::DataType::UInt64
@@ -340,10 +341,12 @@ pub(super) async fn read_keys_with_objects(
             | arrow::datatypes::DataType::Binary
             | arrow::datatypes::DataType::LargeBinary
             | arrow::datatypes::DataType::FixedSizeBinary(_)
+            | arrow::datatypes::DataType::Date32
+            | arrow::datatypes::DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, _)
     ) {
         return Err(Error::refusal(
             "invalid_key_read",
-            "key read requires a scalar Utf8, Int32, Int64, UInt64/Decimal128, or Binary key column",
+            "key read requires a scalar Utf8, Int32, Int64, UInt64/Decimal128, Binary, Date32, or TimestampMicrosecond key column",
         ));
     }
     let out_indices: Vec<usize> = match &spec.columns {
@@ -402,11 +405,8 @@ pub(super) async fn read_keys_with_objects(
         .map(|f| projected_schema.index_of(f.name()))
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    let key_field_id = table
-        .metadata()
-        .current_schema()
-        .field_by_name(&spec.key)
-        .map(|f| f.id);
+    let key_field = table.metadata().current_schema().field_by_name(&spec.key);
+    let key_field_id = key_field.map(|f| f.id);
     // Parse requested values once into the key column's own domain. Integer keys
     // compare as integers: no per-row string formatting, and values that cannot
     // occur in the column (non-numeric, out of range) are dropped up front.
@@ -420,9 +420,18 @@ pub(super) async fn read_keys_with_objects(
             futures::stream::empty(),
         )));
     }
+    let key_partitions = key_field
+        .map(|field| {
+            target.partition_filters(
+                table.metadata().default_partition_spec(),
+                field.id,
+                &field.field_type,
+            )
+        })
+        .unwrap_or_default();
     let candidate_paths: Vec<String> = scan
         .files()
-        .filter(|file| target.file_may_contain(file, key_field_id))
+        .filter(|file| target.file_may_contain(file, key_field_id, &key_partitions))
         .map(|file| file.file_path().to_owned())
         .collect();
 
@@ -451,6 +460,8 @@ enum KeyTargets {
     Ints(BTreeSet<i64>),
     Int128s(BTreeSet<i128>),
     Binaries(BTreeSet<Vec<u8>>),
+    Dates(BTreeSet<i32>),
+    Timestamps(BTreeSet<i64>),
 }
 
 fn parse_binary_key_candidates(value: &str) -> Vec<Vec<u8>> {
@@ -476,7 +487,10 @@ fn parse_binary_key_candidates(value: &str) -> Vec<Vec<u8>> {
 
 impl KeyTargets {
     fn parse(data_type: &arrow::datatypes::DataType, values: &[String]) -> Self {
-        use arrow::datatypes::DataType;
+        use arrow::{
+            array::Array,
+            datatypes::{DataType, TimeUnit},
+        };
         match data_type {
             DataType::Int64 => Self::Ints(values.iter().filter_map(|v| v.parse().ok()).collect()),
             DataType::Int32 => Self::Ints(
@@ -497,6 +511,46 @@ impl KeyTargets {
                         .collect(),
                 )
             }
+            DataType::Date32 => Self::Dates(
+                values
+                    .iter()
+                    .filter_map(|v| {
+                        if let Ok(days) = v.parse::<i32>() {
+                            return Some(days);
+                        }
+                        let src = arrow::array::StringArray::from(vec![v.as_str()]);
+                        let casted = arrow::compute::cast(&src, &DataType::Date32).ok()?;
+                        let arr = casted.as_any().downcast_ref::<arrow::array::Date32Array>()?;
+                        (!arr.is_null(0)).then(|| arr.value(0))
+                    })
+                    .collect(),
+            ),
+            DataType::Timestamp(TimeUnit::Microsecond, tz) => Self::Timestamps(
+                values
+                    .iter()
+                    .filter_map(|v| {
+                        if let Ok(micros) = v.parse::<i64>() {
+                            return Some(micros);
+                        }
+                        let src = arrow::array::StringArray::from(vec![v.as_str()]);
+                        let casted = arrow::compute::cast(
+                            &src,
+                            &DataType::Timestamp(TimeUnit::Microsecond, tz.clone()),
+                        )
+                        .or_else(|_| {
+                            arrow::compute::cast(
+                                &src,
+                                &DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                            )
+                        })
+                        .ok()?;
+                        let arr = casted
+                            .as_any()
+                            .downcast_ref::<arrow::array::TimestampMicrosecondArray>()?;
+                        (!arr.is_null(0)).then(|| arr.value(0))
+                    })
+                    .collect(),
+            ),
             _ => Self::Strings(values.iter().cloned().collect()),
         }
     }
@@ -507,13 +561,134 @@ impl KeyTargets {
             Self::Ints(set) => set.is_empty(),
             Self::Int128s(set) => set.is_empty(),
             Self::Binaries(set) => set.is_empty(),
+            Self::Dates(set) => set.is_empty(),
+            Self::Timestamps(set) => set.is_empty(),
         }
     }
 
-    /// Returns `false` only when exact (untruncated) manifest bounds prove that no
-    /// requested value lies inside the file's key range.
-    fn file_may_contain(&self, file: &iceberg::spec::DataFile, key_field_id: Option<i32>) -> bool {
-        use iceberg::spec::PrimitiveLiteral;
+    fn partition_filters(
+        &self,
+        partition_spec: &iceberg::spec::PartitionSpec,
+        field_id: i32,
+        field_type: &iceberg::spec::Type,
+    ) -> Vec<(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)> {
+        use iceberg::spec::{PrimitiveLiteral, PrimitiveType, Type};
+        let Type::Primitive(prim) = field_type else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+            if pf.source_id != field_id {
+                continue;
+            }
+            let mut set = std::collections::HashSet::new();
+            let mut complete = true;
+            match (self, prim) {
+                (Self::Strings(values), PrimitiveType::String) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::String(value.clone());
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Ints(values), PrimitiveType::Int) => {
+                    for value in values {
+                        let Ok(v) = i32::try_from(*value) else {
+                            continue;
+                        };
+                        let lit = PrimitiveLiteral::Int(v);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Ints(values), PrimitiveType::Long) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Long(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (Self::Dates(values), PrimitiveType::Date) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Int(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                (
+                    Self::Timestamps(values),
+                    PrimitiveType::Timestamp | PrimitiveType::Timestamptz,
+                ) => {
+                    for value in values {
+                        let lit = PrimitiveLiteral::Long(*value);
+                        if let Some(part) =
+                            storage::compute_partition_literal(pf.transform, field_type, &lit)
+                        {
+                            set.insert(part);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    complete = false;
+                }
+            }
+            if complete {
+                out.push((part_idx, set));
+            }
+        }
+        out
+    }
+
+    /// Returns `false` only when partition metadata or exact (untruncated) manifest
+    /// bounds prove that no requested value lies inside the file's key range.
+    fn file_may_contain(
+        &self,
+        file: &iceberg::spec::DataFile,
+        key_field_id: Option<i32>,
+        key_partitions: &[(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)],
+    ) -> bool {
+        use iceberg::spec::{Literal, PrimitiveLiteral};
+        for (part_idx, allowed) in key_partitions {
+            let Some(slot) = file.partition().fields().get(*part_idx) else {
+                continue;
+            };
+            match slot {
+                None => return false,
+                Some(Literal::Primitive(p)) => {
+                    if !allowed.contains(p) {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
         let Some(field_id) = key_field_id else {
             return true;
         };
@@ -548,6 +723,12 @@ impl KeyTargets {
             (Self::Binaries(set), PrimitiveLiteral::Binary(low), PrimitiveLiteral::Binary(high)) => {
                 low > high || set.range(low..=high).next().is_some()
             }
+            (Self::Dates(set), PrimitiveLiteral::Int(low), PrimitiveLiteral::Int(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
+            (Self::Timestamps(set), PrimitiveLiteral::Long(low), PrimitiveLiteral::Long(high)) => {
+                low > high || set.range(low..=high).next().is_some()
+            }
             _ => true,
         }
     }
@@ -560,8 +741,9 @@ fn filter_batch_by_keys(
     out_indices: &[usize],
 ) -> Result<RecordBatch> {
     use arrow::array::{
-        Array, BinaryArray, BooleanArray, Decimal128Array, FixedSizeBinaryArray, Int32Array,
-        Int64Array, LargeBinaryArray, LargeStringArray, StringArray, UInt64Array,
+        Array, BinaryArray, BooleanArray, Date32Array, Decimal128Array, FixedSizeBinaryArray,
+        Int32Array, Int64Array, LargeBinaryArray, LargeStringArray, StringArray, StringViewArray,
+        TimestampMicrosecondArray, UInt64Array,
     };
     let col = batch.column(key_idx);
     let any = col.as_any();
@@ -572,6 +754,10 @@ fn filter_batch_by_keys(
                     .map(|v| Some(v.is_some_and(|v| set.contains(v))))
                     .collect()
             } else if let Some(arr) = any.downcast_ref::<LargeStringArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else if let Some(arr) = any.downcast_ref::<StringViewArray>() {
                 arr.iter()
                     .map(|v| Some(v.is_some_and(|v| set.contains(v))))
                     .collect()
@@ -626,6 +812,30 @@ fn filter_batch_by_keys(
             } else if let Some(arr) = any.downcast_ref::<FixedSizeBinaryArray>() {
                 arr.iter()
                     .map(|v| Some(v.is_some_and(|v| set.contains(v))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Dates(set) => {
+            if let Some(arr) = any.downcast_ref::<Date32Array>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
+                    .collect()
+            } else {
+                return Err(Error::refusal(
+                    "invalid_key_read",
+                    "unsupported physical array type for key column",
+                ));
+            }
+        }
+        KeyTargets::Timestamps(set) => {
+            if let Some(arr) = any.downcast_ref::<TimestampMicrosecondArray>() {
+                arr.iter()
+                    .map(|v| Some(v.is_some_and(|v| set.contains(&v))))
                     .collect()
             } else {
                 return Err(Error::refusal(

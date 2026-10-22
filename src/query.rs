@@ -429,7 +429,12 @@ impl PartitionStream for NativePartition {
                     if !scan.is_located()
                         && !filters.is_empty()
                         && let Some(file) = scan.file(path)
-                        && !file_matches_inexact_filters(scan.native_schema(), file, &filters)
+                        && !file_matches_inexact_filters_with_partition(
+                            scan.native_schema(),
+                            scan.partition_spec(),
+                            file,
+                            &filters,
+                        )
                     {
                         futures::stream::empty().boxed()
                     } else {
@@ -457,8 +462,9 @@ impl PartitionStream for NativePartition {
                         .filter(|file| {
                             scan.is_located()
                                 || filters.is_empty()
-                                || file_matches_inexact_filters(
+                                || file_matches_inexact_filters_with_partition(
                                     scan.native_schema(),
+                                    scan.partition_spec(),
                                     file,
                                     &filters,
                                 )
@@ -534,7 +540,7 @@ fn untruncated_file_bounds(
     (low <= high).then_some((low, high))
 }
 
-fn scalar_to_primitive_literal(
+fn scalar_to_full_primitive_literal(
     scalar: &datafusion::common::ScalarValue,
     expected_type: &iceberg::spec::Type,
 ) -> Option<iceberg::spec::PrimitiveLiteral> {
@@ -544,9 +550,7 @@ fn scalar_to_primitive_literal(
         return None;
     };
     match (scalar, prim) {
-        (ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)), PrimitiveType::String)
-            if s.len() < crate::storage::STATISTICS_TRUNCATE_BYTES =>
-        {
+        (ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)), PrimitiveType::String) => {
             Some(PrimitiveLiteral::String(s.clone()))
         }
         (
@@ -575,6 +579,10 @@ fn scalar_to_primitive_literal(
             Some(PrimitiveLiteral::Int128(*v))
         }
         (ScalarValue::Date32(Some(v)), PrimitiveType::Date) => Some(PrimitiveLiteral::Int(*v)),
+        (
+            ScalarValue::TimestampMicrosecond(Some(v), _),
+            PrimitiveType::Timestamp | PrimitiveType::Timestamptz,
+        ) => Some(PrimitiveLiteral::Long(*v)),
         (ScalarValue::Boolean(Some(v)), PrimitiveType::Boolean) => {
             Some(PrimitiveLiteral::Boolean(*v))
         }
@@ -582,31 +590,57 @@ fn scalar_to_primitive_literal(
     }
 }
 
+fn scalar_to_primitive_literal(
+    scalar: &datafusion::common::ScalarValue,
+    expected_type: &iceberg::spec::Type,
+) -> Option<iceberg::spec::PrimitiveLiteral> {
+    use iceberg::spec::PrimitiveLiteral;
+    let lit = scalar_to_full_primitive_literal(scalar, expected_type)?;
+    match &lit {
+        PrimitiveLiteral::String(s) if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
+        PrimitiveLiteral::Binary(b) if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
+        _ => Some(lit),
+    }
+}
+
+#[allow(dead_code)]
 fn file_matches_inexact_filters(
     native_schema: &iceberg::spec::Schema,
     file: &iceberg::spec::DataFile,
     filters: &[Expr],
 ) -> bool {
+    let unpartitioned = iceberg::spec::PartitionSpec::unpartition_spec();
+    file_matches_inexact_filters_with_partition(native_schema, &unpartitioned, file, filters)
+}
+
+fn file_matches_inexact_filters_with_partition(
+    native_schema: &iceberg::spec::Schema,
+    partition_spec: &iceberg::spec::PartitionSpec,
+    file: &iceberg::spec::DataFile,
+    filters: &[Expr],
+) -> bool {
     filters
         .iter()
-        .all(|expr| file_matches_inexact_expr(native_schema, file, expr))
+        .all(|expr| file_matches_inexact_expr(native_schema, partition_spec, file, expr))
 }
 
 fn file_matches_inexact_expr(
     native_schema: &iceberg::spec::Schema,
+    partition_spec: &iceberg::spec::PartitionSpec,
     file: &iceberg::spec::DataFile,
     expr: &Expr,
 ) -> bool {
     use datafusion::logical_expr::{BinaryExpr, Operator};
+    use iceberg::spec::{Literal, Transform};
     match expr {
         Expr::BinaryExpr(BinaryExpr { left, op, right }) => match op {
             Operator::And => {
-                file_matches_inexact_expr(native_schema, file, left)
-                    && file_matches_inexact_expr(native_schema, file, right)
+                file_matches_inexact_expr(native_schema, partition_spec, file, left)
+                    && file_matches_inexact_expr(native_schema, partition_spec, file, right)
             }
             Operator::Or => {
-                file_matches_inexact_expr(native_schema, file, left)
-                    || file_matches_inexact_expr(native_schema, file, right)
+                file_matches_inexact_expr(native_schema, partition_spec, file, left)
+                    || file_matches_inexact_expr(native_schema, partition_spec, file, right)
             }
             Operator::Eq | Operator::Lt | Operator::LtEq | Operator::Gt | Operator::GtEq => {
                 let (col, scalar, effective_op) = match (left.as_ref(), right.as_ref()) {
@@ -619,6 +653,50 @@ fn file_matches_inexact_expr(
                 let Some(field) = native_schema.field_by_name(col.name()) else {
                     return true;
                 };
+                if let Some(full_val) = scalar_to_full_primitive_literal(scalar, &field.field_type)
+                {
+                    for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+                        if pf.source_id != field.id {
+                            continue;
+                        }
+                        let Some(slot) = file.partition().fields().get(part_idx) else {
+                            continue;
+                        };
+                        let Some(Literal::Primitive(file_part)) = slot else {
+                            return false;
+                        };
+                        let Some(target_part) = storage::compute_partition_literal(
+                            pf.transform,
+                            &field.field_type,
+                            &full_val,
+                        ) else {
+                            continue;
+                        };
+                        let matches_part = match effective_op {
+                            Operator::Eq => file_part == &target_part,
+                            Operator::Lt if pf.transform == Transform::Identity => {
+                                file_part < &target_part
+                            }
+                            Operator::Lt | Operator::LtEq
+                                if storage::is_order_preserving_transform(pf.transform) =>
+                            {
+                                file_part <= &target_part
+                            }
+                            Operator::Gt if pf.transform == Transform::Identity => {
+                                file_part > &target_part
+                            }
+                            Operator::Gt | Operator::GtEq
+                                if storage::is_order_preserving_transform(pf.transform) =>
+                            {
+                                file_part >= &target_part
+                            }
+                            _ => true,
+                        };
+                        if !matches_part {
+                            return false;
+                        }
+                    }
+                }
                 let Some((low, high)) = untruncated_file_bounds(file, field.id) else {
                     return true;
                 };
@@ -645,6 +723,48 @@ fn file_matches_inexact_expr(
             let Some(field) = native_schema.field_by_name(col.name()) else {
                 return true;
             };
+            let mut full_candidates = Vec::with_capacity(in_list.list.len());
+            let mut all_full = true;
+            for item in &in_list.list {
+                if let Expr::Literal(scalar, _) = item
+                    && let Some(val) = scalar_to_full_primitive_literal(scalar, &field.field_type)
+                {
+                    full_candidates.push(val);
+                } else {
+                    all_full = false;
+                    break;
+                }
+            }
+            if all_full {
+                for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
+                    if pf.source_id != field.id {
+                        continue;
+                    }
+                    let Some(slot) = file.partition().fields().get(part_idx) else {
+                        continue;
+                    };
+                    let Some(Literal::Primitive(file_part)) = slot else {
+                        return false;
+                    };
+                    let mut target_parts = Vec::with_capacity(full_candidates.len());
+                    let mut all_mapped = true;
+                    for candidate in &full_candidates {
+                        if let Some(tp) = storage::compute_partition_literal(
+                            pf.transform,
+                            &field.field_type,
+                            candidate,
+                        ) {
+                            target_parts.push(tp);
+                        } else {
+                            all_mapped = false;
+                            break;
+                        }
+                    }
+                    if all_mapped && !target_parts.iter().any(|tp| tp == file_part) {
+                        return false;
+                    }
+                }
+            }
             let Some((low, high)) = untruncated_file_bounds(file, field.id) else {
                 return true;
             };
@@ -765,6 +885,7 @@ mod tests {
             expected_digest: storage::digest(&input).unwrap().0,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         };
         let release = engine.run(&spec).await.unwrap();
         let native = storage::open_pin(&release.dataset.groups["source"], &pin_budget)

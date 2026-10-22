@@ -28,6 +28,7 @@ fn rebuild(root: &Path, base: &ReleasePin, operation: &str, rows: &[Row]) -> Run
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -315,6 +316,7 @@ async fn later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work()
                 &[(Some(1999), Some("existing origin".into()))],
             ),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await
@@ -356,6 +358,7 @@ async fn later_admission_fences_cutover_and_rebased_rebuild_reuses_source_work()
             &[(Some(2000), Some("newly accepted".into()))],
         ),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     assert_eq!(
@@ -574,6 +577,7 @@ async fn based_rebuild_preserves_renamed_hidden_fields_and_new_nullable_defaults
         expected_digest: source.digest,
         sql: "SELECT id, text, id AS discarded FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let initial = engine.run(&initial_spec).await.unwrap();
     let edit = SchemaSpec {
@@ -832,6 +836,7 @@ async fn based_rebuild_recomputes_only_when_retained_schema_history_changes() {
                 &[(Some(2000), Some("newly observed".into()))],
             ),
             deletions: None,
+            merge: None,
             relationship: None,
         })
         .await

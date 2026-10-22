@@ -114,6 +114,7 @@ async fn update_and_incremental_refresh_file_pruning_metrics_across_key_types() 
             expected_digest: f1.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -293,6 +294,7 @@ async fn filtered_and_projected_join_transform_full_and_incremental() {
             expected_digest: l_init.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -306,6 +308,7 @@ async fn filtered_and_projected_join_transform_full_and_incremental() {
             expected_digest: r_init.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();
@@ -688,6 +691,7 @@ async fn chained_incremental_refresh_and_two_stage_cross_date_syndication() {
             expected_digest: init_captures.digest,
             sql: "SELECT * FROM input".into(),
             definition: "v1".into(),
+            partition_by: Vec::new(),
         })
         .await
         .unwrap();

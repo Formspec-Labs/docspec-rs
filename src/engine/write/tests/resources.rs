@@ -143,6 +143,7 @@ async fn wide_slice_receipts_and_held_output_share_admission_without_losing_sele
         definition: "v1".into(),
         base: None,
         relationship: None,
+        partition_by: Vec::new(),
     };
     let original = engine.run(&request).await.unwrap();
     let original_records = engine.inspect(&request.dataset).await.unwrap();

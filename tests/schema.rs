@@ -552,6 +552,7 @@ fn build(root: &Path, base: &ReleasePin, operation: &str, with_base: bool) -> Ru
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: base.dataset.definition.clone(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -584,7 +585,11 @@ async fn cached_related_result_checks_schema_input_history() {
                     name: "rows".into(),
                     function: AggregateFunction::CountRows,
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     assert_eq!(

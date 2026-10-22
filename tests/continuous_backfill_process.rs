@@ -286,6 +286,7 @@ async fn killed_parent_catches_up_source_edits_and_keeps_original_file_evidence(
                 keys: vec!["id".into()],
                 replacements: input(&root.path().join("replacement.parquet"), &replacements),
                 deletions: None,
+                merge: None,
                 relationship: None,
             })
             .await
@@ -398,6 +399,7 @@ async fn killed_live_fence_owner_recovers_exact_source_and_retained_sibling_work
         keys: vec!["id".into()],
         replacements: input(&root.path().join("replacement.parquet"), &replacements),
         deletions: None,
+        merge: None,
         relationship: None,
     };
     assert_eq!(

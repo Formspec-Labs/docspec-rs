@@ -68,6 +68,7 @@ fn fixture(root: &std::path::Path) -> RunSpec {
         expected_digest: storage::digest(&path).unwrap().0,
         sql: "SELECT * FROM input".into(),
         definition: "comments-v1".into(),
+        partition_by: Vec::new(),
     }
 }
 

@@ -296,7 +296,9 @@ pub(super) async fn verify_rebuild(
         return Ok(());
     }
     let after = storage::open_pin(after, budget).await?;
-    if schema_identity(before.metadata(), budget)? != schema_identity(after.metadata(), budget)? {
+    if schema_identity(before.metadata(), budget)? != schema_identity(after.metadata(), budget)?
+        || before.metadata().default_partition_spec() != after.metadata().default_partition_spec()
+    {
         return Err(invalid());
     }
     Ok(())
@@ -567,10 +569,22 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
             .cloned(),
     );
     // Native validation prevents removing identifier fields or invalidating nested IDs.
-    Ok(Schema::builder()
+    let built = Schema::builder()
         .with_fields(fields)
         .with_identifier_field_ids(before.identifier_field_ids())
-        .build()?)
+        .build()?;
+    if metadata
+        .default_partition_spec()
+        .fields()
+        .iter()
+        .any(|pf| built.field_by_id(pf.source_id).is_none())
+    {
+        return Err(Error::refusal(
+            "invalid_schema",
+            "schema edit cannot remove a partition column",
+        ));
+    }
+    Ok(built)
 }
 
 fn evolve(
@@ -643,6 +657,17 @@ pub(super) async fn verify_transition(
     }
     let first = storage::open_pin(first, budget).await?.metadata_ref();
     let second = storage::open_pin(second, budget).await?.metadata_ref();
+    let expected_partitions = if !before.partition_by.is_empty()
+        || !after.partition_by.is_empty()
+        || !second.default_partition_spec().is_unpartitioned()
+    {
+        storage::partition_specs_from_metadata(&second, Some(&before.partition_by))
+    } else {
+        Vec::new()
+    };
+    if after.partition_by != expected_partitions {
+        return Err(invalid());
+    }
     let limit = budget.limits.max_metadata_bytes;
     let spec = spec.clone();
     budget

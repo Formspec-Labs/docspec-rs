@@ -55,6 +55,7 @@ pub(super) fn validate(definition: &AggregationDefinition) -> Result<()> {
                         })
                         || order_by.iter().any(|ob| !valid(&ob.field))
                 }
+                AggregateFunction::FirstValue { .. } => true,
                 function => argument(function).is_some_and(|name| !valid(name)),
             })
     {
@@ -79,7 +80,7 @@ pub(super) fn validate_transform(spec: &AggregateTransform) -> Result<()> {
     Ok(())
 }
 
-fn argument(function: &AggregateFunction) -> Option<&str> {
+pub(super) fn argument(function: &AggregateFunction) -> Option<&str> {
     match function {
         AggregateFunction::CountRows => None,
         AggregateFunction::Count { field }
@@ -89,7 +90,8 @@ fn argument(function: &AggregateFunction) -> Option<&str> {
         | AggregateFunction::CollectDistinctWithProvenance { field, .. }
         | AggregateFunction::Sum { field }
         | AggregateFunction::Min { field }
-        | AggregateFunction::Max { field } => Some(field),
+        | AggregateFunction::Max { field }
+        | AggregateFunction::FirstValue { field } => Some(field),
     }
 }
 
@@ -333,6 +335,12 @@ async fn qualify_transform(
                     ));
                 }
             }
+            AggregateFunction::FirstValue { .. } => {
+                return Err(Error::refusal(
+                    "aggregate_value_type",
+                    "sum, min, max and collect_set require qualified scalar operands",
+                ));
+            }
         }
     }
     Ok(compiled)
@@ -411,6 +419,7 @@ fn build_aggregate_dataframe<'a>(
                 }
                 AggregateFunction::Min { field } => format!("MIN({})", quote(field)),
                 AggregateFunction::Max { field } => format!("MAX({})", quote(field)),
+                AggregateFunction::FirstValue { field } => format!("FIRST_VALUE({})", quote(field)),
             };
             selected.push(format!("{expression} AS {}", quote(&field.name)));
         }
@@ -708,6 +717,7 @@ impl Engine {
             let input_pin = source(input_release)?;
             let input_native = storage::open_pin(input_pin, budget).await?;
             let input_schema = input_native.metadata().current_schema().clone();
+            let input_partition_spec = input_native.metadata().default_partition_spec().clone();
             let (retained, retained_rows) = {
                 let inv = storage::current_snapshot_files(&input_native, budget).await?;
                 let mut set = BTreeSet::new();
@@ -715,6 +725,7 @@ impl Engine {
                 for file in &inv.data {
                     if write::file_may_overlap_mapped_key_files(
                         &input_schema,
+                        &input_partition_spec,
                         &affected_schema,
                         &aggregate.grouping.keys,
                         &k_cols,
@@ -983,6 +994,7 @@ mod tests {
                 expected_digest: initial_input.digest,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();
@@ -1223,6 +1235,7 @@ mod tests {
                 expected_digest: initial_input.digest,
                 sql: "SELECT * FROM input".into(),
                 definition: "v1".into(),
+                partition_by: Vec::new(),
             })
             .await
             .unwrap();

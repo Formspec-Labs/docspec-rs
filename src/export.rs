@@ -280,6 +280,7 @@ impl Predicate {
         Self::Ast(TaggedPredicate::Or { predicates })
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn not(predicate: Predicate) -> Self {
         Self::Ast(TaggedPredicate::Not {
             predicate: Box::new(predicate),

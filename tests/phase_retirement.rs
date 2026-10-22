@@ -35,6 +35,7 @@ fn request(root: &Path, dataset: &str) -> RunSpec {
         expected_digest: source.digest,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     }
 }
 
@@ -500,7 +501,11 @@ async fn evidence_requires_explicit_retirement_after_source_replacement() {
                     field: "text".into(),
                     name: "text".into(),
                 }],
+                filter: None,
+                projections: BTreeMap::new(),
             },
+            filter: None,
+            projections: BTreeMap::new(),
         }),
     };
     assert_eq!(

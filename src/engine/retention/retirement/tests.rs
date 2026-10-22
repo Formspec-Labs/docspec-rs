@@ -198,6 +198,7 @@ async fn legacy_processing_cannot_adopt_a_replacement_admission() {
         expected_digest: storage::digest(&input).unwrap().0,
         sql: "SELECT * FROM input".into(),
         definition: "v1".into(),
+        partition_by: Vec::new(),
     };
     let engine = Engine::open(root.path().join("workspace"), limits())
         .await

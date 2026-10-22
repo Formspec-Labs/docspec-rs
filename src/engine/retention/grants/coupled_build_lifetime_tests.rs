@@ -58,6 +58,7 @@ async fn coupled_full_build_reclaims_old_payload_after_exact_promises_end() {
                     expected_digest: storage::digest(&input).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),
@@ -102,6 +103,7 @@ async fn coupled_full_build_reclaims_old_payload_after_exact_promises_end() {
                     expected_digest: storage::digest(&replacement).unwrap().0,
                     sql: "SELECT * FROM input".into(),
                     definition: "v1".into(),
+                    partition_by: Vec::new(),
                 })
                 .await
                 .unwrap(),
