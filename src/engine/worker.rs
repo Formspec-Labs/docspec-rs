@@ -35,6 +35,14 @@ impl Host {
             .map_err(|_| Error::refusal("source_fence_clock", "host monotonic clock overflow"))
     }
 
+    pub(super) fn unix_millis() -> Result<u64> {
+        let duration = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| Error::refusal("source_fence_clock", "system clock before UNIX epoch"))?;
+        u64::try_from(duration.as_millis())
+            .map_err(|_| Error::refusal("source_fence_clock", "system clock overflow"))
+    }
+
     fn check(&self) -> Result<()> {
         if self.uncertain.load(Ordering::Acquire) {
             return Err(Error::refusal(

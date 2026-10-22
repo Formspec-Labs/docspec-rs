@@ -737,7 +737,9 @@ async fn run(State(engine): State<Engine>, request: Request) -> Result<Json<Rele
             .await
             .map_err(|e| HttpError(e).into_response())?;
         let result = engine.run(&staged.spec).await;
-        staged.cleanup();
+        if result.is_ok() {
+            staged.cleanup();
+        }
         return result
             .map(Json)
             .map_err(|e| HttpError(e).into_response());
@@ -828,7 +830,9 @@ async fn update(
             .await
             .map_err(|e| HttpError(e).into_response())?;
         let result = engine.update(&staged.spec).await;
-        staged.cleanup();
+        if result.is_ok() {
+            staged.cleanup();
+        }
         return result
             .map(Json)
             .map_err(|e| HttpError(e).into_response());

@@ -478,6 +478,8 @@ fn open_parquet_writer(
         .set_compression(Compression::ZSTD(
             ZstdLevel::try_new(3).expect("valid zstd level"),
         ))
+        .set_column_index_truncate_length(Some(crate::storage::STATISTICS_TRUNCATE_BYTES))
+        .set_statistics_truncate_length(Some(crate::storage::STATISTICS_TRUNCATE_BYTES))
         .set_created_by("docspec-ipc".to_owned())
         .build();
     let writer = HashingFileWriter {
@@ -660,8 +662,10 @@ async fn stage_ipc_stream_to_parquet(
     }
 
     let final_path = scratch_dir.join(format!("ipc-{dataset}-{operation}-{ipc_digest}.parquet"));
-    std::fs::rename(&temp_guard.path, &final_path)?;
-    temp_guard.disarm();
+    if !final_path.exists() {
+        std::fs::rename(&temp_guard.path, &final_path)?;
+        temp_guard.disarm();
+    }
     Ok((final_path, parquet_digest))
 }
 

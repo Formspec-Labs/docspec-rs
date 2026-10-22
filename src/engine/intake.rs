@@ -14,6 +14,8 @@ pub(in crate::engine) struct SourceFence {
     pub(in crate::engine) token: String,
     pub(in crate::engine) host: String,
     pub(in crate::engine) expires_millis: u64,
+    #[serde(default)]
+    pub(in crate::engine) unix_expires_millis: u64,
     pub(in crate::engine) closed: bool,
     #[serde(default)]
     pub(in crate::engine) epoch: u64,
@@ -34,14 +36,9 @@ pub(in crate::engine) fn validate_record(fence: &SourceFence) -> Result<()> {
 }
 
 impl SourceFence {
-    #[cfg(test)]
     fn live(&self, host: &str, now: u64) -> Result<bool> {
-        self.live_for(host, true, now)
-    }
-
-    fn live_for(&self, host: &str, require_host_match: bool, now: u64) -> Result<bool> {
         validate_record(self)?;
-        if (require_host_match && self.host != host) || self.closed || now >= self.expires_millis {
+        if self.host != host || self.closed || now >= self.expires_millis {
             return Ok(false);
         }
         if self.expires_millis - now > MAX_FENCE_MILLIS {
@@ -50,20 +47,29 @@ impl SourceFence {
         Ok(true)
     }
 
-    #[cfg(test)]
-    fn exact_live(&self, expected: &Self, host: &str, now: u64) -> Result<()> {
-        self.exact_live_for(expected, host, true, now)
+    fn live_for(
+        &self,
+        host: &str,
+        owned_catalog: bool,
+        monotonic_now: u64,
+        unix_now: u64,
+    ) -> Result<bool> {
+        if self.host == host {
+            return self.live(host, monotonic_now);
+        }
+        validate_record(self)?;
+        if self.closed || owned_catalog || unix_now >= self.unix_expires_millis {
+            return Ok(false);
+        }
+        if self.unix_expires_millis.saturating_sub(unix_now) > MAX_FENCE_MILLIS {
+            return Err(invalid_fence("source fence exceeds the bounded deadline"));
+        }
+        Ok(true)
     }
 
-    fn exact_live_for(
-        &self,
-        expected: &Self,
-        host: &str,
-        require_host_match: bool,
-        now: u64,
-    ) -> Result<()> {
+    fn exact_live(&self, expected: &Self, host: &str, now: u64) -> Result<()> {
         validate_record(expected)?;
-        if self != expected || !self.live_for(host, require_host_match, now)? {
+        if self != expected || !self.live(host, now)? {
             return Err(Error::refusal(
                 "source_fence_lost",
                 "source fence changed or expired; retry continuous cutover",
@@ -91,6 +97,7 @@ impl Engine {
                 &self.inner.host.instance,
                 self.inner.owned_catalog,
                 self.inner.host.monotonic_millis()?,
+                worker::Host::unix_millis()?,
             )?
         {
             return Err(Error::refusal(
@@ -147,11 +154,17 @@ impl Engine {
                 self.check_continuous_fence_owner(&view, intent).await?;
             }
             let now = self.inner.host.monotonic_millis()?;
+            let unix_now = worker::Host::unix_millis()?;
             let previous = self.source_fence(&view).await?;
             if let Some(fence) = &previous
-                && fence.live_for(&self.inner.host.instance, self.inner.owned_catalog, now)?
+                && fence.live_for(
+                    &self.inner.host.instance,
+                    self.inner.owned_catalog,
+                    now,
+                    unix_now,
+                )?
             {
-                if &fence.owner == owner {
+                if &fence.owner == owner && fence.host == self.inner.host.instance {
                     return Ok(fence.clone());
                 }
                 return Err(Error::refusal(
@@ -171,6 +184,9 @@ impl Engine {
                 expires_millis: now
                     .checked_add(millis)
                     .ok_or_else(|| invalid_fence("source fence monotonic deadline overflow"))?,
+                unix_expires_millis: unix_now
+                    .checked_add(millis)
+                    .ok_or_else(|| invalid_fence("source fence wall-clock deadline overflow"))?,
                 closed: false,
                 epoch,
             };
@@ -210,10 +226,9 @@ impl Engine {
             .source_fence(view)
             .await?
             .ok_or_else(|| Error::refusal("source_fence_lost", "source fence is missing"))?;
-        current.exact_live_for(
+        current.exact_live(
             fence,
             &self.inner.host.instance,
-            self.inner.owned_catalog,
             self.inner.host.monotonic_millis()?,
         )
     }
@@ -241,9 +256,8 @@ impl Engine {
                 return Ok(());
             };
             if current != *fence
-                || !current.live_for(
+                || !current.live(
                     &self.inner.host.instance,
-                    self.inner.owned_catalog,
                     self.inner.host.monotonic_millis()?,
                 )?
             {
@@ -281,6 +295,7 @@ mod tests {
             token: uuid::Uuid::new_v4().to_string(),
             host: uuid::Uuid::new_v4().to_string(),
             expires_millis: 100,
+            unix_expires_millis: 1_000,
             closed: false,
             epoch: 1,
         }
@@ -296,6 +311,45 @@ mod tests {
         let mut closed = fence.clone();
         closed.closed = true;
         assert!(!closed.live(&closed.host, 0).unwrap());
+    }
+
+    #[test]
+    fn cross_process_shared_catalog_uses_unix_deadline_without_clock_skew_split_brain() {
+        let mut fence = fence();
+        fence.expires_millis = 50;
+        fence.unix_expires_millis = 1_700_000_100_000;
+        let other_host = uuid::Uuid::new_v4().to_string();
+
+        // Single-host owned catalog immediately treats prior host UUID as dead.
+        assert!(
+            !fence
+                .live_for(&other_host, true, 10, 1_700_000_050_000)
+                .unwrap()
+        );
+
+        // Shared catalog: Process B booted earlier (monotonic_now > fence.expires_millis),
+        // but wall-clock lease is still live -> must NOT steal fence (no split-brain).
+        assert!(
+            fence
+                .live_for(&other_host, false, 999_999, 1_700_000_050_000)
+                .unwrap()
+        );
+
+        // Shared catalog: Process B booted much later (fence.expires_millis - monotonic_now > MAX_FENCE_MILLIS),
+        // must evaluate wall-clock deadline cleanly instead of failing with invalid_source_fence.
+        fence.expires_millis = MAX_FENCE_MILLIS + 500_000;
+        assert!(
+            fence
+                .live_for(&other_host, false, 10, 1_700_000_050_000)
+                .unwrap()
+        );
+
+        // Once wall-clock deadline passes, shared catalog treats remote host lease as expired.
+        assert!(
+            !fence
+                .live_for(&other_host, false, 10, 1_700_000_100_000)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -445,13 +499,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.epoch, 1);
-        // Same logical owner on another worker adopts the active distributed fence.
-        let adopted = worker_b
+        // Same host and logical owner reuses its active fence without extending deadline.
+        let retry_a = worker_a
             .acquire_source_fence(&dataset, &owner_a, 1)
             .await
             .unwrap();
-        assert_eq!(adopted, first);
-        // Competing owner and source intake on worker B are blocked while fence is live.
+        assert_eq!(retry_a, first);
+        // Another worker host cannot steal or impersonate Worker A's live fence.
+        assert_eq!(
+            worker_b
+                .acquire_source_fence(&dataset, &owner_a, 1)
+                .await
+                .unwrap_err()
+                .code(),
+            "source_fenced"
+        );
         assert_eq!(
             worker_b
                 .acquire_source_fence(&dataset, &owner_b, MAX_FENCE_MILLIS)
@@ -465,10 +527,17 @@ mod tests {
             worker_b.check_source_intake(&view_b).await.unwrap_err().code(),
             "source_fenced"
         );
-        worker_b.check_source_fence(&view_b, &first).await.unwrap();
+        assert_eq!(
+            worker_b
+                .check_source_fence(&view_b, &first)
+                .await
+                .unwrap_err()
+                .code(),
+            "source_fence_lost"
+        );
 
-        // Worker B closes the adopted fence; Worker B can then acquire a new epoch.
-        worker_b.close_source_fence(&first).await.unwrap();
+        // Worker A closes its fence; Worker B can then acquire a new epoch.
+        worker_a.close_source_fence(&first).await.unwrap();
         let view_a = worker_a.inner.lifecycle.open(&dataset).await.unwrap();
         worker_a.check_source_intake(&view_a).await.unwrap();
         assert_eq!(

@@ -70,8 +70,10 @@ async fn initial_candidate_recovers_committed_snapshot_without_producer_or_secon
     // or registration. The subsequent call must resume this same candidate.
     let input = &admission.outputs[0];
     let frame = engine.initial_source(&spec, input).await.unwrap();
-    let schema =
-        iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(frame.arrow_schema()).unwrap();
+    let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+        frame.arrow_schema().as_ref(),
+    )
+    .unwrap();
     engine
         .inner
         .lifecycle

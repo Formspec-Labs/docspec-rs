@@ -238,6 +238,7 @@ impl Engine {
         storage::pin_bound(dataset, &table, rows, &self.inner.lifecycle.budget, shared).await
     }
 
+    #[cfg(test)]
     pub(super) async fn create_output(
         &self,
         dataset: &Id,
@@ -328,28 +329,6 @@ impl Engine {
             .outputs
             .first()
             .ok_or_else(|| Error::refusal("corrupt_phase", "admission has no retained input"))?;
-        if spec.base.is_none() && !input.path.starts_with("s3://") {
-            let file = std::fs::File::open(&input.path)?;
-            let builder =
-                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
-            let arrow_schema = builder.schema().clone();
-            if is_identity_source_projection(&spec.sql, arrow_schema.as_ref()) {
-                check_build_arrow_schema(arrow_schema.as_ref())?;
-                #[cfg(test)]
-                self.inner
-                    .identity_build_fast_path
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let schema = storage::arrow_schema_to_schema_auto_assign_ids(arrow_schema.as_ref())?;
-                let table = self
-                    .create_output(&spec.dataset, directory, schema)
-                    .await?;
-                let reader = builder
-                    .with_batch_size(self.inner.lifecycle.budget.limits.batch_rows)
-                    .build()?;
-                let stream = futures::stream::iter(reader.map(|batch| batch.map_err(Error::from)));
-                return self.write_batch_stream(&spec.dataset, table, stream).await;
-            }
-        }
         let context = self.context();
         context
             .register_parquet("input", &input.path, ParquetReadOptions::default())
