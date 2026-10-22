@@ -112,14 +112,6 @@ pub(super) async fn plan_selected_files(
 }
 
 pub(super) fn strip_file_column(batch: RecordBatch, limit: usize) -> Result<RecordBatch> {
-    // Include the transient native column in the admission check for flat schemas;
-    // schemas with List<Struct> columns may split multi-row batches after stripping.
-    if !super::has_list_of_struct(batch.schema().as_ref()) && batch.get_array_memory_size() > limit {
-        return Err(Error::refusal(
-            "oversized_batch",
-            "native reader exceeded its byte allowance",
-        ));
-    }
     let columns = batch.num_columns().checked_sub(1).ok_or_else(|| {
         Error::refusal("native_schema", "native reader omitted its metadata column")
     })?;
@@ -139,5 +131,16 @@ pub(super) fn strip_file_column(batch: RecordBatch, limit: usize) -> Result<Reco
             "native reader returned an unexpected metadata column",
         ));
     }
-    Ok(batch.project(&(0..columns).collect::<Vec<_>>())?)
+    let stripped = batch.project(&(0..columns).collect::<Vec<_>>())?;
+    // Include the transient native column in the admission check for uniform flat schemas;
+    // schemas with List<Struct> or skewed multi-MB string/binary cells split after stripping.
+    if !super::has_splittable_skewed_column(&stripped, limit)
+        && batch.get_array_memory_size() > limit
+    {
+        return Err(Error::refusal(
+            "oversized_batch",
+            "native reader exceeded its byte allowance",
+        ));
+    }
+    Ok(stripped)
 }

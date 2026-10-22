@@ -471,10 +471,11 @@ where
         // default at still-modest CPU on hourly ingestion cadences.
         let expected_arrow =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
-        let mut props_builder = WriterProperties::builder()
+        let props_builder = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
             .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+            .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 2).max(1)))
             // One mebibyte data pages keep a page decodable per read request
             // without inflating the per-row-group page count admitted above.
             .set_data_page_size_limit(1024 * 1024)
@@ -485,10 +486,6 @@ where
             .set_statistics_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
             .set_column_index_truncate_length(Some(STATISTICS_TRUNCATE_BYTES))
             .set_offset_index_disabled(true);
-        if has_list_of_struct(&expected_arrow) {
-            props_builder =
-                props_builder.set_max_row_group_bytes(Some(budget.limits.max_batch_bytes.max(1)));
-        }
         let props = props_builder.build();
         let parquet = ParquetWriterBuilder::new(props, table.metadata().current_schema().clone())
             .with_match_mode(iceberg::arrow::FieldMatchMode::Name);
@@ -522,7 +519,15 @@ where
                     continue;
                 }
                 let raw_batch = coerce_batch(raw_batch)?;
-                for batch in split_oversized_batch(raw_batch, budget.limits.max_batch_bytes)? {
+                let write_split_limit = if budget.limits.max_batch_bytes >= (1 << 20)
+                    && raw_batch.num_rows() > 1
+                    && has_splittable_skewed_column(&raw_batch, budget.limits.max_batch_bytes)
+                {
+                    budget.limits.max_batch_bytes / 2
+                } else {
+                    budget.limits.max_batch_bytes
+                };
+                for batch in split_oversized_batch(raw_batch, write_split_limit)? {
                     let batch =
                         identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
                     next_row = next_row
@@ -678,15 +683,85 @@ pub(crate) fn has_list_of_struct(schema: &arrow::datatypes::Schema) -> bool {
     })
 }
 
+/// Returns the referenced byte size of a `Utf8`/`LargeUtf8`/`Binary`/`LargeBinary`
+/// array slice across `num_rows` rows, or `None` for other array types.
+fn referenced_variable_bytes(col: &dyn arrow::array::Array, num_rows: usize) -> Option<usize> {
+    if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::StringArray>() {
+        let offsets = utf8.value_offsets();
+        let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
+        Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i32>()))
+    } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+        let offsets = utf8.value_offsets();
+        let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
+        Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i64>()))
+    } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::BinaryArray>() {
+        let offsets = bin.value_offsets();
+        let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
+        Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i32>()))
+    } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+        let offsets = bin.value_offsets();
+        let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
+        Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i64>()))
+    } else {
+        None
+    }
+}
+
+/// Returns whether `batch` contains a `List<Struct>` column, an uncompacted
+/// variable-length slice whose backing buffer exceeds its referenced bytes, or a
+/// multi-row batch with a skewed multi-megabyte `Utf8`/`Binary` cell (`> limit / 16`).
+pub(crate) fn has_splittable_skewed_column(batch: &RecordBatch, limit: usize) -> bool {
+    if has_list_of_struct(batch.schema().as_ref()) {
+        return true;
+    }
+    let num_rows = batch.num_rows();
+    if num_rows == 0 || limit < (1 << 20) {
+        return false;
+    }
+    let cell_threshold = (limit / 16).max(1 << 20);
+    for col in batch.columns() {
+        if let Some(ref_bytes) = referenced_variable_bytes(col.as_ref(), num_rows)
+            && col.get_array_memory_size() > ref_bytes.saturating_add(cell_threshold)
+        {
+            return true;
+        }
+        if num_rows <= 1 {
+            continue;
+        }
+        if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::StringArray>() {
+            let offsets = utf8.value_offsets();
+            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+                return true;
+            }
+        } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+            let offsets = utf8.value_offsets();
+            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+                return true;
+            }
+        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::BinaryArray>() {
+            let offsets = bin.value_offsets();
+            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+                return true;
+            }
+        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+            let offsets = bin.value_offsets();
+            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Computes the effective admission byte size of `batch`.
 ///
-/// For multi-row or flat batches, returns `batch.get_array_memory_size()`.
-/// For a 1-row batch containing a high-cardinality `List<Struct>` column, bounds
-/// the nested list contribution by its per-occurrence element size so a single
-/// parent document with 5,000+ occurrences does not fail batch admission once
-/// isolated into its own 1-row batch.
+/// For multi-row batches, returns `batch.get_array_memory_size()`.
+/// For a 1-row batch:
+/// - bounds `List<Struct>` columns by their per-occurrence element size, and
+/// - uses referenced slice bytes for `Utf8`/`Binary` columns so uncompacted slices
+///   are recognized before deep compaction.
 pub(crate) fn effective_batch_bytes(batch: &RecordBatch) -> usize {
-    if batch.num_rows() != 1 || !has_list_of_struct(batch.schema().as_ref()) {
+    if batch.num_rows() != 1 {
         return batch.get_array_memory_size();
     }
     batch
@@ -700,6 +775,8 @@ pub(crate) fn effective_batch_bytes(batch: &RecordBatch) -> usize {
             {
                 let elems = (list.value_length(0).max(1)) as usize;
                 col.get_array_memory_size().div_ceil(elems)
+            } else if let Some(ref_bytes) = referenced_variable_bytes(col.as_ref(), 1) {
+                ref_bytes
             } else {
                 col.get_array_memory_size()
             }
@@ -709,6 +786,10 @@ pub(crate) fn effective_batch_bytes(batch: &RecordBatch) -> usize {
 
 /// Produces a deep-compacted slice `[offset..offset + length]` of `batch` whose
 /// backing Arrow buffers retain only the values referenced by those rows.
+///
+/// Note: `arrow::compute::concat_batches` has a `batches.len() == 1` fast path
+/// that returns `batches[0].clone()` without reallocating buffers. Passing an
+/// trailing 0-row batch forces `MutableArrayData` compaction into fresh buffers.
 pub(crate) fn compact_batch_slice(
     batch: &RecordBatch,
     offset: usize,
@@ -718,10 +799,9 @@ pub(crate) fn compact_batch_slice(
     if sliced.num_columns() == 0 {
         return Ok(sliced);
     }
-    Ok(arrow::compute::concat_batches(
-        &batch.schema(),
-        std::slice::from_ref(&sliced),
-    )?)
+    let schema = batch.schema();
+    let empty = RecordBatch::new_empty(schema.clone());
+    Ok(arrow::compute::concat_batches(&schema, &[sliced, empty])?)
 }
 
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into
@@ -734,7 +814,7 @@ pub(crate) fn split_oversized_batch(
     if batch.get_array_memory_size() <= limit {
         return Ok(vec![batch]);
     }
-    if !has_list_of_struct(batch.schema().as_ref()) {
+    if !has_splittable_skewed_column(&batch, limit) {
         let bytes = batch.get_array_memory_size();
         return Err(Error::refusal(
             "oversized_batch",
@@ -746,7 +826,7 @@ pub(crate) fn split_oversized_batch(
     let num_rows = batch.num_rows();
     if num_rows <= 1 {
         let compacted = if num_rows == 1
-            && batch.get_array_memory_size() > effective_batch_bytes(&batch).saturating_mul(2)
+            && batch.get_array_memory_size() > effective_batch_bytes(&batch)
         {
             compact_batch_slice(&batch, 0, 1)?
         } else {
@@ -777,6 +857,30 @@ pub(crate) fn split_oversized_batch(
                 let elems = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
                 let share = col_bytes.saturating_mul(elems).div_ceil(total_elems);
                 *weight = weight.saturating_add(share.saturating_add(8));
+            }
+        } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::StringArray>() {
+            let offsets = utf8.value_offsets();
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                *weight = weight.saturating_add(bytes.saturating_add(8));
+            }
+        } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+            let offsets = utf8.value_offsets();
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                *weight = weight.saturating_add(bytes.saturating_add(12));
+            }
+        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::BinaryArray>() {
+            let offsets = bin.value_offsets();
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                *weight = weight.saturating_add(bytes.saturating_add(8));
+            }
+        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+            let offsets = bin.value_offsets();
+            for (r, weight) in row_weights.iter_mut().enumerate() {
+                let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
+                *weight = weight.saturating_add(bytes.saturating_add(12));
             }
         } else {
             let per_row = col_bytes.div_ceil(num_rows);
@@ -3069,5 +3173,49 @@ mod tests {
                 "history={historical_snapshots}: closure_counts={closure_counts:?} ({closure_elapsed:?}), open_counts={open_counts:?} ({open_elapsed:?}), values_elapsed={values_elapsed:?}"
             );
         }
+    }
+
+    #[test]
+    fn split_oversized_batch_splits_skewed_utf8_and_compacts_single_row_slices() {
+        use arrow::array::StringArray;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("payload", DataType::Utf8, false),
+        ]));
+        let limit = 4 * 1024 * 1024; // 4 MiB
+        let big_a = "A".repeat(2_500_000);
+        let big_b = "B".repeat(2_500_000);
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["r0", "r1", "r2", "r3"])),
+                Arc::new(StringArray::from(vec!["small-0", &big_a, "small-2", &big_b])),
+            ],
+        )
+        .unwrap();
+        assert!(batch.get_array_memory_size() > limit);
+
+        // 1. Multi-row batch with two 2.5 MB Utf8 cells splits cleanly under 4 MiB per slice.
+        let slices = split_oversized_batch(batch.clone(), limit).unwrap();
+        assert!(slices.len() >= 2);
+        let total_rows: usize = slices.iter().map(RecordBatch::num_rows).sum();
+        assert_eq!(total_rows, 4);
+        for slice in &slices {
+            assert!(
+                slice.get_array_memory_size() <= limit,
+                "slice memory {} exceeded limit {}",
+                slice.get_array_memory_size(),
+                limit
+            );
+        }
+
+        // 2. A 1-row zero-copy slice of the 5+ MB batch still shares the parent buffer
+        // until split_oversized_batch compacts it via compact_batch_slice.
+        let uncompacted_one = batch.slice(1, 1);
+        assert!(uncompacted_one.get_array_memory_size() > limit);
+        let compacted_slices = split_oversized_batch(uncompacted_one, limit).unwrap();
+        assert_eq!(compacted_slices.len(), 1);
+        assert_eq!(compacted_slices[0].num_rows(), 1);
+        assert!(compacted_slices[0].get_array_memory_size() <= limit);
     }
 }

@@ -806,7 +806,7 @@ pub(crate) fn bounded(
                 let Some(batch) = stream.try_next().await? else {
                     return Ok(None);
                 };
-                if crate::storage::has_list_of_struct(batch.schema().as_ref()) {
+                if crate::storage::has_splittable_skewed_column(&batch, limit) {
                     for slice in crate::storage::split_oversized_batch(batch, limit)
                         .map_err(external)?
                     {

@@ -126,21 +126,36 @@ pub(super) async fn read(
     let stream = builder.build().map_err(|_| invalid())?;
     let limit = budget.limits.max_batch_bytes;
     let stream = futures::stream::try_unfold(
-        (stream, transport, metadata_memory, payload_memory),
-        move |(mut stream, transport, metadata_memory, payload_memory)| async move {
-            let Some(batch) = stream.try_next().await.map_err(|_| invalid())? else {
-                return Ok(None);
-            };
-            if super::effective_batch_bytes(&batch) > limit {
-                return Err(Error::refusal(
-                    "oversized_batch",
-                    "export batch exceeds the byte allowance",
-                ));
+        (
+            stream,
+            std::collections::VecDeque::<arrow::record_batch::RecordBatch>::new(),
+            transport,
+            metadata_memory,
+            payload_memory,
+        ),
+        move |(mut stream, mut pending, transport, metadata_memory, payload_memory)| async move {
+            loop {
+                if let Some(batch) = pending.pop_front() {
+                    return Ok(Some((
+                        batch,
+                        (stream, pending, transport, metadata_memory, payload_memory),
+                    )));
+                }
+                let Some(batch) = stream.try_next().await.map_err(|_| invalid())? else {
+                    return Ok(None);
+                };
+                for slice in super::split_oversized_batch(batch, limit).map_err(|_| {
+                    Error::refusal("oversized_batch", "export batch exceeds the byte allowance")
+                })? {
+                    if super::effective_batch_bytes(&slice) > limit {
+                        return Err(Error::refusal(
+                            "oversized_batch",
+                            "export batch exceeds the byte allowance",
+                        ));
+                    }
+                    pending.push_back(slice);
+                }
             }
-            Ok(Some((
-                batch,
-                (stream, transport, metadata_memory, payload_memory),
-            )))
         },
     )
     .map_err(|error: Error| datafusion::error::DataFusionError::External(Box::new(error)));
