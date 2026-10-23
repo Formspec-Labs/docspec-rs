@@ -17,7 +17,20 @@ done
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
+cargo build --locked --all-features --bin docspec
 
-PYTHONPATH="adapters/dagster/src:adapters/dagster/tests${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -m unittest discover -s adapters/dagster/tests -p "test_*.py"
+if command -v uv >/dev/null 2>&1; then
+    tmp_parquet=$(mktemp "${TMPDIR:-/tmp}/docspec_check_input.XXXXXX")
+    mv "$tmp_parquet" "${tmp_parquet}.parquet"
+    tmp_parquet="${tmp_parquet}.parquet"
+    trap 'rm -f "$tmp_parquet"' EXIT
+    uv run --with pyarrow python -c "import pyarrow as pa, pyarrow.parquet as pq; pq.write_table(pa.table({'value': pa.array([1], type=pa.int64())}), '$tmp_parquet')"
+    DOCSPEC_BINARY="$PWD/target/debug/docspec" \
+    DOCSPEC_TEST_INPUT="$tmp_parquet" \
+    PYTHONPATH="adapters/dagster/src:adapters/dagster/tests${PYTHONPATH:+:$PYTHONPATH}" \
+        uv run --with "dagster==1.13.16" --with "pydantic>=2,<3" python -m unittest discover -s adapters/dagster/tests -p "test_*.py"
+else
+    PYTHONPATH="adapters/dagster/src:adapters/dagster/tests${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -m unittest discover -s adapters/dagster/tests -p "test_*.py"
+fi
 
