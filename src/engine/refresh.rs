@@ -62,70 +62,75 @@ impl Engine {
         operation: &'a Operation,
     ) -> futures::future::BoxFuture<'a, Result<Retained<PhaseResult>>> {
         Box::pin(async move {
-        #[cfg(feature = "test-util")]
-        work_started("admission");
-        let budget = &self.inner.lifecycle.budget;
-        let view = self.inner.lifecycle.open(&spec.dataset).await?;
-        let _memory = self.admission_memory(&view, &spec.operation).await?;
-        let (coverage, input_sources) =
-            if let Some(captured) = self.admitted_dependencies(&view, &spec.operation).await? {
-                (
-                    captured.coverage.ok_or_else(invalid)?,
-                    captured.input_sources,
-                )
-            } else {
-                // Earlier requests predate protected admission and retain their
-                // existing capture behavior while physical cleanup stays disabled.
-                (
-                    self.capture_inputs_admitted(&spec.inputs(), false).await?,
-                    BTreeMap::new(),
-                )
-            };
-        let loaded = load_inputs(&coverage, &input_sources, budget).await?;
-        match &spec.transform {
-            RefreshTransform::Join(_) => {}
-            RefreshTransform::Aggregate(aggregate) => {
-                aggregation::register_input(&self.context(), aggregate, &loaded.borrowed(), budget)
+            #[cfg(feature = "test-util")]
+            work_started("admission");
+            let budget = &self.inner.lifecycle.budget;
+            let view = self.inner.lifecycle.open(&spec.dataset).await?;
+            let _memory = self.admission_memory(&view, &spec.operation).await?;
+            let (coverage, input_sources) =
+                if let Some(captured) = self.admitted_dependencies(&view, &spec.operation).await? {
+                    (
+                        captured.coverage.ok_or_else(invalid)?,
+                        captured.input_sources,
+                    )
+                } else {
+                    // Earlier requests predate protected admission and retain their
+                    // existing capture behavior while physical cleanup stays disabled.
+                    (
+                        self.capture_inputs_admitted(&spec.inputs(), false).await?,
+                        BTreeMap::new(),
+                    )
+                };
+            let loaded = load_inputs(&coverage, &input_sources, budget).await?;
+            match &spec.transform {
+                RefreshTransform::Join(_) => {}
+                RefreshTransform::Aggregate(aggregate) => {
+                    aggregation::register_input(
+                        &self.context(),
+                        aggregate,
+                        &loaded.borrowed(),
+                        budget,
+                    )
                     .await?;
+                }
+                RefreshTransform::ConnectedComponents(cc) => {
+                    connected_components::register_input(
+                        &self.context(),
+                        cc,
+                        &loaded.borrowed(),
+                        budget,
+                    )
+                    .await?;
+                }
             }
-            RefreshTransform::ConnectedComponents(cc) => {
-                connected_components::register_input(
-                    &self.context(),
-                    cc,
-                    &loaded.borrowed(),
-                    budget,
-                )
-                .await?;
-            }
-        }
-        let phase = PhaseResult {
-            operation: spec.operation.clone(),
-            phase: "admission".into(),
-            request_digest: operation.request_digest.clone(),
-            eligibility: operation.eligibility,
-            outputs: coverage
-                .inputs
-                .values()
-                .map(|version| version.manifest.clone())
-                .collect(),
-            table: None,
-            rows: 0,
-            changes: None,
-            coverage: Some(coverage),
-            metrics: WriteMetrics::default(),
-            dependencies: Some(PhaseDependencies {
-                input_sources,
-                ..PhaseDependencies::default()
-            }),
-        };
-        let protections = self.request_protections(&view, &spec.operation).await?;
-        self.complete(
-            &OperationRequest::Refresh(Box::new(spec.clone())),
-            operation,
-            phase,
-            protections,
-        )
-        .await
+            let phase = PhaseResult {
+                operation: spec.operation.clone(),
+                phase: "admission".into(),
+                request_digest: operation.request_digest.clone(),
+                eligibility: operation.eligibility,
+                outputs: coverage
+                    .inputs
+                    .values()
+                    .map(|version| version.manifest.clone())
+                    .collect(),
+                table: None,
+                rows: 0,
+                changes: None,
+                coverage: Some(coverage),
+                metrics: WriteMetrics::default(),
+                dependencies: Some(PhaseDependencies {
+                    input_sources,
+                    ..PhaseDependencies::default()
+                }),
+            };
+            let protections = self.request_protections(&view, &spec.operation).await?;
+            self.complete(
+                &OperationRequest::Refresh(Box::new(spec.clone())),
+                operation,
+                phase,
+                protections,
+            )
+            .await
         })
     }
 
@@ -138,41 +143,35 @@ impl Engine {
         captured_source: Option<&'a TablePin>,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
         Box::pin(async move {
-        if spec.mode == RefreshMode::Incremental {
-            return self
-                .process_incremental(
-                    spec,
-                    directory,
-                    admission,
-                    operation,
-                    captured_source,
-                )
-                .await;
-        }
-        let coverage = admission.coverage.as_ref().ok_or_else(invalid)?;
-        if coverage.inputs != spec.inputs() {
-            return Err(invalid());
-        }
-        let input_sources = admission
-            .dependencies
-            .as_ref()
-            .map(|dependencies| &dependencies.input_sources);
-        let loaded = load_inputs(
-            coverage,
-            input_sources.unwrap_or(&BTreeMap::new()),
-            &self.inner.lifecycle.budget,
-        )
-        .await?;
-        let context = self.context();
-        let frame = source_frame(
-            &context,
-            &spec.transform,
-            &loaded.borrowed(),
-            &self.inner.lifecycle.budget,
-            true,
-        )
-        .await?;
-        self.write_frame_at(&spec.dataset, directory, frame).await
+            if spec.mode == RefreshMode::Incremental {
+                return self
+                    .process_incremental(spec, directory, admission, operation, captured_source)
+                    .await;
+            }
+            let coverage = admission.coverage.as_ref().ok_or_else(invalid)?;
+            if coverage.inputs != spec.inputs() {
+                return Err(invalid());
+            }
+            let input_sources = admission
+                .dependencies
+                .as_ref()
+                .map(|dependencies| &dependencies.input_sources);
+            let loaded = load_inputs(
+                coverage,
+                input_sources.unwrap_or(&BTreeMap::new()),
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
+            let context = self.context();
+            let frame = source_frame(
+                &context,
+                &spec.transform,
+                &loaded.borrowed(),
+                &self.inner.lifecycle.budget,
+                true,
+            )
+            .await?;
+            self.write_frame_at(&spec.dataset, directory, frame).await
         })
     }
 
@@ -184,125 +183,126 @@ impl Engine {
         stop: Option<&'a str>,
     ) -> futures::future::BoxFuture<'a, Result<Retained<RelatedResult>>> {
         Box::pin(async move {
-        let request = OperationRequest::Refresh(Box::new(spec.clone()));
-        let dependencies = processing.dependencies.clone().map(|mut dependencies| {
-            if spec.mode == RefreshMode::Full
-                && matches!(spec.transform, RefreshTransform::Join(_))
-                && let Some(table) = &processing.table
-            {
-                dependencies.tables.push(table.into());
-            }
-            dependencies
-        });
-        let evidence = if let Some(phase) = self.phase(&request, operation, "evidence").await? {
-            if phase.dependencies != dependencies
-                || phase.coverage != processing.coverage
-                || phase.changes != processing.changes
-            {
-                return Err(self.phase_generation_conflict(&request, operation, "evidence")?);
-            }
-            phase
-        } else {
-            #[cfg(feature = "test-util")]
-            work_started("evidence");
-            let directory = self
-                .reserve_location(&request, operation, "evidence")
-                .await?;
-            let prepared = if spec.mode == RefreshMode::Incremental {
-                self.incremental_evidence(spec, &directory, processing, operation).await?
-            } else {
-                let context = self.context();
-                match &spec.transform {
-                    RefreshTransform::Join(_) => {
-                        let pin = processing.table.as_ref().ok_or_else(invalid)?;
-                        context.register_table(
-                            "matches",
-                            crate::query::table(
-                                storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
-                                self.inner.lifecycle.budget.clone(),
-                                Some(pin.rows),
-                            )?,
-                        )?;
-                    }
-                    RefreshTransform::Aggregate(aggregate) => {
-                        let loaded = load_inputs(
-                            processing.coverage.as_ref().ok_or_else(invalid)?,
-                            processing
-                                .dependencies
-                                .as_ref()
-                                .map(|dependencies| &dependencies.input_sources)
-                                .unwrap_or(&BTreeMap::new()),
-                            &self.inner.lifecycle.budget,
-                        )
-                        .await?;
-                        aggregation::register_input(
-                            &context,
-                            aggregate,
-                            &loaded.borrowed(),
-                            &self.inner.lifecycle.budget,
-                        )
-                        .await?;
-                    }
-                    RefreshTransform::ConnectedComponents(cc) => {
-                        let loaded = load_inputs(
-                            processing.coverage.as_ref().ok_or_else(invalid)?,
-                            processing
-                                .dependencies
-                                .as_ref()
-                                .map(|dependencies| &dependencies.input_sources)
-                                .unwrap_or(&BTreeMap::new()),
-                            &self.inner.lifecycle.budget,
-                        )
-                        .await?;
-                        connected_components::register_input(
-                            &context,
-                            cc,
-                            &loaded.borrowed(),
-                            &self.inner.lifecycle.budget,
-                        )
-                        .await?;
-                    }
+            let request = OperationRequest::Refresh(Box::new(spec.clone()));
+            let dependencies = processing.dependencies.clone().map(|mut dependencies| {
+                if spec.mode == RefreshMode::Full
+                    && matches!(spec.transform, RefreshTransform::Join(_))
+                    && let Some(table) = &processing.table
+                {
+                    dependencies.tables.push(table.into());
                 }
-                let frame = evidence_frame(
-                    &context,
-                    &spec.transform,
-                    "matches",
-                    &self.inner.lifecycle.budget,
-                )
-                .await?;
-                self.write_frame_at(&spec.dataset, &directory, frame)
+                dependencies
+            });
+            let evidence = if let Some(phase) = self.phase(&request, operation, "evidence").await? {
+                if phase.dependencies != dependencies
+                    || phase.coverage != processing.coverage
+                    || phase.changes != processing.changes
+                {
+                    return Err(self.phase_generation_conflict(&request, operation, "evidence")?);
+                }
+                phase
+            } else {
+                #[cfg(feature = "test-util")]
+                work_started("evidence");
+                let directory = self
+                    .reserve_location(&request, operation, "evidence")
+                    .await?;
+                let prepared = if spec.mode == RefreshMode::Incremental {
+                    self.incremental_evidence(spec, &directory, processing, operation)
+                        .await?
+                } else {
+                    let context = self.context();
+                    match &spec.transform {
+                        RefreshTransform::Join(_) => {
+                            let pin = processing.table.as_ref().ok_or_else(invalid)?;
+                            context.register_table(
+                                "matches",
+                                crate::query::table(
+                                    storage::open_pin(pin, &self.inner.lifecycle.budget).await?,
+                                    self.inner.lifecycle.budget.clone(),
+                                    Some(pin.rows),
+                                )?,
+                            )?;
+                        }
+                        RefreshTransform::Aggregate(aggregate) => {
+                            let loaded = load_inputs(
+                                processing.coverage.as_ref().ok_or_else(invalid)?,
+                                processing
+                                    .dependencies
+                                    .as_ref()
+                                    .map(|dependencies| &dependencies.input_sources)
+                                    .unwrap_or(&BTreeMap::new()),
+                                &self.inner.lifecycle.budget,
+                            )
+                            .await?;
+                            aggregation::register_input(
+                                &context,
+                                aggregate,
+                                &loaded.borrowed(),
+                                &self.inner.lifecycle.budget,
+                            )
+                            .await?;
+                        }
+                        RefreshTransform::ConnectedComponents(cc) => {
+                            let loaded = load_inputs(
+                                processing.coverage.as_ref().ok_or_else(invalid)?,
+                                processing
+                                    .dependencies
+                                    .as_ref()
+                                    .map(|dependencies| &dependencies.input_sources)
+                                    .unwrap_or(&BTreeMap::new()),
+                                &self.inner.lifecycle.budget,
+                            )
+                            .await?;
+                            connected_components::register_input(
+                                &context,
+                                cc,
+                                &loaded.borrowed(),
+                                &self.inner.lifecycle.budget,
+                            )
+                            .await?;
+                        }
+                    }
+                    let frame = evidence_frame(
+                        &context,
+                        &spec.transform,
+                        "matches",
+                        &self.inner.lifecycle.budget,
+                    )
+                    .await?;
+                    self.write_frame_at(&spec.dataset, &directory, frame)
+                        .await?
+                };
+                let phase = PhaseResult {
+                    phase: "evidence".into(),
+                    outputs: prepared.table.objects.clone(),
+                    table: Some(prepared.table),
+                    metrics: prepared.metrics,
+                    dependencies,
+                    ..processing.value.clone()
+                };
+                let protections = processing
+                    .protections
+                    .as_ref()
+                    .map(ReferenceProtections::duplicate)
+                    .transpose()?;
+                self.complete(&request, operation, phase, protections)
                     .await?
             };
-            let phase = PhaseResult {
-                phase: "evidence".into(),
-                outputs: prepared.table.objects.clone(),
-                table: Some(prepared.table),
-                metrics: prepared.metrics,
-                dependencies,
-                ..processing.value.clone()
-            };
-            let protections = processing
-                .protections
-                .as_ref()
-                .map(ReferenceProtections::duplicate)
-                .transpose()?;
-            self.complete(&request, operation, phase, protections)
-                .await?
-        };
-        stop_after(stop, "evidence")?;
-        Ok(Retained {
-            value: RelatedResult {
-                input_sources: processing
-                    .dependencies
-                    .as_ref()
-                    .map(|dependencies| dependencies.input_sources.clone())
-                    .unwrap_or_default(),
-                request: spec.clone(),
-                coverage: processing.coverage.clone().ok_or_else(invalid)?,
-                evidence: evidence.value.table.ok_or_else(invalid)?,
-            },
-            protections: evidence.protections,
-        })
+            stop_after(stop, "evidence")?;
+            Ok(Retained {
+                value: RelatedResult {
+                    input_sources: processing
+                        .dependencies
+                        .as_ref()
+                        .map(|dependencies| dependencies.input_sources.clone())
+                        .unwrap_or_default(),
+                    request: spec.clone(),
+                    coverage: processing.coverage.clone().ok_or_else(invalid)?,
+                    evidence: evidence.value.table.ok_or_else(invalid)?,
+                },
+                protections: evidence.protections,
+            })
         })
     }
 
@@ -905,149 +905,153 @@ pub(super) fn verify_related_with_inputs<'a>(
     checks: &'a mut verification::Checks,
 ) -> futures::future::BoxFuture<'a, Result<()>> {
     Box::pin(async move {
-    if related.coverage.inputs != related.request.inputs() {
-        return Err(invalid());
-    }
-    let relationships = related
-        .coverage
-        .inputs
-        .keys()
-        .map(|dataset| {
-            releases
-                .get(dataset)
-                .map(|release| (dataset.clone(), release.dataset.relationship.clone()))
-                .ok_or_else(invalid)
-        })
-        .collect::<Result<_>>()?;
-    inputs::check_relationships(&related.coverage, &relationships)?;
-    // Reconstruction retains the canonical producer interpretation. The physical
-    // capture is checked separately so its logical label cannot certify itself.
-    for (dataset, captured) in &related.input_sources {
-        if !related.coverage.inputs.contains_key(dataset) || captured.metadata.owner != *dataset {
+        if related.coverage.inputs != related.request.inputs() {
             return Err(invalid());
         }
-        let canonical = releases
-            .get(dataset)
-            .ok_or_else(invalid)?
-            .dataset
-            .groups
-            .get("source")
-            .ok_or_else(invalid)?;
-        let selected = write::open_captured_source(canonical, captured, budget).await?;
-        if checks.deep() {
-            checks.table(captured, budget).await?;
-            let context = budget.context();
-            for (alias, native, rows) in [
-                (
-                    "canonical_input",
-                    storage::open_pin(canonical, budget).await?,
-                    canonical.rows,
-                ),
-                ("captured_input", selected, captured.rows),
-            ] {
-                context.register_table(
-                    alias,
-                    crate::query::occurrences(native, budget.clone(), Some(rows))?,
-                )?;
+        let relationships = related
+            .coverage
+            .inputs
+            .keys()
+            .map(|dataset| {
+                releases
+                    .get(dataset)
+                    .map(|release| (dataset.clone(), release.dataset.relationship.clone()))
+                    .ok_or_else(invalid)
+            })
+            .collect::<Result<_>>()?;
+        inputs::check_relationships(&related.coverage, &relationships)?;
+        // Reconstruction retains the canonical producer interpretation. The physical
+        // capture is checked separately so its logical label cannot certify itself.
+        for (dataset, captured) in &related.input_sources {
+            if !related.coverage.inputs.contains_key(dataset) || captured.metadata.owner != *dataset
+            {
+                return Err(invalid());
             }
-            let columns = context
-                .table("canonical_input")
-                .await?
-                .schema()
-                .fields()
-                .iter()
-                .map(|field| quote(field.name()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            equal_multisets(&context, "canonical_input", "captured_input", &columns).await?;
+            let canonical = releases
+                .get(dataset)
+                .ok_or_else(invalid)?
+                .dataset
+                .groups
+                .get("source")
+                .ok_or_else(invalid)?;
+            let selected = write::open_captured_source(canonical, captured, budget).await?;
+            if checks.deep() {
+                checks.table(captured, budget).await?;
+                let context = budget.context();
+                for (alias, native, rows) in [
+                    (
+                        "canonical_input",
+                        storage::open_pin(canonical, budget).await?,
+                        canonical.rows,
+                    ),
+                    ("captured_input", selected, captured.rows),
+                ] {
+                    context.register_table(
+                        alias,
+                        crate::query::occurrences(native, budget.clone(), Some(rows))?,
+                    )?;
+                }
+                let columns = context
+                    .table("canonical_input")
+                    .await?
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|field| quote(field.name()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                equal_multisets(&context, "canonical_input", "captured_input", &columns).await?;
+            }
         }
-    }
-    let context = budget.context();
-    validate(&related.request)?;
-    let expected = source_frame(
-        &context,
-        &related.request.transform,
-        releases,
-        budget,
-        false,
-    )
-    .await?;
-    let expected_schema =
-        storage::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
-    let native = storage::open_pin(source, budget).await?;
-    if !storage::identity::preserves_schema(&expected_schema, native.metadata().current_schema())? {
-        return Err(Error::refusal(
-            "invalid_related_result",
-            "native result schema differs from the declared computation",
-        ));
-    }
-    context.register_table("expected", expected.into_view())?;
-    context.register_table(
-        "actual",
-        crate::query::table(native, budget.clone(), Some(source.rows))?,
-    )?;
-    let columns = context
-        .table("expected")
-        .await?
-        .schema()
-        .fields()
-        .iter()
-        .map(|field| quote(field.name()))
-        .collect::<Vec<_>>();
-    if checks.deep() {
-        equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
-    }
-    checks.table(&related.evidence, budget).await?;
-    let evidence = storage::open_pin(&related.evidence, budget).await?;
-    let expected_evidence =
-        evidence_frame(&context, &related.request.transform, "actual", budget).await?;
-    let evidence_columns = expected_evidence
-        .schema()
-        .fields()
-        .iter()
-        .map(|field| quote(field.name()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let evidence_schema =
-        storage::arrow_schema_to_schema_auto_assign_ids(expected_evidence.schema().as_arrow())?;
-    context.register_table("expected_evidence", expected_evidence.into_view())?;
-    if *evidence.metadata().current_schema().as_ref() != evidence_schema {
-        return Err(Error::refusal(
-            "invalid_related_result",
-            "contributor evidence schema differs from the selected native result",
-        ));
-    }
-    if !checks.deep() {
-        return Ok(());
-    }
-    context.register_table(
-        "evidence",
-        crate::query::table(evidence, budget.clone(), Some(related.evidence.rows))?,
-    )?;
-    equal_multisets(&context, "expected_evidence", "evidence", &evidence_columns).await?;
-    let RefreshTransform::Join(join) = &related.request.transform else {
-        return Ok(());
-    };
-    for side in match join.join.cardinality {
-        JoinCardinality::ManyToMany => vec![],
-        JoinCardinality::ManyToOne => vec![0],
-        JoinCardinality::OneToOne => vec![0, 2],
-    } {
-        let sql = format!(
-            "SELECT 1 FROM actual WHERE {} IS NOT NULL AND {} IS NOT NULL GROUP BY {}, {} HAVING COUNT(*) > 1 LIMIT 1",
-            quote(TUPLE[0]),
-            quote(TUPLE[2]),
-            quote(TUPLE[side]),
-            quote(TUPLE[side + 1])
-        );
-        if has_rows(&context, &sql).await? {
+        let context = budget.context();
+        validate(&related.request)?;
+        let expected = source_frame(
+            &context,
+            &related.request.transform,
+            releases,
+            budget,
+            false,
+        )
+        .await?;
+        let expected_schema =
+            storage::arrow_schema_to_schema_auto_assign_ids(expected.schema().as_arrow())?;
+        let native = storage::open_pin(source, budget).await?;
+        if !storage::identity::preserves_schema(
+            &expected_schema,
+            native.metadata().current_schema(),
+        )? {
             return Err(Error::refusal(
-                "join_cardinality",
-                "an occurrence has more matching partners than the declared rule permits",
+                "invalid_related_result",
+                "native result schema differs from the declared computation",
             ));
         }
-    }
-    Ok(())
+        context.register_table("expected", expected.into_view())?;
+        context.register_table(
+            "actual",
+            crate::query::table(native, budget.clone(), Some(source.rows))?,
+        )?;
+        let columns = context
+            .table("expected")
+            .await?
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| quote(field.name()))
+            .collect::<Vec<_>>();
+        if checks.deep() {
+            equal_multisets(&context, "expected", "actual", &columns.join(", ")).await?;
+        }
+        checks.table(&related.evidence, budget).await?;
+        let evidence = storage::open_pin(&related.evidence, budget).await?;
+        let expected_evidence =
+            evidence_frame(&context, &related.request.transform, "actual", budget).await?;
+        let evidence_columns = expected_evidence
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| quote(field.name()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let evidence_schema =
+            storage::arrow_schema_to_schema_auto_assign_ids(expected_evidence.schema().as_arrow())?;
+        context.register_table("expected_evidence", expected_evidence.into_view())?;
+        if *evidence.metadata().current_schema().as_ref() != evidence_schema {
+            return Err(Error::refusal(
+                "invalid_related_result",
+                "contributor evidence schema differs from the selected native result",
+            ));
+        }
+        if !checks.deep() {
+            return Ok(());
+        }
+        context.register_table(
+            "evidence",
+            crate::query::table(evidence, budget.clone(), Some(related.evidence.rows))?,
+        )?;
+        equal_multisets(&context, "expected_evidence", "evidence", &evidence_columns).await?;
+        let RefreshTransform::Join(join) = &related.request.transform else {
+            return Ok(());
+        };
+        for side in match join.join.cardinality {
+            JoinCardinality::ManyToMany => vec![],
+            JoinCardinality::ManyToOne => vec![0],
+            JoinCardinality::OneToOne => vec![0, 2],
+        } {
+            let sql = format!(
+                "SELECT 1 FROM actual WHERE {} IS NOT NULL AND {} IS NOT NULL GROUP BY {}, {} HAVING COUNT(*) > 1 LIMIT 1",
+                quote(TUPLE[0]),
+                quote(TUPLE[2]),
+                quote(TUPLE[side]),
+                quote(TUPLE[side + 1])
+            );
+            if has_rows(&context, &sql).await? {
+                return Err(Error::refusal(
+                    "join_cardinality",
+                    "an occurrence has more matching partners than the declared rule permits",
+                ));
+            }
+        }
+        Ok(())
     })
 }
 

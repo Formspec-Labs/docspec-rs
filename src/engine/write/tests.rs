@@ -952,7 +952,10 @@ async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
         ArrowField::new("id", DataType::Int64, false),
         ArrowField::new("text", DataType::Utf8, true),
     ]));
-    assert!(is_identity_source_projection("SELECT * FROM input", &schema));
+    assert!(is_identity_source_projection(
+        "SELECT * FROM input",
+        &schema
+    ));
     assert!(is_identity_source_projection(
         "  select * from input ; ",
         &schema
@@ -1003,7 +1006,10 @@ async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
     let pin = engine.run(&fast_spec).await.unwrap();
     assert_eq!(pin.dataset.groups["source"].rows, 3);
     assert_eq!(
-        engine.inner.identity_build_fast_path.load(Ordering::Relaxed),
+        engine
+            .inner
+            .identity_build_fast_path
+            .load(Ordering::Relaxed),
         1,
         "identity SQL projection should take the direct Parquet fast path"
     );
@@ -1022,7 +1028,10 @@ async fn identity_sql_intake_fast_path_bypasses_datafusion_on_initial_build() {
     let filtered_pin = engine.run(&filtered_spec).await.unwrap();
     assert_eq!(filtered_pin.dataset.groups["source"].rows, 2);
     assert_eq!(
-        engine.inner.identity_build_fast_path.load(Ordering::Relaxed),
+        engine
+            .inner
+            .identity_build_fast_path
+            .load(Ordering::Relaxed),
         1,
         "non-identity SQL should not increment identity_build_fast_path"
     );
@@ -1063,9 +1072,12 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         ],
     )
     .unwrap();
-    let mut writer =
-        ArrowWriter::try_new(std::fs::File::create(&input_path).unwrap(), schema.clone(), None)
-            .unwrap();
+    let mut writer = ArrowWriter::try_new(
+        std::fs::File::create(&input_path).unwrap(),
+        schema.clone(),
+        None,
+    )
+    .unwrap();
     writer.write(&batch).unwrap();
     writer.close().unwrap();
 
@@ -1095,7 +1107,9 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         schema.clone(),
         vec![
             Arc::new(UInt64Array::from(vec![high_u64])),
-            Arc::new(BinaryArray::from(vec![Some(b"\xde\xad\xbe\xef".as_slice())])),
+            Arc::new(BinaryArray::from(vec![Some(
+                b"\xde\xad\xbe\xef".as_slice(),
+            )])),
             Arc::new(LargeBinaryArray::from(vec![Some(b"updated".as_slice())])),
         ],
     )
@@ -1140,7 +1154,10 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         .try_collect()
         .await
         .unwrap();
-    assert_eq!(key_batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+    assert_eq!(
+        key_batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        1
+    );
     let uid_col = key_batches[0]
         .column_by_name("uid")
         .unwrap()
@@ -1172,7 +1189,10 @@ async fn native_uint64_and_binary_support_across_build_update_query_read_keys_an
         .await
         .unwrap();
     assert_eq!(
-        bin_key_batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        bin_key_batches
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum::<usize>(),
         1
     );
 

@@ -30,17 +30,7 @@ pub(super) fn encode(
     batches: SendableRecordBatchStream,
     budget: Budget,
 ) -> Result<impl Stream<Item = Result<Bytes>> + Send + use<>> {
-    if batches.schema().flattened_fields().iter().any(|field| {
-        matches!(
-            field.data_type(),
-            arrow::datatypes::DataType::Dictionary(..)
-        )
-    }) {
-        return Err(Error::refusal(
-            "unsupported_ipc_schema",
-            "dictionary state retention is not qualified for HTTP streaming",
-        ));
-    }
+    validate_ipc_schema(&batches.schema())?;
     // Arrow temporarily encodes batch buffers before writing them. The
     // sink and each transferred chunk have separate reservations below.
     let retained = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
@@ -156,7 +146,10 @@ pub(super) fn is_arrow_stream(headers: &HeaderMap) -> bool {
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|raw| raw.split(';').next())
-        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/vnd.apache.arrow.stream"))
+        .is_some_and(|mime| {
+            mime.trim()
+                .eq_ignore_ascii_case("application/vnd.apache.arrow.stream")
+        })
 }
 
 #[derive(serde::Deserialize)]
@@ -169,8 +162,7 @@ struct IpcRunSpec {
     #[serde(default)]
     relationship: Option<SourceRelationship>,
     #[serde(default)]
-    #[allow(dead_code)]
-    input: Option<String>,
+    _input: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     expected_digest: Option<String>,
     #[serde(default = "default_ipc_sql")]
@@ -188,8 +180,7 @@ fn default_ipc_sql() -> String {
 #[serde(deny_unknown_fields)]
 struct IpcInputSpec {
     #[serde(default)]
-    #[allow(dead_code)]
-    path: Option<String>,
+    _path: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     digest: Option<String>,
 }
@@ -436,15 +427,42 @@ struct HashingFileWriter {
     max_bytes: u64,
 }
 
+#[derive(Debug)]
+pub struct ScratchAllowanceExceeded {
+    pub written_bytes: u64,
+    pub max_bytes: u64,
+}
+
+impl std::fmt::Display for ScratchAllowanceExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "staged Parquet file exceeds scratch storage allowance ({} > {} bytes)",
+            self.written_bytes, self.max_bytes
+        )
+    }
+}
+
+impl std::error::Error for ScratchAllowanceExceeded {}
+
 impl Write for HashingFileWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let next = self
             .written_bytes
             .checked_add(buf.len() as u64)
-            .ok_or_else(|| std::io::Error::other("staged Parquet file size overflow"))?;
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::FileTooLarge,
+                    "staged Parquet file size overflow",
+                )
+            })?;
         if next > self.max_bytes {
-            return Err(std::io::Error::other(
-                "staged Parquet file exceeds scratch storage allowance",
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                ScratchAllowanceExceeded {
+                    written_bytes: next,
+                    max_bytes: self.max_bytes,
+                },
             ));
         }
         let n = self.file.write(buf)?;
@@ -494,16 +512,33 @@ fn open_parquet_writer(
         written_bytes: 0,
         max_bytes,
     };
-    ArrowWriter::try_new(writer, schema, Some(props))
-        .map_err(|e| Error::refusal("parquet_write", format!("failed opening staged Parquet: {e}")))
+    ArrowWriter::try_new(writer, schema, Some(props)).map_err(|e| {
+        Error::refusal(
+            "parquet_write",
+            format!("failed opening staged Parquet: {e}"),
+        )
+    })
 }
 
 fn map_parquet_write_err(err: parquet::errors::ParquetError) -> Error {
+    if let parquet::errors::ParquetError::External(ref cause) = err
+        && let Some(io_err) = cause.downcast_ref::<std::io::Error>()
+        && (io_err.kind() == std::io::ErrorKind::StorageFull
+            || io_err.kind() == std::io::ErrorKind::FileTooLarge
+            || io_err
+                .get_ref()
+                .is_some_and(|c| c.is::<ScratchAllowanceExceeded>()))
+    {
+        return Error::refusal("disk_capacity", io_err.to_string());
+    }
     let msg = err.to_string();
     if msg.contains("exceeds scratch storage allowance") || msg.contains("size overflow") {
         Error::refusal("disk_capacity", msg)
     } else {
-        Error::refusal("parquet_write", format!("failed writing staged Parquet: {msg}"))
+        Error::refusal(
+            "parquet_write",
+            format!("failed writing staged Parquet: {msg}"),
+        )
     }
 }
 
@@ -516,9 +551,8 @@ async fn stage_ipc_stream_to_parquet(
     budget: &Budget,
 ) -> Result<(PathBuf, String)> {
     std::fs::create_dir_all(scratch_dir)?;
-    let mut temp_guard = TempFileGuard::new(
-        scratch_dir.join(format!("ipc-stage-{}.parquet", uuid::Uuid::new_v4())),
-    );
+    let mut temp_guard =
+        TempFileGuard::new(scratch_dir.join(format!("ipc-stage-{}.parquet", uuid::Uuid::new_v4())));
     let mut decoder = StreamDecoder::new();
     let mut ipc_hasher = blake3::Hasher::new();
     let mut total_ipc_bytes = 0u64;
@@ -570,7 +604,10 @@ async fn stage_ipc_stream_to_parquet(
         }
         let mut buffer = arrow::buffer::Buffer::from_slice_ref(&chunk);
         while let Some(batch) = decoder.decode(&mut buffer).map_err(|e| {
-            Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+            Error::refusal(
+                "invalid_ipc_stream",
+                format!("invalid Arrow IPC stream: {e}"),
+            )
         })? {
             pre_batch_bytes = None;
             let batch_bytes = batch.get_array_memory_size();
@@ -597,11 +634,9 @@ async fn stage_ipc_stream_to_parquet(
                     budget.limits.scratch_bytes,
                 )?);
             }
-            writer
-                .as_mut()
-                .expect("writer initialized")
-                .write(&batch)
-                .map_err(map_parquet_write_err)?;
+            if let Some(w) = writer.as_mut() {
+                w.write(&batch).map_err(map_parquet_write_err)?;
+            }
         }
     }
     decoder.finish().map_err(|e| {
@@ -625,7 +660,10 @@ async fn stage_ipc_stream_to_parquet(
             ));
         }
         let mut reader = StreamReader::try_new(std::io::Cursor::new(&raw), None).map_err(|e| {
-            Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+            Error::refusal(
+                "invalid_ipc_stream",
+                format!("invalid Arrow IPC stream: {e}"),
+            )
         })?;
         let schema = reader.schema();
         validate_ipc_schema(&schema)?;
@@ -633,7 +671,10 @@ async fn stage_ipc_stream_to_parquet(
             open_parquet_writer(&temp_guard.path, schema, budget.limits.scratch_bytes)?;
         for batch in &mut reader {
             let batch = batch.map_err(|e| {
-                Error::refusal("invalid_ipc_stream", format!("invalid Arrow IPC stream: {e}"))
+                Error::refusal(
+                    "invalid_ipc_stream",
+                    format!("invalid Arrow IPC stream: {e}"),
+                )
             })?;
             let batch_bytes = batch.get_array_memory_size();
             if batch_bytes > budget.limits.max_batch_bytes {
@@ -648,10 +689,9 @@ async fn stage_ipc_stream_to_parquet(
         writer = Some(out_writer);
     }
 
-    let mut inner = writer
-        .expect("writer initialized")
-        .into_inner()
-        .map_err(map_parquet_write_err)?;
+    let writer =
+        writer.ok_or_else(|| Error::refusal("invalid_ipc_stream", "writer was not initialized"))?;
+    let mut inner = writer.into_inner().map_err(map_parquet_write_err)?;
     inner.file.flush()?;
     inner.file.sync_all()?;
     let parquet_digest = inner.hasher.finalize().to_hex().to_string();

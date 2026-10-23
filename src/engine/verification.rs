@@ -434,9 +434,10 @@ async fn walk(
                 };
                 objects.register_query_store(budget.runtime_env())?;
                 charge(&mut bytes, std::mem::size_of::<Node>(), budget)?;
-                let release =
-                    refresh::read_release_with_objects(&objects, &version, budget, &mut bytes, &memory)
-                        .await?;
+                let release = refresh::read_release_with_objects(
+                    &objects, &version, budget, &mut bytes, &memory,
+                )
+                .await?;
                 if let Some(root) = expected.get(&key)
                     && (root.manifest != release.manifest
                         || root.dataset != release.dataset

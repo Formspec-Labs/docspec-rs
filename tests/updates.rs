@@ -1199,9 +1199,7 @@ async fn update_chain_bounds_inputs_temp_keys_active_files_and_lifecycle_metadat
         "superseded compaction records must be pruned after compact_lifecycle"
     );
     assert!(
-        !inspected
-            .keys()
-            .any(|k| k.starts_with("representation/")),
+        !inspected.keys().any(|k| k.starts_with("representation/")),
         "superseded representation records must be pruned after compact_lifecycle"
     );
 
@@ -1423,7 +1421,12 @@ async fn backfill_and_evidence_interleaved_updates_survive_compaction_and_identi
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        vec!["e1/replacements", "input", "u5/deletions", "u5/replacements"]
+        vec![
+            "e1/replacements",
+            "input",
+            "u5/deletions",
+            "u5/replacements"
+        ]
     );
     verify_release_at(&u5, limits(), VerificationLevel::Deep)
         .await

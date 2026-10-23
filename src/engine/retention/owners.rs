@@ -1100,9 +1100,7 @@ async fn visit_creation(
             for child in output.child_tables.values() {
                 observe(&child.object)?;
             }
-        } else if key.starts_with("compaction-prepared/")
-            || key.starts_with("representation/")
-        {
+        } else if key.starts_with("compaction-prepared/") || key.starts_with("representation/") {
             let result: CompactionResult = serde_json::from_str(json)?;
             observe(&result.source.metadata)?;
             if let Some(logical) = &result.source.logical_metadata {

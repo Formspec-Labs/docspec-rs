@@ -183,10 +183,7 @@ async fn qualify_transform(
             items.push(format!("{sql} AS {}", quote(name)));
         }
         let pre_df = context
-            .sql(&format!(
-                "SELECT {} FROM {input} LIMIT 0",
-                items.join(", ")
-            ))
+            .sql(&format!("SELECT {} FROM {input} LIMIT 0", items.join(", ")))
             .await?;
         pre_df.schema().as_arrow().clone()
     };
@@ -590,227 +587,227 @@ impl Engine {
         captured: (&'a TablePin, &'a iceberg::table::Table),
     ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
         Box::pin(async move {
-        let (captured_source, captured_native) = captured;
-        let RefreshTransform::Aggregate(aggregate) = &spec.transform else {
-            return Err(invalid());
-        };
-        let budget = &self.inner.lifecycle.budget;
-        let before = source(base)?;
-        let context = self.context();
-        register_input(&context, aggregate, &current.borrowed(), budget).await?;
-        let compiled = qualify_transform(&context, aggregate, "aggregate_input").await?;
-        let pre_proj_names: BTreeSet<&str> = compiled
-            .pre_projections
-            .iter()
-            .map(|(n, _)| n.as_str())
-            .collect();
-        let physical_keys_only = aggregate
-            .grouping
-            .keys
-            .iter()
-            .all(|k| !pre_proj_names.contains(k.as_str()));
-        let discovery_keys: Vec<String> = if physical_keys_only {
-            aggregate.grouping.keys.clone()
-        } else {
-            Vec::new()
-        };
-        let affected_dir = directory.child("affected")?;
-        let (affected, scanned) = self
-            .changed_keys(
-                &spec.dataset,
-                &affected_dir,
-                (
-                    &previous.releases[&aggregate.input.dataset],
-                    &current.releases[&aggregate.input.dataset],
-                ),
-                (
-                    previous.canonical_source(&aggregate.input.dataset)?,
-                    current.canonical_source(&aggregate.input.dataset)?,
-                ),
-                &discovery_keys,
-            )
-            .await?;
-        let native = storage::open_pin(&affected, &self.inner.lifecycle.budget).await?;
-        let (discovery_files, discovery_bytes, affected_data) = {
-            let inv = storage::current_snapshot_files(&native, budget).await?;
-            let files = inv.data.len() as u64;
-            let bytes = inv
-                .data
+            let (captured_source, captured_native) = captured;
+            let RefreshTransform::Aggregate(aggregate) = &spec.transform else {
+                return Err(invalid());
+            };
+            let budget = &self.inner.lifecycle.budget;
+            let before = source(base)?;
+            let context = self.context();
+            register_input(&context, aggregate, &current.borrowed(), budget).await?;
+            let compiled = qualify_transform(&context, aggregate, "aggregate_input").await?;
+            let pre_proj_names: BTreeSet<&str> = compiled
+                .pre_projections
                 .iter()
-                .map(|file| file.file_size_in_bytes())
-                .sum::<u64>();
-            (files, bytes, inv.data)
-        };
-        let affected_schema = native.metadata().current_schema().clone();
-        context.register_table(
-            "affected",
-            crate::query::table(native, budget.clone(), Some(affected.rows))?,
-        )?;
-        let key_names = keys(&aggregate.grouping);
-        let mut source_skipped = 0u64;
-        let mut source_probed = 0u64;
-        let (scope, replacement) = if affected.rows == 0 {
-            let empty_key_cols = key_names
+                .map(|(n, _)| n.as_str())
+                .collect();
+            let physical_keys_only = aggregate
+                .grouping
+                .keys
                 .iter()
-                .map(|key| format!("s.{}", quote(key)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let scope = context
-                .sql(&format!(
-                    "SELECT {empty_key_cols} FROM aggregate_input s LIMIT 0"
-                ))
+                .all(|k| !pre_proj_names.contains(k.as_str()));
+            let discovery_keys: Vec<String> = if physical_keys_only {
+                aggregate.grouping.keys.clone()
+            } else {
+                Vec::new()
+            };
+            let affected_dir = directory.child("affected")?;
+            let (affected, scanned) = self
+                .changed_keys(
+                    &spec.dataset,
+                    &affected_dir,
+                    (
+                        &previous.releases[&aggregate.input.dataset],
+                        &current.releases[&aggregate.input.dataset],
+                    ),
+                    (
+                        previous.canonical_source(&aggregate.input.dataset)?,
+                        current.canonical_source(&aggregate.input.dataset)?,
+                    ),
+                    &discovery_keys,
+                )
                 .await?;
-            let frame =
-                aggregate_frame_with_transform(&context, aggregate, "aggregate_input").await?;
-            (scope, frame.limit(0, Some(0))?)
-        } else if aggregate.grouping.keys.is_empty() || !physical_keys_only {
-            let frame =
-                aggregate_frame_with_transform(&context, aggregate, "aggregate_input").await?;
-            let scope = if aggregate.grouping.keys.is_empty() {
+            let native = storage::open_pin(&affected, &self.inner.lifecycle.budget).await?;
+            let (discovery_files, discovery_bytes, affected_data) = {
+                let inv = storage::current_snapshot_files(&native, budget).await?;
+                let files = inv.data.len() as u64;
+                let bytes = inv
+                    .data
+                    .iter()
+                    .map(|file| file.file_size_in_bytes())
+                    .sum::<u64>();
+                (files, bytes, inv.data)
+            };
+            let affected_schema = native.metadata().current_schema().clone();
+            context.register_table(
+                "affected",
+                crate::query::table(native, budget.clone(), Some(affected.rows))?,
+            )?;
+            let key_names = keys(&aggregate.grouping);
+            let mut source_skipped = 0u64;
+            let mut source_probed = 0u64;
+            let (scope, replacement) = if affected.rows == 0 {
+                let empty_key_cols = key_names
+                    .iter()
+                    .map(|key| format!("s.{}", quote(key)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let scope = context
+                    .sql(&format!(
+                        "SELECT {empty_key_cols} FROM aggregate_input s LIMIT 0"
+                    ))
+                    .await?;
+                let frame =
+                    aggregate_frame_with_transform(&context, aggregate, "aggregate_input").await?;
+                (scope, frame.limit(0, Some(0))?)
+            } else if aggregate.grouping.keys.is_empty() || !physical_keys_only {
+                let frame =
+                    aggregate_frame_with_transform(&context, aggregate, "aggregate_input").await?;
+                let scope = if aggregate.grouping.keys.is_empty() {
+                    let selected = key_names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, key)| format!("\"k{i}\" AS {}", quote(key)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    context
+                        .sql(&format!("SELECT DISTINCT {selected} FROM affected"))
+                        .await?
+                } else {
+                    // Pre-projected grouping keys: recompute full groups and union with before keys.
+                    context.register_table(
+                        "__docspec_agg_before",
+                        crate::query::table(
+                            captured_native.clone(),
+                            budget.clone(),
+                            Some(captured_source.rows),
+                        )?,
+                    )?;
+                    let cols = columns(&key_names);
+                    let _ = context.deregister_table("__docspec_agg_new");
+                    context.register_table("__docspec_agg_new", frame.clone().into_view())?;
+                    context
+                    .sql(&format!(
+                        "SELECT DISTINCT {cols} FROM __docspec_agg_before UNION SELECT DISTINCT {cols} FROM __docspec_agg_new"
+                    ))
+                    .await?
+                };
+                (scope, frame)
+            } else {
                 let selected = key_names
                     .iter()
                     .enumerate()
                     .map(|(i, key)| format!("\"k{i}\" AS {}", quote(key)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                context
+                let scope = context
                     .sql(&format!("SELECT DISTINCT {selected} FROM affected"))
-                    .await?
-            } else {
-                // Pre-projected grouping keys: recompute full groups and union with before keys.
+                    .await?;
+                let k_cols: Vec<String> = (0..aggregate.grouping.keys.len())
+                    .map(|i| format!("k{i}"))
+                    .collect();
+                let points = write::key_points::KeyPoints::collect_table(
+                    &context, "affected", &k_cols, budget,
+                )
+                .await?;
+                let input_release = &current.releases[&aggregate.input.dataset];
+                let input_pin = source(input_release)?;
+                let input_native = storage::open_pin(input_pin, budget).await?;
+                let input_schema = input_native.metadata().current_schema().clone();
+                let input_partition_spec = input_native.metadata().default_partition_spec().clone();
+                let (retained, retained_rows) = {
+                    let inv = storage::current_snapshot_files(&input_native, budget).await?;
+                    let mut set = BTreeSet::new();
+                    let mut rows = 0u64;
+                    for file in &inv.data {
+                        if write::file_may_overlap_mapped_key_files(
+                            &input_schema,
+                            &input_partition_spec,
+                            &affected_schema,
+                            &aggregate.grouping.keys,
+                            &k_cols,
+                            &affected_data,
+                            file,
+                        ) && points.as_ref().is_none_or(|p| {
+                            p.may_contain(&input_schema, &aggregate.grouping.keys, file)
+                        }) {
+                            source_probed += 1;
+                            set.insert(file.file_path().to_owned());
+                            rows = rows.saturating_add(file.record_count());
+                        } else {
+                            source_skipped += 1;
+                        }
+                    }
+                    (set, rows)
+                };
                 context.register_table(
-                    "__docspec_agg_before",
-                    crate::query::table(
-                        captured_native.clone(),
+                    "pruned_aggregate_input",
+                    crate::query::pruned_occurrences(
+                        input_native,
                         budget.clone(),
-                        Some(captured_source.rows),
+                        Some(retained_rows),
+                        Arc::new(retained),
                     )?,
                 )?;
-                let cols = columns(&key_names);
-                let _ = context.deregister_table("__docspec_agg_new");
-                context.register_table("__docspec_agg_new", frame.clone().into_view())?;
-                context
+                let scoped = context
                     .sql(&format!(
-                        "SELECT DISTINCT {cols} FROM __docspec_agg_before UNION SELECT DISTINCT {cols} FROM __docspec_agg_new"
+                        "SELECT s.* FROM pruned_aggregate_input s LEFT SEMI JOIN affected k ON {}",
+                        scope_predicate(&aggregate.grouping.keys)
                     ))
-                    .await?
+                    .await?;
+                context.register_table("scoped", scoped.into_view())?;
+                let replacement =
+                    aggregate_frame_with_transform(&context, aggregate, "scoped").await?;
+                (scope, replacement)
             };
-            (scope, frame)
-        } else {
-            let selected = key_names
+            drop(affected_data);
+            let key_field_ids = key_names
                 .iter()
-                .enumerate()
-                .map(|(i, key)| format!("\"k{i}\" AS {}", quote(key)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let scope = context
-                .sql(&format!("SELECT DISTINCT {selected} FROM affected"))
+                .map(|key| {
+                    captured_native
+                        .metadata()
+                        .current_schema()
+                        .field_by_name(key)
+                        .map(|field| field.id)
+                        .ok_or_else(invalid)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let (write_before, replacement) = self
+                .source_replacement(&spec.dataset, captured, directory, replacement, &key_names)
                 .await?;
-            let k_cols: Vec<String> = (0..aggregate.grouping.keys.len())
-                .map(|i| format!("k{i}"))
-                .collect();
-            let points = write::key_points::KeyPoints::collect_table(
-                &context, "affected", &k_cols, budget,
-            )
+            let applied = Box::pin(self.replace_keys(Replacement {
+                dataset: &spec.dataset,
+                directory: directory.child("replacement")?,
+                before: &write_before,
+                keys: &key_names,
+                scope,
+                replacement,
+                replacement_bytes: None,
+            }))
             .await?;
-            let input_release = &current.releases[&aggregate.input.dataset];
-            let input_pin = source(input_release)?;
-            let input_native = storage::open_pin(input_pin, budget).await?;
-            let input_schema = input_native.metadata().current_schema().clone();
-            let input_partition_spec = input_native.metadata().default_partition_spec().clone();
-            let (retained, retained_rows) = {
-                let inv = storage::current_snapshot_files(&input_native, budget).await?;
-                let mut set = BTreeSet::new();
-                let mut rows = 0u64;
-                for file in &inv.data {
-                    if write::file_may_overlap_mapped_key_files(
-                        &input_schema,
-                        &input_partition_spec,
-                        &affected_schema,
-                        &aggregate.grouping.keys,
-                        &k_cols,
-                        &affected_data,
-                        file,
-                    ) && points.as_ref().is_none_or(|p| {
-                        p.may_contain(&input_schema, &aggregate.grouping.keys, file)
-                    }) {
-                        source_probed += 1;
-                        set.insert(file.file_path().to_owned());
-                        rows = rows.saturating_add(file.record_count());
-                    } else {
-                        source_skipped += 1;
-                    }
-                }
-                (set, rows)
-            };
-            context.register_table(
-                "pruned_aggregate_input",
-                crate::query::pruned_occurrences(
-                    input_native,
-                    budget.clone(),
-                    Some(retained_rows),
-                    Arc::new(retained),
-                )?,
-            )?;
-            let scoped = context
-                .sql(&format!(
-                    "SELECT s.* FROM pruned_aggregate_input s LEFT SEMI JOIN affected k ON {}",
-                    scope_predicate(&aggregate.grouping.keys)
-                ))
+            let mut applied = self
+                .finish_source_replacement_at(&spec.dataset, directory, captured_source, applied)
                 .await?;
-            context.register_table("scoped", scoped.into_view())?;
-            let replacement =
-                aggregate_frame_with_transform(&context, aggregate, "scoped").await?;
-            (scope, replacement)
-        };
-        drop(affected_data);
-        let key_field_ids = key_names
-            .iter()
-            .map(|key| {
-                captured_native
-                    .metadata()
-                    .current_schema()
-                    .field_by_name(key)
-                    .map(|field| field.id)
-                    .ok_or_else(invalid)
+            applied.metrics.files_scanned += scanned;
+            applied.metrics.data_files_written += discovery_files;
+            applied.metrics.bytes_written += discovery_bytes;
+            applied.metrics.files_skipped_by_pruning += source_skipped;
+            applied.metrics.candidate_files_probed += source_probed;
+            Ok(write::Prepared {
+                schema_input: None,
+                changes: Some(ChangePin {
+                    rules: super::changes::WRITE_RULES.into(),
+                    base_version: base.id.clone(),
+                    base_manifest: base.manifest.clone(),
+                    before_metadata: before.metadata.clone(),
+                    after_metadata: applied.table.metadata.clone(),
+                    key_field_ids,
+                    removed: applied.removed,
+                    added: applied.added,
+                }),
+                table: applied.table,
+                metrics: applied.metrics,
             })
-            .collect::<Result<Vec<_>>>()?;
-        let (write_before, replacement) = self
-            .source_replacement(&spec.dataset, captured, directory, replacement, &key_names)
-            .await?;
-        let applied = Box::pin(self.replace_keys(Replacement {
-            dataset: &spec.dataset,
-            directory: directory.child("replacement")?,
-            before: &write_before,
-            keys: &key_names,
-            scope,
-            replacement,
-            replacement_bytes: None,
-        }))
-        .await?;
-        let mut applied = self
-            .finish_source_replacement_at(&spec.dataset, directory, captured_source, applied)
-            .await?;
-        applied.metrics.files_scanned += scanned;
-        applied.metrics.data_files_written += discovery_files;
-        applied.metrics.bytes_written += discovery_bytes;
-        applied.metrics.files_skipped_by_pruning += source_skipped;
-        applied.metrics.candidate_files_probed += source_probed;
-        Ok(write::Prepared {
-            schema_input: None,
-            changes: Some(ChangePin {
-                rules: super::changes::WRITE_RULES.into(),
-                base_version: base.id.clone(),
-                base_manifest: base.manifest.clone(),
-                before_metadata: before.metadata.clone(),
-                after_metadata: applied.table.metadata.clone(),
-                key_field_ids,
-                removed: applied.removed,
-                added: applied.added,
-            }),
-            table: applied.table,
-            metrics: applied.metrics,
-        })
         })
     }
     pub(super) fn aggregate_evidence<'a>(

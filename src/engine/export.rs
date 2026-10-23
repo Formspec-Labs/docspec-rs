@@ -4,7 +4,7 @@
 use super::*;
 
 pub(in crate::engine) mod host;
-pub(super) mod pipeline;
+pub mod pipeline;
 pub(super) mod remote;
 use crate::export::{
     ChildTableExport, ExportField, ExportKeyRange, ExportPin, ExportPolicy, ExportSpec,
@@ -1200,8 +1200,7 @@ pub(super) async fn validate_output_object(
             }
             let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
             if describe_schema(builder.schema())? != fields
-                || u64::try_from(builder.metadata().file_metadata().num_rows()).ok()
-                    != Some(rows)
+                || u64::try_from(builder.metadata().file_metadata().num_rows()).ok() != Some(rows)
             {
                 return Err(invalid_export());
             }

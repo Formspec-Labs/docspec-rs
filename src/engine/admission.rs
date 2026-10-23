@@ -169,50 +169,49 @@ impl Engine {
         mut memory: OwnedSemaphorePermit,
     ) -> futures::future::BoxFuture<'a, Result<PreparedAdmission>> {
         Box::pin(async move {
-        let budget = &self.inner.lifecycle.budget;
-        let limit = budget.limits.max_metadata_bytes;
-        let coverage = if let OperationRequest::Refresh(refresh) = spec {
-            let (coverage, capture_memory) = self
-                .capture_inputs_with_memory(&refresh.inputs(), true)
-                .await?;
-            memory.merge(capture_memory);
-            Some(coverage)
-        } else {
-            None
-        };
-        let mut dependencies = AdmissionDependencies {
-            base: base.as_ref().map(ReleasePin::version_ref),
-            coverage,
-            inputs: BTreeMap::new(),
-            update_source,
-            input_sources: BTreeMap::new(),
-        };
-        let mut releases = base.into_iter().collect::<Vec<_>>();
-        let mut release_bytes = inputs::metadata_size(&releases, limit)?;
-        let mut versions = BTreeMap::new();
-        if let Some(coverage) = &dependencies.coverage {
-            for version in coverage.inputs.values().chain(
-                coverage
-                    .generations
-                    .values()
-                    .flat_map(|seal| seal.members.values()),
-            ) {
-                let key = (version.dataset.clone(), version.version.clone());
-                if versions
-                    .insert(key, version.clone())
-                    .is_some_and(|old| old != *version)
-                {
-                    return Err(inputs::invalid_relationship());
+            let budget = &self.inner.lifecycle.budget;
+            let limit = budget.limits.max_metadata_bytes;
+            let coverage = if let OperationRequest::Refresh(refresh) = spec {
+                let (coverage, capture_memory) = self
+                    .capture_inputs_with_memory(&refresh.inputs(), true)
+                    .await?;
+                memory.merge(capture_memory);
+                Some(coverage)
+            } else {
+                None
+            };
+            let mut dependencies = AdmissionDependencies {
+                base: base.as_ref().map(ReleasePin::version_ref),
+                coverage,
+                inputs: BTreeMap::new(),
+                update_source,
+                input_sources: BTreeMap::new(),
+            };
+            let mut releases = base.into_iter().collect::<Vec<_>>();
+            let mut release_bytes = inputs::metadata_size(&releases, limit)?;
+            let mut versions = BTreeMap::new();
+            if let Some(coverage) = &dependencies.coverage {
+                for version in coverage.inputs.values().chain(
+                    coverage
+                        .generations
+                        .values()
+                        .flat_map(|seal| seal.members.values()),
+                ) {
+                    let key = (version.dataset.clone(), version.version.clone());
+                    if versions
+                        .insert(key, version.clone())
+                        .is_some_and(|old| old != *version)
+                    {
+                        return Err(inputs::invalid_relationship());
+                    }
                 }
             }
-        }
-        inputs::metadata_size(&versions.values().collect::<Vec<_>>(), limit)?;
-        for version in versions.into_values() {
-            if dependencies.base.as_ref() == Some(&version) {
-                continue;
-            }
-            let (release, charge) =
-                {
+            inputs::metadata_size(&versions.values().collect::<Vec<_>>(), limit)?;
+            for version in versions.into_values() {
+                if dependencies.base.as_ref() == Some(&version) {
+                    continue;
+                }
+                let (release, charge) = {
                     let lock = self.lock(&version.dataset).await;
                     let _guard = lock.lock().await;
                     let view = self.inner.lifecycle.open(&version.dataset).await?;
@@ -245,114 +244,117 @@ impl Engine {
                     }
                     (release, charge)
                 };
-            if release.version_ref() != version {
-                return Err(inputs::invalid_relationship());
+                if release.version_ref() != version {
+                    return Err(inputs::invalid_relationship());
+                }
+                release_bytes =
+                    release_bytes.saturating_add(inputs::metadata_size(&release, limit)?);
+                if release_bytes > limit {
+                    return Err(Error::refusal(
+                        "metadata_capacity",
+                        "admitted input roots exceed metadata allowance",
+                    ));
+                }
+                memory.merge(charge);
+                releases.push(release);
             }
-            release_bytes = release_bytes.saturating_add(inputs::metadata_size(&release, limit)?);
-            if release_bytes > limit {
+            let managed = self.inner.retained.local_path().ok();
+            for (name, input) in spec.inputs() {
+                // Resolve filesystem aliases once to recognize managed files. A
+                // missing external locator can still reuse an existing completed
+                // phase; only the path that actually needs copying must open it.
+                let path = std::fs::canonicalize(&input.path)
+                    .unwrap_or_else(|_| PathBuf::from(&input.path));
+                let managed_path = if let Some(managed) = managed {
+                    path.strip_prefix(managed).ok().map(|relative| {
+                        (
+                            relative.to_string_lossy().into_owned(),
+                            path.to_string_lossy().into_owned(),
+                        )
+                    })
+                } else if input.path.starts_with("s3://") {
+                    self.inner.objects.validate_retained_path(&input.path)?;
+                    self.inner
+                        .retained
+                        .relative(&input.path)
+                        .map(|relative| (relative.to_owned(), input.path.clone()))
+                } else {
+                    None
+                };
+                if let Some((relative, locator)) = managed_path {
+                    let owner = Path::new(&relative)
+                        .components()
+                        .next()
+                        .and_then(|part| {
+                            if let std::path::Component::Normal(owner) = part {
+                                owner.to_str()
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or_else(inputs::invalid_relationship)?;
+                    let object = self
+                        .qualified_object(&Id::new(owner)?, &locator, &input.digest)
+                        .await?;
+                    memory.merge(
+                        budget.reserve(
+                            inputs::metadata_size(&(&name, &object), limit)?
+                                .saturating_mul(8)
+                                .saturating_add(4096),
+                        )?,
+                    );
+                    dependencies.inputs.insert(name, object);
+                }
+            }
+            let dependency_bytes = inputs::metadata_size(&dependencies, limit)?;
+            if release_bytes.saturating_add(dependency_bytes) > limit {
                 return Err(Error::refusal(
                     "metadata_capacity",
                     "admitted input roots exceed metadata allowance",
                 ));
             }
-            memory.merge(charge);
-            releases.push(release);
-        }
-        let managed = self.inner.retained.local_path().ok();
-        for (name, input) in spec.inputs() {
-            // Resolve filesystem aliases once to recognize managed files. A
-            // missing external locator can still reuse an existing completed
-            // phase; only the path that actually needs copying must open it.
-            let path =
-                std::fs::canonicalize(&input.path).unwrap_or_else(|_| PathBuf::from(&input.path));
-            let managed_path = if let Some(managed) = managed {
-                path.strip_prefix(managed).ok().map(|relative| {
-                    (
-                        relative.to_string_lossy().into_owned(),
-                        path.to_string_lossy().into_owned(),
-                    )
-                })
-            } else if input.path.starts_with("s3://") {
-                self.inner.objects.validate_retained_path(&input.path)?;
-                self.inner
-                    .retained
-                    .relative(&input.path)
-                    .map(|relative| (relative.to_owned(), input.path.clone()))
-            } else {
-                None
-            };
-            if let Some((relative, locator)) = managed_path {
-                let owner = Path::new(&relative)
-                    .components()
-                    .next()
-                    .and_then(|part| {
-                        if let std::path::Component::Normal(owner) = part {
-                            owner.to_str()
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or_else(inputs::invalid_relationship)?;
-                let object = self
-                    .qualified_object(&Id::new(owner)?, &locator, &input.digest)
-                    .await?;
-                memory.merge(
-                    budget.reserve(
-                        inputs::metadata_size(&(&name, &object), limit)?
-                            .saturating_mul(8)
-                            .saturating_add(4096),
-                    )?,
-                );
-                dependencies.inputs.insert(name, object);
+            // Decoding is finished. Do not keep a temporary decoding allowance while
+            // the shared collector admits its own temporary metadata work.
+            let pins_memory = memory
+                .split(release_bytes.saturating_mul(4))
+                .ok_or_else(|| {
+                    Error::refusal("metadata_capacity", "input pin allowance exhausted")
+                })?;
+            let retained = memory
+                .split(
+                    dependency_bytes
+                        .saturating_mul(4)
+                        .saturating_add(boundary.len()),
+                )
+                .ok_or_else(|| {
+                    Error::refusal("metadata_capacity", "input dependency allowance exhausted")
+                })?;
+            drop(memory);
+            let mut protections = self.protect_releases(spec.dataset(), &releases).await?;
+            drop(releases);
+            drop(pins_memory);
+            if !dependencies.inputs.is_empty() {
+                let objects = dependencies.inputs.values().cloned().collect::<Vec<_>>();
+                protections.merge(self.protect_objects(spec.dataset(), &objects).await?)?;
             }
-        }
-        let dependency_bytes = inputs::metadata_size(&dependencies, limit)?;
-        if release_bytes.saturating_add(dependency_bytes) > limit {
-            return Err(Error::refusal(
-                "metadata_capacity",
-                "admitted input roots exceed metadata allowance",
-            ));
-        }
-        // Decoding is finished. Do not keep a temporary decoding allowance while
-        // the shared collector admits its own temporary metadata work.
-        let pins_memory = memory
-            .split(release_bytes.saturating_mul(4))
-            .ok_or_else(|| Error::refusal("metadata_capacity", "input pin allowance exhausted"))?;
-        let retained = memory
-            .split(
-                dependency_bytes
-                    .saturating_mul(4)
-                    .saturating_add(boundary.len()),
-            )
-            .ok_or_else(|| {
-                Error::refusal("metadata_capacity", "input dependency allowance exhausted")
-            })?;
-        drop(memory);
-        let mut protections = self.protect_releases(spec.dataset(), &releases).await?;
-        drop(releases);
-        drop(pins_memory);
-        if !dependencies.inputs.is_empty() {
-            let objects = dependencies.inputs.values().cloned().collect::<Vec<_>>();
-            protections.merge(self.protect_objects(spec.dataset(), &objects).await?)?;
-        }
-        for source in dependencies.input_sources.values() {
-            protections.merge(
-                self.protect_objects(spec.dataset(), &source.objects)
-                    .await?,
-            )?;
-        }
-        if let Some(source) = &dependencies.update_source {
-            protections.merge(
-                self.protect_objects(spec.dataset(), &source.objects)
-                    .await?,
-            )?;
-        }
-        Ok(PreparedAdmission {
-            boundary,
-            dependencies,
-            protections,
-            _memory: retained,
-        })
+            for source in dependencies.input_sources.values() {
+                protections.merge(
+                    self.protect_objects(spec.dataset(), &source.objects)
+                        .await?,
+                )?;
+            }
+            if let Some(source) = &dependencies.update_source {
+                protections.merge(
+                    self.protect_objects(spec.dataset(), &source.objects)
+                        .await?,
+                )?;
+            }
+            Ok(PreparedAdmission {
+                boundary,
+                dependencies,
+                protections,
+                _memory: retained,
+            })
         })
     }
 }

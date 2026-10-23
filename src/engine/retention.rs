@@ -414,13 +414,11 @@ impl Engine {
                 protected_keys.insert(generation.key);
             }
         }
-        for prefix in ["availability-retired/", "operation-retired/"] {
-            for (key, _, _) in rows.prefix(prefix) {
-                if let Some(op_str) = key.strip_prefix(prefix)
-                    && let Ok(op) = Id::new(op_str)
-                {
-                    protected_ops.insert(op);
-                }
+        for (key, _, _) in rows.prefix("availability-retired/") {
+            if let Some(op_str) = key.strip_prefix("availability-retired/")
+                && let Ok(op) = Id::new(op_str)
+            {
+                protected_ops.insert(op);
             }
         }
         for (key, _, json) in rows.prefix("operation/") {
@@ -709,8 +707,12 @@ fn collect_obsolete_lifecycle_keys(
     let selected_id = authority.release.as_ref().map(|release| release.id.clone());
 
     let mut protected_keys = BTreeSet::new();
+    let mut retired_ops = BTreeSet::new();
     for (_, _, json) in rows.prefix("retirement/") {
         let receipt: Retirement = serde_json::from_str(json)?;
+        if let RetirementScope::OperationRecovery { operation } = &receipt.plan.scope {
+            retired_ops.insert(operation.clone());
+        }
         for generation in receipt.plan.records {
             protected_keys.insert(generation.key);
         }
@@ -729,7 +731,7 @@ fn collect_obsolete_lifecycle_keys(
         if rows.contains_key(&format!("result/{op}")) {
             if Some(&op) != selected_id.as_ref()
                 && !rows.contains_key(&format!("availability-retired/{op}"))
-                && !rows.contains_key(&format!("operation-retired/{op}"))
+                && !retired_ops.contains(&op)
             {
                 completed_non_selected.insert(op);
             }
@@ -742,7 +744,7 @@ fn collect_obsolete_lifecycle_keys(
     }
 
     let mut candidate_keys = BTreeSet::new();
-    for op in &completed_non_selected {
+    for op in completed_non_selected.iter().chain(retired_ops.iter()) {
         for exact in [
             format!("readback/{op}"),
             format!("request-dependencies/{op}"),
@@ -767,12 +769,14 @@ fn collect_obsolete_lifecycle_keys(
     let is_obsolete_op = |op: &Id| -> bool {
         if Some(op) == selected_id.as_ref()
             || incomplete_ops.contains(op)
-            || rows.contains_key(&format!("availability-retired/{op}"))
-            || rows.contains_key(&format!("operation-retired/{op}"))
+            || (rows.contains_key(&format!("availability-retired/{op}"))
+                && !retired_ops.contains(op))
         {
             return false;
         }
-        completed_non_selected.contains(op) || !rows.contains_key(&format!("operation/{op}"))
+        retired_ops.contains(op)
+            || completed_non_selected.contains(op)
+            || !rows.contains_key(&format!("operation/{op}"))
     };
 
     for (key, _, json) in rows.prefix("phase/") {
@@ -901,8 +905,12 @@ fn prune_obsolete_protections(
     let selected_id = authority.release.as_ref().map(|release| release.id.clone());
 
     let mut protected_keys = BTreeSet::new();
+    let mut retired_ops = BTreeSet::new();
     for (_, _, json) in rows.prefix("retirement/") {
         let receipt: Retirement = serde_json::from_str(json)?;
+        if let RetirementScope::OperationRecovery { operation } = &receipt.plan.scope {
+            retired_ops.insert(operation.clone());
+        }
         for generation in receipt.plan.records {
             protected_keys.insert(generation.key);
         }
@@ -920,7 +928,7 @@ fn prune_obsolete_protections(
         if rows.contains_key(&format!("result/{op}")) {
             if Some(&op) != selected_id.as_ref()
                 && !rows.contains_key(&format!("availability-retired/{op}"))
-                && !rows.contains_key(&format!("operation-retired/{op}"))
+                && !retired_ops.contains(&op)
             {
                 completed_non_selected.insert(op);
             }
@@ -932,12 +940,14 @@ fn prune_obsolete_protections(
     let is_obsolete_op = |op: &Id| -> bool {
         if Some(op) == selected_id.as_ref()
             || incomplete_ops.contains(op)
-            || rows.contains_key(&format!("availability-retired/{op}"))
-            || rows.contains_key(&format!("operation-retired/{op}"))
+            || (rows.contains_key(&format!("availability-retired/{op}"))
+                && !retired_ops.contains(op))
         {
             return false;
         }
-        completed_non_selected.contains(op) || !rows.contains_key(&format!("operation/{op}"))
+        retired_ops.contains(op)
+            || completed_non_selected.contains(op)
+            || !rows.contains_key(&format!("operation/{op}"))
     };
 
     let kept_jsons: Vec<&str> = rows

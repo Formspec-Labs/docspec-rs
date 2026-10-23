@@ -476,20 +476,13 @@ mod tests {
         let catalog = storage::local_catalog(&root.path().join("shared-catalog"))
             .await
             .unwrap();
-        let worker_a = Engine::with_catalog(
-            root.path().join("worker-a"),
-            catalog.clone(),
-            limits(),
-        )
-        .await
-        .unwrap();
-        let worker_b = Engine::with_catalog(
-            root.path().join("worker-b"),
-            catalog,
-            limits(),
-        )
-        .await
-        .unwrap();
+        let worker_a =
+            Engine::with_catalog(root.path().join("worker-a"), catalog.clone(), limits())
+                .await
+                .unwrap();
+        let worker_b = Engine::with_catalog(root.path().join("worker-b"), catalog, limits())
+            .await
+            .unwrap();
         let dataset = Id::new("dataset").unwrap();
         let owner_a = Id::new("parent-a").unwrap();
         let owner_b = Id::new("parent-b").unwrap();
@@ -524,7 +517,11 @@ mod tests {
         );
         let view_b = worker_b.inner.lifecycle.open(&dataset).await.unwrap();
         assert_eq!(
-            worker_b.check_source_intake(&view_b).await.unwrap_err().code(),
+            worker_b
+                .check_source_intake(&view_b)
+                .await
+                .unwrap_err()
+                .code(),
             "source_fenced"
         );
         assert_eq!(

@@ -176,8 +176,9 @@ pub fn router(engine: Engine) -> Router {
         );
     #[cfg(feature = "remote")]
     let router = router.route("/restore-remote", post(restore_remote));
+    let max_metadata = engine.limits().max_metadata_bytes;
     router
-        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(DefaultBodyLimit::max(max_metadata.min(1024 * 1024)))
         .layer(axum::middleware::from_fn(deadline::apply))
         .with_state(engine)
 }
@@ -640,68 +641,31 @@ impl From<Error> for HttpError {
         Self(error)
     }
 }
+#[derive(serde::Serialize)]
+pub(crate) struct ErrorBody {
+    pub code: &'static str,
+    pub message: String,
+    pub pre_admission: bool,
+}
+
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        let status = match self.0.code() {
-            "invalid_request_timeout" => StatusCode::BAD_REQUEST,
-            "request_timeout" => StatusCode::GATEWAY_TIMEOUT,
-            "availability_retired" => StatusCode::GONE,
-            "no_release" | "no_export" | "no_operation" | "no_compaction" | "no_phase"
-            | "no_removal" | "no_changes" | "missing_group" | "missing_evidence" => {
-                StatusCode::NOT_FOUND
-            }
-            "operation_conflict"
-            | "source_fenced"
-            | "source_fence_lost"
-            | "continuous_changed"
-            | "continuous_child_owned"
-            | "backfill_target_conflict"
-            | "backfill_source_identity_changed"
-            | "stale_continuous_definition"
-            | "correction_conflict"
-            | "correction_required"
-            | "correction_mismatch"
-            | "correction_unknown"
-            | "selected_result"
-            | "operation_active"
-            | "operation_completed"
-            | "operation_abandoned"
-            | "abandonment_conflict"
-            | "generation_conflict"
-            | "generation_retired"
-            | "phase_generation_conflict"
-            | "phase_retired"
-            | "changes_retired"
-            | "grant_in_use"
-            | "grant_retired"
-            | "recovery_retired"
-            | "compaction_retired"
-            | "retirement_conflict"
-            | "removal_conflict"
-            | "stale_removal"
-            | "stale_retirement"
-            | "stale_definition"
-            | "stale_eligibility"
-            | "stale_authority"
-            | "stale_input"
-            | "pending_source"
-            | "export_conflict"
-            | "export_regression"
-            | "stale_export"
-            | "stale_representation"
-            | "coverage_regression" => StatusCode::CONFLICT,
-            "stale_base" | "stale_source_boundary" | "stale_group" | "unproven_succession" => {
-                StatusCode::CONFLICT
-            }
-            "capacity" | "metadata_capacity" | "disk_capacity" => StatusCode::SERVICE_UNAVAILABLE,
-            "worker" => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::UNPROCESSABLE_ENTITY,
+        let (status, pre_admission) = match self.0.kind() {
+            crate::ErrorKind::BadRequest => (StatusCode::BAD_REQUEST, true),
+            crate::ErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, false),
+            crate::ErrorKind::Gone => (StatusCode::GONE, false),
+            crate::ErrorKind::NotFound => (StatusCode::NOT_FOUND, false),
+            crate::ErrorKind::Conflict => (StatusCode::CONFLICT, false),
+            crate::ErrorKind::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, false),
+            crate::ErrorKind::Unprocessable => (StatusCode::UNPROCESSABLE_ENTITY, true),
+            crate::ErrorKind::Internal => (StatusCode::INTERNAL_SERVER_ERROR, false),
         };
-        (
-            status,
-            Json(serde_json::json!({"code": self.0.code(), "message": self.0.to_string()})),
-        )
-            .into_response()
+        let body = ErrorBody {
+            code: self.0.code(),
+            message: self.0.to_string(),
+            pre_admission,
+        };
+        (status, Json(body)).into_response()
     }
 }
 
@@ -740,9 +704,7 @@ async fn run(State(engine): State<Engine>, request: Request) -> Result<Json<Rele
         if result.is_ok() {
             staged.cleanup();
         }
-        return result
-            .map(Json)
-            .map_err(|e| HttpError(e).into_response());
+        return result.map(Json).map_err(|e| HttpError(e).into_response());
     }
     let Json(spec) = Json::<RunSpec>::from_request(request, &engine)
         .await
@@ -833,9 +795,7 @@ async fn update(
         if result.is_ok() {
             staged.cleanup();
         }
-        return result
-            .map(Json)
-            .map_err(|e| HttpError(e).into_response());
+        return result.map(Json).map_err(|e| HttpError(e).into_response());
     }
     let Json(spec) = Json::<UpdateSpec>::from_request(request, &engine)
         .await
@@ -1406,7 +1366,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(bad_digest_response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            bad_digest_response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
         let bad_body: serde_json::Value = serde_json::from_slice(
             &axum::body::to_bytes(bad_digest_response.into_body(), 1 << 20)
                 .await

@@ -431,12 +431,12 @@ where
             target_file_bytes
         };
         let effective_batch_rows = if is_remote {
-            budget.limits.batch_rows.min(2048).max(1)
+            budget.limits.batch_rows.clamp(1, 2048)
         } else {
             budget.limits.batch_rows
         };
         let max_row_group_bytes = if is_remote {
-            (budget.limits.max_batch_bytes / 2).min(2 << 20).max(1)
+            (budget.limits.max_batch_bytes / 2).clamp(1, 2 << 20)
         } else {
             (budget.limits.max_batch_bytes / 2).max(1)
         };
@@ -716,7 +716,10 @@ fn referenced_variable_bytes(col: &dyn arrow::array::Array, num_rows: usize) -> 
         let offsets = utf8.value_offsets();
         let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
         Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i32>()))
-    } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+    } else if let Some(utf8) = col
+        .as_any()
+        .downcast_ref::<arrow::array::LargeStringArray>()
+    {
         let offsets = utf8.value_offsets();
         let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
         Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i64>()))
@@ -724,7 +727,10 @@ fn referenced_variable_bytes(col: &dyn arrow::array::Array, num_rows: usize) -> 
         let offsets = bin.value_offsets();
         let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
         Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i32>()))
-    } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+    } else if let Some(bin) = col
+        .as_any()
+        .downcast_ref::<arrow::array::LargeBinaryArray>()
+    {
         let offsets = bin.value_offsets();
         let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
         Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i64>()))
@@ -756,22 +762,36 @@ pub(crate) fn has_splittable_skewed_column(batch: &RecordBatch, limit: usize) ->
         }
         if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::StringArray>() {
             let offsets = utf8.value_offsets();
-            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+            if (0..num_rows)
+                .any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold)
+            {
                 return true;
             }
-        } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+        } else if let Some(utf8) = col
+            .as_any()
+            .downcast_ref::<arrow::array::LargeStringArray>()
+        {
             let offsets = utf8.value_offsets();
-            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+            if (0..num_rows)
+                .any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold)
+            {
                 return true;
             }
         } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::BinaryArray>() {
             let offsets = bin.value_offsets();
-            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+            if (0..num_rows)
+                .any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold)
+            {
                 return true;
             }
-        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+        } else if let Some(bin) = col
+            .as_any()
+            .downcast_ref::<arrow::array::LargeBinaryArray>()
+        {
             let offsets = bin.value_offsets();
-            if (0..num_rows).any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold) {
+            if (0..num_rows)
+                .any(|r| usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0) > cell_threshold)
+            {
                 return true;
             }
         }
@@ -833,10 +853,7 @@ pub(crate) fn compact_batch_slice(
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into
 /// deep-compacted row slices that fit within `limit` in a single linear pass
 /// by per-row byte weight so each slice is compacted at most once.
-pub(crate) fn split_oversized_batch(
-    batch: RecordBatch,
-    limit: usize,
-) -> Result<Vec<RecordBatch>> {
+pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<Vec<RecordBatch>> {
     if batch.get_array_memory_size() <= limit {
         return Ok(vec![batch]);
     }
@@ -851,13 +868,12 @@ pub(crate) fn split_oversized_batch(
     }
     let num_rows = batch.num_rows();
     if num_rows <= 1 {
-        let compacted = if num_rows == 1
-            && batch.get_array_memory_size() > effective_batch_bytes(&batch)
-        {
-            compact_batch_slice(&batch, 0, 1)?
-        } else {
-            batch
-        };
+        let compacted =
+            if num_rows == 1 && batch.get_array_memory_size() > effective_batch_bytes(&batch) {
+                compact_batch_slice(&batch, 0, 1)?
+            } else {
+                batch
+            };
         let effective = effective_batch_bytes(&compacted);
         if effective > limit {
             return Err(Error::refusal(
@@ -890,7 +906,10 @@ pub(crate) fn split_oversized_batch(
                 let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
                 *weight = weight.saturating_add(bytes.saturating_add(8));
             }
-        } else if let Some(utf8) = col.as_any().downcast_ref::<arrow::array::LargeStringArray>() {
+        } else if let Some(utf8) = col
+            .as_any()
+            .downcast_ref::<arrow::array::LargeStringArray>()
+        {
             let offsets = utf8.value_offsets();
             for (r, weight) in row_weights.iter_mut().enumerate() {
                 let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
@@ -902,7 +921,10 @@ pub(crate) fn split_oversized_batch(
                 let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
                 *weight = weight.saturating_add(bytes.saturating_add(8));
             }
-        } else if let Some(bin) = col.as_any().downcast_ref::<arrow::array::LargeBinaryArray>() {
+        } else if let Some(bin) = col
+            .as_any()
+            .downcast_ref::<arrow::array::LargeBinaryArray>()
+        {
             let offsets = bin.value_offsets();
             for (r, weight) in row_weights.iter_mut().enumerate() {
                 let bytes = usize::try_from(offsets[r + 1] - offsets[r]).unwrap_or(0);
@@ -1395,8 +1417,10 @@ pub(crate) fn compute_partition_column(
         }
         (Transform::Bucket(n), _) if n > 0 => {
             let normalized = match column.data_type() {
-                DataType::LargeUtf8 | DataType::Utf8View => arrow::compute::cast(column, &DataType::Utf8)
-                    .map_err(|_| unsupported_partition_column())?,
+                DataType::LargeUtf8 | DataType::Utf8View => {
+                    arrow::compute::cast(column, &DataType::Utf8)
+                        .map_err(|_| unsupported_partition_column())?
+                }
                 DataType::LargeBinary | DataType::BinaryView => {
                     arrow::compute::cast(column, &DataType::Binary)
                         .map_err(|_| unsupported_partition_column())?
@@ -1413,13 +1437,17 @@ pub(crate) fn compute_partition_column(
                 .downcast_ref::<Int32Array>()
                 .ok_or_else(unsupported_partition_column)?;
             for i in 0..rows {
-                out.push((!column.is_null(i) && !arr.is_null(i)).then(|| Literal::int(arr.value(i))));
+                out.push(
+                    (!column.is_null(i) && !arr.is_null(i)).then(|| Literal::int(arr.value(i))),
+                );
             }
         }
         (Transform::Truncate(w), _) if w > 0 => {
             let normalized = match column.data_type() {
-                DataType::LargeUtf8 | DataType::Utf8View => arrow::compute::cast(column, &DataType::Utf8)
-                    .map_err(|_| unsupported_partition_column())?,
+                DataType::LargeUtf8 | DataType::Utf8View => {
+                    arrow::compute::cast(column, &DataType::Utf8)
+                        .map_err(|_| unsupported_partition_column())?
+                }
                 DataType::LargeBinary | DataType::BinaryView => {
                     arrow::compute::cast(column, &DataType::Binary)
                         .map_err(|_| unsupported_partition_column())?
@@ -1566,7 +1594,9 @@ async fn current_snapshot_added_files_match(table: &Table, expected: &[DataFile]
         }
     }
     added_paths.len() == expected_paths.len()
-        && expected_paths.iter().all(|path| added_paths.contains(*path))
+        && expected_paths
+            .iter()
+            .all(|path| added_paths.contains(*path))
 }
 
 pub(crate) async fn append(
@@ -1770,7 +1800,7 @@ pub(crate) fn copy_verified(
 pub(crate) struct SnapshotFiles {
     pub paths: BTreeSet<String>,
     pub data: Vec<DataFile>,
-    #[cfg(all(not(test), not(feature = "test-util")))]
+    #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
     pub known_sizes: BTreeMap<String, u64>,
     _reservation: tokio::sync::OwnedSemaphorePermit,
 }
@@ -1914,13 +1944,18 @@ async fn snapshot_files_guarded_with_scope_and_files(
     if let Some(known) = known_files
         && table.metadata().snapshots().count() == 1
         && table.metadata().statistics_iter().next().is_none()
-        && table.metadata().partition_statistics_iter().next().is_none()
+        && table
+            .metadata()
+            .partition_statistics_iter()
+            .next()
+            .is_none()
         && let Some(snapshot) = table.metadata().current_snapshot()
     {
         let list_path = snapshot.manifest_list();
         check(list_path)?;
         paths.insert(list_path.to_owned());
         let list = table.manifest_list_reader(snapshot).load().await?;
+        #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
         let mut known_sizes = BTreeMap::new();
         for entry in list.entries() {
             check(&entry.manifest_path)?;
@@ -1932,6 +1967,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
             }
             if let Ok(len) = u64::try_from(entry.manifest_length) {
                 metadata_bytes = metadata_bytes.saturating_add(len);
+                #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
                 known_sizes.insert(entry.manifest_path.clone(), len);
             }
             paths.insert(entry.manifest_path.clone());
@@ -1941,6 +1977,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
             check(file.file_path())?;
             paths.insert(file.file_path().to_owned());
             validate_partition_tuple(spec, file)?;
+            #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
             known_sizes.insert(file.file_path().to_owned(), file.file_size_in_bytes());
             if current_data
                 .insert(file.file_path().to_owned(), file.clone())
@@ -1956,6 +1993,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
         return Ok(SnapshotFiles {
             paths,
             data: current_data.into_values().collect(),
+            #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
             known_sizes,
             _reservation: reservation,
         });
@@ -2081,7 +2119,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
         }
     }
     check_inventory_size(&paths, metadata_bytes, budget)?;
-    #[cfg(all(not(test), not(feature = "test-util")))]
+    #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
     let known_sizes = current_data
         .values()
         .map(|f: &DataFile| (f.file_path().to_owned(), f.file_size_in_bytes()))
@@ -2089,7 +2127,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
     Ok(SnapshotFiles {
         paths,
         data: current_data.into_values().collect(),
-        #[cfg(all(not(test), not(feature = "test-util")))]
+        #[cfg(all(feature = "remote", not(test), not(feature = "test-util")))]
         known_sizes,
         _reservation: reservation,
     })
@@ -2220,8 +2258,8 @@ pub(crate) async fn pin_bound_with_files(
                     }
                     #[cfg(all(not(test), not(feature = "test-util")))]
                     let data_sizes = &inventory.known_sizes;
-                    handle.block_on(futures::future::try_join_all(
-                        inventory.paths.iter().map(|path| {
+                    handle.block_on(futures::future::try_join_all(inventory.paths.iter().map(
+                        |path| {
                             let owner = &owner;
                             let inherited = &inherited;
                             #[cfg(all(not(test), not(feature = "test-util")))]
@@ -2258,8 +2296,8 @@ pub(crate) async fn pin_bound_with_files(
                                     }
                                 }
                             }
-                        }),
-                    ))?
+                        },
+                    )))?
                 }
                 _ => {
                     let mut objects = Vec::new();
@@ -3457,7 +3495,9 @@ mod tests {
             schema,
             vec![
                 Arc::new(StringArray::from(vec!["r0", "r1", "r2", "r3"])),
-                Arc::new(StringArray::from(vec!["small-0", &big_a, "small-2", &big_b])),
+                Arc::new(StringArray::from(vec![
+                    "small-0", &big_a, "small-2", &big_b,
+                ])),
             ],
         )
         .unwrap();

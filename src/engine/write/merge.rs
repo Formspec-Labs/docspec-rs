@@ -96,7 +96,9 @@ pub(in crate::engine) fn validate(
                 if !matches!(field.field_type.as_ref(), Type::List(_)) {
                     return Err(Error::refusal(
                         "invalid_merge",
-                        format!("merge column '{column}' with set_union strategy requires a list type"),
+                        format!(
+                            "merge column '{column}' with set_union strategy requires a list type"
+                        ),
                     ));
                 }
             }
@@ -550,8 +552,8 @@ fn merge_row_pair(
         let p_val = &prior[col_idx];
         let i_val = &incoming[col_idx];
         let flag_idx = supplied_flag_for_col.get(&col_idx).copied();
-        let p_supplied = flag_idx
-            .is_none_or(|f_idx| matches!(prior[f_idx], ScalarValue::Boolean(Some(true))));
+        let p_supplied =
+            flag_idx.is_none_or(|f_idx| matches!(prior[f_idx], ScalarValue::Boolean(Some(true))));
         let i_supplied = flag_idx
             .is_none_or(|f_idx| matches!(incoming[f_idx], ScalarValue::Boolean(Some(true))));
         let p_present = !p_val.is_null() && p_supplied;

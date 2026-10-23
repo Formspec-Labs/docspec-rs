@@ -23,7 +23,7 @@ pub use engine::BackendCapability;
 #[doc(inline)]
 pub use engine::Engine;
 #[doc(inline)]
-pub use error::{Error, Result};
+pub use error::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use model::{
     AggregateField, AggregateFunction, AggregateTransform, AggregationDefinition, BinaryOp,

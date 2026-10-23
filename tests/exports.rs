@@ -1133,9 +1133,7 @@ async fn multi_group_filtered_computed_folded_sorted_and_faceted_export_preserve
     use futures::TryStreamExt;
     use parquet::{
         arrow::arrow_reader::ArrowReaderOptions,
-        file::{
-            metadata::PageIndexPolicy, page_index::column_index::ColumnIndexMetaData,
-        },
+        file::{metadata::PageIndexPolicy, page_index::column_index::ColumnIndexMetaData},
     };
     use std::collections::BTreeMap;
 
@@ -1193,9 +1191,7 @@ async fn multi_group_filtered_computed_folded_sorted_and_faceted_export_preserve
                 "owner-b", "owner-a", "owner-c", "owner-d",
             ])),
             Arc::new(Int64Array::from(vec![118, 119, 117, 119])),
-            Arc::new(StringArray::from(vec![
-                "house", "senate", "house", "house",
-            ])),
+            Arc::new(StringArray::from(vec!["house", "senate", "house", "house"])),
             Arc::new(StringArray::from(vec![
                 Some("expired-body"),
                 Some("active-senate-body"),
@@ -1217,7 +1213,8 @@ async fn multi_group_filtered_computed_folded_sorted_and_faceted_export_preserve
         ],
     )
     .unwrap();
-    let mut writer = ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
+    let mut writer =
+        ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
     writer.write(&batch).unwrap();
     writer.close().unwrap();
 
@@ -1578,9 +1575,7 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
         array::{Array, Int64Builder, ListBuilder, StringBuilder, StructBuilder},
         datatypes::Fields,
     };
-    use docspec::export::{
-        ChildTableExportSpec, ExportPolicy, ExportRows, ExportSpec, SortColumn,
-    };
+    use docspec::export::{ChildTableExportSpec, ExportPolicy, ExportRows, ExportSpec, SortColumn};
     use futures::TryStreamExt;
     use std::{collections::BTreeMap, time::Instant};
 
@@ -1605,7 +1600,11 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
         let sb = occ_builder.values();
         sb.field_builder::<StringBuilder>(0)
             .unwrap()
-            .append_value(format!("archive/part-{:04}/segment-{:05}.xml", ord / 100, ord));
+            .append_value(format!(
+                "archive/part-{:04}/segment-{:05}.xml",
+                ord / 100,
+                ord
+            ));
         sb.field_builder::<Int64Builder>(1)
             .unwrap()
             .append_value(ord * 4096);
@@ -1626,10 +1625,7 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
     }
     occ_builder.append(true);
 
-    let list_field = Arc::new(Field::new_list_field(
-        DataType::Struct(struct_fields),
-        true,
-    ));
+    let list_field = Arc::new(Field::new_list_field(DataType::Struct(struct_fields), true));
     let schema = Arc::new(Schema::new(vec![
         Field::new("owner_id", DataType::Utf8, false),
         Field::new("title", DataType::Utf8, false),
@@ -1639,12 +1635,16 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
         schema.clone(),
         vec![
             Arc::new(StringArray::from(vec!["doc-5000", "doc-0010"])),
-            Arc::new(StringArray::from(vec!["Omnibus Appropriations", "Short Notice"])),
+            Arc::new(StringArray::from(vec![
+                "Omnibus Appropriations",
+                "Short Notice",
+            ])),
             Arc::new(occ_builder.finish()),
         ],
     )
     .unwrap();
-    let mut writer = ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
+    let mut writer =
+        ArrowWriter::try_new(File::create(&input_path).unwrap(), schema, None).unwrap();
     writer.write(&batch).unwrap();
     writer.close().unwrap();
 
@@ -1772,6 +1772,42 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
         "expected >= 3 row-group browse ranges for 5,210 rows at 2,048 rows/group"
     );
 
+    // Verify that the child table parquet file contains OffsetIndex and ColumnIndex
+    let child_file = std::fs::File::open(&child.object.path).unwrap();
+    use parquet::arrow::arrow_reader::{ArrowReaderOptions, ParquetRecordBatchReaderBuilder};
+    use parquet::file::metadata::PageIndexPolicy;
+    let options = ArrowReaderOptions::new().with_page_index_policy(PageIndexPolicy::Optional);
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new_with_options(child_file, options).unwrap();
+    let meta = builder.metadata();
+    assert!(
+        meta.offset_index().is_some(),
+        "exported child parquet file must retain offset_index when page_index_cols is non-empty"
+    );
+    assert!(
+        meta.column_index().is_some(),
+        "exported child parquet file must retain column_index when page_index_cols is non-empty"
+    );
+
+    let rgs: Vec<usize> = (0..meta.num_row_groups()).collect();
+    let selection = docspec::engine::export::pipeline::build_page_index_selection(
+        meta,
+        builder.schema(),
+        &rgs,
+        "owner_id",
+        "occurrence_order",
+        "doc-5000",
+        None,
+        2_500,
+        2_525,
+    );
+    let sel = selection
+        .expect("build_page_index_selection must return Some(RowSelection) with valid PageIndex");
+    assert!(
+        sel.row_count() > 0,
+        "RowSelection must contain active selectors"
+    );
+
     // Parent export has occurrence_count: Int64 instead of source_occurrences
     let parent_batches: Vec<RecordBatch> = engine
         .read_export(&pin)
@@ -1816,8 +1852,7 @@ async fn high_cardinality_list_of_struct_unnests_into_sorted_child_table_with_fa
         elapsed.as_millis() < 20,
         "expected child slice lookup in < 20 ms, took {elapsed:?}"
     );
-    let slice =
-        arrow::compute::concat_batches(&slice_batches[0].schema(), &slice_batches).unwrap();
+    let slice = arrow::compute::concat_batches(&slice_batches[0].schema(), &slice_batches).unwrap();
     assert_eq!(slice.num_rows(), 25);
     let slice_owners = slice
         .column_by_name("owner_id")
@@ -1885,11 +1920,7 @@ async fn export_wide_353_column_schema_and_74_byte_body_key_column_index() {
             // Wait: "bodies/sha256/" is 14 bytes, ".pdf" is 4 bytes; 14 + 56 + 4 = 74 bytes,
             // or 64-hex SHA256 digest: 14 + 64 + 4 = 82 bytes (well over 64-byte default truncation!).
             // Let's use an exact 74-byte key where only the trailing bytes after index 64 differ!
-            format!(
-                "bodies/sha256/{}{:06x}.pdf",
-                "a".repeat(50),
-                r
-            )
+            format!("bodies/sha256/{}{:06x}.pdf", "a".repeat(50), r)
         })
         .collect();
     assert_eq!(body_keys[0].len(), 74);

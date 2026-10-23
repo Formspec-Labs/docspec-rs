@@ -479,8 +479,7 @@ impl MockS3 {
                                 .split('&')
                                 .any(|item| item == "uploads" || item == "uploads=") =>
                         {
-                            let id =
-                                format!("u-{}", next_upload.fetch_add(1, Ordering::Relaxed));
+                            let id = format!("u-{}", next_upload.fetch_add(1, Ordering::Relaxed));
                             uploads.lock().unwrap().insert(id.clone(), BTreeMap::new());
                             let xml = format!(
                                 "<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>{}</Key><UploadId>{id}</UploadId></InitiateMultipartUploadResult>",
@@ -508,11 +507,7 @@ impl MockS3 {
                         }
                         "POST" if query_val("uploadId").is_some() => {
                             let id = query_val("uploadId").unwrap();
-                            let parts = uploads
-                                .lock()
-                                .unwrap()
-                                .remove(&id)
-                                .unwrap_or_default();
+                            let parts = uploads.lock().unwrap().remove(&id).unwrap_or_default();
                             let full: Vec<u8> = parts.into_values().flatten().collect();
                             let mut store = objects.lock().unwrap();
                             if create_only && store.contains_key(path) {
@@ -661,10 +656,8 @@ impl MockS3 {
 impl Drop for MockS3 {
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
-        let _ = std::net::TcpStream::connect_timeout(
-            &self.address,
-            std::time::Duration::from_secs(2),
-        );
+        let _ =
+            std::net::TcpStream::connect_timeout(&self.address, std::time::Duration::from_secs(2));
         if let Some(server) = self.server.take() {
             let _ = server.join();
         }
@@ -699,8 +692,8 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
             .await
             .unwrap(),
     );
-    let objects = storage::remote::remote_objects("s3://bucket/owned-deep", props, HashMap::new())
-        .unwrap();
+    let objects =
+        storage::remote::remote_objects("s3://bucket/owned-deep", props, HashMap::new()).unwrap();
     let limits = Limits {
         compute_threads: 2,
         memory_bytes: 128 << 20,
@@ -1084,16 +1077,24 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
 
     for ds in [&left_ds, &right_ds, &joined_ds, &agg_ds] {
         let rel = engine.latest(ds).await.unwrap();
-        let report = verify_release_at(&rel, engine.inner.lifecycle.budget.limits.clone(), VerificationLevel::Deep)
-            .await
-            .unwrap();
+        let report = verify_release_at(
+            &rel,
+            engine.inner.lifecycle.budget.limits.clone(),
+            VerificationLevel::Deep,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.level, VerificationLevel::Deep);
         let compacted = engine.compact_lifecycle(ds).await.unwrap();
         assert_eq!(compacted.revisions_after, 1);
         let rel_after = engine.latest(ds).await.unwrap();
-        let report_after = verify_release_at(&rel_after, engine.inner.lifecycle.budget.limits.clone(), VerificationLevel::Deep)
-            .await
-            .unwrap();
+        let report_after = verify_release_at(
+            &rel_after,
+            engine.inner.lifecycle.budget.limits.clone(),
+            VerificationLevel::Deep,
+        )
+        .await
+        .unwrap();
         assert_eq!(report_after.level, VerificationLevel::Deep);
     }
     assert_eq!(engine.latest(&agg_ds).await.unwrap(), agg_rel2);
@@ -1328,7 +1329,10 @@ async fn fair_spill_pool_512mb_stress_test_completes_and_cleans_scratch() {
     assert_eq!(runtime_env.memory_pool.reserved(), 0);
     assert_eq!(runtime_env.disk_manager.used_disk_space(), 0);
     assert_eq!(
-        runtime_env.disk_manager.spilling_progress().active_files_count,
+        runtime_env
+            .disk_manager
+            .spilling_progress()
+            .active_files_count,
         0
     );
     let scratch_dir = host.join("scratch");

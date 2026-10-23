@@ -34,7 +34,6 @@ use datafusion::{
     },
     datasource::MemTable,
     logical_expr::{BinaryExpr, Case, Expr, Operator, Volatility, col, lit},
-    physical_plan::SendableRecordBatchStream,
     prelude::SessionContext,
 };
 use futures::TryStreamExt;
@@ -62,41 +61,6 @@ use std::{
 };
 
 impl Engine {
-    /// Streams an unnested child Parquet table produced alongside an [`ExportPin`].
-    ///
-    /// # Errors
-    /// Refuses unknown child tables, inconsistent pins, or unavailable objects.
-    pub async fn read_export_child(
-        &self,
-        pin: &ExportPin,
-        child_name: &str,
-    ) -> Result<SendableRecordBatchStream> {
-        let memory = self.request_memory(&(pin, child_name))?;
-        let pin = pin.clone();
-        let child_name = child_name.to_owned();
-        self.admit_stream(memory, move |engine| async move {
-            let retained = engine
-                .load_export_pin(&pin.dataset, &format!("export-result/{}", pin.id))
-                .await?;
-            if retained != pin {
-                return Err(invalid_export());
-            }
-            let child = retained.child_tables.get(&child_name).ok_or_else(|| {
-                Error::refusal("missing_child_export", "requested child table is not in export pin")
-            })?;
-            let stream = engine
-                .inner
-                .objects
-                .read_flat_parquet(&child.object, &engine.inner.lifecycle.budget)
-                .await?;
-            if describe_schema(&stream.schema())? != child.fields {
-                return Err(invalid_export());
-            }
-            Ok(stream)
-        })
-        .await
-    }
-
     /// Reads a bounded slice `[start_ordinal .. start_ordinal + limit)` of child rows for a
     /// single parent key value using row-group browse ranges and Parquet scalar `PageIndex`
     /// pruning.
@@ -116,7 +80,10 @@ impl Engine {
             .child_tables
             .get(child_name)
             .ok_or_else(|| {
-                Error::refusal("missing_child_export", "requested child table is not in export pin")
+                Error::refusal(
+                    "missing_child_export",
+                    "requested child table is not in export pin",
+                )
             })?
             .clone();
         let child_spec = pin
@@ -137,8 +104,7 @@ impl Engine {
             .cloned()
             .ok_or_else(invalid_export)?;
         let ord_col = child_spec.ordinal_column.clone();
-        let end_ordinal =
-            start_ordinal.saturating_add(i64::try_from(limit).unwrap_or(i64::MAX));
+        let end_ordinal = start_ordinal.saturating_add(i64::try_from(limit).unwrap_or(i64::MAX));
         let browse_ranges = child.browse_ranges.clone();
         let key_value = key_value.to_owned();
         let child_object = child.object.clone();
@@ -279,7 +245,10 @@ impl Engine {
                 let field = parent_schema.field_with_name(&sc.column).map_err(|_| {
                     Error::refusal(
                         "invalid_export",
-                        format!("order_by column {} is absent from the exported schema", sc.column),
+                        format!(
+                            "order_by column {} is absent from the exported schema",
+                            sc.column
+                        ),
                     )
                 })?;
                 if !is_scalar_data_type(field.data_type()) {
@@ -427,7 +396,10 @@ impl Engine {
             let alias = format!("g{idx}");
             if group_name == "evidence" || group_name == "receipts" {
                 let evidence = dataset.evidence.as_ref().ok_or_else(|| {
-                    Error::refusal("missing_group", "export policy names an absent receipt table")
+                    Error::refusal(
+                        "missing_group",
+                        "export policy names an absent receipt table",
+                    )
                 })?;
                 if let Some(source_pin) = dataset.groups.get("source")
                     && evidence.source != NativeSnapshotRef::from(source_pin)
@@ -462,11 +434,7 @@ impl Engine {
                 let source_pin = dataset.groups.get("source").ok_or_else(|| {
                     Error::refusal("missing_group", "export policy names an absent field group")
                 })?;
-                let (native, _) = self
-                    .inner
-                    .objects
-                    .open_snapshot(source_pin, budget)
-                    .await?;
+                let (native, _) = self.inner.objects.open_snapshot(source_pin, budget).await?;
                 let arrow_schema = storage::schema::read_schema(&native)?;
                 for field in arrow_schema.fields() {
                     let name = field.name();
@@ -500,11 +468,7 @@ impl Engine {
                 let group_pin = dataset.groups.get(group_name).ok_or_else(|| {
                     Error::refusal("missing_group", "export policy names an absent field group")
                 })?;
-                let (native, _) = self
-                    .inner
-                    .objects
-                    .open_snapshot(group_pin, budget)
-                    .await?;
+                let (native, _) = self.inner.objects.open_snapshot(group_pin, budget).await?;
                 let arrow_schema = storage::schema::read_schema(&native)?;
                 for field in arrow_schema.fields() {
                     let name = field.name();
@@ -658,11 +622,13 @@ impl Engine {
 
         let mut tracker = BrowseRangeTracker::new(browse_cols);
         let mut rows = 0_u64;
-        let max_rg_rows = if !page_index_cols.is_empty() {
-            row_group_rows.unwrap_or(32768).clamp(16384, 65536)
-        } else {
-            row_group_rows.unwrap_or(1024 * 1024).max(1)
-        };
+        let max_rg_rows = row_group_rows
+            .unwrap_or(if !page_index_cols.is_empty() {
+                32768
+            } else {
+                1024 * 1024
+            })
+            .max(1);
 
         while let Some(batch) = stream.try_next().await? {
             if batch.num_rows() == 0 {
@@ -711,9 +677,18 @@ impl Engine {
                             let take_len = rem.min(max_rg_rows.saturating_sub(in_prog).max(1));
                             let sub_batch = sanitized_batch.slice(offset, take_len);
                             offset += take_len;
-
+                            let prev_flushed = writer.0.flushed_row_groups().len();
                             writer.0.write(&sub_batch)?;
                             tracker.observe_batch(&sub_batch)?;
+
+                            let flushed_now = writer
+                                .0
+                                .flushed_row_groups()
+                                .len()
+                                .saturating_sub(prev_flushed);
+                            for _ in 0..flushed_now {
+                                tracker.finish_row_group();
+                            }
 
                             let should_flush = {
                                 #[cfg(feature = "test-util")]
@@ -725,7 +700,7 @@ impl Engine {
                                     || writer.0.memory_size() >= limits.max_batch_bytes
                                     || writer.0.in_progress_size() >= max_row_group_bytes
                             };
-                            if should_flush && writer.0.in_progress_rows() > 0 {
+                            if flushed_now == 0 && should_flush && writer.0.in_progress_rows() > 0 {
                                 writer.0.flush()?;
                                 tracker.finish_row_group();
                             }
@@ -783,22 +758,23 @@ impl Engine {
 }
 
 fn build_writer_properties(
-    _row_group_rows: Option<usize>,
-    _max_row_group_bytes: usize,
+    row_group_rows: Option<usize>,
+    max_row_group_bytes: usize,
     page_index_cols: &[String],
 ) -> Result<WriterProperties> {
     let mut builder = WriterProperties::builder()
         .set_writer_version(WriterVersion::PARQUET_2_0)
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_max_row_group_row_count(None)
-        .set_max_row_group_bytes(None)
+        .set_max_row_group_row_count(row_group_rows)
+        .set_max_row_group_bytes(Some(max_row_group_bytes))
         .set_data_page_size_limit(1024 * 1024)
         .set_dictionary_enabled(true)
         .set_statistics_enabled(EnabledStatistics::Chunk)
         .set_statistics_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
-        .set_column_index_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES))
-        .set_offset_index_disabled(true);
-    if !page_index_cols.is_empty() {
+        .set_column_index_truncate_length(Some(storage::STATISTICS_TRUNCATE_BYTES));
+    if page_index_cols.is_empty() {
+        builder = builder.set_offset_index_disabled(true);
+    } else {
         builder = builder.set_write_batch_size(256);
     }
     for col_name in page_index_cols {
@@ -957,7 +933,8 @@ fn compile_tagged_scalar(
             let mut when_then_expr = Vec::with_capacity(branches.len());
             for branch in branches {
                 let w = compile_predicate(context, df_schema, &branch.when)?;
-                let t = compile_scalar_expr_with_hint(context, df_schema, &branch.then, column_hint)?;
+                let t =
+                    compile_scalar_expr_with_hint(context, df_schema, &branch.then, column_hint)?;
                 when_then_expr.push((Box::new(w), Box::new(t)));
             }
             let else_box = match else_expr {
@@ -1045,7 +1022,10 @@ fn json_to_literal_expr(
             } else if let Some(f) = n.as_f64() {
                 Ok(lit(f))
             } else {
-                Err(Error::refusal("invalid_export", "unsupported numeric literal"))
+                Err(Error::refusal(
+                    "invalid_export",
+                    "unsupported numeric literal",
+                ))
             }
         }
         serde_json::Value::String(s) => Ok(lit(s.clone())),
@@ -1185,7 +1165,11 @@ fn validate_pipeline_columns(
         }
     }
     if let Some(fold) = &policy.fold_readings {
-        if fold.target_column.to_ascii_lowercase().starts_with("__docspec_") {
+        if fold
+            .target_column
+            .to_ascii_lowercase()
+            .starts_with("__docspec_")
+        {
             return Err(Error::refusal(
                 "export_disclosure",
                 "internal occurrence and evidence fields cannot be exported",
@@ -1312,11 +1296,10 @@ fn build_fold_target_field(target_name: &str, seen_ids: &mut BTreeSet<i32>) -> F
         PARQUET_FIELD_ID_META_KEY.into(),
         values_item_id.to_string(),
     )]));
-    let values_field = Field::new("values", DataType::List(Arc::new(values_item)), false)
-        .with_metadata(HashMap::from([(
-            PARQUET_FIELD_ID_META_KEY.into(),
-            values_list_id.to_string(),
-        )]));
+    let values_field =
+        Field::new("values", DataType::List(Arc::new(values_item)), false).with_metadata(
+            HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), values_list_id.to_string())]),
+        );
     let label_field = Field::new("field", DataType::Utf8, false).with_metadata(HashMap::from([(
         PARQUET_FIELD_ID_META_KEY.into(),
         field_label_id.to_string(),
@@ -1358,12 +1341,9 @@ fn build_parent_output_schema(
             .any(|c| c.replace_with_count_column.as_ref() == Some(col_name))
         {
             let id = next_available_id(seen_ids);
-            out_fields.push(
-                Field::new(col_name, DataType::Int64, false).with_metadata(HashMap::from([(
-                    PARQUET_FIELD_ID_META_KEY.into(),
-                    id.to_string(),
-                )])),
-            );
+            out_fields.push(Field::new(col_name, DataType::Int64, false).with_metadata(
+                HashMap::from([(PARQUET_FIELD_ID_META_KEY.into(), id.to_string())]),
+            ));
             continue;
         }
         let joined_field = joined_schema.field_with_name(col_name).map_err(|_| {
@@ -1492,8 +1472,7 @@ fn fold_readings_array(
         struct_fields.clone(),
         vec![Box::new(field_builder), Box::new(values_builder)],
     );
-    let mut outer_builder =
-        ListBuilder::new(struct_builder).with_field(struct_item_field.clone());
+    let mut outer_builder = ListBuilder::new(struct_builder).with_field(struct_item_field.clone());
 
     let source_cols: Vec<(&str, &str, &ArrayRef)> = source_col_names
         .iter()
@@ -1934,7 +1913,10 @@ impl ChildAccumulator {
         let DataType::Struct(struct_fields) = item_field.data_type() else {
             return Err(Error::refusal(
                 "invalid_export",
-                format!("child table column {} is not a List<Struct>", spec.list_column),
+                format!(
+                    "child table column {} is not a List<Struct>",
+                    spec.list_column
+                ),
             ));
         };
 
@@ -2127,11 +2109,7 @@ impl ChildAccumulator {
             format!("{}.parquet", self.name)
         };
         let path = directory.join(file_name);
-        let rg_rows = if !page_index_cols.is_empty() {
-            self.spec.row_group_rows.clamp(16384, 65536)
-        } else {
-            self.spec.row_group_rows.max(1)
-        };
+        let rg_rows = self.spec.row_group_rows.max(1);
         let max_row_group_bytes = budget.limits.max_batch_bytes.max(1);
         let schema = self.child_schema.clone();
         let fields = self.child_fields.clone();
@@ -2220,12 +2198,23 @@ impl ChildAccumulator {
                                 let sub_batch = slice.slice(offset, take_len);
                                 offset += take_len;
 
+                                let prev_flushed = writer.0.flushed_row_groups().len();
                                 writer.0.write(&sub_batch)?;
                                 tracker.observe_batch(&sub_batch)?;
 
-                                if (writer.0.in_progress_rows() >= rg_rows
-                                    || writer.0.memory_size() >= limits.max_batch_bytes
-                                    || writer.0.in_progress_size() >= max_row_group_bytes)
+                                let flushed_now = writer
+                                    .0
+                                    .flushed_row_groups()
+                                    .len()
+                                    .saturating_sub(prev_flushed);
+                                for _ in 0..flushed_now {
+                                    tracker.finish_row_group();
+                                }
+
+                                if flushed_now == 0
+                                    && (writer.0.in_progress_rows() >= rg_rows
+                                        || writer.0.memory_size() >= limits.max_batch_bytes
+                                        || writer.0.in_progress_size() >= max_row_group_bytes)
                                     && writer.0.in_progress_rows() > 0
                                 {
                                     writer.0.flush()?;
@@ -2571,7 +2560,7 @@ async fn slice_child_parquet_async(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_page_index_selection(
+pub fn build_page_index_selection(
     metadata: &parquet::file::metadata::ParquetMetaData,
     schema: &Schema,
     matching_rgs: &[usize],
@@ -2621,12 +2610,8 @@ fn build_page_index_selection(
                 }
                 ColumnIndexMetaData::INT64(native_idx) => {
                     if let Some(target_i) = key_i64 {
-                        let min_ok = native_idx
-                            .min_value(page_i)
-                            .is_none_or(|&m| target_i >= m);
-                        let max_ok = native_idx
-                            .max_value(page_i)
-                            .is_none_or(|&m| target_i <= m);
+                        let min_ok = native_idx.min_value(page_i).is_none_or(|&m| target_i >= m);
+                        let max_ok = native_idx.max_value(page_i).is_none_or(|&m| target_i <= m);
                         min_ok && max_ok
                     } else {
                         true

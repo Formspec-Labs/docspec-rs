@@ -162,7 +162,8 @@ impl KeyPoints {
                     continue;
                 };
                 let array = batch.column(filter.key_idx);
-                let Ok(computed) = storage::compute_partition_column(filter.transform, array) else {
+                let Ok(computed) = storage::compute_partition_column(filter.transform, array)
+                else {
                     *slot = None;
                     continue;
                 };

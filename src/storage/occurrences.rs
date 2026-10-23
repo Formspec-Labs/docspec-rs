@@ -125,8 +125,8 @@ async fn read_projected_occurrences_inner(
     let mut state =
         Occurrences::capture_projected(table, budget, inventory, true, projection).await?;
     state.observation = observation;
-    Ok(futures::stream::try_unfold(state, |mut state| async move {
-        Ok(state.next().await?.map(|batch| (batch, state)))
+    Ok(futures::stream::try_unfold(state, |mut state| {
+        Box::pin(async move { Ok(state.next().await?.map(|batch| (batch, state))) })
     }))
 }
 
@@ -273,94 +273,100 @@ impl Occurrences {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        loop {
-            if let Some(file) = &mut self.current {
-                if file.pending.is_empty()
-                    && let Some(raw_batch) = file.stream.try_next().await?
-                {
-                    let stripped = super::schema::strip_file_column(raw_batch, self.limit)?;
-                    for slice in super::split_oversized_batch(stripped, self.limit)? {
-                        file.pending.push_back(slice);
+    fn next<'a>(&'a mut self) -> futures::future::BoxFuture<'a, Result<Option<RecordBatch>>> {
+        Box::pin(async move {
+            loop {
+                if let Some(file) = &mut self.current {
+                    if file.pending.is_empty()
+                        && let Some(raw_batch) = file.stream.try_next().await?
+                    {
+                        let stripped = super::schema::strip_file_column(raw_batch, self.limit)?;
+                        for slice in super::split_oversized_batch(stripped, self.limit)? {
+                            file.pending.push_back(slice);
+                        }
                     }
+                    if let Some(batch) = file.pending.pop_front() {
+                        let batch =
+                            super::identity::materialize(batch, &file.path, file.next, self.limit)?;
+                        let end = file
+                            .next
+                            .checked_add(batch.num_rows() as u64)
+                            .filter(|end| *end <= file.rows && *end <= i64::MAX as u64)
+                            .ok_or_else(|| {
+                                Error::refusal(
+                                    "occurrence_count",
+                                    "decoded rows exceed the captured native count",
+                                )
+                            })?;
+                        let batch = if let Some(selection) = &self.selection {
+                            selection.apply(
+                                batch,
+                                Some((&file.path, file.next, end)),
+                                self.limit,
+                            )?
+                        } else if self.located {
+                            append_locations(
+                                batch,
+                                &file.path,
+                                file.next,
+                                end,
+                                &self.schema,
+                                self.limit,
+                            )?
+                        } else {
+                            batch
+                        };
+                        file.next = end;
+                        return Ok(Some(batch));
+                    }
+                    if file.next != file.rows {
+                        return Err(Error::refusal(
+                            "occurrence_count",
+                            "decoded rows differ from the captured native count",
+                        ));
+                    }
+                    if let Some(observation) = &self.observation {
+                        observation.finish();
+                    }
+                    self.current = None;
                 }
-                if let Some(batch) = file.pending.pop_front() {
-                    let batch =
-                        super::identity::materialize(batch, &file.path, file.next, self.limit)?;
-                    let end = file
-                        .next
-                        .checked_add(batch.num_rows() as u64)
-                        .filter(|end| *end <= file.rows && *end <= i64::MAX as u64)
-                        .ok_or_else(|| {
-                            Error::refusal(
-                                "occurrence_count",
-                                "decoded rows exceed the captured native count",
-                            )
-                        })?;
-                    let batch = if let Some(selection) = &self.selection {
-                        selection.apply(batch, Some((&file.path, file.next, end)), self.limit)?
-                    } else if self.located {
-                        append_locations(
-                            batch,
-                            &file.path,
-                            file.next,
-                            end,
-                            &self.schema,
-                            self.limit,
-                        )?
-                    } else {
-                        batch
-                    };
-                    file.next = end;
-                    return Ok(Some(batch));
-                }
-                if file.next != file.rows {
-                    return Err(Error::refusal(
-                        "occurrence_count",
-                        "decoded rows differ from the captured native count",
-                    ));
-                }
-                if let Some(observation) = &self.observation {
-                    observation.finish();
-                }
-                self.current = None;
-            }
-            let Some(task) = self.tasks.try_next().await? else {
-                if !self.expected.is_empty() {
-                    return Err(Error::refusal(
+                let Some(task) = self.tasks.try_next().await? else {
+                    if !self.expected.is_empty() {
+                        return Err(Error::refusal(
+                            "occurrence_tasks",
+                            "native scan omitted a captured live data file",
+                        ));
+                    }
+                    return Ok(None);
+                };
+                let file = self.expected.remove(&task.data_file_path).ok_or_else(|| {
+                    Error::refusal(
                         "occurrence_tasks",
-                        "native scan omitted a captured live data file",
-                    ));
+                        "native scan repeats a file or includes an unknown file",
+                    )
+                })?;
+                check_task(&task, &file)?;
+                let path = task.data_file_path.clone();
+                let rows = file.record_count();
+                let result = self
+                    .reader
+                    .clone()
+                    .read(futures::stream::once(async move { Ok(task) }).boxed())?;
+                if let Some(observation) = &self.observation {
+                    observation.attach(&result);
                 }
-                return Ok(None);
-            };
-            let file = self.expected.remove(&task.data_file_path).ok_or_else(|| {
-                Error::refusal(
-                    "occurrence_tasks",
-                    "native scan repeats a file or includes an unknown file",
-                )
-            })?;
-            check_task(&task, &file)?;
-            let path = task.data_file_path.clone();
-            let rows = file.record_count();
-            let result = self
-                .reader
-                .clone()
-                .read(futures::stream::once(async move { Ok(task) }).boxed())?;
-            if let Some(observation) = &self.observation {
-                observation.attach(&result);
+                let stream = result.stream();
+                self.current = Some(FileRows {
+                    stream,
+                    pending: std::collections::VecDeque::new(),
+                    path,
+                    next: 0,
+                    rows,
+                });
+                // An empty-file population still yields cooperatively between tasks.
+                tokio::task::yield_now().await;
             }
-            let stream = result.stream();
-            self.current = Some(FileRows {
-                stream,
-                pending: std::collections::VecDeque::new(),
-                path,
-                next: 0,
-                rows,
-            });
-            // An empty-file population still yields cooperatively between tasks.
-            tokio::task::yield_now().await;
-        }
+        })
     }
 }
 
@@ -615,8 +621,8 @@ impl OccurrenceScan {
             _batches: budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?,
             _metadata: self._metadata.clone(),
         };
-        Ok(futures::stream::try_unfold(state, |mut state| async move {
-            Ok(state.next().await?.map(|batch| (batch, state)))
+        Ok(futures::stream::try_unfold(state, |mut state| {
+            Box::pin(async move { Ok(state.next().await?.map(|batch| (batch, state))) })
         }))
     }
 }

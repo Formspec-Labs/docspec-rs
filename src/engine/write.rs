@@ -368,65 +368,65 @@ impl Engine {
         admission: &'a PhaseResult,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
         Box::pin(async move {
-        let input = admission
-            .outputs
-            .first()
-            .ok_or_else(|| Error::refusal("corrupt_phase", "admission has no retained input"))?;
-        let context = self.context();
-        context
-            .register_parquet("input", &input.path, ParquetReadOptions::default())
-            .await?;
-        let input_df = context.table("input").await?;
-        let dataframe = if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
-            validate_plan(input_df.logical_plan())?;
-            input_df
-        } else {
-            build_query(&context, &spec.sql).await?
-        };
-        if let Some(base) = &spec.base {
-            let release = self.release_admitted(&spec.dataset, base).await?;
-            let native = storage::open_pin(
-                &release.dataset.groups["source"],
-                &self.inner.lifecycle.budget,
-            )
-            .await?;
-            if !spec.partition_by.is_empty() {
-                storage::check_partition_by_matches(
+            let input = admission.outputs.first().ok_or_else(|| {
+                Error::refusal("corrupt_phase", "admission has no retained input")
+            })?;
+            let context = self.context();
+            context
+                .register_parquet("input", &input.path, ParquetReadOptions::default())
+                .await?;
+            let input_df = context.table("input").await?;
+            let dataframe =
+                if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
+                    validate_plan(input_df.logical_plan())?;
+                    input_df
+                } else {
+                    build_query(&context, &spec.sql).await?
+                };
+            if let Some(base) = &spec.base {
+                let release = self.release_admitted(&spec.dataset, base).await?;
+                let native = storage::open_pin(
+                    &release.dataset.groups["source"],
+                    &self.inner.lifecycle.budget,
+                )
+                .await?;
+                if !spec.partition_by.is_empty() {
+                    storage::check_partition_by_matches(
+                        native.metadata().current_schema(),
+                        native.metadata().default_partition_spec(),
+                        &spec.partition_by,
+                    )?;
+                }
+                // An explicit base fixes field meaning, order and allocation history.
+                // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
+                let expected =
+                    iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+                let dataframe = coerce_dataframe_for_schema(dataframe, &expected)?;
+                let dataframe = schema::normalize(
+                    dataframe,
                     native.metadata().current_schema(),
-                    native.metadata().default_partition_spec(),
-                    &spec.partition_by,
-                )?;
+                    &[],
+                    &self.inner.lifecycle.budget,
+                )
+                .await?;
+                let table = self
+                    .replacement_output(&spec.dataset, directory, &native)
+                    .await?;
+                let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
+                prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
+                return Ok(prepared);
             }
-            // An explicit base fixes field meaning, order and allocation history.
-            // SchemaSpec changes that interpretation; a rebuild supplies fresh values.
-            let expected =
-                iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-            let dataframe = coerce_dataframe_for_schema(dataframe, &expected)?;
-            let dataframe = schema::normalize(
-                dataframe,
-                native.metadata().current_schema(),
-                &[],
-                &self.inner.lifecycle.budget,
-            )
-            .await?;
-            let table = self
-                .replacement_output(&spec.dataset, directory, &native)
-                .await?;
-            let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
-            prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
-            return Ok(prepared);
-        }
-        check_build_fields(&dataframe)?;
-        if !spec.partition_by.is_empty() {
-            let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
-                dataframe.schema().as_arrow(),
-            )?;
-            let table = self
-                .create_partitioned_output(&spec.dataset, directory, schema, &spec.partition_by)
-                .await?;
-            return self.write_output(&spec.dataset, table, dataframe).await;
-        }
-        self.write_frame(&spec.dataset, directory, dataframe).await
+            check_build_fields(&dataframe)?;
+            if !spec.partition_by.is_empty() {
+                let schema = iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                    dataframe.schema().as_arrow(),
+                )?;
+                let table = self
+                    .create_partitioned_output(&spec.dataset, directory, schema, &spec.partition_by)
+                    .await?;
+                return self.write_output(&spec.dataset, table, dataframe).await;
+            }
+            self.write_frame(&spec.dataset, directory, dataframe).await
         })
     }
 
@@ -512,218 +512,219 @@ impl Engine {
         captured_source: Option<&'a TablePin>,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
         Box::pin(async move {
-        let base = self.release_admitted(&spec.dataset, &spec.base).await?;
-        let canonical_before = base
-            .dataset
-            .groups
-            .get("source")
-            .ok_or_else(|| Error::refusal("invalid_base", "base has no source table"))?;
-        // Older admissions consume their canonical source; retries never resolve
-        // a newer physical representation after the request has been retained.
-        let captured_before = captured_source.unwrap_or(canonical_before);
-        let captured_native = open_captured_source_with_objects(
-            &self.inner.objects,
-            canonical_before,
-            captured_before,
-            &self.inner.lifecycle.budget,
-        )
-        .await?;
-        let before_with_origins;
-        let (before, native) =
-            if !storage::identity::has_origins(captured_native.metadata().current_schema())? {
-                // Source occurrences survive the first value rewrite even without
-                // receipts. Add optional origin fields through native metadata;
-                // the existing reader fills original file/row before filtering.
-                before_with_origins = self
-                    .source_with_origins_at(
-                        &spec.dataset,
-                        captured_before,
-                        &directory.child("source-origins")?,
-                    )
-                    .await?;
-                let native = self
-                    .inner
-                    .objects
-                    .open_pin(&before_with_origins, &self.inner.lifecycle.budget)
-                    .await?;
-                (&before_with_origins, native)
-            } else {
-                (captured_before, captured_native)
-            };
-        let context = self.context();
-        let request = OperationRequest::Update(spec.clone());
-        for ((name, source_spec), object) in request.inputs().iter().zip(&admission.outputs) {
-            #[cfg(all(not(test), not(feature = "test-util")))]
-            let local_path = if self.inner.objects.is_remote() {
-                let candidate = ObjectRef {
-                    owner: object.owner.clone(),
-                    path: source_spec.path.clone(),
-                    digest: object.digest.clone(),
-                    bytes: object.bytes,
-                };
-                storage::verify_object(&candidate)
-                    .ok()
-                    .map(|()| candidate.path)
-            } else {
-                None
-            };
-            #[cfg(any(test, feature = "test-util"))]
-            let local_path: Option<String> = {
-                let _ = source_spec;
-                None
-            };
-            let parquet_path = local_path.as_deref().unwrap_or(&object.path);
-            context
-                .register_parquet(name.as_str(), parquet_path, ParquetReadOptions::default())
-                .await?;
-        }
-        let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-        let mut replacement =
-            coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
-        if storage::defaults::has_supplied(native.metadata().current_schema())
-            || storage::identity::has_origins(native.metadata().current_schema())?
-        {
-            replacement = schema::normalize(
-                replacement,
-                native.metadata().current_schema(),
-                &spec.keys,
+            let base = self.release_admitted(&spec.dataset, &spec.base).await?;
+            let canonical_before = base
+                .dataset
+                .groups
+                .get("source")
+                .ok_or_else(|| Error::refusal("invalid_base", "base has no source table"))?;
+            // Older admissions consume their canonical source; retries never resolve
+            // a newer physical representation after the request has been retained.
+            let captured_before = captured_source.unwrap_or(canonical_before);
+            let captured_native = open_captured_source_with_objects(
+                &self.inner.objects,
+                canonical_before,
+                captured_before,
                 &self.inner.lifecycle.budget,
             )
             .await?;
-        }
-        context.deregister_table("replacements")?;
-        context.register_table("replacements", replacement.clone().into_view())?;
-        if !same_fields(&schema, replacement.schema().as_arrow())? {
-            return Err(Error::refusal(
-                "schema_mismatch",
-                "replacement rows must match the base field names, types and nullability",
-            ));
-        }
-        let mut field_ids = Vec::new();
-        for key in &spec.keys {
-            let field = native
-                .metadata()
-                .current_schema()
-                .field_by_name(key)
-                .ok_or_else(|| {
-                    Error::refusal("unknown_key", "update key is absent from the base schema")
-                })?;
-            field_ids.push(field.id);
-        }
-        if let Some(merge_spec) = &spec.merge {
-            merge::validate(merge_spec, native.metadata().current_schema(), &spec.keys)?;
-        }
-        let keys = spec
-            .keys
-            .iter()
-            .map(|key| identifier(key))
-            .collect::<Vec<_>>()
-            .join(", ");
-        if spec.deletions.is_some() {
-            let deletions =
-                coerce_dataframe_for_schema(context.table("deletions").await?, &schema)?;
-            context.deregister_table("deletions")?;
-            context.register_table("deletions", deletions.clone().into_view())?;
-            let expected_keys = spec
-                .keys
-                .iter()
-                .map(|key| {
-                    schema
-                        .field_with_name(key)
-                        .map(|field| field.clone().with_nullable(true))
-                })
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            let supplied_keys = spec
-                .keys
-                .iter()
-                .map(|key| {
-                    deletions
-                        .schema()
-                        .as_arrow()
-                        .field_with_name(key)
+            let before_with_origins;
+            let (before, native) =
+                if !storage::identity::has_origins(captured_native.metadata().current_schema())? {
+                    // Source occurrences survive the first value rewrite even without
+                    // receipts. Add optional origin fields through native metadata;
+                    // the existing reader fills original file/row before filtering.
+                    before_with_origins = self
+                        .source_with_origins_at(
+                            &spec.dataset,
+                            captured_before,
+                            &directory.child("source-origins")?,
+                        )
+                        .await?;
+                    let native = self
+                        .inner
+                        .objects
+                        .open_pin(&before_with_origins, &self.inner.lifecycle.budget)
+                        .await?;
+                    (&before_with_origins, native)
+                } else {
+                    (captured_before, captured_native)
+                };
+            let context = self.context();
+            let request = OperationRequest::Update(spec.clone());
+            for ((name, source_spec), object) in request.inputs().iter().zip(&admission.outputs) {
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                let local_path = if self.inner.objects.is_remote() {
+                    let candidate = ObjectRef {
+                        owner: object.owner.clone(),
+                        path: source_spec.path.clone(),
+                        digest: object.digest.clone(),
+                        bytes: object.bytes,
+                    };
+                    storage::verify_object(&candidate)
                         .ok()
-                        .map(|field| field.clone().with_nullable(true))
-                })
-                .collect::<Option<Vec<_>>>();
-            if deletions.schema().fields().len() != spec.keys.len()
-                || match supplied_keys {
-                    Some(fields) => !same_fields(
-                        &arrow::datatypes::Schema::new(expected_keys),
-                        &arrow::datatypes::Schema::new(fields),
-                    )?,
-                    None => true,
-                }
+                        .map(|()| candidate.path)
+                } else {
+                    None
+                };
+                #[cfg(any(test, feature = "test-util"))]
+                let local_path: Option<String> = {
+                    let _ = source_spec;
+                    None
+                };
+                let parquet_path = local_path.as_deref().unwrap_or(&object.path);
+                context
+                    .register_parquet(name.as_str(), parquet_path, ParquetReadOptions::default())
+                    .await?;
+            }
+            let schema =
+                iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+            let mut replacement =
+                coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
+            if storage::defaults::has_supplied(native.metadata().current_schema())
+                || storage::identity::has_origins(native.metadata().current_schema())?
             {
+                replacement = schema::normalize(
+                    replacement,
+                    native.metadata().current_schema(),
+                    &spec.keys,
+                    &self.inner.lifecycle.budget,
+                )
+                .await?;
+            }
+            context.deregister_table("replacements")?;
+            context.register_table("replacements", replacement.clone().into_view())?;
+            if !same_fields(&schema, replacement.schema().as_arrow())? {
                 return Err(Error::refusal(
                     "schema_mismatch",
-                    "deletion rows must contain exactly the typed key fields",
+                    "replacement rows must match the base field names, types and nullability",
                 ));
             }
-            if any_rows(key_join(
-                context.table("replacements").await?,
-                context.table("deletions").await?,
-                &spec.keys,
-                datafusion::logical_expr::JoinType::Inner,
-            )?)
-            .await?
-            {
-                return Err(Error::refusal(
-                    "conflicting_update",
-                    "replacement and deletion keys overlap",
-                ));
+            let mut field_ids = Vec::new();
+            for key in &spec.keys {
+                let field = native
+                    .metadata()
+                    .current_schema()
+                    .field_by_name(key)
+                    .ok_or_else(|| {
+                        Error::refusal("unknown_key", "update key is absent from the base schema")
+                    })?;
+                field_ids.push(field.id);
             }
-        }
-        let scope_sql = if spec.deletions.is_some() {
-            format!(
-                "SELECT DISTINCT {keys} FROM replacements UNION SELECT DISTINCT {keys} FROM deletions"
-            )
-        } else {
-            format!("SELECT DISTINCT {keys} FROM replacements")
-        };
-        let scope = context.sql(&scope_sql).await?;
-        let applied = self
-            .replace_keys_with_merge(
-                Replacement {
-                    dataset: &spec.dataset,
-                    directory: directory.clone(),
-                    before,
-                    keys: &spec.keys,
-                    scope,
-                    replacement,
-                    replacement_bytes: Some(
-                        admission
-                            .outputs
-                            .iter()
-                            .fold(0_u64, |sum, object| sum.saturating_add(object.bytes)),
-                    ),
-                },
-                spec.merge.as_ref(),
-            )
-            .await?;
-        let Applied {
-            table,
-            removed,
-            added,
-            metrics,
-        } = self
-            .finish_source_replacement_at(&spec.dataset, directory, captured_before, applied)
-            .await?;
-        let changes = ChangePin {
-            rules: super::changes::WRITE_RULES.into(),
-            base_version: spec.base.clone(),
-            base_manifest: base.manifest,
-            before_metadata: canonical_before.metadata.clone(),
-            after_metadata: table.metadata.clone(),
-            key_field_ids: field_ids,
-            removed,
-            added,
-        };
-        Ok(Prepared {
-            table,
-            changes: Some(changes),
-            metrics,
-            schema_input: None,
-        })
+            if let Some(merge_spec) = &spec.merge {
+                merge::validate(merge_spec, native.metadata().current_schema(), &spec.keys)?;
+            }
+            let keys = spec
+                .keys
+                .iter()
+                .map(|key| identifier(key))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if spec.deletions.is_some() {
+                let deletions =
+                    coerce_dataframe_for_schema(context.table("deletions").await?, &schema)?;
+                context.deregister_table("deletions")?;
+                context.register_table("deletions", deletions.clone().into_view())?;
+                let expected_keys = spec
+                    .keys
+                    .iter()
+                    .map(|key| {
+                        schema
+                            .field_with_name(key)
+                            .map(|field| field.clone().with_nullable(true))
+                    })
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let supplied_keys = spec
+                    .keys
+                    .iter()
+                    .map(|key| {
+                        deletions
+                            .schema()
+                            .as_arrow()
+                            .field_with_name(key)
+                            .ok()
+                            .map(|field| field.clone().with_nullable(true))
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if deletions.schema().fields().len() != spec.keys.len()
+                    || match supplied_keys {
+                        Some(fields) => !same_fields(
+                            &arrow::datatypes::Schema::new(expected_keys),
+                            &arrow::datatypes::Schema::new(fields),
+                        )?,
+                        None => true,
+                    }
+                {
+                    return Err(Error::refusal(
+                        "schema_mismatch",
+                        "deletion rows must contain exactly the typed key fields",
+                    ));
+                }
+                if any_rows(key_join(
+                    context.table("replacements").await?,
+                    context.table("deletions").await?,
+                    &spec.keys,
+                    datafusion::logical_expr::JoinType::Inner,
+                )?)
+                .await?
+                {
+                    return Err(Error::refusal(
+                        "conflicting_update",
+                        "replacement and deletion keys overlap",
+                    ));
+                }
+            }
+            let scope_sql = if spec.deletions.is_some() {
+                format!(
+                    "SELECT DISTINCT {keys} FROM replacements UNION SELECT DISTINCT {keys} FROM deletions"
+                )
+            } else {
+                format!("SELECT DISTINCT {keys} FROM replacements")
+            };
+            let scope = context.sql(&scope_sql).await?;
+            let applied = self
+                .replace_keys_with_merge(
+                    Replacement {
+                        dataset: &spec.dataset,
+                        directory: directory.clone(),
+                        before,
+                        keys: &spec.keys,
+                        scope,
+                        replacement,
+                        replacement_bytes: Some(
+                            admission
+                                .outputs
+                                .iter()
+                                .fold(0_u64, |sum, object| sum.saturating_add(object.bytes)),
+                        ),
+                    },
+                    spec.merge.as_ref(),
+                )
+                .await?;
+            let Applied {
+                table,
+                removed,
+                added,
+                metrics,
+            } = self
+                .finish_source_replacement_at(&spec.dataset, directory, captured_before, applied)
+                .await?;
+            let changes = ChangePin {
+                rules: super::changes::WRITE_RULES.into(),
+                base_version: spec.base.clone(),
+                base_manifest: base.manifest,
+                before_metadata: canonical_before.metadata.clone(),
+                after_metadata: table.metadata.clone(),
+                key_field_ids: field_ids,
+                removed,
+                added,
+            };
+            Ok(Prepared {
+                table,
+                changes: Some(changes),
+                metrics,
+                schema_input: None,
+            })
         })
     }
 
@@ -803,9 +804,7 @@ impl Engine {
                 let _metadata =
                     budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
                 let metadata = storage::fresh_metadata_at(
-                    storage::arrow_schema_to_schema_auto_assign_ids(
-                        scope.schema().as_arrow(),
-                    )?,
+                    storage::arrow_schema_to_schema_auto_assign_ids(scope.schema().as_arrow())?,
                     &directory.child("keys")?.as_string()?,
                 )?;
                 drop(storage::bounded_json(
@@ -1035,9 +1034,8 @@ impl Engine {
             )?;
             let replacement = if let Some(merge_spec) = merge {
                 let prior_df = if removed_files.is_empty() {
-                    let empty = datafusion::datasource::empty::EmptyTable::new(Arc::new(
-                        schema.clone(),
-                    ));
+                    let empty =
+                        datafusion::datasource::empty::EmptyTable::new(Arc::new(schema.clone()));
                     context.read_table(Arc::new(empty))?
                 } else {
                     let paths = removed_files
@@ -1281,7 +1279,8 @@ pub(super) fn coerce_dataframe_for_schema(
     let mut needs_projection = false;
     let mut exprs = Vec::with_capacity(actual.fields().len());
     for field in actual.fields() {
-        let col_expr = datafusion::prelude::col(datafusion::common::Column::from_name(field.name()));
+        let col_expr =
+            datafusion::prelude::col(datafusion::common::Column::from_name(field.name()));
         let target_type = if let Ok(expected_field) = expected.field_with_name(field.name()) {
             let coerced_actual = storage::coerce_data_type(field.data_type());
             if &coerced_actual == expected_field.data_type()
@@ -1290,16 +1289,13 @@ pub(super) fn coerce_dataframe_for_schema(
                     (
                         arrow::datatypes::DataType::Binary,
                         arrow::datatypes::DataType::LargeBinary,
-                    )
-                    | (
+                    ) | (
                         arrow::datatypes::DataType::LargeBinary,
                         arrow::datatypes::DataType::Binary,
-                    )
-                    | (
+                    ) | (
                         arrow::datatypes::DataType::Utf8,
                         arrow::datatypes::DataType::LargeUtf8,
-                    )
-                    | (
+                    ) | (
                         arrow::datatypes::DataType::LargeUtf8,
                         arrow::datatypes::DataType::Utf8,
                     )
@@ -1353,10 +1349,8 @@ pub(super) fn same_fields(
         return Ok(false);
     }
     let right = arrow::datatypes::Schema::new(fields);
-    Ok(
-        storage::arrow_schema_to_schema_auto_assign_ids(left)?
-            == storage::arrow_schema_to_schema_auto_assign_ids(&right)?,
-    )
+    Ok(storage::arrow_schema_to_schema_auto_assign_ids(left)?
+        == storage::arrow_schema_to_schema_auto_assign_ids(&right)?)
 }
 pub(super) async fn any_rows(frame: DataFrame) -> Result<bool> {
     let batches = frame

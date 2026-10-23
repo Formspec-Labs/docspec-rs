@@ -86,9 +86,7 @@ pub(crate) fn build_unbound_partition_spec(
         }
         builder = builder
             .add_partition_field(source.id, field_name, to_iceberg_transform(&spec.transform))
-            .map_err(|_| {
-                unsupported_partition_spec("partition spec could not be constructed")
-            })?;
+            .map_err(|_| unsupported_partition_spec("partition spec could not be constructed"))?;
     }
     let unbound = builder.build();
     validate_unbound_partition_spec(schema, &unbound)?;

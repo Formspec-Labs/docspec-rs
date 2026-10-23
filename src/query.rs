@@ -569,13 +569,16 @@ fn scalar_to_full_primitive_literal(
         }
         (ScalarValue::Int32(Some(v)), PrimitiveType::Int) => Some(PrimitiveLiteral::Int(*v)),
         (ScalarValue::Int64(Some(v)), PrimitiveType::Long) => Some(PrimitiveLiteral::Long(*v)),
-        (ScalarValue::UInt64(Some(v)), PrimitiveType::Decimal { precision: 20, scale: 0 }) => {
-            Some(PrimitiveLiteral::Int128(i128::from(*v)))
-        }
         (
-            ScalarValue::Decimal128(Some(v), p, s),
-            PrimitiveType::Decimal { precision, scale },
-        ) if u32::from(*p) == *precision && *s >= 0 && (*s as u32) == *scale => {
+            ScalarValue::UInt64(Some(v)),
+            PrimitiveType::Decimal {
+                precision: 20,
+                scale: 0,
+            },
+        ) => Some(PrimitiveLiteral::Int128(i128::from(*v))),
+        (ScalarValue::Decimal128(Some(v), p, s), PrimitiveType::Decimal { precision, scale })
+            if u32::from(*p) == *precision && *s >= 0 && (*s as u32) == *scale =>
+        {
             Some(PrimitiveLiteral::Int128(*v))
         }
         (ScalarValue::Date32(Some(v)), PrimitiveType::Date) => Some(PrimitiveLiteral::Int(*v)),
@@ -603,7 +606,7 @@ fn scalar_to_primitive_literal(
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn file_matches_inexact_filters(
     native_schema: &iceberg::spec::Schema,
     file: &iceberg::spec::DataFile,
@@ -807,8 +810,8 @@ pub(crate) fn bounded(
                     return Ok(None);
                 };
                 if crate::storage::has_splittable_skewed_column(&batch, limit) {
-                    for slice in crate::storage::split_oversized_batch(batch, limit)
-                        .map_err(external)?
+                    for slice in
+                        crate::storage::split_oversized_batch(batch, limit).map_err(external)?
                     {
                         pending.push_back(slice);
                     }

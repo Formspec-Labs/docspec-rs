@@ -409,12 +409,7 @@ impl CollectDistinctWithProvenanceAccumulator {
         bytes
     }
 
-    fn consider(
-        &mut self,
-        val: ScalarValue,
-        provs: Vec<ScalarValue>,
-        ords: Vec<ScalarValue>,
-    ) {
+    fn consider(&mut self, val: ScalarValue, provs: Vec<ScalarValue>, ords: Vec<ScalarValue>) {
         if val.is_null() {
             return;
         }
@@ -468,8 +463,7 @@ impl CollectDistinctWithProvenanceAccumulator {
         let mut columns: Vec<ArrayRef> = Vec::with_capacity(num_cols);
 
         // Column 0: distinct non-null values in ascending order.
-        let val_scalars: Vec<ScalarValue> =
-            self.entries.keys().map(|k| k.0.clone()).collect();
+        let val_scalars: Vec<ScalarValue> = self.entries.keys().map(|k| k.0.clone()).collect();
         let val_arr = scalars_to_array(val_scalars, &struct_fields[0])
             .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
         columns.push(val_arr);
@@ -494,18 +488,14 @@ impl CollectDistinctWithProvenanceAccumulator {
                     .values()
                     .map(|(_, ords)| ords[o_idx].clone())
                     .collect();
-                let o_arr =
-                    scalars_to_array(o_scalars, &struct_fields[1 + self.num_prov + o_idx])
-                        .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
+                let o_arr = scalars_to_array(o_scalars, &struct_fields[1 + self.num_prov + o_idx])
+                    .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
                 columns.push(o_arr);
             }
         }
 
-        let struct_arr: ArrayRef = Arc::new(StructArray::try_new(
-            struct_fields.clone(),
-            columns,
-            None,
-        )?);
+        let struct_arr: ArrayRef =
+            Arc::new(StructArray::try_new(struct_fields.clone(), columns, None)?);
         let coerced = coerce_array_to_field(&struct_arr, item_field)
             .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
         let offsets = OffsetBuffer::from_lengths([len]);

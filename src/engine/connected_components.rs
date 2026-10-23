@@ -543,11 +543,7 @@ impl GraphTopology {
                     .column_by_name(&edge.column)
                     .ok_or_else(invalid)?
                     .clone();
-                edge_cols.push((
-                    edge.namespace.to_ascii_lowercase(),
-                    is_body_edge(edge),
-                    col,
-                ));
+                edge_cols.push((edge.namespace.to_ascii_lowercase(), is_body_edge(edge), col));
             }
 
             for i in 0..n {
@@ -669,7 +665,11 @@ impl GraphTopology {
                 continue;
             }
             for &r in rows {
-                entries.push((doc_id.as_str(), self.occ_files[r].as_str(), self.occ_rows[r]));
+                entries.push((
+                    doc_id.as_str(),
+                    self.occ_files[r].as_str(),
+                    self.occ_rows[r],
+                ));
             }
         }
         if entries.is_empty() {
@@ -985,20 +985,8 @@ impl EvaluatedGraph {
         let batch = self.build_component_batch(spec, out_schema, selected)?;
         if batch.get_array_memory_size() > max_bytes && selected.len() > 1 {
             let mid = selected.len() / 2;
-            self.build_component_chunk_bounded(
-                spec,
-                out_schema,
-                &selected[..mid],
-                max_bytes,
-                out,
-            )?;
-            self.build_component_chunk_bounded(
-                spec,
-                out_schema,
-                &selected[mid..],
-                max_bytes,
-                out,
-            )?;
+            self.build_component_chunk_bounded(spec, out_schema, &selected[..mid], max_bytes, out)?;
+            self.build_component_chunk_bounded(spec, out_schema, &selected[mid..], max_bytes, out)?;
         } else {
             out.push(batch);
         }
@@ -1331,10 +1319,7 @@ impl EvaluatedGraph {
     }
 }
 
-fn output_schema(
-    in_schema: &SchemaRef,
-    spec: &ConnectedComponentsTransform,
-) -> Result<SchemaRef> {
+fn output_schema(in_schema: &SchemaRef, spec: &ConnectedComponentsTransform) -> Result<SchemaRef> {
     let mut fields = Vec::with_capacity(1 + spec.aggregates.len());
     fields.push(Field::new(&spec.document_id_column, DataType::Utf8, true));
     for agg in &spec.aggregates {
@@ -1783,14 +1768,7 @@ impl Engine {
                 DataType::Utf8,
                 true,
             )])));
-            let in_schema = Arc::new(
-                context
-                    .table("cc_input")
-                    .await?
-                    .schema()
-                    .as_arrow()
-                    .clone(),
-            );
+            let in_schema = Arc::new(context.table("cc_input").await?.schema().as_arrow().clone());
             let empty_rep = RecordBatch::new_empty(output_schema(&in_schema, cc)?);
             (vec![empty_scope], vec![empty_rep])
         } else {
@@ -1832,10 +1810,8 @@ impl Engine {
                 )?,
             )?;
 
-            let old_topo =
-                GraphTopology::from_table(&context, cc, "cc_old_input", budget).await?;
-            let new_topo =
-                GraphTopology::from_table(&context, cc, "cc_input", budget).await?;
+            let old_topo = GraphTopology::from_table(&context, cc, "cc_old_input", budget).await?;
+            let new_topo = GraphTopology::from_table(&context, cc, "cc_input", budget).await?;
 
             let (old_affected_docs, new_affected_docs) =
                 affected_component_closure(&old_topo, &new_topo, &seed_rks);

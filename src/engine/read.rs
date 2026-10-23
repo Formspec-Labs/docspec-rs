@@ -520,7 +520,9 @@ impl KeyTargets {
                         }
                         let src = arrow::array::StringArray::from(vec![v.as_str()]);
                         let casted = arrow::compute::cast(&src, &DataType::Date32).ok()?;
-                        let arr = casted.as_any().downcast_ref::<arrow::array::Date32Array>()?;
+                        let arr = casted
+                            .as_any()
+                            .downcast_ref::<arrow::array::Date32Array>()?;
                         (!arr.is_null(0)).then(|| arr.value(0))
                     })
                     .collect(),
@@ -571,7 +573,10 @@ impl KeyTargets {
         partition_spec: &iceberg::spec::PartitionSpec,
         field_id: i32,
         field_type: &iceberg::spec::Type,
-    ) -> Vec<(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)> {
+    ) -> Vec<(
+        usize,
+        std::collections::HashSet<iceberg::spec::PrimitiveLiteral>,
+    )> {
         use iceberg::spec::{PrimitiveLiteral, PrimitiveType, Type};
         let Type::Primitive(prim) = field_type else {
             return Vec::new();
@@ -672,7 +677,10 @@ impl KeyTargets {
         &self,
         file: &iceberg::spec::DataFile,
         key_field_id: Option<i32>,
-        key_partitions: &[(usize, std::collections::HashSet<iceberg::spec::PrimitiveLiteral>)],
+        key_partitions: &[(
+            usize,
+            std::collections::HashSet<iceberg::spec::PrimitiveLiteral>,
+        )],
     ) -> bool {
         use iceberg::spec::{Literal, PrimitiveLiteral};
         for (part_idx, allowed) in key_partitions {
@@ -720,9 +728,11 @@ impl KeyTargets {
             (Self::Int128s(set), PrimitiveLiteral::Int128(low), PrimitiveLiteral::Int128(high)) => {
                 low > high || set.range(low..=high).next().is_some()
             }
-            (Self::Binaries(set), PrimitiveLiteral::Binary(low), PrimitiveLiteral::Binary(high)) => {
-                low > high || set.range(low..=high).next().is_some()
-            }
+            (
+                Self::Binaries(set),
+                PrimitiveLiteral::Binary(low),
+                PrimitiveLiteral::Binary(high),
+            ) => low > high || set.range(low..=high).next().is_some(),
             (Self::Dates(set), PrimitiveLiteral::Int(low), PrimitiveLiteral::Int(high)) => {
                 low > high || set.range(low..=high).next().is_some()
             }

@@ -144,7 +144,8 @@ impl Scope {
                     Err(error) => return Err(error),
                 }
             }
-            self.root_ready.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.root_ready
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.namespace(catalog.create_namespace(&physical, properties).await?)
     }

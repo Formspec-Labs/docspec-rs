@@ -84,13 +84,9 @@ pub struct WhenThen {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TaggedScalarExpr {
     /// A SQL scalar expression parsed and validated for determinism against the input schema.
-    Sql {
-        expression: String,
-    },
+    Sql { expression: String },
     /// Reference an existing column by name.
-    Column {
-        name: String,
-    },
+    Column { name: String },
     /// A typed literal constant (or `null`).
     Literal {
         #[serde(default)]
@@ -103,25 +99,15 @@ pub enum TaggedScalarExpr {
         else_expr: Option<Box<ScalarExpr>>,
     },
     /// `COALESCE(expr1, expr2, ...)`.
-    Coalesce {
-        exprs: Vec<ScalarExpr>,
-    },
+    Coalesce { exprs: Vec<ScalarExpr> },
     /// `CONCAT(expr1, expr2, ...)`.
-    Concat {
-        exprs: Vec<ScalarExpr>,
-    },
+    Concat { exprs: Vec<ScalarExpr> },
     /// `LOWER(expr)`.
-    Lower {
-        expr: Box<ScalarExpr>,
-    },
+    Lower { expr: Box<ScalarExpr> },
     /// `UPPER(expr)`.
-    Upper {
-        expr: Box<ScalarExpr>,
-    },
+    Upper { expr: Box<ScalarExpr> },
     /// `TRIM(expr)`.
-    Trim {
-        expr: Box<ScalarExpr>,
-    },
+    Trim { expr: Box<ScalarExpr> },
 }
 
 /// Deterministic scalar expression accepted as either a SQL string or a structured AST.
@@ -518,7 +504,9 @@ impl ExportPolicy {
 
     /// Returns the primary field group name.
     pub fn primary_group(&self) -> &str {
-        self.groups.first().map_or(self.group.as_str(), String::as_str)
+        self.groups
+            .first()
+            .map_or(self.group.as_str(), String::as_str)
     }
 
     /// Returns whether this policy uses any extended multi-group, relational, or child-table features.
@@ -573,7 +561,9 @@ impl ExportPolicy {
         }
         // Deduplicate while preserving first-seen order.
         let mut seen = BTreeSet::new();
-        cols.into_iter().filter(|c| seen.insert(c.clone())).collect()
+        cols.into_iter()
+            .filter(|c| seen.insert(c.clone()))
+            .collect()
     }
 }
 

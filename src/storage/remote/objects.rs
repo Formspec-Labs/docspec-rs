@@ -270,8 +270,8 @@ static REGISTERED_PREFIXES: std::sync::OnceLock<
     std::sync::Mutex<std::collections::BTreeMap<String, RemoteObjects>>,
 > = std::sync::OnceLock::new();
 
-fn registered_prefixes() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, RemoteObjects>>
-{
+fn registered_prefixes()
+-> &'static std::sync::Mutex<std::collections::BTreeMap<String, RemoteObjects>> {
     REGISTERED_PREFIXES.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
 }
 
@@ -431,9 +431,7 @@ impl RemoteObjects {
             temporary,
             placement,
         };
-        if !temporary
-            && let Ok(mut guard) = registered_prefixes().lock()
-        {
+        if !temporary && let Ok(mut guard) = registered_prefixes().lock() {
             guard.insert(instance.owned_location(), instance.clone());
         }
         Ok(instance)

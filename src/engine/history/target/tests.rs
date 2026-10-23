@@ -41,7 +41,7 @@ fn build(dataset: &Id, name: &str, base: Option<&ReleasePin>) -> OperationReques
         definition: base
             .map_or("v1", |base| base.dataset.definition.as_str())
             .into(),
-            partition_by: Vec::new(),
+        partition_by: Vec::new(),
     })
 }
 

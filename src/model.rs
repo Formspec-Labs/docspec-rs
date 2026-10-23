@@ -384,7 +384,9 @@ impl LiteralValue {
             }
             serde_json::Value::String(s) => Ok(Self::String(s)),
             serde_json::Value::Object(mut map) => {
-                let Some(kind) = map.remove("kind").and_then(|v| v.as_str().map(str::to_owned))
+                let Some(kind) = map
+                    .remove("kind")
+                    .and_then(|v| v.as_str().map(str::to_owned))
                 else {
                     return Err("literal object must specify a string 'kind'".into());
                 };
@@ -595,11 +597,7 @@ impl<'de> Deserialize<'de> for ScalarExpr {
             Case {
                 #[serde(alias = "branches", alias = "cases")]
                 when_then: Vec<CaseWhen>,
-                #[serde(
-                    default,
-                    alias = "else",
-                    alias = "otherwise"
-                )]
+                #[serde(default, alias = "else", alias = "otherwise")]
                 else_expr: Option<Box<ScalarExpr>>,
             },
             Cast {
@@ -879,7 +877,9 @@ impl<'de> Deserialize<'de> for Predicate {
                 match (self.exprs, self.left, self.right) {
                     (Some(v), None, None) => Ok(v),
                     (None, Some(l), Some(r)) => Ok(vec![*l, *r]),
-                    _ => Err("logical predicate requires either 'exprs' or ('left' and 'right')".into()),
+                    _ => Err(
+                        "logical predicate requires either 'exprs' or ('left' and 'right')".into(),
+                    ),
                 }
             }
         }
@@ -907,7 +907,10 @@ impl<'de> Deserialize<'de> for Predicate {
                 "expected predicate object or SQL string",
             ));
         };
-        let Some(kind) = map.remove("kind").and_then(|v| v.as_str().map(str::to_owned)) else {
+        let Some(kind) = map
+            .remove("kind")
+            .and_then(|v| v.as_str().map(str::to_owned))
+        else {
             return Err(serde::de::Error::custom("predicate object missing 'kind'"));
         };
         let rest = serde_json::Value::Object(map);

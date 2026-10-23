@@ -909,7 +909,11 @@ async fn first_value_by_and_collect_distinct_with_provenance_full_and_incrementa
             2,
             None,
             Some("https://bbc.com/b1".into()),
-            vec![("bbc.com".into(), Some("https://bbc.com/b1".into()), Some(15))]
+            vec![(
+                "bbc.com".into(),
+                Some("https://bbc.com/b1".into()),
+                Some(15)
+            )]
         )
     );
 
@@ -1001,7 +1005,11 @@ async fn first_value_by_and_collect_distinct_with_provenance_full_and_incrementa
             2,
             Some("Late Breaking".into()),
             Some("https://bbc.com/b1".into()),
-            vec![("bbc.com".into(), Some("https://bbc.com/b1".into()), Some(15))]
+            vec![(
+                "bbc.com".into(),
+                Some("https://bbc.com/b1".into()),
+                Some(15)
+            )]
         )
     );
 }
@@ -1201,9 +1209,14 @@ async fn merge_multi_batch_chunking_and_schema_evolved_supply_flags() {
         .await
         .unwrap()
         .unwrap();
-    verify_applied_changes(&after_step1, &after_step2, &cert2.changes, tight_limits.clone())
-        .await
-        .unwrap();
+    verify_applied_changes(
+        &after_step1,
+        &after_step2,
+        &cert2.changes,
+        tight_limits.clone(),
+    )
+    .await
+    .unwrap();
 
     // Inspect physical native table including `__docspec_supplied_4`
     let budget = docspec::budget::Budget::new(tight_limits).unwrap();

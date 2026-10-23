@@ -461,7 +461,9 @@ impl Engine {
                 } else {
                     #[cfg(feature = "test-util")]
                     work_started("receipts");
-                    let directory = self.reserve_location(request, operation, "receipts").await?;
+                    let directory = self
+                        .reserve_location(request, operation, "receipts")
+                        .await?;
                     let context = self.context();
                     let native = self
                         .inner

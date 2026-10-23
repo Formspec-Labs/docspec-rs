@@ -399,8 +399,16 @@ enum PausedOperation {
     Compaction,
 }
 
-#[tokio::main(worker_threads = 12)]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(12)
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -899,23 +907,13 @@ async fn main() -> anyhow::Result<()> {
                         _ => unreachable!(),
                     };
                     let release = read_json::<ReleasePin>(release)?;
-                    let mut stream = if occurrences {
+                    let stream = if occurrences {
                         engine.read_source_occurrences(&release).await?
                     } else {
                         engine.read_combined(&release).await?
                     };
-                    let file = std::fs::OpenOptions::new()
-                        .create_new(true)
-                        .write(true)
-                        .open(output)?;
-                    let mut writer = arrow::ipc::writer::StreamWriter::try_new(
-                        BufWriter::new(file),
-                        &stream.schema(),
-                    )?;
-                    while let Some(batch) = stream.try_next().await? {
-                        writer.write(&batch)?;
-                    }
-                    writer.finish()?;
+                    write_stream(output, stream).await?;
+                    engine.shutdown().await?;
                 }
                 Command::Latest { dataset } => {
                     print_json(&engine.latest(&Id::new(dataset)?).await?)?

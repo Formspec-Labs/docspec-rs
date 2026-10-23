@@ -1001,12 +1001,7 @@ async fn connected_components_full_and_incremental_merge_split_and_reuse_untouch
     );
 
     // Verify equivalence with a fresh Full refresh on captures_split:
-    let mut full_spec_2 = cc_spec(
-        &captures_split,
-        None,
-        "full-check-split",
-        RefreshMode::Full,
-    );
+    let mut full_spec_2 = cc_spec(&captures_split, None, "full-check-split", RefreshMode::Full);
     full_spec_2.dataset = id("documents_full_check_2");
     let docs_full_2 = engine.refresh(&full_spec_2).await.unwrap();
     assert_eq!(actual_split, read_components(&engine, &docs_full_2).await);
@@ -1055,10 +1050,38 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
     // - Rows with empty `source_id` and no edges fall back to `file:row` occurrence identity
     //   instead of colliding on `sha256(["sources", []])`.
     let rows = [
-        ("src-a", Some("canon-1"), Some("body-xyz"), &[][..], 10, "Draft A"),
-        ("src-b", Some("canon-2"), Some("body-xyz"), &[][..], 20, "Draft B"),
-        ("html-404-1", Some("canon-404-1"), None, &[][..], 1, "Not Found 1"),
-        ("html-404-2", Some("canon-404-2"), None, &[][..], 1, "Not Found 2"),
+        (
+            "src-a",
+            Some("canon-1"),
+            Some("body-xyz"),
+            &[][..],
+            10,
+            "Draft A",
+        ),
+        (
+            "src-b",
+            Some("canon-2"),
+            Some("body-xyz"),
+            &[][..],
+            20,
+            "Draft B",
+        ),
+        (
+            "html-404-1",
+            Some("canon-404-1"),
+            None,
+            &[][..],
+            1,
+            "Not Found 1",
+        ),
+        (
+            "html-404-2",
+            Some("canon-404-2"),
+            None,
+            &[][..],
+            1,
+            "Not Found 2",
+        ),
         ("", None, None, &[][..], 50, "Empty Key 1"),
         ("", None, None, &[][..], 60, "Empty Key 2"),
     ];
@@ -1082,55 +1105,56 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
         .await
         .unwrap();
 
-    let make_spec = |input: &ReleasePin, base: Option<Id>, op: &str, mode: RefreshMode| RefreshSpec {
-        dataset: id("web_docs"),
-        operation: id(op),
-        base,
-        definition: "v1".into(),
-        policy: RefreshPolicy::Captured,
-        mode,
-        relationship: None,
-        transform: RefreshTransform::ConnectedComponents(ConnectedComponentsTransform {
-            input: input.version_ref(),
-            row_key: "source_id".into(),
-            edges: vec![
-                ConnectedEdgeSpec {
-                    namespace: "canonical".into(),
-                    column: "canonical_url".into(),
-                },
-                ConnectedEdgeSpec {
-                    namespace: "body".into(),
-                    column: "content_hash".into(),
-                },
-            ],
-            order_by: vec![SortColumn::asc("priority")],
-            document_id_column: "document_id".into(),
-            aggregates: vec![
-                AggregateField {
-                    name: "rep_title".into(),
-                    function: AggregateFunction::FirstValue {
-                        field: "title".into(),
+    let make_spec =
+        |input: &ReleasePin, base: Option<Id>, op: &str, mode: RefreshMode| RefreshSpec {
+            dataset: id("web_docs"),
+            operation: id(op),
+            base,
+            definition: "v1".into(),
+            policy: RefreshPolicy::Captured,
+            mode,
+            relationship: None,
+            transform: RefreshTransform::ConnectedComponents(ConnectedComponentsTransform {
+                input: input.version_ref(),
+                row_key: "source_id".into(),
+                edges: vec![
+                    ConnectedEdgeSpec {
+                        namespace: "canonical".into(),
+                        column: "canonical_url".into(),
                     },
-                },
-                AggregateField {
-                    name: "member_count".into(),
-                    function: AggregateFunction::CountRows,
-                },
-                AggregateField {
-                    name: "sources".into(),
-                    function: AggregateFunction::CollectSet {
-                        field: "source_id".into(),
+                    ConnectedEdgeSpec {
+                        namespace: "body".into(),
+                        column: "content_hash".into(),
                     },
-                },
-                AggregateField {
-                    name: "all_tags".into(),
-                    function: AggregateFunction::CollectSet {
-                        field: "tags".into(),
+                ],
+                order_by: vec![SortColumn::asc("priority")],
+                document_id_column: "document_id".into(),
+                aggregates: vec![
+                    AggregateField {
+                        name: "rep_title".into(),
+                        function: AggregateFunction::FirstValue {
+                            field: "title".into(),
+                        },
                     },
-                },
-            ],
-        }),
-    };
+                    AggregateField {
+                        name: "member_count".into(),
+                        function: AggregateFunction::CountRows,
+                    },
+                    AggregateField {
+                        name: "sources".into(),
+                        function: AggregateFunction::CollectSet {
+                            field: "source_id".into(),
+                        },
+                    },
+                    AggregateField {
+                        name: "all_tags".into(),
+                        function: AggregateFunction::CollectSet {
+                            field: "tags".into(),
+                        },
+                    },
+                ],
+            }),
+        };
 
     let docs1 = engine
         .refresh(&make_spec(&captures, None, "initial", RefreshMode::Full))
@@ -1149,14 +1173,27 @@ async fn body_namespace_document_id_and_attribute_only_incremental_update() {
         actual1[&expected_body_doc_id].sources,
         vec!["src-a".to_owned(), "src-b".to_owned()]
     );
-    assert_eq!(actual1[&expected_404_1].sources, vec!["html-404-1".to_owned()]);
-    assert_eq!(actual1[&expected_404_2].sources, vec!["html-404-2".to_owned()]);
+    assert_eq!(
+        actual1[&expected_404_1].sources,
+        vec!["html-404-1".to_owned()]
+    );
+    assert_eq!(
+        actual1[&expected_404_2].sources,
+        vec!["html-404-2".to_owned()]
+    );
 
     // Attribute-only incremental update: change `src-b` priority from 20 -> 5 and title -> "Final B"
     // without changing any edges or component membership!
     let attr_file = write_cc_input(
         &root.path().join("body_attr.parquet"),
-        &[("src-b", Some("canon-2"), Some("body-xyz"), &[][..], 5, "Final B")],
+        &[(
+            "src-b",
+            Some("canon-2"),
+            Some("body-xyz"),
+            &[][..],
+            5,
+            "Final B",
+        )],
     );
     let captures2 = engine
         .update(&UpdateSpec {

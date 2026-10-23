@@ -190,100 +190,101 @@ impl Engine {
         admission: &'a PhaseResult,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
         Box::pin(async move {
-        let input = admission
-            .outputs
-            .first()
-            .ok_or_else(|| Error::refusal("corrupt_phase", "admission has no retained input"))?;
-        let budget = &self.inner.lifecycle.budget;
-        // Resolve and admit the saved intent before opening Parquet or planning
-        // the query. Its actual retained size, not the configured ceiling, stays
-        // charged while native processing uses it.
-        let mut planned = None;
-        let RetainedCandidate {
-            pending,
-            resuming,
-            native: initial,
-            _memory,
-        } = if let Some(saved) = self.existing_candidate(spec, operation, input).await? {
-            saved
-        } else {
-            let source = self.initial_source(spec, input).await?;
-            let schema =
-                storage::arrow_schema_to_schema_auto_assign_ids(source.arrow_schema().as_ref())?;
-            let pending = self
-                .reserve_candidate(spec, operation, input, schema)
-                .await?;
-            planned = Some(source);
-            pending
-        };
-        let catalog = self.inner.lifecycle.catalog.as_ref();
-        #[cfg(all(not(test), not(feature = "test-util")))]
-        let check_existing = resuming;
-        #[cfg(any(test, feature = "test-util"))]
-        let check_existing = true;
-        let table = if check_existing && catalog.table_exists(&pending.identifier).await? {
-            catalog.load_table(&pending.identifier).await?
-        } else {
-            self.inner
-                .objects
-                .create_candidate_metadata(
-                    &pending.metadata,
-                    pending.metadata_json.into_bytes(),
-                    budget,
-                    resuming,
-                )
-                .await?;
-            match catalog
-                .register_table(&pending.identifier, pending.metadata.path.clone())
-                .await
-            {
-                Ok(table) => table,
-                Err(error) => {
-                    // Lost response or competing exact registration: reconcile only
-                    // the retained identifier. An absent table preserves the error.
-                    if !catalog.table_exists(&pending.identifier).await? {
-                        return Err(error.into());
-                    }
-                    catalog.load_table(&pending.identifier).await?
-                }
-            }
-        };
-        let table = self.inner.objects.bind_table(&table)?.into_native();
-        if let Some(prepared) = self
-            .recover_initial_output(&spec.dataset, &table, &initial, &pending.metadata)
-            .await?
-        {
-            return Ok(prepared);
-        }
-        let result = async {
-            #[cfg(any(test, feature = "test-util"))]
-            crate::catalog::GuardedCatalog::new(catalog, &table)
-                .load_table(table.identifier())
-                .await?;
-            let source = match planned {
-                Some(source) => source,
-                None => self.initial_source(spec, input).await?,
+            let input = admission.outputs.first().ok_or_else(|| {
+                Error::refusal("corrupt_phase", "admission has no retained input")
+            })?;
+            let budget = &self.inner.lifecycle.budget;
+            // Resolve and admit the saved intent before opening Parquet or planning
+            // the query. Its actual retained size, not the configured ceiling, stays
+            // charged while native processing uses it.
+            let mut planned = None;
+            let RetainedCandidate {
+                pending,
+                resuming,
+                native: initial,
+                _memory,
+            } = if let Some(saved) = self.existing_candidate(spec, operation, input).await? {
+                saved
+            } else {
+                let source = self.initial_source(spec, input).await?;
+                let schema = storage::arrow_schema_to_schema_auto_assign_ids(
+                    source.arrow_schema().as_ref(),
+                )?;
+                let pending = self
+                    .reserve_candidate(spec, operation, input, schema)
+                    .await?;
+                planned = Some(source);
+                pending
             };
-            self.write_initial_source(&spec.dataset, table, source).await
-        }
-        .await;
-        match result {
-            Ok(prepared) => Ok(prepared),
-            Err(error) => {
-                // A competing exact retry or lost append response can commit
-                // before this writer fails. Reload only the retained candidate;
-                // never append again or allocate another output identity.
-                let table = catalog.load_table(&pending.identifier).await?;
-                let table = self.inner.objects.bind_table(&table)?.into_native();
-                match self
-                    .recover_initial_output(&spec.dataset, &table, &initial, &pending.metadata)
-                    .await?
+            let catalog = self.inner.lifecycle.catalog.as_ref();
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            let check_existing = resuming;
+            #[cfg(any(test, feature = "test-util"))]
+            let check_existing = true;
+            let table = if check_existing && catalog.table_exists(&pending.identifier).await? {
+                catalog.load_table(&pending.identifier).await?
+            } else {
+                self.inner
+                    .objects
+                    .create_candidate_metadata(
+                        &pending.metadata,
+                        pending.metadata_json.into_bytes(),
+                        budget,
+                        resuming,
+                    )
+                    .await?;
+                match catalog
+                    .register_table(&pending.identifier, pending.metadata.path.clone())
+                    .await
                 {
-                    Some(prepared) => Ok(prepared),
-                    None => Err(error),
+                    Ok(table) => table,
+                    Err(error) => {
+                        // Lost response or competing exact registration: reconcile only
+                        // the retained identifier. An absent table preserves the error.
+                        if !catalog.table_exists(&pending.identifier).await? {
+                            return Err(error.into());
+                        }
+                        catalog.load_table(&pending.identifier).await?
+                    }
+                }
+            };
+            let table = self.inner.objects.bind_table(&table)?.into_native();
+            if let Some(prepared) = self
+                .recover_initial_output(&spec.dataset, &table, &initial, &pending.metadata)
+                .await?
+            {
+                return Ok(prepared);
+            }
+            let result = async {
+                #[cfg(any(test, feature = "test-util"))]
+                crate::catalog::GuardedCatalog::new(catalog, &table)
+                    .load_table(table.identifier())
+                    .await?;
+                let source = match planned {
+                    Some(source) => source,
+                    None => self.initial_source(spec, input).await?,
+                };
+                self.write_initial_source(&spec.dataset, table, source)
+                    .await
+            }
+            .await;
+            match result {
+                Ok(prepared) => Ok(prepared),
+                Err(error) => {
+                    // A competing exact retry or lost append response can commit
+                    // before this writer fails. Reload only the retained candidate;
+                    // never append again or allocate another output identity.
+                    let table = catalog.load_table(&pending.identifier).await?;
+                    let table = self.inner.objects.bind_table(&table)?.into_native();
+                    match self
+                        .recover_initial_output(&spec.dataset, &table, &initial, &pending.metadata)
+                        .await?
+                    {
+                        Some(prepared) => Ok(prepared),
+                        None => Err(error),
+                    }
                 }
             }
-        }
         })
     }
 

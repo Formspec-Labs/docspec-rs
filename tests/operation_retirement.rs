@@ -338,3 +338,75 @@ async fn active_operation_must_be_abandoned_and_its_phases_remain_independent() 
         assert_eq!(after[&generation.key], before[&generation.key]);
     }
 }
+
+#[tokio::test]
+async fn compact_lifecycle_reclaims_retired_incomplete_operation_and_protections() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = open(root.path()).await;
+    let a = build(root.path(), "a", vec![1, 2, 3]);
+    let initial_release = engine.run(&a).await.unwrap();
+
+    // 1. Run incomplete operation b up to injected failure
+    let b = build(root.path(), "b", vec![4, 5, 6]);
+    assert_eq!(
+        engine.run_until(&b, "processing").await.unwrap_err().code(),
+        "injected_failure"
+    );
+    let before_abandon = engine.inspect(&b.dataset).await.unwrap();
+    let b_phases = phase_keys(&before_abandon, &b.operation);
+    assert!(
+        !b_phases.is_empty(),
+        "incomplete operation should have written phase records"
+    );
+    assert!(
+        before_abandon.keys().any(|k| k.starts_with("protection/")),
+        "incomplete operation should have registered protection records"
+    );
+
+    // 2. Abandon operation b and retire its recovery
+    let _abandoned = engine
+        .abandon(&b.dataset, &b.operation, "abandon failed operation b")
+        .await
+        .unwrap();
+    let recovery = engine
+        .plan_operation_retirement(
+            &b.dataset,
+            &id("b-recovery"),
+            &b.operation,
+            "end abandoned b recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&recovery).await.unwrap();
+
+    // 3. Compact lifecycle
+    let stats = engine.compact_lifecycle(&b.dataset).await.unwrap();
+    assert_eq!(stats.revisions_after, 1);
+
+    // 4. Assert obsolete phases and attempts are reclaimed while operation/request remain protected
+    let after_compaction = engine.inspect(&b.dataset).await.unwrap();
+    assert!(
+        after_compaction.contains_key(&format!("operation/{}", b.operation)),
+        "operation/b must remain preserved in snapshot for recovery receipt validation"
+    );
+    assert!(
+        after_compaction.contains_key(&format!("request/{}", b.operation)),
+        "request/b must remain preserved in snapshot for recovery receipt validation"
+    );
+    assert!(
+        after_compaction.contains_key("retirement/b-recovery"),
+        "retirement receipt must remain in lifecycle snapshot"
+    );
+    for key in &b_phases {
+        assert!(
+            !after_compaction.contains_key(key),
+            "obsolete phase record {key} must be reclaimed by compact_lifecycle"
+        );
+    }
+
+    // 5. Verify the active release remains verified and retention inspection is clean
+    drop(engine);
+    let reopened = open(root.path()).await;
+    assert_eq!(reopened.latest(&a.dataset).await.unwrap(), initial_release);
+    assert_eq!(values(&reopened, &initial_release).await, vec![1, 2, 3]);
+}

@@ -501,7 +501,10 @@ async fn filtered_and_projected_join_transform_full_and_incremental() {
     // - outlet "blog" flips active=true -> doc 3 ENTERS the filter!
     let l_upd = write_left(
         "left-upd.parquet",
-        &[(1, "reuters", Some("Breaking Story"), 20), (2, "reuters", None, 200)],
+        &[
+            (1, "reuters", Some("Breaking Story"), 20),
+            (2, "reuters", None, 200),
+        ],
     );
     let r_upd = write_right(
         "right-upd.parquet",
@@ -570,10 +573,7 @@ async fn filtered_and_projected_join_transform_full_and_incremental() {
                     "short".into()
                 )
             ),
-            (
-                3,
-                ("blog".into(), "Short Post".into(), 1200, "long".into())
-            ),
+            (3, ("blog".into(), "Short Post".into(), 1200, "long".into())),
         ])
     );
 }

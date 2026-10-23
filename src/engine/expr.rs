@@ -220,16 +220,10 @@ fn collect_sql_identifiers(sql: &str, out: &mut BTreeSet<String>) -> Result<()> 
     let statements = Parser::parse_sql(&GenericDialect {}, &wrapped)
         .map_err(|e| Error::refusal("invalid_refresh", format!("invalid SQL expression: {e}")))?;
     let Some(Statement::Query(query)) = statements.first() else {
-        return Err(Error::refusal(
-            "invalid_refresh",
-            "invalid SQL expression",
-        ));
+        return Err(Error::refusal("invalid_refresh", "invalid SQL expression"));
     };
     let SetExpr::Select(select) = query.body.as_ref() else {
-        return Err(Error::refusal(
-            "invalid_refresh",
-            "invalid SQL expression",
-        ));
+        return Err(Error::refusal("invalid_refresh", "invalid SQL expression"));
     };
     if select.projection.len() != 1 {
         return Err(Error::refusal(
@@ -307,7 +301,9 @@ pub(super) fn collect_predicate_refs(
             collect_scalar_refs(left, out)?;
             collect_scalar_refs(right, out)
         }
-        Predicate::IsNull { expr } | Predicate::IsNotNull { expr } => collect_scalar_refs(expr, out),
+        Predicate::IsNull { expr } | Predicate::IsNotNull { expr } => {
+            collect_scalar_refs(expr, out)
+        }
         Predicate::InList { expr, list, .. } => {
             collect_scalar_refs(expr, out)?;
             for item in list {
@@ -612,7 +608,10 @@ pub(super) fn compile_join_sql(
             };
             return Ok(format!("{alias}.{}", quote(src_field)));
         }
-        match (left_public.contains(col_ref), right_public.contains(col_ref)) {
+        match (
+            left_public.contains(col_ref),
+            right_public.contains(col_ref),
+        ) {
             (true, false) => Ok(format!("l.{}", quote(col_ref))),
             (false, true) => Ok(format!("r.{}", quote(col_ref))),
             (true, true) => Err(Error::refusal(
@@ -708,7 +707,11 @@ pub(super) fn compile_join_sql(
                 JoinSide::Left => "l",
                 JoinSide::Right => "r",
             };
-            select_items.push(format!("{side}.{} AS {}", quote(&field.field), quote(&field.name)));
+            select_items.push(format!(
+                "{side}.{} AS {}",
+                quote(&field.field),
+                quote(&field.name)
+            ));
         }
     }
     for (name, proj_sql) in &compiled_projections {
@@ -856,7 +859,9 @@ pub(super) fn compile_aggregate_sql(
             } else {
                 Err(Error::refusal(
                     "unknown_field",
-                    format!("unknown input column '{col_ref}' in pre-aggregation projection '{name}'"),
+                    format!(
+                        "unknown input column '{col_ref}' in pre-aggregation projection '{name}'"
+                    ),
                 ))
             }
         })?;

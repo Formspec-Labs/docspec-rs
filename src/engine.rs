@@ -37,7 +37,7 @@ mod compaction;
 mod comparison;
 mod corrections;
 mod evidence;
-mod export;
+pub mod export;
 mod expr;
 #[doc(inline)]
 pub use evidence::read_receipts;
@@ -517,6 +517,10 @@ impl Engine {
             .entry(dataset.clone())
             .or_default()
             .clone()
+    }
+
+    pub fn limits(&self) -> &Limits {
+        &self.inner.lifecycle.budget.limits
     }
 
     fn context(&self) -> SessionContext {
@@ -1310,143 +1314,145 @@ impl Engine {
             };
             stop_after(stop, "admission")?;
 
-            let (processing, _freshly_processed) =
-                if let Some(phase) = self.phase(spec, operation, "processing").await? {
-                    (phase, false)
-                } else {
-                    (
-                        crate::progress::phase(spec.dataset(), spec.operation(), "processing", async {
-                    #[cfg(feature = "test-util")]
-                    work_started("processing");
-                    let (prepared, update_source, _capture_memory) =
-                        if let OperationRequest::Build(build) = spec
-                            && build.base.is_none()
-                        {
-                            (
-                                self.process_initial_build(build, operation, &admission)
-                                    .await?,
-                                None,
-                                None,
-                            )
-                        } else {
-                            // Unacknowledged work starts in a fresh protected attempt. Completed
-                            // processing resolves above before any writer or input query.
-                            let directory =
-                                self.reserve_location(spec, operation, "processing").await?;
-                            let (_capture_memory, update_source) =
-                                if admission::captures_source(spec) {
-                                    let view = lifecycle.open(spec.dataset()).await?;
-                                    let memory =
-                                        self.admission_memory(&view, spec.operation()).await?;
-                                    let source = self
-                                        .admitted_dependencies(&view, spec.operation())
+            let (processing, _freshly_processed) = if let Some(phase) =
+                self.phase(spec, operation, "processing").await?
+            {
+                (phase, false)
+            } else {
+                (
+                    crate::progress::phase(spec.dataset(), spec.operation(), "processing", async {
+                        #[cfg(feature = "test-util")]
+                        work_started("processing");
+                        let (prepared, update_source, _capture_memory) =
+                            if let OperationRequest::Build(build) = spec
+                                && build.base.is_none()
+                            {
+                                (
+                                    self.process_initial_build(build, operation, &admission)
+                                        .await?,
+                                    None,
+                                    None,
+                                )
+                            } else {
+                                // Unacknowledged work starts in a fresh protected attempt. Completed
+                                // processing resolves above before any writer or input query.
+                                let directory =
+                                    self.reserve_location(spec, operation, "processing").await?;
+                                let (_capture_memory, update_source) =
+                                    if admission::captures_source(spec) {
+                                        let view = lifecycle.open(spec.dataset()).await?;
+                                        let memory =
+                                            self.admission_memory(&view, spec.operation()).await?;
+                                        let source = self
+                                            .admitted_dependencies(&view, spec.operation())
+                                            .await?
+                                            .and_then(|dependencies| dependencies.update_source);
+                                        (Some(memory), source)
+                                    } else {
+                                        (None, None)
+                                    };
+                                let prepared = match spec {
+                                    OperationRequest::Build(build) => {
+                                        self.process_build(
+                                            build,
+                                            directory.local_path()?,
+                                            &admission,
+                                        )
                                         .await?
-                                        .and_then(|dependencies| dependencies.update_source);
-                                    (Some(memory), source)
-                                } else {
-                                    (None, None)
+                                    }
+                                    OperationRequest::Update(update) => {
+                                        self.process_update(
+                                            update,
+                                            &directory,
+                                            &admission,
+                                            update_source.as_ref(),
+                                        )
+                                        .await?
+                                    }
+                                    OperationRequest::Schema(schema) => {
+                                        Box::pin(self.process_schema(
+                                            schema,
+                                            directory.local_path()?,
+                                            operation,
+                                        ))
+                                        .await?
+                                    }
+                                    OperationRequest::Evidence(evidence) => {
+                                        self.process_receipts(evidence, &directory, &admission)
+                                            .await?
+                                    }
+                                    OperationRequest::Refresh(refresh) => {
+                                        self.process_refresh(
+                                            refresh,
+                                            &directory,
+                                            &admission,
+                                            operation,
+                                            update_source.as_ref(),
+                                        )
+                                        .await?
+                                    }
+                                    OperationRequest::Backfill(_) => {
+                                        return Err(Error::refusal(
+                                            "invalid_operation",
+                                            "use the backfill service",
+                                        ));
+                                    }
                                 };
-                            let prepared = match spec {
-                                OperationRequest::Build(build) => {
-                                    self.process_build(
-                                        build,
-                                        directory.local_path()?,
-                                        &admission,
-                                    )
-                                    .await?
-                                }
-                                OperationRequest::Update(update) => {
-                                    self.process_update(
-                                        update,
-                                        &directory,
-                                        &admission,
-                                        update_source.as_ref(),
-                                    )
-                                    .await?
-                                }
-                                OperationRequest::Schema(schema) => {
-                                    Box::pin(self.process_schema(
-                                        schema,
-                                        directory.local_path()?,
-                                        operation,
-                                    ))
-                                    .await?
-                                }
-                                OperationRequest::Evidence(evidence) => {
-                                    self.process_receipts(evidence, &directory, &admission)
-                                        .await?
-                                }
-                                OperationRequest::Refresh(refresh) => {
-                                    self.process_refresh(
-                                        refresh,
-                                        &directory,
-                                        &admission,
-                                        operation,
-                                        update_source.as_ref(),
-                                    )
-                                    .await?
-                                }
-                                OperationRequest::Backfill(_) => {
-                                    return Err(Error::refusal(
-                                        "invalid_operation",
-                                        "use the backfill service",
-                                    ));
-                                }
+                                (prepared, update_source, _capture_memory)
                             };
-                            (prepared, update_source, _capture_memory)
+                        let mut outputs = prepared.table.objects.clone();
+                        if let Some(changes) = &prepared.changes {
+                            outputs.push(changes.base_manifest.clone());
+                            outputs.extend(changes.removed.objects.clone());
+                            outputs.extend(changes.added.objects.clone());
+                        }
+                        outputs.sort_by(|left, right| left.path.cmp(&right.path));
+                        outputs.dedup();
+                        let phase = PhaseResult {
+                            operation: spec.operation().clone(),
+                            phase: "processing".into(),
+                            request_digest: request.to_owned(),
+                            eligibility: operation.eligibility,
+                            outputs,
+                            rows: prepared.table.rows,
+                            table: Some(prepared.table),
+                            changes: prepared.changes,
+                            coverage: admission.coverage.clone(),
+                            metrics: prepared.metrics,
+                            dependencies: Some(PhaseDependencies {
+                                input_sources: admission
+                                    .dependencies
+                                    .as_ref()
+                                    .map(|dependencies| dependencies.input_sources.clone())
+                                    .unwrap_or_default(),
+                                admitted_inputs: spec
+                                    .inputs()
+                                    .keys()
+                                    .cloned()
+                                    .zip(admission.outputs.iter().cloned())
+                                    .collect(),
+                                base_manifest: operation.base_manifest.clone(),
+                                schema_metadata: prepared.schema_input.into_iter().collect(),
+                                tables: update_source
+                                    .as_ref()
+                                    .map(NativeSnapshotRef::from)
+                                    .into_iter()
+                                    .collect(),
+                            }),
                         };
-                    let mut outputs = prepared.table.objects.clone();
-                    if let Some(changes) = &prepared.changes {
-                        outputs.push(changes.base_manifest.clone());
-                        outputs.extend(changes.removed.objects.clone());
-                        outputs.extend(changes.added.objects.clone());
-                    }
-                    outputs.sort_by(|left, right| left.path.cmp(&right.path));
-                    outputs.dedup();
-                    let phase = PhaseResult {
-                        operation: spec.operation().clone(),
-                        phase: "processing".into(),
-                        request_digest: request.to_owned(),
-                        eligibility: operation.eligibility,
-                        outputs,
-                        rows: prepared.table.rows,
-                        table: Some(prepared.table),
-                        changes: prepared.changes,
-                        coverage: admission.coverage.clone(),
-                        metrics: prepared.metrics,
-                        dependencies: Some(PhaseDependencies {
-                            input_sources: admission
-                                .dependencies
-                                .as_ref()
-                                .map(|dependencies| dependencies.input_sources.clone())
-                                .unwrap_or_default(),
-                            admitted_inputs: spec
-                                .inputs()
-                                .keys()
-                                .cloned()
-                                .zip(admission.outputs.iter().cloned())
-                                .collect(),
-                            base_manifest: operation.base_manifest.clone(),
-                            schema_metadata: prepared.schema_input.into_iter().collect(),
-                            tables: update_source
-                                .as_ref()
-                                .map(NativeSnapshotRef::from)
-                                .into_iter()
-                                .collect(),
-                        }),
-                    };
-                    let view = lifecycle.open(spec.dataset()).await?;
-                    let mut protections = self.request_protections(&view, spec.operation()).await?;
-                    ReferenceProtections::inherit(
-                        &mut protections,
-                        admission.protections.as_ref(),
-                    )?;
-                    self.complete(spec, operation, phase, protections).await
-                })
-                .await?,
-                        true,
-                    )
-                };
+                        let view = lifecycle.open(spec.dataset()).await?;
+                        let mut protections =
+                            self.request_protections(&view, spec.operation()).await?;
+                        ReferenceProtections::inherit(
+                            &mut protections,
+                            admission.protections.as_ref(),
+                        )?;
+                        self.complete(spec, operation, phase, protections).await
+                    })
+                    .await?,
+                    true,
+                )
+            };
             stop_after(stop, "processing")?;
 
             Ok(PreparedSource {
@@ -1576,14 +1582,8 @@ impl Engine {
                         let boundary = view.table.metadata_location_result()?.to_owned();
                         drop(guards);
                         prepared = Some(
-                            self.protect_admission(
-                                spec,
-                                boundary,
-                                base,
-                                update_source,
-                                decoding,
-                            )
-                            .await?,
+                            self.protect_admission(spec, boundary, base, update_source, decoding)
+                                .await?,
                         );
                         continue;
                     };
@@ -1759,7 +1759,10 @@ impl Engine {
                 processed.clone()
             };
             let related = if let OperationRequest::Refresh(refresh) = spec {
-                Some(self.prepare_evidence(refresh, &operation, &processing, stop).await?)
+                Some(
+                    self.prepare_evidence(refresh, &operation, &processing, stop)
+                        .await?,
+                )
             } else if evidence_only {
                 base.as_ref()
                     .and_then(|base| base.dataset.related.as_ref())
@@ -1913,19 +1916,21 @@ impl Engine {
                 .await?
             };
             stop_after(stop, "validation")?;
-            Box::pin(self.prepare_changes(
-                spec,
-                &operation,
-                base.as_ref(),
-                if evidence_only {
-                    None
-                } else {
-                    processing.changes.as_ref()
-                },
-                receipts
-                    .as_ref()
-                    .and_then(|receipts| receipts.changes.as_ref()),
-            ))
+            Box::pin(
+                self.prepare_changes(
+                    spec,
+                    &operation,
+                    base.as_ref(),
+                    if evidence_only {
+                        None
+                    } else {
+                        processing.changes.as_ref()
+                    },
+                    receipts
+                        .as_ref()
+                        .and_then(|receipts| receipts.changes.as_ref()),
+                ),
+            )
             .await?;
             let protection_view = lifecycle.open(spec.dataset()).await?;
             let mut readback_protections = self
@@ -1985,12 +1990,10 @@ impl Engine {
                             let Some(prev_ref) = &prior_cursor.parent_manifest else {
                                 break;
                             };
-                            let memory = Arc::new(
-                                self.inner
-                                    .lifecycle
-                                    .budget
-                                    .reserve(self.inner.lifecycle.budget.limits.max_metadata_bytes)?,
-                            );
+                            let memory =
+                                Arc::new(self.inner.lifecycle.budget.reserve(
+                                    self.inner.lifecycle.budget.limits.max_metadata_bytes,
+                                )?);
                             let prev: DatasetPin = inputs::read_manifest(
                                 &self.inner.objects,
                                 prev_ref,
@@ -2138,7 +2141,9 @@ impl Engine {
                     _ => base.as_ref().map(|b| b.dataset.partition_by.as_slice()),
                 };
                 if declared.is_some_and(|d| !d.is_empty())
-                    || base.as_ref().is_some_and(|b| !b.dataset.partition_by.is_empty())
+                    || base
+                        .as_ref()
+                        .is_some_and(|b| !b.dataset.partition_by.is_empty())
                 {
                     let native = self
                         .inner

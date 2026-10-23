@@ -59,7 +59,7 @@ pub struct Lifecycle {
     retained_prefix: Option<String>,
     pub(crate) catalog: Arc<dyn Catalog>,
     pub(crate) budget: Budget,
-    cache: Arc<Mutex<HashMap<String, Arc<SnapshotRows>>>>,
+    cache: Arc<Mutex<Option<Arc<SnapshotRows>>>>,
     #[cfg(all(not(test), not(feature = "test-util")))]
     view_cache: Arc<Mutex<HashMap<TableIdent, View>>>,
     #[cfg(all(not(test), not(feature = "test-util")))]
@@ -80,8 +80,8 @@ struct DeferredCommit {
 
 #[derive(Debug)]
 pub(crate) struct SnapshotRows {
-    metadata: String,
-    values: BTreeMap<String, (i64, Arc<str>)>,
+    pub(crate) metadata: String,
+    pub values: BTreeMap<String, (i64, Arc<str>)>,
     cache_bytes: usize,
     history_rows: usize,
     history_bytes: usize,
@@ -188,7 +188,7 @@ impl Lifecycle {
             retained_prefix: None,
             catalog,
             budget,
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(Mutex::new(None)),
             #[cfg(all(not(test), not(feature = "test-util")))]
             view_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(all(not(test), not(feature = "test-util")))]
@@ -280,11 +280,7 @@ impl Lifecycle {
                 deferred.changes.insert(k, v);
             }
             {
-                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-                if cache.len() >= 64 {
-                    cache.clear();
-                }
-                cache.insert(deferred.base_rows.metadata.clone(), deferred.base_rows);
+                *self.cache.lock().map_err(cache_poisoned)? = Some(deferred.base_rows);
             }
             let merged: Vec<_> = deferred.changes.into_iter().collect();
             return self.commit(&deferred.base_view, merged).await;
@@ -302,11 +298,7 @@ impl Lifecycle {
             .remove(&ident);
         if let Some(deferred) = deferred {
             {
-                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-                if cache.len() >= 64 {
-                    cache.clear();
-                }
-                cache.insert(deferred.base_rows.metadata.clone(), deferred.base_rows);
+                *self.cache.lock().map_err(cache_poisoned)? = Some(deferred.base_rows);
             }
             if !deferred.changes.is_empty() {
                 let merged: Vec<_> = deferred.changes.into_iter().collect();
@@ -347,19 +339,17 @@ impl Lifecycle {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains(&ident);
-        if is_known {
-            if let Ok(table) = self.catalog.load_table(&ident).await {
-                let view = View {
-                    revision: table.metadata().last_sequence_number(),
-                    table,
-                    logical_identifier: ident,
-                };
-                #[cfg(all(not(test), not(feature = "test-util")))]
-                {
-                    self.set_cached_view(view.clone());
-                }
-                return Ok(view);
+        if is_known && let Ok(table) = self.catalog.load_table(&ident).await {
+            let view = View {
+                revision: table.metadata().last_sequence_number(),
+                table,
+                logical_identifier: ident,
+            };
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            {
+                self.set_cached_view(view.clone());
             }
+            return Ok(view);
         }
         let namespace = ident.namespace().clone();
         let namespace_existed = self.catalog.namespace_exists(&namespace).await?;
@@ -466,138 +456,139 @@ impl Lifecycle {
     }
 
     /// Retains one immutable state and its byte reservation across cache replacement.
-    pub(crate) async fn rows(&self, view: &View) -> Result<Arc<SnapshotRows>> {
-        self.rows_inner(view, true).await
+    pub(crate) fn rows<'a>(
+        &'a self,
+        view: &'a View,
+    ) -> futures::future::BoxFuture<'a, Result<Arc<SnapshotRows>>> {
+        self.rows_inner(view, true)
     }
 
     /// Loads current records for baseline compaction, bounding memory by deduplicated live state.
-    pub(crate) async fn rows_for_compaction(&self, view: &View) -> Result<Arc<SnapshotRows>> {
-        self.rows_inner(view, false).await
+    pub(crate) fn rows_for_compaction<'a>(
+        &'a self,
+        view: &'a View,
+    ) -> futures::future::BoxFuture<'a, Result<Arc<SnapshotRows>>> {
+        self.rows_inner(view, false)
     }
 
-    async fn rows_inner(
-        &self,
-        view: &View,
+    fn rows_inner<'a>(
+        &'a self,
+        view: &'a View,
         enforce_history_budget: bool,
-    ) -> Result<Arc<SnapshotRows>> {
-        #[cfg(all(not(test), not(feature = "test-util")))]
-        if let Some(rows) = self
-            .deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&view.logical_identifier)
-            .map(|d| d.rows.clone())
-        {
-            return Ok(rows);
-        }
-        let metadata = view.table.metadata_location_result()?.to_owned();
-        if let Some(hit) = self
-            .cache
-            .lock()
-            .map_err(cache_poisoned)?
-            .get(&metadata)
-            .cloned()
-        {
-            return Ok(hit);
-        }
-        let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
-        let mut current = BTreeMap::<String, (i64, Arc<str>)>::new();
-        let mut cache_bytes = 0_usize;
-        if view.table.metadata().current_snapshot().is_none() {
-            let entry = Arc::new(SnapshotRows {
-                metadata: metadata.clone(),
-                values: current,
-                cache_bytes,
-                history_rows: 0,
-                history_bytes: 0,
-                reserved_future_bytes: 0,
-                _reservation: reservation,
-            });
-            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-            if cache.len() >= 64 {
-                cache.clear();
+    ) -> futures::future::BoxFuture<'a, Result<Arc<SnapshotRows>>> {
+        Box::pin(async move {
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            if let Some(rows) = self
+                .deferred_commit
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&view.logical_identifier)
+                .map(|d| d.rows.clone())
+            {
+                return Ok(rows);
             }
-            cache.insert(metadata, entry.clone());
-            return Ok(entry);
-        }
-        let batches = storage::read_batches(&view.table, &self.budget).await?;
-        futures::pin_mut!(batches);
-        let mut bytes = 0_usize;
-        let mut history_rows = 0_usize;
-        while let Some(batch) = batches.try_next().await? {
-            let keys = strings(&batch, 0)?;
-            let values = strings(&batch, 2)?;
-            let revisions = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid revision column"))?;
-            for i in 0..batch.num_rows() {
-                let key = keys.value(i);
-                let value = values.value(i);
-                let row_bytes = history_row_bytes(key, value);
-                history_rows = history_rows.saturating_add(1);
-                bytes = bytes.saturating_add(row_bytes);
-                if enforce_history_budget {
-                    check_history_size(bytes, self.budget.limits.max_metadata_bytes)?;
-                }
-                let revision = revisions.value(i);
-                if current.get(key).is_none_or(|(old, _)| *old < revision) {
-                    if let Some((_, old_value)) =
-                        current.insert(key.to_owned(), (revision, Arc::from(value)))
-                    {
-                        cache_bytes =
-                            cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+            let metadata = view.table.metadata_location_result()?.to_owned();
+            if let Some(hit) = self
+                .cache
+                .lock()
+                .map_err(cache_poisoned)?
+                .as_ref()
+                .filter(|hit| hit.metadata == metadata)
+                .cloned()
+            {
+                return Ok(hit);
+            }
+            let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
+            let mut current = BTreeMap::<String, (i64, Arc<str>)>::new();
+            let mut cache_bytes = 0_usize;
+            if view.table.metadata().current_snapshot().is_none() {
+                let entry = Arc::new(SnapshotRows {
+                    metadata,
+                    values: current,
+                    cache_bytes,
+                    history_rows: 0,
+                    history_bytes: 0,
+                    reserved_future_bytes: 0,
+                    _reservation: reservation,
+                });
+                *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+                return Ok(entry);
+            }
+            let batches = storage::read_batches(&view.table, &self.budget).await?;
+            futures::pin_mut!(batches);
+            let mut bytes = 0_usize;
+            let mut history_rows = 0_usize;
+            while let Some(batch) = batches.try_next().await? {
+                let keys = strings(&batch, 0)?;
+                let values = strings(&batch, 2)?;
+                let revisions = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .ok_or_else(|| Error::refusal("corrupt_metadata", "invalid revision column"))?;
+                for i in 0..batch.num_rows() {
+                    let key = keys.value(i);
+                    let value = values.value(i);
+                    let row_bytes = history_row_bytes(key, value);
+                    history_rows = history_rows.saturating_add(1);
+                    bytes = bytes.saturating_add(row_bytes);
+                    if enforce_history_budget {
+                        check_history_size(bytes, self.budget.limits.max_metadata_bytes)?;
                     }
-                    cache_bytes = cache_bytes.saturating_add(row_bytes);
-                    check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
+                    let revision = revisions.value(i);
+                    if current.get(key).is_none_or(|(old, _)| *old < revision) {
+                        if let Some((_, old_value)) =
+                            current.insert(key.to_owned(), (revision, Arc::from(value)))
+                        {
+                            cache_bytes =
+                                cache_bytes.saturating_sub(history_row_bytes(key, &old_value));
+                        }
+                        cache_bytes = cache_bytes.saturating_add(row_bytes);
+                        check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
+                    }
                 }
             }
-        }
-        for (key, _) in current
-            .range("removal-intent/".to_owned()..)
-            .take_while(|(key, _)| key.starts_with("removal-intent/"))
-        {
-            check_removal_state_exists(&current, key)?;
-        }
-        let reserved_future_bytes = current
-            .range("removal-state/".to_owned()..)
-            .take_while(|(key, _)| key.starts_with("removal-state/"))
-            .try_fold(0_usize, |total, (key, (revision, value))| {
-                let reserved = removal_reservation(&current, key, *revision, value)?;
-                total.checked_add(reserved).ok_or_else(reservation_overflow)
-            })?;
-        let within_history_budget = check_history_reservation(
-            bytes,
-            reserved_future_bytes,
-            self.budget.limits.max_metadata_bytes,
-        )
-        .is_ok();
-        if enforce_history_budget && !within_history_budget {
-            check_history_reservation(
+            for (key, _) in current
+                .range("removal-intent/".to_owned()..)
+                .take_while(|(key, _)| key.starts_with("removal-intent/"))
+            {
+                check_removal_state_exists(&current, key)?;
+            }
+            let reserved_future_bytes = current
+                .range("removal-state/".to_owned()..)
+                .take_while(|(key, _)| key.starts_with("removal-state/"))
+                .try_fold(0_usize, |total, (key, (revision, value))| {
+                    let reserved = removal_reservation(&current, key, *revision, value)?;
+                    total.checked_add(reserved).ok_or_else(reservation_overflow)
+                })?;
+            let within_history_budget = check_history_reservation(
                 bytes,
                 reserved_future_bytes,
                 self.budget.limits.max_metadata_bytes,
-            )?;
-        }
-        check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
-        let entry = Arc::new(SnapshotRows {
-            metadata: metadata.clone(),
-            values: current,
-            cache_bytes,
-            history_rows,
-            history_bytes: bytes,
-            reserved_future_bytes,
-            _reservation: reservation,
-        });
-        if within_history_budget {
-            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-            if cache.len() >= 64 {
-                cache.clear();
+            )
+            .is_ok();
+            if enforce_history_budget && !within_history_budget {
+                check_history_reservation(
+                    bytes,
+                    reserved_future_bytes,
+                    self.budget.limits.max_metadata_bytes,
+                )?;
             }
-            cache.insert(metadata, entry.clone());
-        }
-        Ok(entry)
+            check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
+            let entry = Arc::new(SnapshotRows {
+                metadata,
+                values: current,
+                cache_bytes,
+                history_rows,
+                history_bytes: bytes,
+                reserved_future_bytes,
+                _reservation: reservation,
+            });
+            if within_history_budget {
+                *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+            }
+            Ok(entry)
+        })
     }
 
     /// Atomically appends changes only while the captured authority remains current.
@@ -723,14 +714,21 @@ impl Lifecycle {
         check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
         #[cfg(all(not(test), not(feature = "test-util")))]
         {
-            let mut guard = self.deferred_commit.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self
+                .deferred_commit
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(deferred) = guard.get_mut(&view.logical_identifier) {
                 for (k, v) in changes {
                     deferred.changes.insert(k, v);
                 }
-                let meta = deferred.base_view.table.metadata_location_result()?.to_owned();
+                let meta = deferred
+                    .base_view
+                    .table
+                    .metadata_location_result()?
+                    .to_owned();
                 let entry = Arc::new(SnapshotRows {
-                    metadata: meta.clone(),
+                    metadata: meta,
                     values: next_values,
                     cache_bytes,
                     history_rows,
@@ -739,11 +737,7 @@ impl Lifecycle {
                     _reservation: reservation,
                 });
                 deferred.rows = entry.clone();
-                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-                if cache.len() >= 64 {
-                    cache.clear();
-                }
-                cache.insert(meta, entry);
+                *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
                 return Ok(deferred.base_view.clone());
             }
         }
@@ -778,7 +772,7 @@ impl Lifecycle {
         }
         let meta = table.metadata_location_result()?.to_owned();
         let entry = Arc::new(SnapshotRows {
-            metadata: meta.clone(),
+            metadata: meta,
             values: next_values,
             cache_bytes,
             history_rows,
@@ -786,13 +780,7 @@ impl Lifecycle {
             reserved_future_bytes,
             _reservation: reservation,
         });
-        {
-            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-            if cache.len() >= 64 {
-                cache.clear();
-            }
-            cache.insert(meta, entry);
-        }
+        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
         let next_view = View {
             revision: table.metadata().last_sequence_number(),
             table,
@@ -920,7 +908,8 @@ impl Lifecycle {
         )
         .await?;
         let files_after = files.len();
-        let table = match replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await {
+        let table = match replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await
+        {
             Ok(table) => table,
             Err(error) => {
                 #[cfg(all(not(test), not(feature = "test-util")))]
@@ -947,7 +936,7 @@ impl Lifecycle {
         let current_revision = table.metadata().last_sequence_number();
         let meta = table.metadata_location_result()?.to_owned();
         let entry = Arc::new(SnapshotRows {
-            metadata: meta.clone(),
+            metadata: meta,
             values: next_values,
             cache_bytes,
             history_rows,
@@ -955,13 +944,7 @@ impl Lifecycle {
             reserved_future_bytes,
             _reservation: reservation,
         });
-        {
-            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
-            if cache.len() >= 64 {
-                cache.clear();
-            }
-            cache.insert(meta, entry);
-        }
+        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
         self.reclaim_expired_baseline_files(&table).await?;
         let next_view = View {
             revision: current_revision,
@@ -2014,10 +1997,7 @@ mod tests {
             .commit(&b, vec![record("key", "other dataset").unwrap()])
             .await
             .unwrap();
-        assert_ne!(
-            retained.metadata,
-            lifecycle.rows(&b).await.unwrap().metadata
-        );
+        assert_ne!(a.table.metadata().location(), b.table.metadata().location());
         // The old native files are now inaccessible. Record reads must still use
         // the retained state; a cache lookup and replay would fail here.
         std::fs::rename(
