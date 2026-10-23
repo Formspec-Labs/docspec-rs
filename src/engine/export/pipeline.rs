@@ -658,7 +658,11 @@ impl Engine {
 
         let mut tracker = BrowseRangeTracker::new(browse_cols);
         let mut rows = 0_u64;
-        let max_rg_rows = row_group_rows.unwrap_or(1024 * 1024).max(1);
+        let max_rg_rows = if !page_index_cols.is_empty() {
+            row_group_rows.unwrap_or(32768).clamp(16384, 65536)
+        } else {
+            row_group_rows.unwrap_or(1024 * 1024).max(1)
+        };
 
         while let Some(batch) = stream.try_next().await? {
             if batch.num_rows() == 0 {
@@ -2123,7 +2127,11 @@ impl ChildAccumulator {
             format!("{}.parquet", self.name)
         };
         let path = directory.join(file_name);
-        let rg_rows = self.spec.row_group_rows.max(1);
+        let rg_rows = if !page_index_cols.is_empty() {
+            self.spec.row_group_rows.clamp(16384, 65536)
+        } else {
+            self.spec.row_group_rows.max(1)
+        };
         let max_row_group_bytes = budget.limits.max_batch_bytes.max(1);
         let schema = self.child_schema.clone();
         let fields = self.child_fields.clone();
