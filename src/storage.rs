@@ -591,6 +591,17 @@ where
                                     arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
                                 ) => unit == target_unit && field.data_type() != target,
                                 (
+                                    arrow::datatypes::DataType::Int8
+                                    | arrow::datatypes::DataType::Int16
+                                    | arrow::datatypes::DataType::UInt8
+                                    | arrow::datatypes::DataType::UInt16,
+                                    arrow::datatypes::DataType::Int32,
+                                )
+                                | (
+                                    arrow::datatypes::DataType::UInt32,
+                                    arrow::datatypes::DataType::Int64,
+                                )
+                                | (
                                     arrow::datatypes::DataType::Binary,
                                     arrow::datatypes::DataType::LargeBinary,
                                 )

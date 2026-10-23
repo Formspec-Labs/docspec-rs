@@ -1266,7 +1266,8 @@ impl Engine {
                             && matches!(spec, OperationRequest::Build(build) if build.base.is_none())
                             && (spec.dataset().as_str().starts_with("catalog-")
                                 || spec.dataset().as_str().starts_with("raw-")
-                                || spec.dataset().as_str().starts_with("obs-"))
+                                || spec.dataset().as_str().starts_with("obs-")
+                                || spec.dataset().as_str().starts_with("source-observations-"))
                         {
                             let local_ref = ObjectRef {
                                 owner: expected.owner.clone(),
@@ -2413,7 +2414,8 @@ impl Engine {
                 && matches!(spec, OperationRequest::Build(build) if build.base.is_none())
                 && (spec.dataset().as_str().starts_with("catalog-")
                     || spec.dataset().as_str().starts_with("raw-")
-                    || spec.dataset().as_str().starts_with("obs-"));
+                    || spec.dataset().as_str().starts_with("obs-")
+                    || spec.dataset().as_str().starts_with("source-observations-"));
             #[cfg(any(test, feature = "test-util"))]
             let skip_output_check = false;
             // The worker owns the retained completion until its size checks finish,
@@ -3062,7 +3064,8 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
     #[cfg(all(not(test), not(feature = "test-util")))]
     if !(dataset.dataset.as_str().starts_with("catalog-")
         || dataset.dataset.as_str().starts_with("raw-")
-        || dataset.dataset.as_str().starts_with("obs-"))
+        || dataset.dataset.as_str().starts_with("obs-")
+        || dataset.dataset.as_str().starts_with("source-observations-"))
         || !matches!(&dataset.request, OperationRequest::Build(build) if build.base.is_none())
     {
         objects.extend(dataset.inputs.values().cloned());
@@ -3198,7 +3201,8 @@ async fn verify_local_release(
     #[cfg(all(not(test), not(feature = "test-util")))]
     let check_inputs = !(decoded.dataset.as_str().starts_with("catalog-")
         || decoded.dataset.as_str().starts_with("raw-")
-        || decoded.dataset.as_str().starts_with("obs-"))
+        || decoded.dataset.as_str().starts_with("obs-")
+        || decoded.dataset.as_str().starts_with("source-observations-"))
         || !matches!(&decoded.request, OperationRequest::Build(build) if build.base.is_none());
     #[cfg(any(test, feature = "test-util"))]
     let check_inputs = true;
