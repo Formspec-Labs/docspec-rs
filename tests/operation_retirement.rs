@@ -358,10 +358,40 @@ async fn compact_lifecycle_reclaims_retired_incomplete_operation_and_protections
         !b_phases.is_empty(),
         "incomplete operation should have written phase records"
     );
+    let b_candidate_attempts: Vec<String> = before_abandon
+        .keys()
+        .filter(|k| k.starts_with(&format!("candidate-attempt/{}/", b.operation)))
+        .cloned()
+        .collect();
     assert!(
-        before_abandon.keys().any(|k| k.starts_with("protection/")),
-        "incomplete operation should have registered protection records"
+        !b_candidate_attempts.is_empty(),
+        "incomplete operation b should have registered candidate-attempt records"
     );
+    let b_dep_key = format!("request-dependencies/{}", b.operation);
+    assert!(
+        before_abandon.contains_key(&b_dep_key),
+        "incomplete operation b should have registered request-dependencies"
+    );
+    let b_protections: Vec<String> = before_abandon
+        .iter()
+        .filter_map(|(k, v)| {
+            if !k.starts_with("protection/") {
+                return None;
+            }
+            let purpose = v.get("purpose")?.as_str()?;
+            if purpose.starts_with(&format!("{}/", b.operation)) {
+                Some(k.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        !b_protections.is_empty(),
+        "incomplete operation b should have registered protection records with purpose matching operation b"
+    );
+    assert!(before_abandon.contains_key(&format!("operation/{}", b.operation)));
+    assert!(before_abandon.contains_key(&format!("request/{}", b.operation)));
 
     // 2. Abandon operation b and retire its recovery
     let _abandoned = engine
@@ -377,14 +407,33 @@ async fn compact_lifecycle_reclaims_retired_incomplete_operation_and_protections
         )
         .await
         .unwrap();
+    for attempt in &b_candidate_attempts {
+        assert!(
+            recovery.records.iter().any(|r| r.key == *attempt),
+            "recovery plan must include candidate-attempt {attempt}"
+        );
+    }
+    assert!(
+        recovery.records.iter().any(|r| r.key == b_dep_key),
+        "recovery plan must include request-dependencies record"
+    );
+    for prot in &b_protections {
+        assert!(
+            recovery.records.iter().any(|r| r.key == *prot),
+            "recovery plan must include protection record {prot}"
+        );
+    }
     engine.retire_operation(&recovery).await.unwrap();
 
     // 3. Compact lifecycle
     let stats = engine.compact_lifecycle(&b.dataset).await.unwrap();
     assert_eq!(stats.revisions_after, 1);
 
-    // 4. Assert obsolete phases and attempts are reclaimed while operation/request remain protected
+    // 4. Assert obsolete attempts, dependencies, protections, and phases are reclaimed
+    // while core recovery anchors and receipt records remain intact
     let after_compaction = engine.inspect(&b.dataset).await.unwrap();
+
+    // 4a. Core recovery anchors and receipts must remain preserved
     assert!(
         after_compaction.contains_key(&format!("operation/{}", b.operation)),
         "operation/b must remain preserved in snapshot for recovery receipt validation"
@@ -397,6 +446,69 @@ async fn compact_lifecycle_reclaims_retired_incomplete_operation_and_protections
         after_compaction.contains_key("retirement/b-recovery"),
         "retirement receipt must remain in lifecycle snapshot"
     );
+    let retired_markers: Vec<_> = after_compaction
+        .keys()
+        .filter(|k| k.starts_with("retired/"))
+        .collect();
+    assert!(
+        !retired_markers.is_empty(),
+        "retired record markers (retired/...) must remain preserved in lifecycle snapshot after compaction"
+    );
+    assert_eq!(
+        retired_markers.len(),
+        recovery.records.len(),
+        "every retired record generation should retain its tombstone marker in the compacted lifecycle snapshot"
+    );
+
+    // 4b. Obsolete attempts must be reclaimed
+    for prefix in [
+        format!("candidate-attempt/{}/", b.operation),
+        format!("source-attempt/{}/", b.operation),
+        format!("release-attempt/{}/", b.operation),
+    ] {
+        let remaining_attempts: Vec<_> = after_compaction
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .collect();
+        assert!(
+            remaining_attempts.is_empty(),
+            "obsolete attempt records for prefix '{prefix}' must be reclaimed by compact_lifecycle, but found: {remaining_attempts:?}"
+        );
+    }
+
+    // 4c. Obsolete dependency records must be reclaimed
+    assert!(
+        !after_compaction.contains_key(&b_dep_key),
+        "obsolete {b_dep_key} must be reclaimed by compact_lifecycle"
+    );
+
+    // 4d. Obsolete protections associated with the retired operation must be reclaimed
+    for prot_key in &b_protections {
+        assert!(
+            !after_compaction.contains_key(prot_key),
+            "obsolete protection record {prot_key} must be reclaimed by compact_lifecycle"
+        );
+    }
+    let lingering_b_protections: Vec<_> = after_compaction
+        .iter()
+        .filter_map(|(k, v)| {
+            if !k.starts_with("protection/") {
+                return None;
+            }
+            let purpose = v.get("purpose")?.as_str()?;
+            if purpose.starts_with(&format!("{}/", b.operation)) {
+                Some((k.clone(), purpose.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        lingering_b_protections.is_empty(),
+        "no protections associated with operation b should remain after compaction, but found: {lingering_b_protections:?}"
+    );
+
+    // 4e. Obsolete phase records must be reclaimed
     for key in &b_phases {
         assert!(
             !after_compaction.contains_key(key),
@@ -409,4 +521,25 @@ async fn compact_lifecycle_reclaims_retired_incomplete_operation_and_protections
     let reopened = open(root.path()).await;
     assert_eq!(reopened.latest(&a.dataset).await.unwrap(), initial_release);
     assert_eq!(values(&reopened, &initial_release).await, vec![1, 2, 3]);
+    assert_eq!(
+        reopened.run(&b).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+    assert_eq!(
+        reopened.plan(&b).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+    let reopened_inspect = reopened.inspect(&b.dataset).await.unwrap();
+    assert!(reopened_inspect.contains_key(&format!("operation/{}", b.operation)));
+    assert!(reopened_inspect.contains_key(&format!("request/{}", b.operation)));
+    assert!(reopened_inspect.contains_key("retirement/b-recovery"));
+    assert!(!reopened_inspect.contains_key(&b_dep_key));
+    assert!(
+        !reopened_inspect
+            .keys()
+            .any(|k| k.starts_with(&format!("candidate-attempt/{}/", b.operation)))
+    );
+    for prot_key in &b_protections {
+        assert!(!reopened_inspect.contains_key(prot_key));
+    }
 }

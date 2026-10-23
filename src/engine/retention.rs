@@ -712,9 +712,12 @@ fn collect_obsolete_lifecycle_keys(
         let receipt: Retirement = serde_json::from_str(json)?;
         if let RetirementScope::OperationRecovery { operation } = &receipt.plan.scope {
             retired_ops.insert(operation.clone());
-        }
-        for generation in receipt.plan.records {
-            protected_keys.insert(generation.key);
+            protected_keys.insert(format!("operation/{operation}"));
+            protected_keys.insert(format!("request/{operation}"));
+        } else {
+            for generation in receipt.plan.records {
+                protected_keys.insert(generation.key);
+            }
         }
     }
 
@@ -910,9 +913,12 @@ fn prune_obsolete_protections(
         let receipt: Retirement = serde_json::from_str(json)?;
         if let RetirementScope::OperationRecovery { operation } = &receipt.plan.scope {
             retired_ops.insert(operation.clone());
-        }
-        for generation in receipt.plan.records {
-            protected_keys.insert(generation.key);
+            protected_keys.insert(format!("operation/{operation}"));
+            protected_keys.insert(format!("request/{operation}"));
+        } else {
+            for generation in receipt.plan.records {
+                protected_keys.insert(generation.key);
+            }
         }
     }
 

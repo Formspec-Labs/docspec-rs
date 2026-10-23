@@ -345,22 +345,24 @@ pub(super) fn validate_saved(
         }
     }
     for generation in &receipt.plan.records {
-        if rows.revision(&generation.key) != Some(generation.revision) {
-            return Err(invalid_retirement());
-        }
-        if generation.key.starts_with("protection/") {
-            let _memory = rows.reserve_decoded(budget, &[&generation.key])?;
-            let (_, _, attempt) = rows
-                .get_record::<Protection>(&generation.key)?
-                .ok_or_else(invalid_retirement)?;
-            check_attempt(
-                &engine.inner.root,
-                &request,
-                revision,
-                generation,
-                &attempt,
-                receipt.plan.revision,
-            )?;
+        if let Some(actual) = rows.revision(&generation.key) {
+            if actual != generation.revision {
+                return Err(invalid_retirement());
+            }
+            if generation.key.starts_with("protection/") {
+                let _memory = rows.reserve_decoded(budget, &[&generation.key])?;
+                let (_, _, attempt) = rows
+                    .get_record::<Protection>(&generation.key)?
+                    .ok_or_else(invalid_retirement)?;
+                check_attempt(
+                    &engine.inner.root,
+                    &request,
+                    revision,
+                    generation,
+                    &attempt,
+                    receipt.plan.revision,
+                )?;
+            }
         }
     }
     Ok(())
