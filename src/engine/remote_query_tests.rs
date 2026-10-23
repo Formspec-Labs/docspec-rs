@@ -67,6 +67,7 @@ async fn composed_remote_context_queries_projected_filtered_parquet() {
         },
         ownership,
         true,
+        None,
     )
     .unwrap();
     let context = engine.context();
@@ -80,16 +81,17 @@ async fn composed_remote_context_queries_projected_filtered_parquet() {
         "CREATE EXTERNAL TABLE outside_input STORED AS PARQUET LOCATION 's3://bucket/outside/input.parquet'",
         "SET datafusion.execution.target_partitions = 2",
     ] {
-        assert!(write::build_query(&context, sql).await.is_err());
+        assert!(sql_validation::build_query(&context, sql).await.is_err());
     }
     assert_eq!(
         fixture.observed_paths(),
         before,
         "forbidden SQL performs no transport effects"
     );
-    let dataframe = write::build_query(&context, "SELECT text FROM input WHERE counter < 3")
-        .await
-        .unwrap();
+    let dataframe =
+        sql_validation::build_query(&context, "SELECT text FROM input WHERE counter < 3")
+            .await
+            .unwrap();
     assert_eq!(dataframe.schema().fields().len(), 1);
     let mut stream = dataframe.execute_stream().await.unwrap();
     let mut values = Vec::new();

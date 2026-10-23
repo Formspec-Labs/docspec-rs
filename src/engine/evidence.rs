@@ -300,7 +300,7 @@ impl Engine {
                 .get("source")
                 .ok_or_else(|| invalid("result has no source table"))?;
             let pin = engine
-                .representation_pin(&view, &release.id, "source", canonical)
+                .resolve_representation_pin(&view, "source", canonical)
                 .await?;
             let context = engine.context();
             context.register_table(
@@ -916,10 +916,14 @@ async fn verify_receipt_values(
         .map(|name| quote(name))
         .collect::<Vec<_>>()
         .join(", ");
-    let mismatch = format!(
-        "SELECT 1 FROM (SELECT {columns}, CAST(1 AS BIGINT) AS delta FROM expected UNION ALL SELECT {columns}, CAST(-1 AS BIGINT) AS delta FROM current) GROUP BY {columns} HAVING SUM(delta) <> 0 LIMIT 1"
-    );
-    if any_rows(context.sql(&mismatch).await?).await? {
+    if changes::any_signed_multiset_mismatch(
+        context,
+        &columns,
+        &[("expected", &[("delta", 1)]), ("current", &[("delta", -1)])],
+        "SUM(delta) <> 0",
+    )
+    .await?
+    {
         return Err(invalid(reason));
     }
     Ok(())

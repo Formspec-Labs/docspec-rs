@@ -391,7 +391,7 @@ impl Engine {
             })
             .await?;
         #[cfg(feature = "test-util")]
-        work_started("restore-local-objects");
+        work_started_async("restore-local-objects").await;
         let generation = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
         let catalogs = root.join("catalogs");
         create_owned_directories(&root, &catalogs)?;
@@ -474,10 +474,10 @@ impl Engine {
         File::open(&fresh_path)?.sync_all()?;
         File::open(&catalogs)?.sync_all()?;
         #[cfg(feature = "test-util")]
-        work_started("restore-local-verified");
+        work_started_async("restore-local-verified").await;
         restore::select_catalog(&root, &restored)?;
         #[cfg(feature = "test-util")]
-        work_started("restore-local-selected");
+        work_started_async("restore-local-selected").await;
         Ok(restored)
     }
 

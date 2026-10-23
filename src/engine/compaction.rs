@@ -5,14 +5,18 @@ use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use futures::stream::BoxStream;
 use std::collections::BTreeSet;
 
+/// Retained compaction admission record capturing the request, source table pin, and release manifest.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct Capture {
+pub(super) struct CompactionCapture {
     pub spec: CompactionSpec,
     pub source: TablePin,
     pub manifest: ObjectRef,
 }
 
+pub(super) type Capture = CompactionCapture;
+
 impl Engine {
+    /// Acquires owner reference protections for a compaction table pin and optional release manifest.
     pub(super) async fn protect_compaction_table(
         &self,
         dataset: &Id,
@@ -69,10 +73,10 @@ impl Engine {
         .await
     }
 
-    pub(super) async fn representation_pin(
+    /// Resolves the active verified physical representation for a canonical logical group pin.
+    pub(super) async fn resolve_representation_pin(
         &self,
         view: &View,
-        _version: &Id,
         group: &str,
         canonical: &TablePin,
     ) -> Result<TablePin> {
@@ -104,6 +108,18 @@ impl Engine {
         }
     }
 
+    /// Compatibility wrapper delegating to [`Engine::resolve_representation_pin`].
+    pub(super) async fn representation_pin(
+        &self,
+        view: &View,
+        _version: &Id,
+        group: &str,
+        canonical: &TablePin,
+    ) -> Result<TablePin> {
+        self.resolve_representation_pin(view, group, canonical)
+            .await
+    }
+
     async fn compact_admitted(
         &self,
         spec: &CompactionSpec,
@@ -118,12 +134,41 @@ impl Engine {
                 "compaction needs a positive output size and distinct file paths",
             ));
         }
+        let result_key = format!("compaction-result/{}", spec.operation);
+        let (capture, protections) = match self.admit_compaction_capture(spec, &result_key).await? {
+            Ok(admitted) => admitted,
+            Err(done) => return Ok(done),
+        };
+        let mut prepared = self
+            .prepare_compaction_rewrite(spec, &capture, &protections)
+            .await?;
+        stop_after(stop, "rewrite")?;
+        self.verify_compaction_rewrite(spec, &capture, &protections, &mut prepared)
+            .await?;
+        stop_after(stop, "verification")?;
+        if let Some(existing) = self
+            .select_compaction_representation(spec, &capture, &protections, &prepared, &result_key)
+            .await?
+        {
+            return Ok(existing);
+        }
+        stop_after(stop, "selection")?;
+        Ok(prepared)
+    }
+
+    async fn admit_compaction_capture(
+        &self,
+        spec: &CompactionSpec,
+        result_key: &str,
+    ) -> Result<
+        std::result::Result<
+            (CompactionCapture, retention::owners::ReferenceProtections),
+            CompactionResult,
+        >,
+    > {
         let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&spec.dataset).await;
         let request_key = format!("compaction-request/{}", spec.operation);
-        let result_key = format!("compaction-result/{}", spec.operation);
-        let prepared_key = format!("compaction-prepared/{}", spec.operation);
-        let verified_key = format!("compaction-verified/{}", spec.operation);
         let captured = {
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
@@ -142,18 +187,18 @@ impl Engine {
                     "compaction recovery was explicitly retired; use a new operation identity",
                 ));
             }
-            if let Some(done) = lifecycle
-                .get::<CompactionResult>(&view, &result_key)
-                .await?
-            {
+            if let Some(done) = lifecycle.get::<CompactionResult>(&view, result_key).await? {
                 if done.spec != *spec || !done.verified {
                     return Err(invalid(
                         "compaction identity is already bound to another request",
                     ));
                 }
-                return Ok(done);
+                return Ok(Err(done));
             }
-            if let Some(capture) = lifecycle.get::<Capture>(&view, &request_key).await? {
+            if let Some(capture) = lifecycle
+                .get::<CompactionCapture>(&view, &request_key)
+                .await?
+            {
                 if capture.spec != *spec {
                     return Err(invalid(
                         "compaction identity is already bound to another request",
@@ -170,165 +215,186 @@ impl Engine {
                 None
             }
         };
-        let (capture, protections) = if let Some(captured) = captured {
-            captured
-        } else {
-            let capture = {
-                let _guard = lock.lock().await;
-                let view = lifecycle.open(&spec.dataset).await?;
-                self.check_operation_available(&view, &spec.version).await?;
-                let release = self
-                    .resolve_release(&view, &spec.dataset, &spec.version)
-                    .await?;
-                let canonical = release
-                    .dataset
-                    .groups
-                    .get(&spec.group)
-                    .ok_or_else(|| invalid("release lacks the requested field group"))?;
-                let source = self
-                    .representation_pin(&view, &spec.version, &spec.group, canonical)
-                    .await?;
-                Capture {
-                    spec: spec.clone(),
-                    source,
-                    manifest: release.manifest,
-                }
-            };
-            // Owner grants are acquired outside consumer locking, before admission.
-            let protections = self
-                .protect_compaction_table(&spec.dataset, &capture.source, Some(&capture.manifest))
-                .await?;
+        if let Some(captured) = captured {
+            return Ok(Ok(captured));
+        }
+        let capture = {
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
-            if let Some(existing) = lifecycle.get::<Capture>(&view, &request_key).await? {
-                if existing.spec != *spec {
-                    return Err(invalid(
-                        "compaction identity is already bound to another request",
-                    ));
-                }
-                let retained = self
-                    .retained_protections(&view, &request_key)
-                    .await?
-                    .ok_or_else(|| {
-                        invalid("compaction admission lacks retained owner protection")
-                    })?;
-                (existing, retained)
-            } else {
-                let release = self
-                    .resolve_release(&view, &spec.dataset, &spec.version)
-                    .await?;
-                let canonical = release
-                    .dataset
-                    .groups
-                    .get(&spec.group)
-                    .ok_or_else(|| invalid("logical group disappeared"))?;
-                if release.manifest != capture.manifest
-                    || self
-                        .representation_pin(&view, &spec.version, &spec.group, canonical)
-                        .await?
-                        != capture.source
-                {
-                    return Err(Error::refusal(
-                        "stale_representation",
-                        "representation changed before compaction admission",
-                    ));
-                }
-                lifecycle
-                    .commit(
-                        &view,
-                        completion_records(
-                            &spec.dataset,
-                            &view,
-                            &request_key,
-                            &capture,
-                            Some(&protections),
-                        )?,
-                    )
-                    .await?;
-                (capture, protections)
+            self.check_operation_available(&view, &spec.version).await?;
+            let release = self
+                .resolve_release(&view, &spec.dataset, &spec.version)
+                .await?;
+            let canonical = release
+                .dataset
+                .groups
+                .get(&spec.group)
+                .ok_or_else(|| invalid("release lacks the requested field group"))?;
+            let source = self
+                .resolve_representation_pin(&view, &spec.group, canonical)
+                .await?;
+            CompactionCapture {
+                spec: spec.clone(),
+                source,
+                manifest: release.manifest,
             }
         };
+        // Owner grants are acquired outside consumer locking, before admission.
+        let protections = self
+            .protect_compaction_table(&spec.dataset, &capture.source, Some(&capture.manifest))
+            .await?;
+        let _guard = lock.lock().await;
         let view = lifecycle.open(&spec.dataset).await?;
-        let mut prepared = if let Some(completed) = lifecycle
+        if let Some(existing) = lifecycle
+            .get::<CompactionCapture>(&view, &request_key)
+            .await?
+        {
+            if existing.spec != *spec {
+                return Err(invalid(
+                    "compaction identity is already bound to another request",
+                ));
+            }
+            let retained = self
+                .retained_protections(&view, &request_key)
+                .await?
+                .ok_or_else(|| invalid("compaction admission lacks retained owner protection"))?;
+            Ok(Ok((existing, retained)))
+        } else {
+            let release = self
+                .resolve_release(&view, &spec.dataset, &spec.version)
+                .await?;
+            let canonical = release
+                .dataset
+                .groups
+                .get(&spec.group)
+                .ok_or_else(|| invalid("logical group disappeared"))?;
+            if release.manifest != capture.manifest
+                || self
+                    .resolve_representation_pin(&view, &spec.group, canonical)
+                    .await?
+                    != capture.source
+            {
+                return Err(Error::refusal(
+                    "stale_representation",
+                    "representation changed before compaction admission",
+                ));
+            }
+            lifecycle
+                .commit(
+                    &view,
+                    completion_records(
+                        &spec.dataset,
+                        &view,
+                        &request_key,
+                        &capture,
+                        Some(&protections),
+                    )?,
+                )
+                .await?;
+            Ok(Ok((capture, protections)))
+        }
+    }
+
+    async fn prepare_compaction_rewrite(
+        &self,
+        spec: &CompactionSpec,
+        capture: &CompactionCapture,
+        protections: &retention::owners::ReferenceProtections,
+    ) -> Result<CompactionResult> {
+        let lifecycle = &self.inner.lifecycle;
+        let lock = self.lock(&spec.dataset).await;
+        let prepared_key = format!("compaction-prepared/{}", spec.operation);
+        let view = lifecycle.open(&spec.dataset).await?;
+        if let Some(completed) = lifecycle
             .get::<CompactionResult>(&view, &prepared_key)
             .await?
         {
-            check_result(&capture, &completed)?;
+            check_result(capture, &completed)?;
             storage::check_available(completed.replacement.objects.clone(), &lifecycle.budget)
                 .await?;
-            completed
-        } else {
-            let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
-            let directory = self
-                .inner
-                .root
-                .join("objects")
-                .join(spec.dataset.as_str())
-                .join(id.as_str());
-            {
-                let _guard = lock.lock().await;
-                let view = lifecycle.open(&spec.dataset).await?;
-                lifecycle
-                    .commit(
-                        &view,
-                        vec![record(
-                            format!("protection/{id}"),
-                            Protection {
-                                id,
-                                consumer: spec.dataset.clone(),
-                                purpose: format!("{}/compaction", spec.operation),
-                                paths: vec![format!("{}/", directory.display())],
-                                retired: false,
-                            },
-                        )?],
-                    )
-                    .await?;
-            }
-            std::fs::create_dir_all(&directory)?;
-            #[cfg(feature = "test-util")]
-            work_started("compaction-rewrite");
-            let candidate = self.rewrite_compaction(&capture, &directory).await?;
+            return Ok(completed);
+        }
+        let id = Id::new(uuid::Uuid::new_v4().simple().to_string())?;
+        let directory = self
+            .inner
+            .root
+            .join("objects")
+            .join(spec.dataset.as_str())
+            .join(id.as_str());
+        {
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
-            if let Some(existing) = lifecycle
-                .get::<CompactionResult>(&view, &prepared_key)
-                .await?
-            {
-                check_result(&capture, &existing)?;
-                existing
-            } else {
-                lifecycle
-                    .commit(
+            lifecycle
+                .commit(
+                    &view,
+                    vec![record(
+                        format!("protection/{id}"),
+                        Protection {
+                            id,
+                            consumer: spec.dataset.clone(),
+                            purpose: format!("{}/compaction", spec.operation),
+                            paths: vec![format!("{}/", directory.display())],
+                            retired: false,
+                        },
+                    )?],
+                )
+                .await?;
+        }
+        std::fs::create_dir_all(&directory)?;
+        #[cfg(feature = "test-util")]
+        work_started("compaction-rewrite");
+        let candidate = self.rewrite_compaction(capture, &directory).await?;
+        let _guard = lock.lock().await;
+        let view = lifecycle.open(&spec.dataset).await?;
+        if let Some(existing) = lifecycle
+            .get::<CompactionResult>(&view, &prepared_key)
+            .await?
+        {
+            check_result(capture, &existing)?;
+            Ok(existing)
+        } else {
+            lifecycle
+                .commit(
+                    &view,
+                    completion_records(
+                        &spec.dataset,
                         &view,
-                        completion_records(
-                            &spec.dataset,
-                            &view,
-                            &prepared_key,
-                            &candidate,
-                            Some(&protections),
-                        )?,
-                    )
-                    .await?;
-                candidate
-            }
-        };
-        stop_after(stop, "rewrite")?;
+                        &prepared_key,
+                        &candidate,
+                        Some(protections),
+                    )?,
+                )
+                .await?;
+            Ok(candidate)
+        }
+    }
+
+    async fn verify_compaction_rewrite(
+        &self,
+        spec: &CompactionSpec,
+        capture: &CompactionCapture,
+        protections: &retention::owners::ReferenceProtections,
+        prepared: &mut CompactionResult,
+    ) -> Result<()> {
+        let lifecycle = &self.inner.lifecycle;
+        let lock = self.lock(&spec.dataset).await;
+        let verified_key = format!("compaction-verified/{}", spec.operation);
         let view = lifecycle.open(&spec.dataset).await?;
         if let Some(verified) = lifecycle
             .get::<CompactionResult>(&view, &verified_key)
             .await?
         {
-            check_result(&capture, &verified)?;
+            check_result(capture, &verified)?;
             let mut expected = prepared.clone();
             expected.verified = true;
             if verified != expected {
                 return Err(invalid("verification names another rewrite"));
             }
-            prepared = verified;
+            *prepared = verified;
         } else {
             #[cfg(feature = "test-util")]
             work_started("compaction-verification");
-            verify_equivalence(&prepared, &lifecycle.budget).await?;
+            verify_equivalence(prepared, &lifecycle.budget).await?;
             prepared.verified = true;
             let _guard = lock.lock().await;
             let view = lifecycle.open(&spec.dataset).await?;
@@ -339,78 +405,84 @@ impl Engine {
                         &spec.dataset,
                         &view,
                         &verified_key,
-                        &prepared,
-                        Some(&protections),
+                        prepared,
+                        Some(protections),
                     )?,
                 )
                 .await?;
         }
-        stop_after(stop, "verification")?;
+        Ok(())
+    }
+
+    async fn select_compaction_representation(
+        &self,
+        spec: &CompactionSpec,
+        capture: &CompactionCapture,
+        protections: &retention::owners::ReferenceProtections,
+        prepared: &CompactionResult,
+        result_key: &str,
+    ) -> Result<Option<CompactionResult>> {
         // Selection only needs the replacement, shared files and logical schema.
         // Keep broader predecessor grants on recovery records, not this authority.
         let selected_protections = self
             .protect_compaction_table(&spec.dataset, &prepared.replacement, None)
             .await?;
-        {
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(&spec.dataset).await?;
-            if let Some(existing) = lifecycle
-                .get::<CompactionResult>(&view, &result_key)
-                .await?
-            {
-                if existing != prepared {
-                    return Err(invalid("completed representation differs from retry"));
-                }
-                return Ok(existing);
+        let lifecycle = &self.inner.lifecycle;
+        let lock = self.lock(&spec.dataset).await;
+        let _guard = lock.lock().await;
+        let view = lifecycle.open(&spec.dataset).await?;
+        if let Some(existing) = lifecycle.get::<CompactionResult>(&view, result_key).await? {
+            if existing != *prepared {
+                return Err(invalid("completed representation differs from retry"));
             }
-            let release = self
-                .resolve_release(&view, &spec.dataset, &spec.version)
-                .await?;
-            if release.manifest != capture.manifest {
-                return Err(invalid("logical result identity changed during compaction"));
-            }
-            let canonical = release
-                .dataset
-                .groups
-                .get(&spec.group)
-                .ok_or_else(|| invalid("logical group disappeared"))?;
-            let current = self
-                .representation_pin(&view, &spec.version, &spec.group, canonical)
-                .await?;
-            if current != capture.source {
-                return Err(Error::refusal(
-                    "stale_representation",
-                    "another equivalent representation was selected; the completed rewrite remains retained",
-                ));
-            }
-            let representation_key = format!(
-                "representation/{}/{}",
-                capture.source.logical_metadata().digest,
-                spec.group
-            );
-            let mut records = completion_records(
-                &spec.dataset,
-                &view,
-                &representation_key,
-                &prepared,
-                Some(&selected_protections),
-            )?;
-            records.extend(completion_records(
-                &spec.dataset,
-                &view,
-                &result_key,
-                &prepared,
-                Some(&protections),
-            )?);
-            lifecycle.commit(&view, records).await?;
+            return Ok(Some(existing));
         }
-        stop_after(stop, "selection")?;
-        Ok(prepared)
+        let release = self
+            .resolve_release(&view, &spec.dataset, &spec.version)
+            .await?;
+        if release.manifest != capture.manifest {
+            return Err(invalid("logical result identity changed during compaction"));
+        }
+        let canonical = release
+            .dataset
+            .groups
+            .get(&spec.group)
+            .ok_or_else(|| invalid("logical group disappeared"))?;
+        let current = self
+            .resolve_representation_pin(&view, &spec.group, canonical)
+            .await?;
+        if current != capture.source {
+            return Err(Error::refusal(
+                "stale_representation",
+                "another equivalent representation was selected; the completed rewrite remains retained",
+            ));
+        }
+        let representation_key = format!(
+            "representation/{}/{}",
+            capture.source.logical_metadata().digest,
+            spec.group
+        );
+        let mut records = completion_records(
+            &spec.dataset,
+            &view,
+            &representation_key,
+            prepared,
+            Some(&selected_protections),
+        )?;
+        records.extend(completion_records(
+            &spec.dataset,
+            &view,
+            result_key,
+            prepared,
+            Some(protections),
+        )?);
+        lifecycle.commit(&view, records).await?;
+        Ok(None)
     }
 
     async fn rewrite_compaction(
         &self,
-        capture: &Capture,
+        capture: &CompactionCapture,
         directory: &Path,
     ) -> Result<CompactionResult> {
         let spec = &capture.spec;
@@ -521,6 +593,7 @@ impl Engine {
     }
 }
 
+/// Opens an occurrence-aware or value-only scan over `table` depending on whether `source` is true.
 async fn capture_scan(
     table: &iceberg::table::Table,
     budget: &Budget,
@@ -538,6 +611,7 @@ async fn capture_scan(
     }
 }
 
+/// Streams record batches sequentially across the selected file `paths` in `scan`.
 fn selected_stream<'a>(
     scan: &'a storage::OccurrenceScan,
     paths: &'a [String],
@@ -549,6 +623,7 @@ fn selected_stream<'a>(
         .boxed()
 }
 
+/// Projects `batch` into the target compaction output `schema`, mapping occurrence columns to origin columns for source tables.
 fn rewrite_batch(batch: RecordBatch, schema: &SchemaRef, source: bool) -> Result<RecordBatch> {
     let input = batch.schema();
     let columns = schema
@@ -566,6 +641,7 @@ fn rewrite_batch(batch: RecordBatch, schema: &SchemaRef, source: bool) -> Result
     Ok(RecordBatch::try_new(schema.clone(), columns)?)
 }
 
+/// Projects out internal hidden storage columns so before and after batches can be compared directly.
 fn comparable(batch: RecordBatch) -> Result<RecordBatch> {
     let fields = batch
         .schema()
@@ -578,6 +654,7 @@ fn comparable(batch: RecordBatch) -> Result<RecordBatch> {
     Ok(batch.project(&fields)?)
 }
 
+/// Verifies that the compacted output files contain the exact same row sequence, values, and occurrence identities as the selected input files.
 async fn verify_equivalence(result: &CompactionResult, budget: &Budget) -> Result<()> {
     let before = storage::open_pin(&result.source, budget).await?;
     let after = storage::open_pin(&result.replacement, budget).await?;
@@ -595,6 +672,7 @@ async fn verify_equivalence(result: &CompactionResult, budget: &Budget) -> Resul
     compare_streams(left, right, result.rows).await
 }
 
+/// Compares two record batch streams slice-by-slice regardless of batch chunk boundaries.
 async fn compare_streams(
     mut left: BoxStream<'_, Result<RecordBatch>>,
     mut right: BoxStream<'_, Result<RecordBatch>>,
@@ -650,7 +728,8 @@ async fn compare_streams(
     }
 }
 
-pub(super) fn check_result(capture: &Capture, result: &CompactionResult) -> Result<()> {
+/// Validates that a retained [`CompactionResult`] matches its [`CompactionCapture`] request and logical metadata.
+pub(super) fn check_result(capture: &CompactionCapture, result: &CompactionResult) -> Result<()> {
     if result.spec != capture.spec
         || result.source != capture.source
         || result.source.logical_metadata() != result.replacement.logical_metadata()

@@ -1,4 +1,18 @@
 //! One immutable scalar intent with exact recoverable source captures.
+//!
+//! Continuous backfill coordinates optimistic and fenced child attempts through
+//! five catalog control records keyed by parent or child operation ID:
+//! - `continuous/{parent}` ([`Intent`]): immutable parent intent, initial base
+//!   pin, control epoch/eligibility, and authored source field bindings.
+//! - `continuous-child/{child}` ([`Child`]): immutable ownership and capture
+//!   record for a specific child backfill attempt (`round`, `previous`, and
+//!   captured source `VersionRef`).
+//! - `continuous-state/{parent}` ([`Child`]): mutable pointer to the latest
+//!   admitted child attempt for `parent`.
+//! - `continuous-result/{parent}` ([`Completed`]): terminal selection binding
+//!   `parent` to the winning child `VersionRef` and optional fence token.
+//! - `continuous-abandoned/{parent}` ([`Abandonment`]): terminal abandonment
+//!   record preventing further child attempts while preserving completed work.
 
 #[cfg(all(test, feature = "test-util"))]
 mod tests;
@@ -9,6 +23,7 @@ use crate::engine::intake::SourceFence;
 
 type Record = (String, serde_json::Value);
 
+/// Immutable parent intent record stored at `continuous/{parent}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::engine) struct Intent {
@@ -33,6 +48,8 @@ struct CaptureAuthority {
     release: Option<ReleasePin>,
 }
 
+/// Child capture and round ownership record stored at `continuous-child/{child}`
+/// and referenced by `continuous-state/{parent}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::engine) struct Child {
@@ -47,6 +64,7 @@ pub(in crate::engine) struct Child {
     admission_boundary: u64,
 }
 
+/// Terminal parent completion record stored at `continuous-result/{parent}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::engine) struct Completed {
@@ -57,6 +75,7 @@ pub(in crate::engine) struct Completed {
     fence: Option<String>,
 }
 
+/// Active child backfill attempt paired with its parent [`Intent`] and optional [`SourceFence`].
 pub(super) struct Attempt {
     pub(super) intent: Intent,
     child: Child,
@@ -135,23 +154,23 @@ fn validate_child(child: &Child, rows: &SnapshotRows, revision: i64) -> Result<(
     let mut expected = intent.spec.backfill.clone();
     expected.operation = child.child.clone();
     expected.base = child.capture.version.clone();
-    if child.round == 0
-        || child.child == child.parent
-        || child.intent_digest != intent.digest
-        || child.dataset != intent.spec.backfill.dataset
-        || child.capture.dataset != child.dataset
-        || child.capture.manifest.owner != child.dataset
-        || owner != *child
-        || owner_revision != revision
-        || operation_revision != revision
-        || request_revision != revision
-        || revision <= 0
-        || parent_revision > revision
-        || request != OperationRequest::Backfill(expected)
-        || fingerprint(&request)? != child.request_digest
-        || operation.request_digest != child.request_digest
-        || operation.base.as_ref() != Some(&child.capture.version)
-    {
+    let identity_matches = child.round > 0
+        && child.child != child.parent
+        && child.intent_digest == intent.digest
+        && child.dataset == intent.spec.backfill.dataset
+        && child.capture.dataset == child.dataset
+        && child.capture.manifest.owner == child.dataset
+        && owner == *child;
+    let revisions_match = revision > 0
+        && owner_revision == revision
+        && operation_revision == revision
+        && request_revision == revision
+        && parent_revision <= revision;
+    let request_matches = request == OperationRequest::Backfill(expected)
+        && fingerprint(&request)? == child.request_digest
+        && operation.request_digest == child.request_digest
+        && operation.base.as_ref() == Some(&child.capture.version);
+    if !(identity_matches && revisions_match && request_matches) {
         return Err(invalid(
             "child identity, material request or admission revision differs",
         ));
@@ -444,7 +463,7 @@ impl Engine {
             .dataset
             .groups
             .get("source")
-            .ok_or_else(invalid_group)?;
+            .ok_or_else(|| invalid_group("initial backfill release lacks a source group"))?;
         let table = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let expressions = Expressions::compile(
             &self.context(),
@@ -508,7 +527,9 @@ impl Engine {
         self.check_continuous_parent(&view, intent).await?;
         let authority: CaptureAuthority =
             lifecycle.get(&view, "authority").await?.unwrap_or_default();
-        let current = authority.release.as_ref().ok_or_else(invalid_group)?;
+        let current = authority.release.as_ref().ok_or_else(|| {
+            invalid_group("continuous capture authority lacks a selected release")
+        })?;
         self.continuous_target(&view, intent, current).await?;
         let previous = self.continuous_child_in(&view, &state_key(parent)).await?;
         if let Some(child) = &previous
@@ -522,9 +543,11 @@ impl Engine {
             let request: OperationRequest = lifecycle
                 .get(&view, &format!("request/{}", child.child))
                 .await?
-                .ok_or_else(invalid_group)?;
+                .ok_or_else(|| invalid_group("continuous child request record is missing"))?;
             let OperationRequest::Backfill(request) = request else {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "continuous child request record is not a backfill request",
+                ));
             };
             return Ok((
                 request,
@@ -711,7 +734,9 @@ impl Engine {
         self.continuous_target(
             view,
             &attempt.intent,
-            authority.release.as_ref().ok_or_else(invalid_group)?,
+            authority.release.as_ref().ok_or_else(|| {
+                invalid_group("continuous admission authority lacks a selected release")
+            })?,
         )
         .await?;
         let rows = lifecycle.rows(view).await?;
@@ -775,7 +800,9 @@ impl Engine {
         attempt: &Attempt,
     ) -> Result<()> {
         let OperationRequest::Backfill(spec) = &release.dataset.request else {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "continuous selection candidate is not a backfill release",
+            ));
         };
         self.check_continuous_child(view, spec, Some(attempt))
             .await?;
@@ -787,7 +814,9 @@ impl Engine {
         if state != attempt.child {
             return Err(changed());
         }
-        let current = authority.release.as_ref().ok_or_else(invalid_group)?;
+        let current = authority.release.as_ref().ok_or_else(|| {
+            invalid_group("continuous selection authority lacks a selected release")
+        })?;
         self.continuous_target(view, &attempt.intent, current)
             .await?;
         let progress = if let Some(related) = &release.dataset.related {

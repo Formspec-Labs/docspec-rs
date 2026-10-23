@@ -742,7 +742,7 @@ pub(in crate::engine) fn check_pin_binding(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "remote"))]
 pub(super) async fn test_retained_phase_revision_bindings(
     engine: &Engine,
     spec: &ExportSpec,

@@ -3,11 +3,8 @@
 use super::*;
 use crate::engine::retention::retirement as retained;
 
-fn invalid() -> Error {
-    Error::refusal(
-        "invalid_retirement",
-        "change retirement requires distinct versions, a reason and matching optional certificates",
-    )
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_retirement", reason)
 }
 
 impl Engine {
@@ -38,7 +35,9 @@ impl Engine {
                 || reason.trim().is_empty()
                 || versions.windows(2).any(|pair| pair[0] == pair[1])
             {
-                return Err(invalid());
+                return Err(invalid(
+                    "change retirement requires distinct versions and a non-empty reason",
+                ));
             }
             let lock = engine.lock(&dataset).await;
             let _guard = lock.lock().await;
@@ -55,7 +54,9 @@ impl Engine {
                         Error::refusal("no_changes", "requested optional changes are unavailable")
                     })?;
                 if certificate.after.dataset != dataset || revision > view.revision {
-                    return Err(invalid());
+                    return Err(invalid(
+                        "change certificate dataset or revision does not match the opened catalog view",
+                    ));
                 }
                 check_certificate(&rows, revision, &key, &certificate)?;
                 if retained::record_retired(&rows, &view, &key, revision, &lifecycle.budget)? {
@@ -88,7 +89,9 @@ impl Engine {
     /// malformed selection metadata, unqualified catalogs or capacity exhaustion.
     pub async fn retire_changes(&self, plan: &RetentionPlan) -> Result<Retirement> {
         if plan.scope != RetirementScope::OptionalChanges {
-            return Err(invalid());
+            return Err(invalid(
+                "retire_changes requires an OptionalChanges retention plan",
+            ));
         }
         self.retire_retained(plan).await
     }

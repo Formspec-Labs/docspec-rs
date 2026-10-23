@@ -125,6 +125,7 @@ async fn fixture() -> Fixture {
         limits(),
         local.inner.host.clone(),
         false,
+        None,
     )
     .unwrap();
     drop(local);
@@ -385,6 +386,7 @@ async fn completed_remote_stage_cleanup_reconciles_intent_and_unlink_gaps() {
             limits(),
             ownership,
             false,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -558,6 +560,7 @@ async fn stage_cleanup_waits_for_configured_reader_and_its_admitted_stream() {
         limits(),
         engine.inner.host.clone(),
         false,
+        None,
     )
     .unwrap();
     drop(engine);

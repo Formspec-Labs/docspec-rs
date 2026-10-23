@@ -262,15 +262,8 @@ impl Engine {
             reason.to_owned(),
         );
         self.admit_work(memory, move |engine| async move {
-            engine.retirement_catalog()?;
-            if reason.trim().is_empty() {
-                return Err(invalid_retirement());
-            }
-            let lock = engine.lock(&dataset).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&dataset).await?;
+            let (_guard, view, rows) = engine.open_retirement_view(&dataset, &reason).await?;
             engine.check_operation_available(&view, &operation).await?;
-            let rows = engine.inner.lifecycle.rows(&view).await?;
             let records = collect(&rows, &view, &operation, &engine.inner.lifecycle.budget)?;
             retirement::plan(
                 &view,

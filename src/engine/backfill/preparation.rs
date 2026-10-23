@@ -13,6 +13,7 @@ pub(in crate::engine) struct AcknowledgedFile {
     pub(in crate::engine) protections: Option<Arc<ReferenceProtections>>,
 }
 
+/// Incremental accumulator of verified scalar data files, origins, and owner protections.
 struct FileAssembly {
     files: Vec<DataFile>,
     inherited: Vec<ObjectRef>,
@@ -32,7 +33,9 @@ impl FileAssembly {
     ) -> Result<()> {
         for file in acknowledged {
             if file.generation.key != file_key(&file.completion.source, expressions, eligibility)? {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "acknowledged file key differs from expected scalar file key",
+                ));
             }
             self.bytes = charge_assembly(
                 self.bytes,
@@ -76,7 +79,6 @@ impl Engine {
         checks: &mut super::super::verification::Checks,
     ) -> Result<PreparedGroup> {
         let lifecycle = &self.inner.lifecycle;
-        let lock = self.lock(request.dataset()).await;
         let view = lifecycle.open(request.dataset()).await?;
         self.check_not_abandoned(&view, request.operation()).await?;
         let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
@@ -117,256 +119,29 @@ impl Engine {
                 self.retained_protections(&view, &prepared_key).await?,
             )
         } else {
-            #[cfg(feature = "test-util")]
-            work_started("backfill-assembly");
-            let directory = self.reserve_group(request, operation, "processing").await?;
-            let output = self
-                .create_output_at(request.dataset(), &directory, expressions.native.clone())
-                .await?;
-            let scan = storage::OccurrenceScan::open(&native, &lifecycle.budget).await?;
-            let objects = source_objects(source);
-            let mut completions = BTreeMap::new();
-            let mut assembly = FileAssembly {
-                files: Vec::new(),
-                inherited: Vec::new(),
-                origins: Vec::new(),
-                protections: source_protections
-                    .map(ReferenceProtections::duplicate)
-                    .transpose()?,
-                bytes: 0,
-            };
-            let _assembly = lifecycle
-                .budget
-                .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
-            // One declaration serves every newly computed file in this preparation.
-            // The reserved prefix protects it before any file acknowledgment.
-            let declaration = origins::write_at(
-                &self.inner.objects,
-                request.dataset(),
-                &directory.child("declaration.json")?,
-                &OriginalDeclaration {
-                    processor: PROCESSOR.into(),
-                    definition: definition.clone(),
-                    input_fields: expressions.input_fields.clone(),
-                },
-                &lifecycle.budget,
+            self.assemble_prepared_group(
+                request,
+                operation,
+                source,
+                source_protections,
+                definition,
+                &native,
+                &expressions,
+                &prepared_key,
+                stop,
+                checks,
             )
-            .await?;
-            let mut completion_view = lifecycle.open(request.dataset()).await?;
-            for file in scan.files() {
-                let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
-                let key = file_key(object, &expressions, operation.eligibility)?;
-                let existing: Option<FileCompletion> =
-                    self.active_completion(&completion_view, &key).await?;
-                if let Some(existing) = existing {
-                    if existing.source != **object || existing.rows != file.record_count() {
-                        return Err(invalid_group());
-                    }
-                    let rows = lifecycle.rows(&completion_view).await?;
-                    let retained = AcknowledgedFile {
-                        completion: existing,
-                        generation: RetainedGeneration {
-                            key: key.clone(),
-                            revision: rows.revision(&key).ok_or_else(invalid_group)?,
-                        },
-                        protections: self
-                            .retained_protections(&completion_view, &key)
-                            .await?
-                            .map(Arc::new),
-                    };
-                    #[cfg(feature = "test-util")]
-                    self.scalar_file_reused(request).await;
-                    if let Err(error) = assembly
-                        .append(
-                            vec![retained],
-                            &expressions,
-                            operation.eligibility,
-                            &lifecycle.budget,
-                            checks,
-                        )
-                        .await
-                    {
-                        self.acknowledge_files(
-                            request,
-                            operation,
-                            &mut completions,
-                            source_protections,
-                        )
-                        .await?;
-                        return Err(error);
-                    }
-                    continue;
-                }
-                // A new execution of the same deficient definition cannot create
-                // a qualifying historical baseline after its omission is known.
-                let correction_view = lifecycle.open(request.dataset()).await?;
-                if self
-                    .requirements(&correction_view, definition)
-                    .await?
-                    .is_some()
-                {
-                    self.acknowledge_files(
-                        request,
-                        operation,
-                        &mut completions,
-                        source_protections,
-                    )
-                    .await?;
-                    return Err(super::super::corrections::mismatch());
-                }
-                let result = self
-                    .compute_file(
-                        request.dataset(),
-                        &directory,
-                        &scan,
-                        object,
-                        file.record_count(),
-                        &output,
-                        expressions.clone(),
-                    )
-                    .await;
-                let completion = match result {
-                    Ok(mut completion) => {
-                        completion.source_metadata = Some(source.metadata.clone());
-                        completion.execution = Some(OriginalExecution {
-                            operation: request.operation().clone(),
-                            declaration: declaration.clone(),
-                        });
-                        completion
-                    }
-                    Err(error) => {
-                        self.acknowledge_files(
-                            request,
-                            operation,
-                            &mut completions,
-                            source_protections,
-                        )
-                        .await?;
-                        let _guard = lock.lock().await;
-                        let view = lifecycle.open(request.dataset()).await?;
-                        self.check_not_abandoned(&view, request.operation()).await?;
-                        lifecycle
-                            .commit(
-                                &view,
-                                vec![record(
-                                    format!("failure/{}/{key}", request.operation()),
-                                    error.to_string(),
-                                )?],
-                            )
-                            .await?;
-                        return Err(error);
-                    }
-                };
-                if completion.source != **object || completion.rows != file.record_count() {
-                    return Err(invalid_group());
-                }
-                completions.insert(key, completion);
-                let bytes = serde_json::to_vec(&completions)?.len();
-                if completions.len() >= COMPLETION_BUNDLE
-                    || bytes >= lifecycle.budget.limits.max_metadata_bytes / 8
-                {
-                    let acknowledged = self
-                        .acknowledge_files(request, operation, &mut completions, source_protections)
-                        .await?;
-                    stop_after(stop, "files")?;
-                    assembly
-                        .append(
-                            acknowledged,
-                            &expressions,
-                            operation.eligibility,
-                            &lifecycle.budget,
-                            checks,
-                        )
-                        .await?;
-                    completion_view = lifecycle.open(request.dataset()).await?;
-                }
-            }
-            let acknowledged = self
-                .acknowledge_files(request, operation, &mut completions, source_protections)
-                .await?;
-            stop_after(stop, "files")?;
-            assembly
-                .append(
-                    acknowledged,
-                    &expressions,
-                    operation.eligibility,
-                    &lifecycle.budget,
-                    checks,
-                )
-                .await?;
-            let output =
-                storage::append(&output, lifecycle.catalog.as_ref(), assembly.files).await?;
-            let prepared = self
-                .pin_output(request.dataset(), &output, source.rows, &assembly.inherited)
-                .await?;
-            let _guard = lock.lock().await;
-            let view = lifecycle.open(request.dataset()).await?;
-            self.check_completion(&view, operation, request.operation())
-                .await?;
-            if let Some(existing) = self
-                .active_completion::<PreparedCompletion>(&view, &prepared_key)
-                .await?
-            {
-                check_group_dependencies(
-                    &prepared_key,
-                    existing.dependencies.as_ref(),
-                    source,
-                    &existing.table,
-                )?;
-                (
-                    existing.table,
-                    existing.origins,
-                    self.retained_protections(&view, &prepared_key).await?,
-                )
-            } else {
-                let origins = origins::write_at(
-                    &self.inner.objects,
-                    request.dataset(),
-                    &directory.child("origins.json")?,
-                    &ScalarOrigins {
-                        processor: PROCESSOR.into(),
-                        definition: definition.clone(),
-                        input_fields: expressions.input_fields.clone(),
-                        dependencies: GroupDependencies {
-                            source: source.into(),
-                            source_logical_metadata: source.logical_metadata.clone(),
-                            output: (&prepared).into(),
-                        },
-                        files: assembly.origins,
-                    },
-                    &lifecycle.budget,
-                )
-                .await?;
-                let completed = PreparedCompletion {
-                    origins: Some(origins),
-                    dependencies: Some(GroupDependencies {
-                        source: source.into(),
-                        source_logical_metadata: source.logical_metadata.clone(),
-                        output: (&prepared).into(),
-                    }),
-                    table: prepared,
-                };
-                let records = completion_records(
-                    request.dataset(),
-                    &view,
-                    &prepared_key,
-                    &completed,
-                    assembly.protections.as_ref(),
-                )?;
-                lifecycle.commit(&view, records).await?;
-                (completed.table, completed.origins, assembly.protections)
-            }
+            .await?
+        };
+        let binding = origins::ScalarOriginBinding {
+            source,
+            group: &prepared,
+            definition,
+            input_fields: &expressions.input_fields,
+            native_field_ids: &expressions.native_field_ids,
         };
         checks
-            .scalar_origins(
-                origins.as_ref(),
-                source,
-                &prepared,
-                definition,
-                &expressions.input_fields,
-                &expressions.native_field_ids,
-                &lifecycle.budget,
-            )
+            .scalar_origins(origins.as_ref(), binding, &lifecycle.budget)
             .await?;
         let correction_view = lifecycle.open(request.dataset()).await?;
         self.check_prepared_correction(
@@ -382,12 +157,8 @@ impl Engine {
             .validate_scalar_group(
                 request,
                 operation,
-                source,
+                binding,
                 source_protections,
-                definition,
-                &expressions.input_fields,
-                &expressions.native_field_ids,
-                &prepared,
                 origins.as_ref(),
                 protections.as_ref(),
                 checks,
@@ -406,22 +177,287 @@ impl Engine {
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "One checker binds exact source, target interpretation and inherited protections"
+        reason = "Group assembly threads operation, source table, compiled expressions, and verification state"
     )]
-    pub(super) async fn validate_scalar_group(
+    async fn assemble_prepared_group(
         &self,
         request: &OperationRequest,
         operation: &Operation,
         source: &TablePin,
         source_protections: Option<&ReferenceProtections>,
         definition: &GroupDefinition,
-        input_fields: &BTreeMap<String, i32>,
-        native_field_ids: &BTreeMap<i32, i32>,
-        output: &TablePin,
+        native: &iceberg::table::Table,
+        expressions: &Arc<Expressions>,
+        prepared_key: &str,
+        stop: Option<&str>,
+        checks: &mut super::super::verification::Checks,
+    ) -> Result<(TablePin, Option<ObjectRef>, Option<ReferenceProtections>)> {
+        #[cfg(feature = "test-util")]
+        work_started("backfill-assembly");
+        let lifecycle = &self.inner.lifecycle;
+        let lock = self.lock(request.dataset()).await;
+        let directory = self.reserve_group(request, operation, "processing").await?;
+        let output = self
+            .create_output_at(request.dataset(), &directory, expressions.native.clone())
+            .await?;
+        let scan = storage::OccurrenceScan::open(native, &lifecycle.budget).await?;
+        let objects = source_objects(source);
+        let mut completions = BTreeMap::new();
+        let mut assembly = FileAssembly {
+            files: Vec::new(),
+            inherited: Vec::new(),
+            origins: Vec::new(),
+            protections: source_protections
+                .map(ReferenceProtections::duplicate)
+                .transpose()?,
+            bytes: 0,
+        };
+        let _assembly = lifecycle
+            .budget
+            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
+        // One declaration serves every newly computed file in this preparation.
+        // The reserved prefix protects it before any file acknowledgment.
+        let declaration = origins::write_at(
+            &self.inner.objects,
+            request.dataset(),
+            &directory.child("declaration.json")?,
+            &OriginalDeclaration {
+                processor: PROCESSOR.into(),
+                definition: definition.clone(),
+                input_fields: expressions.input_fields.clone(),
+            },
+            &lifecycle.budget,
+        )
+        .await?;
+        let mut completion_view = lifecycle.open(request.dataset()).await?;
+        for file in scan.files() {
+            let object = objects.get(file.file_path()).ok_or_else(|| {
+                invalid_group("source snapshot file is missing from pinned object inventory")
+            })?;
+            let key = file_key(object, expressions, operation.eligibility)?;
+            let existing: Option<FileCompletion> =
+                self.active_completion(&completion_view, &key).await?;
+            if let Some(existing) = existing {
+                if existing.source != **object || existing.rows != file.record_count() {
+                    return Err(invalid_group(
+                        "retained file completion source or row count differs from source file",
+                    ));
+                }
+                let rows = lifecycle.rows(&completion_view).await?;
+                let retained = AcknowledgedFile {
+                    completion: existing,
+                    generation: RetainedGeneration {
+                        key: key.clone(),
+                        revision: rows.revision(&key).ok_or_else(|| {
+                            invalid_group("retained file completion revision is missing")
+                        })?,
+                    },
+                    protections: self
+                        .retained_protections(&completion_view, &key)
+                        .await?
+                        .map(Arc::new),
+                };
+                #[cfg(feature = "test-util")]
+                self.scalar_file_reused(request).await;
+                if let Err(error) = assembly
+                    .append(
+                        vec![retained],
+                        expressions,
+                        operation.eligibility,
+                        &lifecycle.budget,
+                        checks,
+                    )
+                    .await
+                {
+                    self.acknowledge_files(
+                        request,
+                        operation,
+                        &mut completions,
+                        source_protections,
+                    )
+                    .await?;
+                    return Err(error);
+                }
+                continue;
+            }
+            // A new execution of the same deficient definition cannot create
+            // a qualifying historical baseline after its omission is known.
+            let correction_view = lifecycle.open(request.dataset()).await?;
+            if self
+                .requirements(&correction_view, definition)
+                .await?
+                .is_some()
+            {
+                self.acknowledge_files(request, operation, &mut completions, source_protections)
+                    .await?;
+                return Err(super::super::corrections::mismatch());
+            }
+            let result = self
+                .compute_file(
+                    request.dataset(),
+                    &directory,
+                    &scan,
+                    object,
+                    file.record_count(),
+                    &output,
+                    expressions.clone(),
+                )
+                .await;
+            let completion = match result {
+                Ok(mut completion) => {
+                    completion.source_metadata = Some(source.metadata.clone());
+                    completion.execution = Some(OriginalExecution {
+                        operation: request.operation().clone(),
+                        declaration: declaration.clone(),
+                    });
+                    completion
+                }
+                Err(error) => {
+                    self.acknowledge_files(
+                        request,
+                        operation,
+                        &mut completions,
+                        source_protections,
+                    )
+                    .await?;
+                    let _guard = lock.lock().await;
+                    let view = lifecycle.open(request.dataset()).await?;
+                    self.check_not_abandoned(&view, request.operation()).await?;
+                    lifecycle
+                        .commit(
+                            &view,
+                            vec![record(
+                                format!("failure/{}/{key}", request.operation()),
+                                error.to_string(),
+                            )?],
+                        )
+                        .await?;
+                    return Err(error);
+                }
+            };
+            if completion.source != **object || completion.rows != file.record_count() {
+                return Err(invalid_group(
+                    "computed file completion source or row count differs from source file",
+                ));
+            }
+            completions.insert(key, completion);
+            let bytes = serde_json::to_vec(&completions)?.len();
+            if completions.len() >= COMPLETION_BUNDLE
+                || bytes >= lifecycle.budget.limits.max_metadata_bytes / 8
+            {
+                let acknowledged = self
+                    .acknowledge_files(request, operation, &mut completions, source_protections)
+                    .await?;
+                stop_after(stop, "files")?;
+                assembly
+                    .append(
+                        acknowledged,
+                        expressions,
+                        operation.eligibility,
+                        &lifecycle.budget,
+                        checks,
+                    )
+                    .await?;
+                completion_view = lifecycle.open(request.dataset()).await?;
+            }
+        }
+        let acknowledged = self
+            .acknowledge_files(request, operation, &mut completions, source_protections)
+            .await?;
+        stop_after(stop, "files")?;
+        assembly
+            .append(
+                acknowledged,
+                expressions,
+                operation.eligibility,
+                &lifecycle.budget,
+                checks,
+            )
+            .await?;
+        let output = storage::append(&output, lifecycle.catalog.as_ref(), assembly.files).await?;
+        let prepared = self
+            .pin_output(request.dataset(), &output, source.rows, &assembly.inherited)
+            .await?;
+        let _guard = lock.lock().await;
+        let view = lifecycle.open(request.dataset()).await?;
+        self.check_completion(&view, operation, request.operation())
+            .await?;
+        if let Some(existing) = self
+            .active_completion::<PreparedCompletion>(&view, prepared_key)
+            .await?
+        {
+            check_group_dependencies(
+                prepared_key,
+                existing.dependencies.as_ref(),
+                source,
+                &existing.table,
+            )?;
+            Ok((
+                existing.table,
+                existing.origins,
+                self.retained_protections(&view, prepared_key).await?,
+            ))
+        } else {
+            let origins = origins::write_at(
+                &self.inner.objects,
+                request.dataset(),
+                &directory.child("origins.json")?,
+                &ScalarOrigins {
+                    processor: PROCESSOR.into(),
+                    definition: definition.clone(),
+                    input_fields: expressions.input_fields.clone(),
+                    dependencies: GroupDependencies {
+                        source: source.into(),
+                        source_logical_metadata: source.logical_metadata.clone(),
+                        output: (&prepared).into(),
+                    },
+                    files: assembly.origins,
+                },
+                &lifecycle.budget,
+            )
+            .await?;
+            let completed = PreparedCompletion {
+                origins: Some(origins),
+                dependencies: Some(GroupDependencies {
+                    source: source.into(),
+                    source_logical_metadata: source.logical_metadata.clone(),
+                    output: (&prepared).into(),
+                }),
+                table: prepared,
+            };
+            let records = completion_records(
+                request.dataset(),
+                &view,
+                prepared_key,
+                &completed,
+                assembly.protections.as_ref(),
+            )?;
+            lifecycle.commit(&view, records).await?;
+            Ok((completed.table, completed.origins, assembly.protections))
+        }
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Validates scalar group origin completion against source/output protections and shared check state"
+    )]
+    pub(super) async fn validate_scalar_group(
+        &self,
+        request: &OperationRequest,
+        operation: &Operation,
+        binding: origins::ScalarOriginBinding<'_>,
+        source_protections: Option<&ReferenceProtections>,
         origins: Option<&ObjectRef>,
         output_protections: Option<&ReferenceProtections>,
         checks: &mut super::super::verification::Checks,
     ) -> Result<Option<ReferenceProtections>> {
+        let origins::ScalarOriginBinding {
+            source,
+            group: output,
+            definition,
+            input_fields,
+            ..
+        } = binding;
         let lifecycle = &self.inner.lifecycle;
         let validation_key =
             scalar_validation_key(operation.eligibility, source, definition, input_fields)?;
@@ -443,16 +479,7 @@ impl Engine {
             if !checks.inspects_tables() {
                 *checks = super::super::verification::Checks::routine(self.inner.objects.clone());
             }
-            verification::verify_group_data(
-                source,
-                output,
-                definition,
-                input_fields,
-                native_field_ids,
-                &lifecycle.budget,
-                checks,
-            )
-            .await?;
+            verification::verify_group_data(binding, &lifecycle.budget, checks).await?;
             let lock = self.lock(request.dataset()).await;
             let _guard = lock.lock().await;
             let view = lifecycle.open(request.dataset()).await?;
@@ -557,11 +584,15 @@ impl Engine {
                 self.active_completion::<FileCompletion>(&view, key).await?
             {
                 if existing.source != candidate.source || existing.rows != candidate.rows {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "active file completion source or row count differs from candidate",
+                    ));
                 }
                 (
                     existing,
-                    rows.revision(key).ok_or_else(invalid_group)?,
+                    rows.revision(key).ok_or_else(|| {
+                        invalid_group("active file completion revision is missing")
+                    })?,
                     self.retained_protections(&view, key).await?.map(Arc::new),
                 )
             } else {
@@ -670,7 +701,9 @@ impl Engine {
         });
         let files = storage::write_batches(output, stream, budget).await?;
         if files.iter().map(DataFile::record_count).sum::<u64>() != rows {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "written scalar output row count differs from source file row count",
+            ));
         }
         let descriptor_location =
             directory.child(&format!("{}.avro", uuid::Uuid::new_v4().simple()))?;
@@ -792,4 +825,182 @@ pub(super) fn scalar_validation_key(
         "backfill-validation/{eligibility}/{}",
         digest.to_hex()
     ))
+}
+
+impl Engine {
+    pub(super) async fn retained_backfill_readback(
+        &self,
+        spec: &BackfillSpec,
+        operation: &Operation,
+        capture: &BackfillCapture,
+        base: &ReleasePin,
+        checks: &mut super::super::verification::Checks,
+    ) -> Result<(Option<Retained<ReleasePin>>, bool)> {
+        let lifecycle = &self.inner.lifecycle;
+        let view = lifecycle.open(&spec.dataset).await?;
+        let rows = lifecycle.rows(&view).await?;
+        let prefix = format!("backfill-readback/{}/", spec.operation);
+        let mut readbacks = rows.prefix(&prefix).peekable();
+        if readbacks.peek().is_none() {
+            return Ok((None, false));
+        }
+        checks.compose();
+        let _memory = lifecycle
+            .budget
+            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
+        let request = OperationRequest::Backfill(spec.clone());
+        let definition = spec.group_definition();
+        let source = base
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid_group("backfill base release is missing source group"))?;
+        let mut retained: Option<(i64, &str, ReadbackCompletion)> = None;
+        for (key, revision, json) in readbacks {
+            tokio::task::consume_budget().await;
+            let completed: ReadbackCompletion = serde_json::from_str(json)?;
+            let readback = &completed.release;
+            let dataset = &readback.dataset;
+            let table = dataset.groups.get(spec.group.as_str()).ok_or_else(|| {
+                invalid_group("retained readback is missing target group table pin")
+            })?;
+            let binding = dataset.computed.get(spec.group.as_str()).ok_or_else(|| {
+                invalid_group("retained readback is missing target computed group")
+            })?;
+            validate_retained_readback_entry(
+                key,
+                &prefix,
+                readback,
+                binding,
+                spec,
+                &request,
+                &definition,
+                operation,
+                capture,
+                base,
+                source,
+            )?;
+            verify_groups(dataset, &lifecycle.budget, checks).await?;
+            super::super::evidence::verify(dataset, &lifecycle.budget, checks).await?;
+            if let Some((_, _, previous)) = &retained
+                && (previous.release.dataset.groups.get(spec.group.as_str()) != Some(table)
+                    || previous.release.dataset.computed.get(spec.group.as_str()) != Some(binding))
+            {
+                return Err(Error::refusal(
+                    "phase_generation_conflict",
+                    format!("retained readback {key} binds a different target generation"),
+                ));
+            }
+            if retained
+                .as_ref()
+                .is_none_or(|(prior, _, _)| revision > *prior)
+            {
+                retained = Some((revision, key, completed));
+            }
+        }
+        if let Some((_, key, completed)) = retained {
+            let current_validator = completed.scalar_validator.as_deref() == Some(VALIDATOR);
+            Ok((
+                Some(Retained {
+                    value: completed.release,
+                    protections: self.retained_protections(&view, key).await?,
+                }),
+                current_validator,
+            ))
+        } else {
+            Ok((None, false))
+        }
+    }
+
+    pub(super) async fn check_backfill_target(
+        &self,
+        view: &View,
+        spec: &BackfillSpec,
+        candidate: &DatasetPin,
+    ) -> Result<()> {
+        let lifecycle = &self.inner.lifecycle;
+        let rows = lifecycle.rows(view).await?;
+        let prefix = format!("backfill-readback/{}/", spec.operation);
+        for (key, _, json) in rows.prefix(&prefix) {
+            let _memory = rows.reserve_decoded(&lifecycle.budget, &[key])?;
+            let retained: ReleasePin = serde_json::from_str(json)?;
+            check_retained_target(&retained.dataset, candidate, spec.group.as_str())?;
+        }
+        Ok(())
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Validates one retained backfill-readback record against operation, capture, base, and source invariants"
+)]
+fn validate_retained_readback_entry(
+    key: &str,
+    prefix: &str,
+    readback: &ReleasePin,
+    binding: &ComputedGroup,
+    spec: &BackfillSpec,
+    request: &OperationRequest,
+    definition: &GroupDefinition,
+    operation: &Operation,
+    capture: &BackfillCapture,
+    base: &ReleasePin,
+    source: &TablePin,
+) -> Result<()> {
+    let dataset = &readback.dataset;
+    if !readback.verified
+        || readback.id != spec.operation
+        || dataset.dataset != spec.dataset
+        || dataset.version != spec.operation
+        || &dataset.request != request
+        || readback.manifest.owner != spec.dataset
+        || key != format!("{prefix}{}", readback.manifest.digest)
+    {
+        return Err(invalid_group(
+            "retained backfill readback identity, request, or key digest is invalid",
+        ));
+    }
+    if dataset.format != operation.result_format
+        || dataset.eligibility != operation.eligibility
+        || dataset.boundary != operation.boundary
+        || dataset.definition != operation.definition
+        || dataset.processor != PROCESSOR
+    {
+        return Err(invalid_group(
+            "retained backfill readback format, eligibility, boundary, definition, or processor disagrees with operation",
+        ));
+    }
+    if dataset.groups.get("source") != Some(source)
+        || dataset.related != capture.related
+        || dataset.relationship != base.dataset.relationship
+        || dataset.parent_manifest.is_none()
+    {
+        return Err(invalid_group(
+            "retained backfill readback source group, related metadata, relationship, or parent_manifest is invalid",
+        ));
+    }
+    if &binding.definition != definition
+        || &binding.request != request
+        || binding.source_metadata != source.metadata
+        || binding.base_manifest != capture.base_manifest
+        || capture.base_manifest != base.manifest
+    {
+        return Err(invalid_group(
+            "retained backfill readback computed binding disagrees with capture or base manifest",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_retained_target(
+    retained: &DatasetPin,
+    candidate: &DatasetPin,
+    group: &str,
+) -> Result<()> {
+    if retained.groups.get(group) != candidate.groups.get(group)
+        || retained.computed.get(group) != candidate.computed.get(group)
+    {
+        return Err(super::super::corrections::required());
+    }
+    Ok(())
 }

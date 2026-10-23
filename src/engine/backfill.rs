@@ -1,7 +1,7 @@
 //! Recoverable row-local field groups, selected against an exact source boundary.
 
 use super::retention::owners::ReferenceProtections;
-use super::*;
+use super::{expr::is_valid_identifier, write::identifier as quote, *};
 use iceberg::spec::{DataFile, FormatVersion, StructType};
 use std::collections::BTreeSet;
 
@@ -15,9 +15,11 @@ mod preparation;
 mod protection_tests;
 #[cfg(all(test, feature = "test-util"))]
 mod validator_tests;
-mod verification;
+pub(in crate::engine) mod verification;
 use expressions::Expressions;
-use origins::{FileOrigin, OriginalDeclaration, OriginalExecution, ScalarOrigins};
+use origins::{
+    FileOrigin, OriginalDeclaration, OriginalExecution, ScalarOriginBinding, ScalarOrigins,
+};
 pub(super) use verification::{verify_binding_dependencies, verify_groups};
 
 // Batches acknowledgments without retaining payloads or creating one lifecycle
@@ -36,8 +38,12 @@ pub(super) struct PreparedGroup {
     pub protections: Option<ReferenceProtections>,
 }
 
+/// Alias retained for internal callers referencing `backfill::Capture`.
+pub(in crate::engine) type Capture = BackfillCapture;
+
+/// Captured source boundary, target group state, and admission fence for a backfill operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(in crate::engine) struct Capture {
+pub(in crate::engine) struct BackfillCapture {
     pub(in crate::engine) admission_fence: u64,
     pub(in crate::engine) target: Option<ObjectRef>,
     pub(in crate::engine) target_binding: Option<ComputedGroup>,
@@ -120,15 +126,8 @@ impl<'de> Deserialize<'de> for ReadbackCompletion {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let scalar_validator = serde_json::from_value(
-            value
-                .get("scalar_validator")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-        )
-        .map_err(serde::de::Error::custom)?;
-        let release = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        let (release, scalar_validator) =
+            super::validation::deserialize_stamped_release(deserializer, "scalar_validator")?;
         Ok(Self {
             release,
             scalar_validator,
@@ -172,10 +171,7 @@ pub(in crate::engine) fn validate_definition(spec: &GroupDefinition) -> Result<(
         || ids.len() != spec.fields.len()
         || names.len() != spec.fields.len()
         || spec.fields.iter().any(|field| {
-            field.id < 1
-                || field.name.trim().is_empty()
-                || field.name.to_ascii_lowercase().starts_with("__docspec_")
-                || field.expression.trim().is_empty()
+            field.id < 1 || !is_valid_identifier(&field.name) || field.expression.trim().is_empty()
         })
     {
         return Err(Error::refusal(
@@ -209,9 +205,7 @@ impl Engine {
                 let _guard = lock.lock().await;
                 let view = engine.inner.lifecycle.open(&dataset.dataset).await?;
                 for (group, pin) in &mut dataset.groups {
-                    *pin = engine
-                        .representation_pin(&view, &dataset.version, group, pin)
-                        .await?;
+                    *pin = engine.resolve_representation_pin(&view, group, pin).await?;
                 }
             }
             combined_dataset(&dataset, &engine.inner.lifecycle.budget).await
@@ -240,7 +234,10 @@ async fn combined_dataset(
     dataset: &DatasetPin,
     budget: &Budget,
 ) -> Result<datafusion::physical_plan::SendableRecordBatchStream> {
-    let source_pin = &dataset.groups["source"];
+    let source_pin = dataset
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid_group("dataset is missing source group"))?;
     let objects = storage::Objects::for_path(&source_pin.metadata.path);
     objects.register_query_store(budget.runtime_env())?;
     let source = objects.open_pin(source_pin, budget).await?;
@@ -260,15 +257,19 @@ async fn combined_dataset(
         .collect::<Vec<_>>();
     context.register_table(
         "source",
-        crate::query::occurrences(source, budget.clone(), Some(dataset.groups["source"].rows))?,
+        crate::query::occurrences(source, budget.clone(), Some(source_pin.rows))?,
     )?;
     let mut from = "source s".to_owned();
     for (index, (name, binding)) in dataset.computed.iter().enumerate() {
         let alias = format!("g{index}");
-        let native = storage::open_pin(&dataset.groups[name], budget).await?;
+        let group_pin = dataset
+            .groups
+            .get(name)
+            .ok_or_else(|| invalid_group("dataset is missing table pin for computed group"))?;
+        let native = storage::open_pin(group_pin, budget).await?;
         context.register_table(
             &alias,
-            crate::query::table(native, budget.clone(), Some(dataset.groups[name].rows))?,
+            crate::query::table(native, budget.clone(), Some(group_pin.rows))?,
         )?;
         from.push_str(&format!(
             " INNER JOIN {alias} ON s.{} = {alias}.{} AND s.{} = {alias}.{}",
@@ -362,8 +363,12 @@ impl Engine {
             self.check_operation_available(&view, &spec.base).await?;
         }
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
-        let native =
-            storage::open_pin(&base.dataset.groups["source"], &self.inner.lifecycle.budget).await?;
+        let base_source = base
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid_group("backfill base release is missing source group"))?;
+        let native = storage::open_pin(base_source, &self.inner.lifecycle.budget).await?;
         let expressions = Expressions::compile(
             &self.context(),
             native.metadata().current_schema(),
@@ -379,7 +384,7 @@ impl Engine {
             completed: false,
             files_completed: Some(0),
             files_pending: Some(0),
-            rows: base.dataset.groups["source"].rows,
+            rows: base_source.rows,
             failures: BTreeMap::new(),
             promotion_refusal: None,
         };
@@ -397,9 +402,9 @@ impl Engine {
             require_current_boundary: false,
         });
         let capture = lifecycle
-            .get::<Capture>(&view, &format!("backfill/{}", spec.operation))
+            .get::<BackfillCapture>(&view, &format!("backfill/{}", spec.operation))
             .await?
-            .unwrap_or(Capture {
+            .unwrap_or(BackfillCapture {
                 admission_fence: authority.boundary,
                 target: base
                     .dataset
@@ -427,15 +432,7 @@ impl Engine {
         let retained_target = retained_readback.is_some();
         plan.promotion_refusal =
             check_definition(&authority, &OperationRequest::Backfill(spec.clone()))
-                .and_then(|()| {
-                    promotion(
-                        &authority,
-                        &operation,
-                        &capture,
-                        &base.dataset.groups["source"],
-                        spec,
-                    )
-                })
+                .and_then(|()| promotion(&authority, &operation, &capture, base_source, spec))
                 .err()
                 .map(|error| error.code().to_owned());
         if plan.promotion_refusal.is_none() {
@@ -461,11 +458,13 @@ impl Engine {
                 None
             };
         }
-        let objects = source_objects(&base.dataset.groups["source"]);
+        let objects = source_objects(base_source);
         let mut files_completed = 0;
         let mut files_pending = 0;
         for file in scan.files() {
-            let object = objects.get(file.file_path()).ok_or_else(invalid_group)?;
+            let object = objects.get(file.file_path()).ok_or_else(|| {
+                invalid_group("source data file is missing from source pin objects")
+            })?;
             let key = file_key(object, &expressions, eligibility)?;
             if retained_target
                 || self
@@ -567,9 +566,88 @@ impl Engine {
         let request = OperationRequest::Backfill(spec.clone());
         let digest = fingerprint(&request)?;
         let lifecycle = &self.inner.lifecycle;
+        let (operation, capture, base, stale_capture) = match self
+            .admit_backfill_operation(spec, &request, &digest, continuous)
+            .await?
+        {
+            BackfillAdmission::Completed(result) => return Ok(result),
+            BackfillAdmission::Admitted(admitted) => admitted,
+        };
+        if continuous.is_some() {
+            stop_after(stop, "continuous-admission")?;
+        }
+        if stale_capture {
+            // Preserve protected first admission before retrying. Otherwise a
+            // hot source can exhaust optimistic attempts with no retained parent
+            // eligible to acquire the bounded intake fence. Skip obsolete work.
+            return Err(Error::refusal(
+                "stale_source_boundary",
+                "source changed before protected child admission; recapture before processing",
+            ));
+        }
+        let source = base
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid_group("backfill base release is missing source group"))?;
+        // Issued readbacks retain their qualified target even when earlier phase
+        // promises retire. Resolve them before reopening those preparation paths.
+        let mut checks = super::verification::Checks::with_objects(
+            VerificationLevel::Routine,
+            self.inner.objects.clone(),
+        );
+        let (retained_readback, current_readback_validator) = self
+            .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
+            .await?;
+        if let Some(readback) = &retained_readback {
+            let view = lifecycle.open(&spec.dataset).await?;
+            self.guard_corrections(&view, &readback.dataset, None)
+                .await?;
+        }
+        let (prepared, binding, prepared_protections) = self
+            .prepare_or_recover_backfill_group(
+                spec,
+                &request,
+                &operation,
+                &capture,
+                &base,
+                source,
+                continuous,
+                stop,
+                retained_readback.as_ref(),
+                current_readback_validator,
+                &mut checks,
+            )
+            .await?;
+        checks.compose();
+        self.promote_backfill_composition(
+            spec,
+            &request,
+            &operation,
+            &capture,
+            source,
+            prepared,
+            binding,
+            prepared_protections,
+            retained_readback,
+            stop,
+            continuous,
+            &mut checks,
+        )
+        .await
+    }
+
+    async fn admit_backfill_operation(
+        &self,
+        spec: &BackfillSpec,
+        request: &OperationRequest,
+        digest: &str,
+        continuous: Option<&continuous::Attempt>,
+    ) -> Result<BackfillAdmission> {
+        let lifecycle = &self.inner.lifecycle;
         let lock = self.lock(&spec.dataset).await;
         let mut admission: Option<super::admission::PreparedAdmission> = None;
-        let (operation, capture, base, stale_capture) = loop {
+        loop {
             let guard = lock.lock().await;
             let view = self.read_view(&spec.dataset).await?;
             self.check_operation_available(&view, &spec.operation)
@@ -585,7 +663,7 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
             {
-                return Ok(result);
+                return Ok(BackfillAdmission::Completed(result));
             }
             self.check_not_abandoned(&view, &spec.operation).await?;
             if old.is_none() {
@@ -606,7 +684,7 @@ impl Engine {
                     Error::refusal("no_release", "backfill source version is unavailable")
                 })?;
             let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            check_definition(&authority, &request)?;
+            check_definition(&authority, request)?;
             if old.is_none() && base.dataset.eligibility != authority.eligibility {
                 return Err(Error::refusal(
                     "stale_eligibility",
@@ -615,120 +693,119 @@ impl Engine {
             }
             if let Some(operation) = old {
                 check_preparation(&authority, &operation)?;
-                let capture: Capture = lifecycle
+                let capture: BackfillCapture = lifecycle
                     .get(&view, &format!("backfill/{}", spec.operation))
                     .await?
-                    .ok_or_else(invalid_group)?;
-                break (operation, capture, base, false);
-            } else {
-                let Some(protected) = &admission else {
-                    let boundary = view.table.metadata_location_result()?.to_owned();
-                    drop(guard);
-                    admission = Some(
-                        self.protect_admission(
-                            &request,
-                            boundary,
-                            Some(base),
-                            None,
-                            decoding.expect("new backfill admission reserved decoding"),
-                        )
-                        .await?,
-                    );
-                    continue;
-                };
-                if !protected.is_current(&view)? {
-                    // Another independent group may have advanced the catalog.
-                    // Re-evaluate admission; do not replay the stale decision.
-                    admission = None;
-                    continue;
-                }
-                let operation = Operation {
-                    request_digest: digest.clone(),
-                    eligibility: authority.eligibility,
-                    epoch: authority.epoch,
-                    boundary: base.dataset.boundary,
-                    admission_fence: None,
-                    result_format: FORMAT,
-                    definition: spec.definition.clone(),
-                    base: Some(spec.base.clone()),
-                    base_manifest: None,
-                    schema_key: None,
-                    require_current_boundary: false,
-                };
-                let capture = Capture {
-                    admission_fence: authority.boundary,
-                    target: base
-                        .dataset
-                        .groups
-                        .get(spec.group.as_str())
-                        .map(|pin| pin.metadata.clone()),
-                    target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
-                    base_manifest: base.manifest.clone(),
-                    related: base.dataset.related.clone(),
-                };
-                let mut records = vec![
-                    record(format!("operation/{}", spec.operation), &operation)?,
-                    record(format!("request/{}", spec.operation), &request)?,
-                    record(format!("backfill/{}", spec.operation), &capture)?,
-                    record(
-                        format!("runtime/{}", spec.operation),
-                        serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}),
-                    )?,
-                ];
-                let stale_capture = self
-                    .continuous_admission_records(&view, spec, continuous, &mut records)
-                    .await?;
-                protected.records(&view, &request, &mut records)?;
-                lifecycle.commit(&view, records).await?;
-                break (operation, capture, base, stale_capture);
+                    .ok_or_else(|| invalid_group("admitted backfill is missing capture record"))?;
+                return Ok(BackfillAdmission::Admitted((
+                    operation, capture, base, false,
+                )));
             }
-        };
-        drop(admission);
-        if continuous.is_some() {
-            stop_after(stop, "continuous-admission")?;
-        }
-        if stale_capture {
-            // Preserve protected first admission before retrying. Otherwise a
-            // hot source can exhaust optimistic attempts with no retained parent
-            // eligible to acquire the bounded intake fence. Skip obsolete work.
-            return Err(Error::refusal(
-                "stale_source_boundary",
-                "source changed before protected child admission; recapture before processing",
-            ));
-        }
-        let source = base
-            .dataset
-            .groups
-            .get("source")
-            .ok_or_else(invalid_group)?;
-        // Issued readbacks retain their qualified target even when earlier phase
-        // promises retire. Resolve them before reopening those preparation paths.
-        let mut checks = super::verification::Checks::with_objects(
-            VerificationLevel::Routine,
-            self.inner.objects.clone(),
-        );
-        let (mut retained_readback, current_readback_validator) = self
-            .retained_backfill_readback(spec, &operation, &capture, &base, &mut checks)
-            .await?;
-        if let Some(readback) = &retained_readback {
-            let view = lifecycle.open(&spec.dataset).await?;
-            self.guard_corrections(&view, &readback.dataset, None)
+            let Some(protected) = &admission else {
+                let boundary = view.table.metadata_location_result()?.to_owned();
+                drop(guard);
+                admission = Some(
+                    self.protect_admission(
+                        request,
+                        boundary,
+                        Some(base),
+                        None,
+                        decoding.expect("new backfill admission reserved decoding"),
+                    )
+                    .await?,
+                );
+                continue;
+            };
+            if !protected.is_current(&view)? {
+                // Another independent group may have advanced the catalog.
+                // Re-evaluate admission; do not replay the stale decision.
+                admission = None;
+                continue;
+            }
+            let operation = Operation {
+                request_digest: digest.to_owned(),
+                eligibility: authority.eligibility,
+                epoch: authority.epoch,
+                boundary: base.dataset.boundary,
+                admission_fence: None,
+                result_format: FORMAT,
+                definition: spec.definition.clone(),
+                base: Some(spec.base.clone()),
+                base_manifest: None,
+                schema_key: None,
+                require_current_boundary: false,
+            };
+            let capture = BackfillCapture {
+                admission_fence: authority.boundary,
+                target: base
+                    .dataset
+                    .groups
+                    .get(spec.group.as_str())
+                    .map(|pin| pin.metadata.clone()),
+                target_binding: base.dataset.computed.get(spec.group.as_str()).cloned(),
+                base_manifest: base.manifest.clone(),
+                related: base.dataset.related.clone(),
+            };
+            let mut records = vec![
+                record(format!("operation/{}", spec.operation), &operation)?,
+                record(format!("request/{}", spec.operation), request)?,
+                record(format!("backfill/{}", spec.operation), &capture)?,
+                record(
+                    format!("runtime/{}", spec.operation),
+                    serde_json::json!({"processor": PROCESSOR, "dependency_lock_blake3": blake3::hash(include_bytes!("../../Cargo.lock")).to_hex().as_str(), "limits": lifecycle.budget.limits}),
+                )?,
+            ];
+            let stale_capture = self
+                .continuous_admission_records(&view, spec, continuous, &mut records)
                 .await?;
+            protected.records(&view, request, &mut records)?;
+            lifecycle.commit(&view, records).await?;
+            return Ok(BackfillAdmission::Admitted((
+                operation,
+                capture,
+                base,
+                stale_capture,
+            )));
         }
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Recovery or preparation binds operation, source, continuous intent, and shared verification checks"
+    )]
+    async fn prepare_or_recover_backfill_group(
+        &self,
+        spec: &BackfillSpec,
+        request: &OperationRequest,
+        operation: &Operation,
+        capture: &BackfillCapture,
+        base: &ReleasePin,
+        source: &TablePin,
+        continuous: Option<&continuous::Attempt>,
+        stop: Option<&str>,
+        retained_readback: Option<&Retained<ReleasePin>>,
+        current_readback_validator: bool,
+        checks: &mut super::verification::Checks,
+    ) -> Result<(TablePin, ComputedGroup, Option<ReferenceProtections>)> {
+        let lifecycle = &self.inner.lifecycle;
         let (prepared, binding, mut prepared_protections) =
-            if let Some(readback) = &retained_readback {
+            if let Some(readback) = retained_readback {
                 (
                     readback
                         .dataset
                         .groups
                         .get(spec.group.as_str())
-                        .ok_or_else(invalid_group)?
+                        .ok_or_else(|| {
+                            invalid_group("retained readback is missing target group table pin")
+                        })?
                         .clone(),
                     readback
                         .dataset
                         .computed
                         .get(spec.group.as_str())
-                        .ok_or_else(invalid_group)?
+                        .ok_or_else(|| {
+                            invalid_group("retained readback is missing target computed group")
+                        })?
                         .clone(),
                     readback
                         .protections
@@ -757,21 +834,23 @@ impl Engine {
                 )
                 .await?;
                 if decoded != base.dataset {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "decoded base manifest differs from retained base dataset pin",
+                    ));
                 }
                 let definition = spec.group_definition();
-                checks.trust(&base, &lifecycle.budget).await?;
+                checks.trust(base, &lifecycle.budget).await?;
                 let view = lifecycle.open(&spec.dataset).await?;
                 let source_protections = self.request_protections(&view, &spec.operation).await?;
                 let prepared = Box::pin(self.prepare_group(
-                    &request,
-                    &operation,
+                    request,
+                    operation,
                     source,
                     source_protections.as_ref(),
                     &definition,
                     continuous.map(|attempt| &attempt.intent.input_fields),
                     stop,
-                    &mut checks,
+                    checks,
                 ))
                 .await?;
                 let binding = ComputedGroup {
@@ -792,17 +871,19 @@ impl Engine {
                 let source_protections = self.request_protections(&view, &spec.operation).await?;
                 let validation_protections = self
                     .validate_scalar_group(
-                        &request,
-                        &operation,
-                        source,
+                        request,
+                        operation,
+                        ScalarOriginBinding {
+                            source,
+                            group: &prepared,
+                            definition: &binding.definition,
+                            input_fields: &binding.input_fields,
+                            native_field_ids: &binding.native_field_ids,
+                        },
                         source_protections.as_ref(),
-                        &binding.definition,
-                        &binding.input_fields,
-                        &binding.native_field_ids,
-                        &prepared,
                         binding.origins.as_ref(),
                         prepared_protections.as_ref(),
-                        &mut checks,
+                        checks,
                     )
                     .await?;
                 ReferenceProtections::inherit(
@@ -812,7 +893,30 @@ impl Engine {
             }
             stop_after(stop, "validation")?;
         }
-        checks.compose();
+        Ok((prepared, binding, prepared_protections))
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Composition retry loop binds prepared group, binding, protections, readback, and continuous attempt"
+    )]
+    async fn promote_backfill_composition(
+        &self,
+        spec: &BackfillSpec,
+        request: &OperationRequest,
+        operation: &Operation,
+        capture: &BackfillCapture,
+        source: &TablePin,
+        prepared: TablePin,
+        binding: ComputedGroup,
+        prepared_protections: Option<ReferenceProtections>,
+        mut retained_readback: Option<Retained<ReleasePin>>,
+        stop: Option<&str>,
+        continuous: Option<&continuous::Attempt>,
+        checks: &mut super::verification::Checks,
+    ) -> Result<ReleasePin> {
+        let lifecycle = &self.inner.lifecycle;
+        let lock = self.lock(&spec.dataset).await;
         // Only composition is retried after a compatible sibling selection. Expensive
         // file work is retained; no stale whole-dataset manifest can win the retry.
         loop {
@@ -829,8 +933,10 @@ impl Engine {
                 let authority: Authority =
                     lifecycle.get(&view, "authority").await?.unwrap_or_default();
                 self.check_not_abandoned(&view, &spec.operation).await?;
-                promotion(&authority, &operation, &capture, source, spec)?;
-                let current = authority.release.ok_or_else(invalid_group)?;
+                promotion(&authority, operation, capture, source, spec)?;
+                let current = authority
+                    .release
+                    .ok_or_else(|| invalid_group("authority is missing selected release"))?;
                 let key = format!("result/{}", current.id);
                 let protections = self.retained_protections(&view, &key).await?;
                 if protections.is_some() {
@@ -839,9 +945,11 @@ impl Engine {
                     let recorded: ReleasePin = lifecycle
                         .get(&view, &key)
                         .await?
-                        .ok_or_else(invalid_group)?;
+                        .ok_or_else(|| invalid_group("selected release record is missing"))?;
                     if recorded != current {
-                        return Err(invalid_group());
+                        return Err(invalid_group(
+                            "recorded selected release differs from authority release",
+                        ));
                     }
                 }
                 (current, protections)
@@ -865,18 +973,22 @@ impl Engine {
                 .insert(spec.group.to_string(), binding.clone());
             check_names(&dataset)?;
             Box::pin(self.qualify_corrections(
-                &request,
-                &operation,
+                request,
+                operation,
                 &mut dataset,
                 &mut readback_protections,
-                &mut checks,
+                checks,
             ))
             .await?;
             if let Some(readback) = &retained_readback {
-                check_retained_target(&readback.dataset, &dataset, spec.group.as_str())?;
+                preparation::check_retained_target(
+                    &readback.dataset,
+                    &dataset,
+                    spec.group.as_str(),
+                )?;
             }
-            verify_groups(&dataset, &lifecycle.budget, &mut checks).await?;
-            super::evidence::verify(&dataset, &lifecycle.budget, &mut checks).await?;
+            verify_groups(&dataset, &lifecycle.budget, checks).await?;
+            super::evidence::verify(&dataset, &lifecycle.budget, checks).await?;
             let serialized = serde_json::to_vec_pretty(&dataset)?;
             if serialized.len() > lifecycle.budget.limits.max_metadata_bytes {
                 return Err(Error::refusal(
@@ -907,13 +1019,15 @@ impl Engine {
             };
             let release = if let Some(recorded) = recorded {
                 if recorded.dataset != dataset {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "recorded backfill readback dataset disagrees with candidate dataset",
+                    ));
                 }
                 check_release_available_with_checks(
                     &self.inner.objects,
                     &recorded,
                     &lifecycle.budget,
-                    &mut checks,
+                    checks,
                 )
                 .await?;
                 recorded
@@ -924,13 +1038,13 @@ impl Engine {
                         &self.inner.objects,
                         &readback,
                         &lifecycle.budget,
-                        &mut checks,
+                        checks,
                     )
                     .await?;
                 }
                 #[cfg(feature = "test-util")]
                 work_started("backfill-readback");
-                let directory = self.reserve_group(&request, &operation, "release").await?;
+                let directory = self.reserve_group(request, operation, "release").await?;
                 let manifest_path = directory.child("release.json")?.as_string()?;
                 let manifest = ObjectRef {
                     owner: spec.dataset.clone(),
@@ -962,11 +1076,13 @@ impl Engine {
                 )
                 .await?;
                 if decoded != release.dataset {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "decoded candidate release manifest differs from candidate dataset",
+                    ));
                 }
                 let _guard = lock.lock().await;
                 let view = lifecycle.open(&spec.dataset).await?;
-                self.check_completion(&view, &operation, &spec.operation)
+                self.check_completion(&view, operation, &spec.operation)
                     .await?;
                 // Other workers or a prior loop iteration may already have
                 // retained this operation's target. Check in the commit view so
@@ -1016,7 +1132,7 @@ impl Engine {
                 return Ok(completed);
             }
             let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
-            promotion(&authority, &operation, &capture, source, spec)?;
+            promotion(&authority, operation, capture, source, spec)?;
             if authority.release.as_ref() != Some(&current) {
                 continue;
             }
@@ -1035,135 +1151,21 @@ impl Engine {
             return Ok(release.value);
         }
     }
-
-    async fn retained_backfill_readback(
-        &self,
-        spec: &BackfillSpec,
-        operation: &Operation,
-        capture: &Capture,
-        base: &ReleasePin,
-        checks: &mut super::verification::Checks,
-    ) -> Result<(Option<Retained<ReleasePin>>, bool)> {
-        let lifecycle = &self.inner.lifecycle;
-        let view = lifecycle.open(&spec.dataset).await?;
-        let rows = lifecycle.rows(&view).await?;
-        let prefix = format!("backfill-readback/{}/", spec.operation);
-        let mut readbacks = rows.prefix(&prefix).peekable();
-        if readbacks.peek().is_none() {
-            return Ok((None, false));
-        }
-        checks.compose();
-        let _memory = lifecycle
-            .budget
-            .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(2))?;
-        let request = OperationRequest::Backfill(spec.clone());
-        let definition = spec.group_definition();
-        let source = base
-            .dataset
-            .groups
-            .get("source")
-            .ok_or_else(invalid_group)?;
-        let mut retained: Option<(i64, &str, ReadbackCompletion)> = None;
-        for (key, revision, json) in readbacks {
-            tokio::task::consume_budget().await;
-            let completed: ReadbackCompletion = serde_json::from_str(json)?;
-            let readback = &completed.release;
-            let dataset = &readback.dataset;
-            let table = dataset
-                .groups
-                .get(spec.group.as_str())
-                .ok_or_else(invalid_group)?;
-            let binding = dataset
-                .computed
-                .get(spec.group.as_str())
-                .ok_or_else(invalid_group)?;
-            if !readback.verified
-                || readback.id != spec.operation
-                || dataset.dataset != spec.dataset
-                || dataset.version != spec.operation
-                || dataset.request != request
-                || dataset.format != operation.result_format
-                || dataset.eligibility != operation.eligibility
-                || dataset.boundary != operation.boundary
-                || dataset.definition != operation.definition
-                || dataset.processor != PROCESSOR
-                || dataset.groups.get("source") != Some(source)
-                || dataset.related != capture.related
-                || dataset.relationship != base.dataset.relationship
-                || dataset.parent_manifest.is_none()
-                || binding.definition != definition
-                || binding.request != request
-                || binding.source_metadata != source.metadata
-                || binding.base_manifest != capture.base_manifest
-                || capture.base_manifest != base.manifest
-                || readback.manifest.owner != spec.dataset
-                || key != format!("{prefix}{}", readback.manifest.digest)
-            {
-                return Err(invalid_group());
-            }
-            verify_groups(dataset, &lifecycle.budget, checks).await?;
-            super::evidence::verify(dataset, &lifecycle.budget, checks).await?;
-            if let Some((_, _, previous)) = &retained
-                && (previous.release.dataset.groups.get(spec.group.as_str()) != Some(table)
-                    || previous.release.dataset.computed.get(spec.group.as_str()) != Some(binding))
-            {
-                return Err(Error::refusal(
-                    "phase_generation_conflict",
-                    format!("retained readback {key} binds a different target generation"),
-                ));
-            }
-            if retained
-                .as_ref()
-                .is_none_or(|(prior, _, _)| revision > *prior)
-            {
-                retained = Some((revision, key, completed));
-            }
-        }
-        if let Some((_, key, completed)) = retained {
-            let current_validator = completed.scalar_validator.as_deref() == Some(VALIDATOR);
-            Ok((
-                Some(Retained {
-                    value: completed.release,
-                    protections: self.retained_protections(&view, key).await?,
-                }),
-                current_validator,
-            ))
-        } else {
-            Ok((None, false))
-        }
-    }
-
-    async fn check_backfill_target(
-        &self,
-        view: &View,
-        spec: &BackfillSpec,
-        candidate: &DatasetPin,
-    ) -> Result<()> {
-        let lifecycle = &self.inner.lifecycle;
-        let rows = lifecycle.rows(view).await?;
-        let prefix = format!("backfill-readback/{}/", spec.operation);
-        for (key, _, json) in rows.prefix(&prefix) {
-            let _memory = rows.reserve_decoded(&lifecycle.budget, &[key])?;
-            let retained: ReleasePin = serde_json::from_str(json)?;
-            check_retained_target(&retained.dataset, candidate, spec.group.as_str())?;
-        }
-        Ok(())
-    }
 }
 
-fn check_retained_target(retained: &DatasetPin, candidate: &DatasetPin, group: &str) -> Result<()> {
-    if retained.groups.get(group) != candidate.groups.get(group)
-        || retained.computed.get(group) != candidate.computed.get(group)
-    {
-        return Err(super::corrections::required());
-    }
-    Ok(())
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Single-use return value from backfill admission phase"
+)]
+enum BackfillAdmission {
+    Completed(ReleasePin),
+    Admitted((Operation, BackfillCapture, ReleasePin, bool)),
 }
 
 fn promotion(
     authority: &Authority,
     operation: &Operation,
-    capture: &Capture,
+    capture: &BackfillCapture,
     source: &TablePin,
     spec: &BackfillSpec,
 ) -> Result<()> {
@@ -1176,7 +1178,10 @@ fn promotion(
             "backfill definition or dependency eligibility changed",
         ));
     }
-    let current = authority.selected.as_ref().ok_or_else(invalid_group)?;
+    let current = authority
+        .selected
+        .as_ref()
+        .ok_or_else(|| invalid_group("authority is missing selected dataset pin"))?;
     if current.eligibility != operation.eligibility {
         return Err(Error::refusal(
             "stale_eligibility",
@@ -1283,7 +1288,8 @@ async fn read_completion(
     storage::check_available(completion.outputs.clone(), budget).await?;
     let descriptor = completion.descriptor.clone();
     let schema = schema.clone();
-    let size = usize::try_from(descriptor.bytes).map_err(|_| invalid_group())?;
+    let size = usize::try_from(descriptor.bytes)
+        .map_err(|_| invalid_group("file completion descriptor byte length overflows usize"))?;
     let objects = storage::Objects::for_path(&descriptor.path);
     let buffer = budget.reserve(
         size.saturating_add(1)
@@ -1324,7 +1330,7 @@ async fn read_completion(
     let paths: BTreeSet<_> = files.iter().map(DataFile::file_path).collect();
     let rows = files.iter().try_fold(0u64, |rows, file| {
         rows.checked_add(file.record_count())
-            .ok_or_else(invalid_group)
+            .ok_or_else(|| invalid_group("file completion record counts overflow"))
     })?;
     if known.len() != completion.outputs.len()
         || paths.len() != files.len()
@@ -1334,23 +1340,18 @@ async fn read_completion(
             .any(|file| known.get(file.file_path()) != Some(&file.file_size_in_bytes()))
         || rows != completion.rows
     {
-        return Err(invalid_group());
+        return Err(invalid_group(
+            "file completion descriptor paths, byte sizes, or row counts disagree with completion record",
+        ));
     }
     Ok(files)
 }
 
-fn invalid_group() -> Error {
-    Error::refusal(
-        "invalid_group",
-        "computed group identity, schema or coverage differs from its captured source",
-    )
+pub(in crate::engine) fn invalid_group(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_group", reason)
 }
 
-fn quote(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
-fn check_names(dataset: &DatasetPin) -> Result<()> {
+pub(in crate::engine) fn check_names(dataset: &DatasetPin) -> Result<()> {
     let mut names = BTreeSet::new();
     for group in dataset.computed.values() {
         for field in &group.definition.fields {
@@ -1383,360 +1384,4 @@ fn charge_assembly(bytes: usize, completion: &FileCompletion, limit: usize) -> R
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn completed_plan_qualifies_admission_and_result_without_opening_inputs() {
-        let root = tempfile::tempdir().unwrap();
-        let engine = Engine::open(
-            root.path().join("workspace"),
-            Limits {
-                scratch_bytes: 16 << 20,
-                ..Limits::default()
-            },
-        )
-        .await
-        .unwrap();
-        for fault in [
-            "none",
-            "missing-admission",
-            "conflicting-admission",
-            "dataset",
-            "id",
-            "version",
-            "request",
-            "unverified",
-            "missing-source",
-        ] {
-            let spec = BackfillSpec {
-                dataset: Id::new(fault).unwrap(),
-                operation: Id::new("derived").unwrap(),
-                base: Id::new("base").unwrap(),
-                definition: "v1".into(),
-                group: Id::new("length").unwrap(),
-                group_definition: "scalar-v1".into(),
-                fields: vec![ComputedField {
-                    id: 10,
-                    name: "text_length".into(),
-                    expression: "length(text)".into(),
-                }],
-            };
-            let request = OperationRequest::Backfill(spec.clone());
-            let operation = Operation {
-                request_digest: if fault == "conflicting-admission" {
-                    "another-request".into()
-                } else {
-                    fingerprint(&request).unwrap()
-                },
-                eligibility: 0,
-                epoch: 0,
-                boundary: 0,
-                admission_fence: None,
-                result_format: FORMAT,
-                definition: spec.definition.clone(),
-                base: Some(spec.base.clone()),
-                base_manifest: None,
-                schema_key: None,
-                require_current_boundary: false,
-            };
-            // No source, manifest or native metadata objects exist. Only the
-            // lifecycle receipt is needed to report a completed plan.
-            let missing = ObjectRef {
-                owner: spec.dataset.clone(),
-                path: root.path().join("absent").to_string_lossy().into_owned(),
-                digest: "a".repeat(64),
-                bytes: 0,
-            };
-            let mut result = ReleasePin {
-                id: spec.operation.clone(),
-                dataset: DatasetPin {
-                    format: FORMAT,
-                    dataset: spec.dataset.clone(),
-                    version: spec.operation.clone(),
-                    groups: BTreeMap::from([(
-                        "source".into(),
-                        TablePin {
-                            table: "source".into(),
-                            metadata: missing.clone(),
-                            snapshot: None,
-                            schema_id: 0,
-                            objects: vec![],
-                            rows: 7,
-                            logical_metadata: None,
-                        },
-                    )]),
-                    computed: BTreeMap::new(),
-                    inputs: BTreeMap::new(),
-                    relationship: SourceRelationship::Independent,
-                    related: None,
-                    evidence: None,
-                    definition: spec.definition.clone(),
-                    eligibility: 0,
-                    boundary: 0,
-                    request,
-                    parent_manifest: None,
-                    processor: PROCESSOR.into(),
-                    validation: VerificationLevel::Routine,
-                    partition_by: Vec::new(),
-                },
-                manifest: missing,
-                verified: true,
-            };
-            match fault {
-                "dataset" => result.dataset.dataset = Id::new("other").unwrap(),
-                "id" => result.id = Id::new("other").unwrap(),
-                "version" => result.dataset.version = Id::new("other").unwrap(),
-                "request" => {
-                    let OperationRequest::Backfill(ref mut stored) = result.dataset.request else {
-                        unreachable!()
-                    };
-                    stored.group_definition = "different".into();
-                }
-                "unverified" => result.verified = false,
-                "missing-source" => result.dataset.groups.clear(),
-                _ => {}
-            }
-            let lifecycle = &engine.inner.lifecycle;
-            let view = lifecycle.open(&spec.dataset).await.unwrap();
-            let mut changes = vec![record(format!("result/{}", spec.operation), result).unwrap()];
-            if fault != "missing-admission" {
-                changes.push(record(format!("operation/{}", spec.operation), operation).unwrap());
-            }
-            lifecycle.commit(&view, changes).await.unwrap();
-            let plan = engine.plan_backfill(&spec).await;
-            match fault {
-                "none" => {
-                    let plan = plan.unwrap();
-                    assert!(plan.completed);
-                    assert_eq!(plan.rows, 7);
-                    assert_eq!(plan.files_completed, None);
-                    assert_eq!(plan.files_pending, None);
-                }
-                "conflicting-admission" => {
-                    assert_eq!(plan.unwrap_err().code(), "operation_conflict");
-                }
-                _ => assert_eq!(plan.unwrap_err().code(), "release_mismatch"),
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn native_rename_reuses_file_completions_but_name_reuse_changes_input_meaning() {
-        let root = tempfile::TempDir::new().unwrap();
-        let engine = Engine::open(
-            root.path().join("workspace"),
-            Limits {
-                scratch_bytes: 16 << 20,
-                ..Limits::default()
-            },
-        )
-        .await
-        .unwrap();
-        let dataset = Id::new("cache").unwrap();
-        let prepared = engine
-            .write_frame(
-                &dataset,
-                &root.path().join("source"),
-                engine
-                    .context()
-                    .sql("SELECT CAST(1 AS BIGINT) AS old, CAST(100 AS BIGINT) AS spare")
-                    .await
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let source = prepared.table;
-        let native = storage::open_pin(&source, &engine.inner.lifecycle.budget)
-            .await
-            .unwrap();
-        let fields = native.metadata().current_schema().as_struct().fields();
-        let old_id = fields[0].id;
-        let spec = BackfillSpec {
-            dataset: dataset.clone(),
-            operation: Id::new("backfill").unwrap(),
-            base: Id::new("base").unwrap(),
-            definition: "v1".into(),
-            group: Id::new("derived").unwrap(),
-            group_definition: "scalar-v1".into(),
-            fields: vec![ComputedField {
-                id: 10,
-                name: "answer".into(),
-                expression: "old + 1".into(),
-            }],
-        };
-        let operation = Operation {
-            request_digest: "fixture".into(),
-            eligibility: 0,
-            epoch: 0,
-            boundary: 0,
-            admission_fence: None,
-            result_format: FORMAT,
-            definition: "v1".into(),
-            base: Some(spec.base.clone()),
-            base_manifest: None,
-            schema_key: None,
-            require_current_boundary: false,
-        };
-        let request = OperationRequest::Backfill(spec.clone());
-        let first = engine
-            .prepare_group(
-                &request,
-                &operation,
-                &source,
-                None,
-                &spec.group_definition(),
-                None,
-                None,
-                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
-            )
-            .await
-            .unwrap();
-        let before = engine.inspect(&dataset).await.unwrap();
-        let completions = before
-            .iter()
-            .filter(|(key, _)| key.starts_with("phase/backfill/"))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<BTreeMap<_, _>>();
-        assert!(!completions.is_empty());
-        let mut renamed = fields[0].as_ref().clone();
-        renamed.name = "new name".into();
-        renamed.doc = Some("presentation only".into());
-        let new_schema = iceberg::spec::Schema::builder()
-            .with_fields([
-                fields[1].clone(),
-                Arc::new(renamed),
-                Arc::new(iceberg::spec::NestedField::optional(
-                    30,
-                    "old",
-                    iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
-                )),
-            ])
-            .build()
-            .unwrap();
-        let directory = root.path().join("evolved");
-        let metadata = native
-            .metadata()
-            .clone()
-            .into_builder(None)
-            .set_location(directory.to_string_lossy().into_owned())
-            .assign_uuid(uuid::Uuid::new_v4())
-            .add_current_schema(new_schema)
-            .unwrap()
-            .build()
-            .unwrap()
-            .metadata;
-        let identifier =
-            iceberg::TableIdent::new(native.identifier().namespace().clone(), "evolved".into());
-        let evolved = storage::register_candidate(
-            engine.inner.lifecycle.catalog.as_ref(),
-            &identifier,
-            storage::CandidateWriter::Local,
-            move || Ok(metadata),
-            &engine.inner.lifecycle.budget,
-        )
-        .await
-        .unwrap();
-        let evolved = storage::pin(
-            &dataset,
-            &evolved,
-            source.rows,
-            &engine.inner.lifecycle.budget,
-            &source.objects,
-        )
-        .await
-        .unwrap();
-        let bound = engine
-            .prepare_group(
-                &request,
-                &operation,
-                &evolved,
-                None,
-                &spec.group_definition(),
-                Some(&first.input_fields),
-                None,
-                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
-            )
-            .await
-            .unwrap();
-        assert_eq!(bound.input_fields["old"], old_id);
-        let after = engine.inspect(&dataset).await.unwrap();
-        assert_eq!(
-            completions,
-            after
-                .iter()
-                .filter(|(key, _)| key.starts_with("phase/backfill/"))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect::<BTreeMap<_, _>>()
-        );
-        let data = |pin: &TablePin| {
-            pin.objects
-                .iter()
-                .filter(|object| object.path.ends_with(".parquet"))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(data(&first.table), data(&bound.table));
-        assert_ne!(first.table.metadata, bound.table.metadata);
-        // Same SQL and current source pin, but fresh name resolution consumes
-        // ID30 rather than ID1. Neither file nor whole-table reuse may collide.
-        let fresh = engine
-            .prepare_group(
-                &request,
-                &operation,
-                &evolved,
-                None,
-                &spec.group_definition(),
-                None,
-                None,
-                &mut crate::engine::verification::Checks::new(VerificationLevel::Routine),
-            )
-            .await
-            .unwrap();
-        assert_eq!(fresh.input_fields["old"], 30);
-        assert_ne!(data(&fresh.table), data(&bound.table));
-        for (pin, expected) in [(&bound.table, Some(2)), (&fresh.table, None)] {
-            let table = storage::open_pin(pin, &engine.inner.lifecycle.budget)
-                .await
-                .unwrap();
-            let batches = storage::read_batches(&table, &engine.inner.lifecycle.budget)
-                .await
-                .unwrap()
-                .try_collect::<Vec<_>>()
-                .await
-                .unwrap();
-            let values = batches[0]
-                .column(2)
-                .as_any()
-                .downcast_ref::<arrow::array::Int64Array>()
-                .unwrap();
-            assert_eq!(values.iter().collect::<Vec<_>>(), vec![expected]);
-        }
-    }
-
-    #[test]
-    fn aggregate_completion_descriptors_cannot_exceed_assembly_allowance() {
-        let object = ObjectRef {
-            owner: Id::new("test").unwrap(),
-            path: "descriptor".into(),
-            digest: "a".repeat(64),
-            bytes: 600,
-        };
-        let completion = FileCompletion {
-            execution: None,
-            source_metadata: None,
-            source: object.clone(),
-            rows: 0,
-            descriptor: object,
-            outputs: vec![],
-        };
-        let admitted = charge_assembly(0, &completion, 1024).unwrap();
-        assert!(admitted < 1024);
-        assert_eq!(
-            charge_assembly(admitted, &completion, 1024)
-                .unwrap_err()
-                .code(),
-            "metadata_capacity"
-        );
-    }
-}
+mod tests;

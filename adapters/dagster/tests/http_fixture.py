@@ -26,9 +26,16 @@ def server(*responses):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
+        def do_GET(self):
+            requests.append((self.path, b""))
+            self._serve()
+
         def do_POST(self):
             payload = self.rfile.read(int(self.headers["Content-Length"]))
             requests.append((self.path, payload))
+            self._serve()
+
+        def _serve(self):
             current = pending.pop(0) if pending else reply(b"unexpected request", status=500)
             if current["mode"] == "disconnect":
                 self.connection.shutdown(socket.SHUT_RDWR)

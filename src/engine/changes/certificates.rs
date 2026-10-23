@@ -8,6 +8,7 @@ use crate::engine::retention::retirement::record_retired;
 pub(in crate::engine) const WRITE_RULES: &str = "docspec.local-applied-writes.v1";
 const CHANGE_FORMAT: u32 = 1;
 
+/// Retained pre-selection record stored at `prepared-changes/{operation}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::engine) struct PreparedChanges {
@@ -30,13 +31,11 @@ impl From<&ChangeCertificate> for PreparedChanges {
     }
 }
 
-fn invalid() -> Error {
-    Error::refusal(
-        "invalid_changes",
-        "optional changes differ from their qualified local selection",
-    )
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_changes", reason)
 }
 
+/// Validates a retained [`PreparedChanges`] record against its catalog key and dataset owner.
 pub(in crate::engine) fn check_prepared(
     prepared: &PreparedChanges,
     key: &str,
@@ -50,7 +49,9 @@ pub(in crate::engine) fn check_prepared(
         || &prepared.descriptor.owner != dataset
         || prepared.operation == prepared.before.version
     {
-        return Err(invalid());
+        return Err(invalid(
+            "prepared changes record differs from its expected key, format, rules, or dataset owner",
+        ));
     }
     Ok(())
 }
@@ -92,7 +93,7 @@ pub(in crate::engine) struct ChangeSelection {
 fn selected_result(rows: &SnapshotRows, result: &VersionRef) -> Result<(i64, Selected)> {
     let (revision, _, selected): (_, _, Selected) = rows
         .get_record(&format!("result/{}", result.version))?
-        .ok_or_else(invalid)?;
+        .ok_or_else(|| invalid("selected result record is missing for change certificate"))?;
     if revision <= 0
         || selected.id != result.version
         || selected.dataset.version != result.version
@@ -101,7 +102,9 @@ fn selected_result(rows: &SnapshotRows, result: &VersionRef) -> Result<(i64, Sel
         || result.manifest.owner != result.dataset
         || !selected.verified
     {
-        return Err(invalid());
+        return Err(invalid(
+            "selected result record differs from the expected version reference",
+        ));
     }
     Ok((revision, selected))
 }
@@ -141,11 +144,14 @@ fn certificate_binding(
         || key != format!("change-certificate/{}", after.version)
         || after.manifest.owner != after.dataset
     {
-        return Err(invalid());
+        return Err(invalid(
+            "change certificate revision, key, or manifest owner differs from its selected result",
+        ));
     }
     Ok(())
 }
 
+/// Validates a retained [`ChangeCertificate`] against the catalog snapshot and its selected result.
 pub(in crate::engine) fn check_certificate(
     rows: &SnapshotRows,
     revision: i64,
@@ -174,11 +180,14 @@ pub(in crate::engine) fn local_certificate(
     }
     certificate_binding(revision, selected.revision, &key, &certificate)?;
     if certificate.after != *result || revision > view.revision {
-        return Err(invalid());
+        return Err(invalid(
+            "local change certificate target version or revision differs from view",
+        ));
     }
     Ok(Some((certificate, memory)))
 }
 
+/// Validates that a deserialized [`AppliedChangeSet`] matches its [`PreparedChanges`] header.
 pub(in crate::engine) fn check_applied(
     changes: &AppliedChangeSet,
     prepared: &PreparedChanges,
@@ -189,11 +198,14 @@ pub(in crate::engine) fn check_applied(
         || changes.operation != prepared.operation
         || changes.before != prepared.before
     {
-        return Err(invalid());
+        return Err(invalid(
+            "applied change set header differs from prepared changes record",
+        ));
     }
     Ok(())
 }
 
+/// Validates internal structural invariants and owner bindings of an [`AppliedChangeSet`].
 pub(super) fn check_bindings(changes: &AppliedChangeSet) -> Result<()> {
     if changes.format != CHANGE_FORMAT
         || changes.rules != WRITE_RULES
@@ -201,7 +213,9 @@ pub(super) fn check_bindings(changes: &AppliedChangeSet) -> Result<()> {
         || changes.before.manifest.owner != changes.before.dataset
         || (changes.source.is_none() && changes.receipts.is_none())
     {
-        return Err(invalid());
+        return Err(invalid(
+            "applied change set format, rules, versions, or non-empty delta requirement failed",
+        ));
     }
     for pin in changes.source.iter().chain(&changes.receipts) {
         if pin.rules != WRITE_RULES
@@ -212,7 +226,9 @@ pub(super) fn check_bindings(changes: &AppliedChangeSet) -> Result<()> {
             || pin.removed.metadata.owner != changes.before.dataset
             || pin.added.metadata.owner != changes.before.dataset
         {
-            return Err(invalid());
+            return Err(invalid(
+                "applied change pin base version, manifest, or metadata owner differs from before state",
+            ));
         }
     }
     Ok(())
@@ -243,7 +259,9 @@ impl Engine {
         let _memory = lifecycle
             .budget
             .reserve(lifecycle.budget.limits.max_metadata_bytes.saturating_mul(4))?;
-        let before = before.ok_or_else(invalid)?.version_ref();
+        let before = before
+            .ok_or_else(|| invalid("prepared changes require a base release pin"))?
+            .version_ref();
         let applied = AppliedChangeSet {
             format: CHANGE_FORMAT,
             rules: WRITE_RULES.into(),
@@ -263,7 +281,9 @@ impl Engine {
             // Reuse the prepared byte identity. Selection independently reads
             // and validates the descriptor once before certifying its result.
             if storage::json_digest(&applied)?.to_hex().as_str() != prepared.descriptor.digest {
-                return Err(invalid());
+                return Err(invalid(
+                    "active prepared changes digest differs from candidate applied change set",
+                ));
             }
             return Ok(());
         }
@@ -303,7 +323,9 @@ impl Engine {
             if existing.descriptor.digest != prepared.descriptor.digest
                 || existing.descriptor.bytes != prepared.descriptor.bytes
             {
-                return Err(invalid());
+                return Err(invalid(
+                    "concurrent prepared changes descriptor differs from candidate",
+                ));
             }
             return Ok(());
         }
@@ -385,7 +407,9 @@ impl Engine {
         if release.dataset.parent_manifest.as_ref() != Some(&prepared.before.manifest)
             || release.dataset.request.base() != Some(&prepared.before.version)
         {
-            return Err(invalid());
+            return Err(invalid(
+                "prepared changes base manifest or version differs from release parent",
+            ));
         }
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
         let applied: AppliedChangeSet = inputs::read_manifest(
@@ -410,7 +434,9 @@ impl Engine {
                 .as_ref()
                 .is_none_or(|receipts| receipts.table.metadata != pin.after_metadata)
         }) {
-            return Err(invalid());
+            return Err(invalid(
+                "applied changes after metadata differs from selected release source or receipts",
+            ));
         }
         Ok(Some(ChangeCertificate {
             format: prepared.format,

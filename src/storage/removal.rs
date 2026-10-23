@@ -325,8 +325,7 @@ fn check_identity(_before: &Metadata, _after: &Metadata) -> Result<()> {
 }
 
 fn sync_parent(parent: &Path) -> Result<()> {
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
+    super::sync_directory(parent)
         .map_err(|_| Error::refusal("removal_sync", "removal parent synchronization failed"))
 }
 

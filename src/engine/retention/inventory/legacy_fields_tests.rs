@@ -1,4 +1,4 @@
-//! Supported complete states drop only the former optional change members.
+//! Strict unknown-field rejection and required phase change decoding tests.
 
 use super::*;
 
@@ -84,51 +84,15 @@ fn legacy_changes() -> serde_json::Value {
 }
 
 #[test]
-fn supported_state_release_and_authority_accept_null_and_typed_legacy_members() {
-    for format in [10, 11, FORMAT] {
-        for source in [serde_json::Value::Null, legacy_changes()] {
-            for receipts in [serde_json::Value::Null, legacy_changes()] {
-                let expected = state(format);
-                let mut encoded = serde_json::to_value(&expected).unwrap();
-                encoded["changes"] = source.clone();
-                encoded["evidence"]["changes"] = receipts;
-                let actual: Strict<DatasetPin> = serde_json::from_value(encoded.clone()).unwrap();
-                assert_eq!(actual.0, expected);
-                let release = serde_json::json!({
-                    "id": "after",
-                    "dataset": encoded,
-                    "manifest": object("after.release.json"),
-                    "verified": true,
-                });
-                let actual: Strict<ReleasePin> = serde_json::from_value(release.clone()).unwrap();
-                assert_eq!(actual.0.dataset, expected);
-                let authority = serde_json::json!({
-                    "definition": "v1", "eligibility": 1, "epoch": 0, "boundary": 1,
-                    "selected": encoded, "release": release, "selection_revision": 1,
-                });
-                let actual: Strict<Authority> = serde_json::from_value(authority).unwrap();
-                assert_eq!(actual.0.selected.as_ref(), Some(&expected));
-                assert_eq!(actual.0.release.unwrap().dataset, expected);
-                let current = serde_json::to_value(expected).unwrap();
-                assert!(current.get("changes").is_none());
-                assert!(current["evidence"].get("changes").is_none());
-            }
-        }
-    }
-}
-
-#[test]
 fn unrelated_and_malformed_dependency_fields_still_refuse() {
     for path in [
         "/unknown_dependency",
         "/evidence/unknown_dependency",
         "/groups/source/changes",
-        "/changes/unknown_dependency",
-        "/evidence/changes/unknown_dependency",
+        "/changes",
+        "/evidence/changes",
     ] {
         let mut encoded = serde_json::to_value(state(11)).unwrap();
-        encoded["changes"] = legacy_changes();
-        encoded["evidence"]["changes"] = legacy_changes();
         let (parent, field) = path.rsplit_once('/').unwrap();
         encoded
             .pointer_mut(parent)
@@ -144,35 +108,11 @@ fn unrelated_and_malformed_dependency_fields_still_refuse() {
             "{path}"
         );
     }
-    for path in ["/changes", "/evidence/changes"] {
-        let mut encoded = serde_json::to_value(state(11)).unwrap();
-        encoded["changes"] = legacy_changes();
-        encoded["evidence"]["changes"] = legacy_changes();
-        *encoded.pointer_mut(path).unwrap() = serde_json::json!({"removed": null});
-        assert!(
-            serde_json::from_value::<Strict<DatasetPin>>(encoded).is_err(),
-            "{path}"
-        );
-    }
-}
-
-#[test]
-fn compatibility_is_limited_to_supported_typed_complete_states() {
-    #[derive(Serialize, Deserialize)]
-    #[serde(transparent)]
-    struct OtherRecord(DatasetPin);
-
-    let mut encoded = serde_json::to_value(state(11)).unwrap();
-    encoded["changes"] = legacy_changes();
-    assert!(serde_json::from_value::<Strict<OtherRecord>>(encoded.clone()).is_err());
-    encoded["format"] = serde_json::json!(u32::MAX);
-    assert!(serde_json::from_value::<Strict<DatasetPin>>(encoded).is_err());
 }
 
 #[test]
 fn release_and_authority_do_not_ignore_changes_outside_the_complete_state() {
-    let mut dataset = serde_json::to_value(state(11)).unwrap();
-    dataset["changes"] = serde_json::Value::Null;
+    let dataset = serde_json::to_value(state(11)).unwrap();
     let mut release = serde_json::json!({
         "id": "after", "dataset": dataset,
         "manifest": object("after.release.json"), "verified": true,

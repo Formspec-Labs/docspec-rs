@@ -23,6 +23,24 @@ pub(in crate::engine) struct ValidatedReadback {
     validator: Option<String>,
 }
 
+/// Deserializes a flattened [`ReleasePin`] together with an optional private validator stamp field,
+/// preserving integer keys in native field-ID maps through `serde_json::Value`.
+pub(in crate::engine) fn deserialize_stamped_release<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+    stamp_field: &str,
+) -> std::result::Result<(ReleasePin, Option<String>), D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let validator = serde_json::from_value(
+        value
+            .get(stamp_field)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    )
+    .map_err(serde::de::Error::custom)?;
+    let release = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+    Ok((release, validator))
+}
+
 // Preserve JSON's integer native-field-map keys through the maintained Value
 // decoder; flattened Serde Content cannot decode those maps. Strict retention
 // decoding admits this private stamp only on the readback record family.
@@ -30,15 +48,7 @@ impl<'de> Deserialize<'de> for ValidatedReadback {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let validator = serde_json::from_value(
-            value
-                .get("validator")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-        )
-        .map_err(serde::de::Error::custom)?;
-        let release = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        let (release, validator) = deserialize_stamped_release(deserializer, "validator")?;
         Ok(Self { release, validator })
     }
 }

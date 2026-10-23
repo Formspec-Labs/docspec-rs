@@ -403,6 +403,37 @@ impl Engine {
         .await
     }
 
+    pub(super) async fn open_retirement_view(
+        &self,
+        dataset: &Id,
+        reason: &str,
+    ) -> Result<(tokio::sync::OwnedMutexGuard<()>, View, Arc<SnapshotRows>)> {
+        self.retirement_catalog()?;
+        if reason.trim().is_empty() {
+            return Err(invalid_retirement());
+        }
+        let guard = self.lock(dataset).await.lock_owned().await;
+        let view = self.inner.lifecycle.open(dataset).await?;
+        let rows = self.inner.lifecycle.rows(&view).await?;
+        Ok((guard, view, rows))
+    }
+
+    pub(super) async fn plan_retirement_in<F>(
+        &self,
+        dataset: Id,
+        retirement: Id,
+        scope: RetirementScope,
+        reason: String,
+        collect: F,
+    ) -> Result<RetentionPlan>
+    where
+        F: FnOnce(&Engine, &View, &SnapshotRows) -> Result<Vec<RetainedGeneration>>,
+    {
+        let (_guard, view, rows) = self.open_retirement_view(&dataset, &reason).await?;
+        let records = collect(self, &view, &rows)?;
+        plan(&view, dataset, retirement, scope, reason, records)
+    }
+
     async fn plan_phase_retirement_admitted(
         &self,
         dataset: Id,
@@ -412,38 +443,35 @@ impl Engine {
     ) -> Result<RetentionPlan> {
         self.retirement_catalog()?;
         keys.sort();
-        if reason.trim().is_empty()
-            || keys.is_empty()
+        if keys.is_empty()
             || keys.windows(2).any(|pair| pair[0] == pair[1])
             || keys.iter().any(|key| !completion_key(key))
         {
             return Err(invalid_retirement());
         }
-        let lock = self.lock(&dataset).await;
-        let _guard = lock.lock().await;
-        let view = self.inner.lifecycle.open(&dataset).await?;
-        let rows = self.inner.lifecycle.rows(&view).await?;
-        let mut phases = Vec::with_capacity(keys.len());
-        for key in keys {
-            let revision = rows
-                .revision(&key)
-                .ok_or_else(|| Error::refusal("no_phase", "requested completion is unavailable"))?;
-            if record_retired(&rows, &view, &key, revision, &self.inner.lifecycle.budget)? {
-                return Err(Error::refusal(
-                    "phase_retired",
-                    "requested completion is already retired",
-                ));
-            }
-            phases.push(RetainedGeneration { key, revision });
-        }
-        plan(
-            &view,
+        self.plan_retirement_in(
             dataset,
             retirement,
             RetirementScope::PhaseRecovery,
             reason,
-            phases,
+            |engine, view, rows| {
+                let mut phases = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let revision = rows.revision(&key).ok_or_else(|| {
+                        Error::refusal("no_phase", "requested completion is unavailable")
+                    })?;
+                    if record_retired(rows, view, &key, revision, &engine.inner.lifecycle.budget)? {
+                        return Err(Error::refusal(
+                            "phase_retired",
+                            "requested completion is already retired",
+                        ));
+                    }
+                    phases.push(RetainedGeneration { key, revision });
+                }
+                Ok(phases)
+            },
         )
+        .await
     }
 
     /// Captures explicit retirement of named local restore promises.
@@ -470,42 +498,50 @@ impl Engine {
                 .map(|point| format!("restore-point/{point}"))
                 .collect::<Vec<_>>();
             keys.sort();
-            if keys.is_empty()
-                || reason.trim().is_empty()
-                || keys.windows(2).any(|pair| pair[0] == pair[1])
-            {
+            if keys.is_empty() || keys.windows(2).any(|pair| pair[0] == pair[1]) {
                 return Err(invalid_retirement());
             }
-            let lock = engine.lock(&dataset).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&dataset).await?;
-            let rows = engine.inner.lifecycle.rows(&view).await?;
-            let mut records = Vec::with_capacity(keys.len());
-            for key in keys {
-                let (revision, _, point) = rows
-                    .get_record::<crate::restore::RestorePointRef>(&key)?
-                    .ok_or_else(|| {
-                        Error::refusal("no_restore_point", "requested restore point is unavailable")
-                    })?;
-                if point.dataset != dataset || key != format!("restore-point/{}", point.id) {
-                    return Err(invalid_retirement());
-                }
-                if record_retired(&rows, &view, &key, revision, &engine.inner.lifecycle.budget)? {
-                    return Err(Error::refusal(
-                        "restore_point_retired",
-                        "requested restore point is already retired",
-                    ));
-                }
-                records.push(RetainedGeneration { key, revision });
-            }
-            plan(
-                &view,
-                dataset,
-                retirement,
-                RetirementScope::RestorePoints,
-                reason,
-                records,
-            )
+            let expected_dataset = dataset.clone();
+            engine
+                .plan_retirement_in(
+                    dataset,
+                    retirement,
+                    RetirementScope::RestorePoints,
+                    reason,
+                    |engine, view, rows| {
+                        let mut records = Vec::with_capacity(keys.len());
+                        for key in keys {
+                            let (revision, _, point) = rows
+                                .get_record::<crate::restore::RestorePointRef>(&key)?
+                                .ok_or_else(|| {
+                                    Error::refusal(
+                                        "no_restore_point",
+                                        "requested restore point is unavailable",
+                                    )
+                                })?;
+                            if point.dataset != expected_dataset
+                                || key != format!("restore-point/{}", point.id)
+                            {
+                                return Err(invalid_retirement());
+                            }
+                            if record_retired(
+                                rows,
+                                view,
+                                &key,
+                                revision,
+                                &engine.inner.lifecycle.budget,
+                            )? {
+                                return Err(Error::refusal(
+                                    "restore_point_retired",
+                                    "requested restore point is already retired",
+                                ));
+                            }
+                            records.push(RetainedGeneration { key, revision });
+                        }
+                        Ok(records)
+                    },
+                )
+                .await
         })
         .await
     }

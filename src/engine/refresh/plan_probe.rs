@@ -33,7 +33,7 @@ async fn retained_comments_join_physical_plans() -> Result<()> {
         &mut remaining,
     )?;
     let RefreshTransform::Join(join) = &request.transform else {
-        return Err(invalid());
+        return Err(invalid("plan probe expects a join refresh request"));
     };
     let context = budget.context();
     let mut bytes = budget.limits.max_metadata_bytes - remaining;
@@ -41,7 +41,10 @@ async fn retained_comments_join_physical_plans() -> Result<()> {
     for (alias, version) in [("join_left", &join.left), ("join_right", &join.right)] {
         let release = read_release(version, &budget, &mut bytes, &memory).await?;
         let dataset = release.dataset;
-        let pin = dataset.groups.get("source").ok_or_else(invalid)?;
+        let pin = dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid("retained input release is missing its source pin"))?;
         println!(
             "input={alias}; dataset={}; version={}; rows={}; snapshot={:?}; schema_id={}; metadata={}",
             dataset.dataset,
@@ -74,7 +77,8 @@ async fn retained_comments_join_physical_plans() -> Result<()> {
 
 fn read_json<T: DeserializeOwned>(path: &Path, remaining: &mut usize) -> Result<T> {
     let file = File::open(path)?;
-    let bytes = usize::try_from(file.metadata()?.len()).map_err(|_| invalid())?;
+    let bytes = usize::try_from(file.metadata()?.len())
+        .map_err(|_| invalid("metadata file length overflows usize"))?;
     if bytes > *remaining {
         return Err(Error::refusal(
             "plan_probe_metadata",
@@ -84,7 +88,7 @@ fn read_json<T: DeserializeOwned>(path: &Path, remaining: &mut usize) -> Result<
     let mut contents = Vec::with_capacity(bytes);
     file.take(bytes as u64 + 1).read_to_end(&mut contents)?;
     if contents.len() != bytes {
-        return Err(invalid());
+        return Err(invalid("metadata file length changed while reading"));
     }
     *remaining -= bytes;
     Ok(serde_json::from_slice(&contents)?)

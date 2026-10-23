@@ -1,17 +1,45 @@
 //! Complete affected-key recomputation over immutable native occurrence files.
+//!
+//! Incremental join maintenance evaluates relational delta algebra over immutable
+//! occurrence files:
+//!
+//! ```text
+//! L_new ⋈ R_new = (L_old ⋈ R_old) \ Δ_removed ∪ Δ_added
+//! ```
+//!
+//! 1. **Changed-key discovery (`changed_keys`)**: For both the left and right inputs,
+//!    identifies added or removed occurrence files between the base and target input
+//!    releases (or reads the explicit `ChangePin` lineage via `history_keys`) and
+//!    projects their join key tuples into `keys_0` and `keys_1`, whose distinct union
+//!    forms the `affected` key set $K_\Delta$.
+//! 2. **Snapshot file pruning**: Uses Iceberg column min/max bounds, partition specs,
+//!    and exact in-memory `KeyPoints` sets (`prune_snapshot_files`) to skip reading
+//!    occurrence files on either side whose key ranges cannot intersect $K_\Delta$.
+//! 3. **Null-safe semi-join scoping (`old_scope_{0,1}`, `new_scope_{0,1}`)**: Filters
+//!    both old and new occurrence tables against `affected` using `IS NOT DISTINCT FROM`
+//!    on every join key. Using null-safe equality during scoping ensures that rows with
+//!    partial-null or all-null join keys (which may participate in outer joins or
+//!    `NullMatching::Equal` joins) are included in the recomputed key neighbourhood.
+//! 4. **Prior output eviction (`scope`)**: Joins the base join output (`before`) against
+//!    `old_scope_0` on `(__docspec_left_file, __docspec_left_row)` and `old_scope_1` on
+//!    `(__docspec_right_file, __docspec_right_row)`. Any prior output tuple whose left
+//!    *or* right contributing occurrence belongs to $K_\Delta$ is included in the removal
+//!    scope ($\Delta_{\text{removed}}$).
+//! 5. **Neighbourhood recomputation (`replacement`)**: Evaluates the full join recipe
+//!    (`refresh::join_registered`) over `new_scope_0 ⋈ new_scope_1` ($\Delta_{\text{added}}$)
+//!    and applies `replace_keys` to atomically swap $\Delta_{\text{removed}}$ for
+//!    $\Delta_{\text{added}}$ in the native output table and contributor evidence.
 
 mod history;
 
 use super::{refresh, write::Replacement, *};
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
+use datafusion::{common::Column, prelude::col};
 use refresh::{TUPLE, tuple_columns};
 use write::identifier as quote;
 
-fn full_refresh() -> Error {
-    Error::refusal(
-        "full_refresh_required",
-        "incremental refresh requires a qualified related base with unchanged input roles, native schemas and transform definition",
-    )
+fn full_refresh(reason: &'static str) -> Error {
+    Error::refusal("full_refresh_required", reason)
 }
 
 impl Engine {
@@ -30,7 +58,9 @@ impl Engine {
         }
         qualify(
             spec,
-            authority.selected.as_ref().ok_or_else(full_refresh)?,
+            authority.selected.as_ref().ok_or_else(|| {
+                full_refresh("incremental refresh requires a selected base release")
+            })?,
             authority.eligibility,
             &self.inner.lifecycle.budget,
         )
@@ -45,16 +75,28 @@ impl Engine {
         operation: &'a Operation,
         captured_source: Option<&'a TablePin>,
     ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
-            let coverage = admission.coverage.as_ref().ok_or_else(full_refresh)?;
+            let coverage = admission.coverage.as_ref().ok_or_else(|| {
+                full_refresh("incremental refresh admission is missing input coverage")
+            })?;
             if coverage.inputs != spec.inputs() {
-                return Err(full_refresh());
+                return Err(full_refresh(
+                    "admitted input coverage disagrees with incremental refresh inputs",
+                ));
             }
             let base = self
-                .release_admitted(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
+                .release_admitted(
+                    &spec.dataset,
+                    spec.base.as_ref().ok_or_else(|| {
+                        full_refresh("incremental refresh requires a declared base version")
+                    })?,
+                )
                 .await?;
             check_manifest(&base, operation)?;
-            let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
+            let related = base.dataset.related.as_ref().ok_or_else(|| {
+                full_refresh("incremental refresh base is missing related result provenance")
+            })?;
             let budget = &self.inner.lifecycle.budget;
             // A base is read as an immutable result, never inferred from table heads.
             resolve_release(&base, budget).await?;
@@ -104,7 +146,9 @@ impl Engine {
                             .current_schema()
                             .field_by_name(name)
                             .map(|field| field.id)
-                            .ok_or_else(full_refresh)
+                            .ok_or_else(|| {
+                                full_refresh("base native schema is missing an output key field")
+                            })
                     })
                     .collect::<Result<Vec<_>>>()?;
                 return Ok(write::Prepared {
@@ -170,15 +214,22 @@ impl Engine {
         current: &'a refresh::LoadedInputs,
         captured: (&'a TablePin, &'a iceberg::table::Table),
     ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let (captured_source, native) = captured;
             let budget = &self.inner.lifecycle.budget;
-            let related = base.dataset.related.as_ref().ok_or_else(full_refresh)?;
+            let related = base.dataset.related.as_ref().ok_or_else(|| {
+                full_refresh("incremental join base is missing related result provenance")
+            })?;
             let RefreshTransform::Join(join) = &spec.transform else {
-                return Err(full_refresh());
+                return Err(full_refresh(
+                    "incremental join expects a join transform specification",
+                ));
             };
             let RefreshTransform::Join(previous_join) = &related.request.transform else {
-                return Err(full_refresh());
+                return Err(full_refresh(
+                    "incremental join base was not produced by a join transform",
+                ));
             };
             let context = self.context();
             let mut discovery = WriteMetrics::default();
@@ -186,8 +237,6 @@ impl Engine {
                 (0, &previous_join.left, &join.left),
                 (1, &previous_join.right, &join.right),
             ] {
-                let old = source(&previous.releases[&old_version.dataset])?;
-                let new = source(&current.releases[&new_version.dataset])?;
                 let keys = join
                     .join
                     .keys
@@ -228,15 +277,15 @@ impl Engine {
                     format!("keys_{index}"),
                     crate::query::table(native, budget.clone(), Some(pin.rows))?,
                 )?;
-                let _ = (old, new);
             }
             let keys = self
                 .write_frame_at(
                     &spec.dataset,
                     &directory.child("affected-keys")?,
                     context
-                        .sql("SELECT * FROM keys_0 UNION SELECT * FROM keys_1")
-                        .await?,
+                        .table("keys_0")
+                        .await?
+                        .union_distinct(context.table("keys_1").await?)?,
                 )
                 .await?;
             discovery.data_files_written += keys.metrics.data_files_written;
@@ -256,7 +305,7 @@ impl Engine {
             let affected_points = if keys.table.rows == 0 {
                 None
             } else {
-                write::key_points::KeyPoints::collect_table(&context, "affected", &k_cols, budget)
+                super::key_pruning::KeyPoints::collect_table(&context, "affected", &k_cols, budget)
                     .await?
             };
             for (index, old_version, new_version) in [
@@ -289,29 +338,17 @@ impl Engine {
                         let side_schema = side_native.metadata().current_schema().clone();
                         let side_partition_spec =
                             side_native.metadata().default_partition_spec().clone();
-                        let (retained, retained_rows) = {
-                            let inv = storage::current_snapshot_files(&side_native, budget).await?;
-                            let mut set = std::collections::BTreeSet::new();
-                            let mut rows = 0u64;
-                            for file in &inv.data {
-                                if write::file_may_overlap_mapped_key_files(
-                                    &side_schema,
-                                    &side_partition_spec,
-                                    &affected_schema,
-                                    &side_keys,
-                                    &k_cols,
-                                    &affected_data,
-                                    file,
-                                ) && affected_points
-                                    .as_ref()
-                                    .is_none_or(|p| p.may_contain(&side_schema, &side_keys, file))
-                                {
-                                    set.insert(file.file_path().to_owned());
-                                    rows = rows.saturating_add(file.record_count());
-                                }
-                            }
-                            (set, rows)
-                        };
+                        let inv = storage::current_snapshot_files(&side_native, budget).await?;
+                        let (retained, retained_rows) = super::key_pruning::prune_snapshot_files(
+                            &inv.data,
+                            &side_schema,
+                            &side_partition_spec,
+                            &affected_schema,
+                            &side_keys,
+                            &k_cols,
+                            &affected_data,
+                            affected_points.as_ref(),
+                        );
                         context.register_table(
                             format!("{prefix}_{index}"),
                             crate::query::pruned_occurrences(
@@ -326,8 +363,9 @@ impl Engine {
             }
             drop(affected_data);
             drop(affected_points);
-            // Null-safe membership also includes unmatched partial-null groups under
-            // ordinary SQL equality. The actual join keeps its declared null policy.
+            // Null-safe membership (`IS NOT DISTINCT FROM`) includes unmatched partial-null
+            // key groups so outer-join or NullMatching::Equal rows are scoped accurately;
+            // the recomputed join itself still enforces its declared NullMatching policy.
             for side in 0..2 {
                 let predicate = join
                     .join
@@ -344,10 +382,10 @@ impl Engine {
                     .join(" AND ");
                 for prefix in ["old", "new"] {
                     let frame = context
-                    .sql(&format!(
-                        "SELECT s.* FROM {prefix}_{side} s LEFT SEMI JOIN affected k ON {predicate}"
-                    ))
-                    .await?;
+                        .sql(&format!(
+                            "SELECT s.* FROM {prefix}_{side} s LEFT SEMI JOIN affected k ON {predicate}"
+                        ))
+                        .await?;
                     context.register_table(format!("{prefix}_scope_{side}"), frame.into_view())?;
                 }
             }
@@ -355,6 +393,9 @@ impl Engine {
                 "before",
                 crate::query::table(native.clone(), budget.clone(), Some(captured_source.rows))?,
             )?;
+            // Match `before` against `old_scope_0` and `old_scope_1` by physical occurrence
+            // coordinates `(OCCURRENCE_FILE, OCCURRENCE_ROW)` so any prior output row whose
+            // left or right contributor belonged to the affected key set is evicted.
             let mut joins = Vec::new();
             for side in 0..2 {
                 joins.push(format!(
@@ -366,14 +407,14 @@ impl Engine {
                 ));
             }
             let scope = context
-            .sql(&format!(
-                "SELECT DISTINCT {} FROM before b {} WHERE s0.{} IS NOT NULL OR s1.{} IS NOT NULL",
-                tuple_columns(Some("b")),
-                joins.join(" "),
-                quote(storage::OCCURRENCE_FILE),
-                quote(storage::OCCURRENCE_FILE)
-            ))
-            .await?;
+                .sql(&format!(
+                    "SELECT DISTINCT {} FROM before b {} WHERE s0.{} IS NOT NULL OR s1.{} IS NOT NULL",
+                    tuple_columns(Some("b")),
+                    joins.join(" "),
+                    quote(storage::OCCURRENCE_FILE),
+                    quote(storage::OCCURRENCE_FILE)
+                ))
+                .await?;
             context.register_table("join_left", context.table("new_scope_0").await?.into_view())?;
             context.register_table(
                 "join_right",
@@ -389,7 +430,9 @@ impl Engine {
                         .current_schema()
                         .field_by_name(key)
                         .map(|field| field.id)
-                        .ok_or_else(full_refresh)
+                        .ok_or_else(|| {
+                            full_refresh("base join schema is missing an occurrence tuple column")
+                        })
                 })
                 .collect::<Result<Vec<_>>>()?;
             let keys = TUPLE.map(str::to_owned);
@@ -441,6 +484,7 @@ impl Engine {
         canonical: (&'a TablePin, &'a TablePin),
         keys: &'a [String],
     ) -> futures::future::BoxFuture<'a, Result<(TablePin, u64)>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let budget = &self.inner.lifecycle.budget;
             let old = source(versions.0)?;
@@ -601,20 +645,32 @@ impl Engine {
         processing: &'a PhaseResult,
         operation: &'a Operation,
     ) -> futures::future::BoxFuture<'a, Result<write::Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let base = self
-                .release_admitted(&spec.dataset, spec.base.as_ref().ok_or_else(full_refresh)?)
+                .release_admitted(
+                    &spec.dataset,
+                    spec.base.as_ref().ok_or_else(|| {
+                        full_refresh("incremental evidence requires a declared base version")
+                    })?,
+                )
                 .await?;
             check_manifest(&base, operation)?;
             let before = &base
                 .dataset
                 .related
                 .as_ref()
-                .ok_or_else(full_refresh)?
+                .ok_or_else(|| {
+                    full_refresh("incremental evidence base is missing related result provenance")
+                })?
                 .evidence;
-            let changes = processing.changes.as_ref().ok_or_else(full_refresh)?;
+            let changes = processing.changes.as_ref().ok_or_else(|| {
+                full_refresh("incremental processing phase is missing its change pin")
+            })?;
             if changes.base_manifest != base.manifest {
-                return Err(full_refresh());
+                return Err(full_refresh(
+                    "incremental change pin base manifest disagrees with admitted base",
+                ));
             }
             if changes.removed.rows == 0 && changes.added.rows == 0 {
                 return Ok(write::Prepared {
@@ -648,7 +704,10 @@ impl Engine {
                 )
                 .await;
             }
-            let columns = tuple_columns(None);
+            let tuple_exprs: Vec<_> = TUPLE
+                .iter()
+                .map(|&name| col(Column::from_name(name)))
+                .collect();
             let keys = TUPLE.map(str::to_owned);
             let applied = Box::pin(
                 self.replace_keys(Replacement {
@@ -657,9 +716,11 @@ impl Engine {
                     before,
                     keys: &keys,
                     scope: context
-                        .sql(&format!("SELECT DISTINCT {columns} FROM removed"))
-                        .await?,
-                    replacement: context.sql(&format!("SELECT {columns} FROM added")).await?,
+                        .table("removed")
+                        .await?
+                        .select(tuple_exprs.clone())?
+                        .distinct()?,
+                    replacement: context.table("added").await?.select(tuple_exprs)?,
                     replacement_bytes: Some(
                         changes
                             .added
@@ -684,7 +745,7 @@ pub(super) fn source(release: &ReleasePin) -> Result<&TablePin> {
         .dataset
         .groups
         .get("source")
-        .ok_or_else(full_refresh)
+        .ok_or_else(|| full_refresh("release is missing its canonical source table pin"))
 }
 
 fn check_manifest(base: &ReleasePin, operation: &Operation) -> Result<()> {
@@ -704,14 +765,18 @@ pub(super) async fn qualify(
     eligibility: u64,
     budget: &Budget,
 ) -> Result<()> {
-    let related = base.related.as_ref().ok_or_else(full_refresh)?;
+    let related = base.related.as_ref().ok_or_else(|| {
+        full_refresh("incremental refresh requires a base release with related provenance")
+    })?;
     if spec.base.as_ref() != Some(&base.version)
         || base.eligibility != eligibility
         || spec.definition != base.definition
         || spec.definition != related.request.definition
         || !spec.transform.same_definition(&related.request.transform)
     {
-        return Err(full_refresh());
+        return Err(full_refresh(
+            "incremental refresh requires a qualified related base with unchanged input roles, native schemas and transform definition",
+        ));
     }
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = 0;
@@ -727,7 +792,9 @@ pub(super) async fn qualify(
         let old = storage::open_pin(source(&old)?, budget).await?;
         let new = storage::open_pin(source(&new)?, budget).await?;
         if storage::identity::public_schema(&old)? != storage::identity::public_schema(&new)? {
-            return Err(full_refresh());
+            return Err(full_refresh(
+                "input public schema changed between base and target versions",
+            ));
         }
     }
     Ok(())

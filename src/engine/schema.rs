@@ -20,7 +20,7 @@ impl Engine {
             .selected
             .as_ref()
             .and_then(|s| s.groups.get("source"))
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| invalid("selected authority lacks a source group"))?;
         // An unchanged first based Build can retain the original material key.
         // Later reuse rechecks compatibility if that exact generation changes.
         let key = phase_key(
@@ -42,7 +42,7 @@ impl Engine {
             return Ok(None);
         }
         let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
-        Ok(Some(schema_identity(
+        Ok(Some(table_schema_identity(
             native.metadata(),
             &self.inner.lifecycle.budget,
         )?))
@@ -68,9 +68,18 @@ impl Engine {
         let key = format!("result/{base}");
         let rows = self.inner.lifecycle.rows(view).await?;
         let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[&key])?;
-        let (_, _, captured) = rows.get_record::<ReleasePin>(&key)?.ok_or_else(invalid)?;
-        let before = captured.dataset.groups.get("source").ok_or_else(invalid)?;
-        let after = phase.table.as_ref().ok_or_else(invalid)?;
+        let (_, _, captured) = rows
+            .get_record::<ReleasePin>(&key)?
+            .ok_or_else(|| invalid("captured base release record is missing"))?;
+        let before = captured
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid("captured base release lacks a source group"))?;
+        let after = phase
+            .table
+            .as_ref()
+            .ok_or_else(|| invalid("reused build processing phase lacks a source table"))?;
         if before == after {
             return Ok(());
         }
@@ -141,12 +150,18 @@ impl Engine {
             }
             return Ok(());
         };
-        let base = authority.selected.as_ref().ok_or_else(invalid)?;
+        let base = authority
+            .selected
+            .as_ref()
+            .ok_or_else(|| invalid("schema edit requires a selected base dataset"))?;
         if new_admission {
             self.check_abandoned_gap(view, &spec.dataset, base.boundary, authority.boundary)
                 .await?;
         }
-        let source = base.groups.get("source").ok_or_else(invalid)?;
+        let source = base
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid("selected base dataset lacks a source group"))?;
         let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let proposed = fields(native.metadata(), spec)?;
         storage::defaults::check_expansion(&proposed, &self.inner.lifecycle.budget.limits, false)?;
@@ -187,7 +202,9 @@ impl Engine {
         work_started("admission");
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         if operation.base_manifest.as_ref() != Some(&base.manifest) {
-            return Err(invalid());
+            return Err(invalid(
+                "schema operation base manifest differs from admitted base release",
+            ));
         }
         let phase = PhaseResult {
             operation: spec.operation.clone(),
@@ -224,9 +241,15 @@ impl Engine {
     ) -> Result<write::Prepared> {
         let base = self.release_admitted(&spec.dataset, &spec.base).await?;
         if operation.base_manifest.as_ref() != Some(&base.manifest) {
-            return Err(invalid());
+            return Err(invalid(
+                "schema operation base manifest differs from admitted base release",
+            ));
         }
-        let source = base.dataset.groups.get("source").ok_or_else(invalid)?;
+        let source = base
+            .dataset
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid("admitted base release lacks a source group"))?;
         let native = storage::open_pin(source, &self.inner.lifecycle.budget).await?;
         let previous = native.metadata_ref();
         let spec_owned = spec.clone();
@@ -254,7 +277,8 @@ impl Engine {
     }
 }
 
-fn schema_identity(metadata: &TableMetadata, budget: &Budget) -> Result<String> {
+/// Computes a deterministic BLAKE3 digest of a table's format version, schema history, and column allocation state.
+fn table_schema_identity(metadata: &TableMetadata, budget: &Budget) -> Result<String> {
     let _memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
     let schemas = metadata
         .schemas_iter()
@@ -296,10 +320,13 @@ pub(super) async fn verify_rebuild(
         return Ok(());
     }
     let after = storage::open_pin(after, budget).await?;
-    if schema_identity(before.metadata(), budget)? != schema_identity(after.metadata(), budget)?
+    if table_schema_identity(before.metadata(), budget)?
+        != table_schema_identity(after.metadata(), budget)?
         || before.metadata().default_partition_spec() != after.metadata().default_partition_spec()
     {
-        return Err(invalid());
+        return Err(invalid(
+            "rebuilt source table schema identity or partition spec differs from base",
+        ));
     }
     Ok(())
 }
@@ -435,7 +462,9 @@ pub(super) async fn normalize(
                 Some(id) => flags.remove(&id),
                 None => values.remove(&field.id),
             }
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| {
+                invalid("normalized schema field is missing its value or flag expression")
+            })?;
             Ok(expression.alias(&field.name))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -465,15 +494,14 @@ pub(super) fn validate(spec: &SchemaSpec) -> Result<()> {
         || (spec.fields.is_empty() && spec.additions.is_empty())
         || ids.len() != spec.fields.len()
         || names.len() != spec.fields.len() + spec.additions.len()
-        || spec.fields.iter().any(|field| {
-            field.id <= 0
-                || field.name.trim().is_empty()
-                || field.name.to_ascii_lowercase().starts_with("__docspec_")
-        })
-        || spec.additions.iter().any(|field| {
-            field.name.trim().is_empty()
-                || field.name.to_ascii_lowercase().starts_with("__docspec_")
-        })
+        || spec
+            .fields
+            .iter()
+            .any(|field| field.id <= 0 || !expr::is_valid_identifier(&field.name))
+        || spec
+            .additions
+            .iter()
+            .any(|field| !expr::is_valid_identifier(&field.name))
     {
         return Err(Error::refusal(
             "invalid_schema",
@@ -498,13 +526,17 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
         .map(|selected| {
             let mut field = roots
                 .get(&selected.id)
-                .ok_or_else(invalid)?
+                .ok_or_else(|| {
+                    invalid("schema edit selects a field ID absent from the base schema")
+                })?
                 .as_ref()
                 .clone();
             if field.name.starts_with(storage::defaults::SUPPLIED_PREFIX)
                 || storage::identity::hidden(&field.name)
             {
-                return Err(invalid());
+                return Err(invalid(
+                    "schema edit cannot select internal supplied-marker or hidden fields",
+                ));
             }
             field.name = selected.name.clone();
             if let Some(value) = spec.write_defaults.get(&field.id) {
@@ -512,7 +544,9 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
                     .field_by_name(&storage::defaults::supplied_name(field.id))
                     .is_none()
                 {
-                    return Err(invalid());
+                    return Err(invalid(
+                        "write default update requires a field with tracked supplied presence",
+                    ));
                 }
                 field.write_default = storage::defaults::literal(&field.field_type, value.clone())?;
             }
@@ -524,7 +558,9 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
         .keys()
         .any(|id| !spec.fields.iter().any(|f| f.id == *id))
     {
-        return Err(invalid());
+        return Err(invalid(
+            "write default update references a field ID not retained in the schema edit",
+        ));
     }
     // Keep presence paired with the logical field through rename/reorder/removal.
     let markers = fields
@@ -538,11 +574,15 @@ fn fields(metadata: &TableMetadata, spec: &SchemaSpec) -> Result<Schema> {
     fields.extend(markers);
     let mut next = metadata.last_column_id();
     for addition in &spec.additions {
-        let id = next.checked_add(1).ok_or_else(invalid)?;
+        let id = next
+            .checked_add(1)
+            .ok_or_else(|| invalid("column ID allocation overflowed on added field"))?;
         next = id
             .checked_add(1)
             .filter(|id| !iceberg::metadata_columns::is_metadata_field(*id))
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| {
+                invalid("column ID allocation overflowed or collided with reserved metadata ID")
+            })?;
         let data_type = storage::defaults::native_type(addition.data_type);
         let default = storage::defaults::literal(&data_type, addition.default.clone())?;
         let mut field = NestedField::optional(id, &addition.name, data_type);
@@ -618,29 +658,36 @@ pub(super) async fn verify_transition(
     budget: &Budget,
 ) -> Result<()> {
     validate(spec)?;
-    if !supported_format(before.format)
-        || !supported_format(after.format)
-        || before.dataset != spec.dataset
-        || after.dataset != spec.dataset
-        || after.version != spec.operation
-        || before.version != spec.base
-        || before.definition != spec.definition
-        || after.definition != spec.next_definition
-        || before.related.is_some()
-        || after.related.is_some()
-        || before.inputs != after.inputs
-        || before.relationship != after.relationship
-        || before.eligibility != after.eligibility
-        || if after.format == PREVIOUS_FORMAT {
-            before.boundary.checked_add(1) != Some(after.boundary)
-        } else {
-            before.boundary != after.boundary
-        }
-    {
-        return Err(invalid());
+    let formats_valid = supported_format(before.format) && supported_format(after.format);
+    let identity_matches = before.dataset == spec.dataset
+        && after.dataset == spec.dataset
+        && after.version == spec.operation
+        && before.version == spec.base
+        && before.definition == spec.definition
+        && after.definition == spec.next_definition;
+    let state_preserved = before.related.is_none()
+        && after.related.is_none()
+        && before.inputs == after.inputs
+        && before.relationship == after.relationship
+        && before.eligibility == after.eligibility;
+    let boundary_matches = if after.format == PREVIOUS_FORMAT {
+        before.boundary.checked_add(1) == Some(after.boundary)
+    } else {
+        before.boundary == after.boundary
+    };
+    if !(formats_valid && identity_matches && state_preserved && boundary_matches) {
+        return Err(invalid(
+            "schema transition dataset, version, definition, eligibility, or boundary differs",
+        ));
     }
-    let first = before.groups.get("source").ok_or_else(invalid)?;
-    let second = after.groups.get("source").ok_or_else(invalid)?;
+    let first = before
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid("schema transition before state lacks a source group"))?;
+    let second = after
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid("schema transition after state lacks a source group"))?;
     let reservation = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(4))?;
     fn inherited(pin: &TablePin) -> BTreeMap<&str, &ObjectRef> {
         pin.objects
@@ -653,7 +700,9 @@ pub(super) async fn verify_transition(
         || first.snapshot != second.snapshot
         || inherited(first) != inherited(second)
     {
-        return Err(invalid());
+        return Err(invalid(
+            "schema transition altered source row count, snapshot, or data file objects",
+        ));
     }
     let first = storage::open_pin(first, budget).await?.metadata_ref();
     let second = storage::open_pin(second, budget).await?.metadata_ref();
@@ -666,7 +715,9 @@ pub(super) async fn verify_transition(
         Vec::new()
     };
     if after.partition_by != expected_partitions {
-        return Err(invalid());
+        return Err(invalid(
+            "schema transition partition specifications differ from evolved metadata",
+        ));
     }
     let limit = budget.limits.max_metadata_bytes;
     let spec = spec.clone();
@@ -674,7 +725,9 @@ pub(super) async fn verify_transition(
         .blocking(move || {
             let _reservation = reservation;
             if first.uuid() == second.uuid() {
-                return Err(invalid());
+                return Err(invalid(
+                    "schema transition must allocate a distinct table UUID",
+                ));
             }
             let expected = evolve(&first, &spec, second.location(), second.uuid())?;
             // The native builder has no timestamp setter. Round-trip only its bounded
@@ -685,7 +738,9 @@ pub(super) async fn verify_transition(
             normalized["last-updated-ms"] = second.last_updated_ms().into();
             let expected: TableMetadata = serde_json::from_value(normalized)?;
             if expected != *second {
-                return Err(invalid());
+                return Err(invalid(
+                    "evolved table metadata differs from expected schema transition output",
+                ));
             }
             Ok(())
         })
@@ -700,7 +755,10 @@ pub(super) async fn check_available(dataset: &DatasetPin, budget: &Budget) -> Re
     let mut bytes = 0;
     let before: DatasetPin = inputs::read_manifest(
         &storage::Objects::Local,
-        dataset.parent_manifest.as_ref().ok_or_else(invalid)?,
+        dataset
+            .parent_manifest
+            .as_ref()
+            .ok_or_else(|| invalid("schema result lacks a parent manifest"))?,
         budget,
         &mut bytes,
         &memory,
@@ -709,11 +767,8 @@ pub(super) async fn check_available(dataset: &DatasetPin, budget: &Budget) -> Re
     verify_transition(spec, &before, dataset, budget).await
 }
 
-fn invalid() -> Error {
-    Error::refusal(
-        "invalid_schema",
-        "schema selection differs from its exact base, field identities or retained native state",
-    )
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_schema", reason)
 }
 
 #[cfg(test)]
@@ -736,16 +791,16 @@ mod tests {
             .unwrap();
         let metadata = storage::fresh_metadata(schema, root.path()).unwrap();
         let budget = Budget::new(Limits::default()).unwrap();
-        let expected = schema_identity(&metadata, &budget).unwrap();
+        let expected = table_schema_identity(&metadata, &budget).unwrap();
         let encoded = serde_json::to_value(&metadata).unwrap();
         // Native deserialization rebuilds unordered identifier sets per open.
         for _ in 0..16 {
             let reopened: TableMetadata = serde_json::from_value(encoded.clone()).unwrap();
-            assert_eq!(schema_identity(&reopened, &budget).unwrap(), expected);
+            assert_eq!(table_schema_identity(&reopened, &budget).unwrap(), expected);
         }
         let mut changed = encoded;
         changed["last-column-id"] = 99.into();
         let changed: TableMetadata = serde_json::from_value(changed).unwrap();
-        assert_ne!(schema_identity(&changed, &budget).unwrap(), expected);
+        assert_ne!(table_schema_identity(&changed, &budget).unwrap(), expected);
     }
 }

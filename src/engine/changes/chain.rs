@@ -10,6 +10,7 @@ mod tests;
 // histories explicitly use the consumer's conservative endpoint path.
 pub(in crate::engine) const MAX_LINKS: usize = 64;
 
+/// Outcome of attempting to qualify a forward change chain between two releases.
 pub(in crate::engine) enum Forward {
     Eligible(Chain),
     Fallback(ComparisonFallback),
@@ -22,25 +23,25 @@ pub(in crate::engine) struct Chain {
     pub memory: Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
+/// One signed native delta table (`removed` or `added`) in a qualified [`Chain`].
 pub(in crate::engine) struct Delta {
     pub table: iceberg::table::Table,
     pub rows: u64,
     pub weight: i64,
 }
 
-fn invalid() -> Error {
-    Error::refusal(
-        "invalid_changes",
-        "qualified changes have inconsistent source continuity",
-    )
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_changes", reason)
 }
 
+/// Accumulates `additional` metadata bytes into `total` and checks against `budget`.
 fn charge(total: &mut usize, additional: usize, budget: &Budget) -> bool {
     *total = total.saturating_add(additional);
     *total <= budget.limits.max_metadata_bytes
 }
 
 impl Engine {
+    /// Walks certified change links backward from `endpoints.1` to `endpoints.0` to assemble a forward delta [`Chain`].
     pub(in crate::engine) fn change_chain<'a>(
         &'a self,
         view: &'a View,
@@ -77,7 +78,9 @@ impl Engine {
             if selected.metadata != canonical.1.metadata
                 || &selected.logical_metadata != canonical.1.logical_metadata()
             {
-                return Err(invalid());
+                return Err(invalid(
+                    "after release source metadata differs from canonical endpoint",
+                ));
             }
             let mut pins = Vec::new();
             let mut memory = Vec::new();
@@ -112,7 +115,9 @@ impl Engine {
                 // receipts. Intermediate complete-state availability is not required.
                 let previous = changes::change_selection(&rows, &predecessor, budget)?;
                 if previous.revision >= selected.revision {
-                    return Err(invalid());
+                    return Err(invalid(
+                        "change certificate predecessor revision is not strictly older",
+                    ));
                 }
                 let descriptor_memory = Arc::new(
                     budget.reserve(
@@ -134,7 +139,9 @@ impl Engine {
                     if source.after_metadata != selected.metadata
                         || source.before_metadata != previous.metadata
                     {
-                        return Err(invalid());
+                        return Err(invalid(
+                            "applied source change metadata does not bridge predecessor and successor",
+                        ));
                     }
                     for pin in [&source.removed, &source.added] {
                         if !charge(
@@ -149,7 +156,9 @@ impl Engine {
                 } else if selected.logical_metadata != previous.logical_metadata {
                     // A receipt-only hop may share a verified physical replacement,
                     // but cannot silently bridge a different logical source.
-                    return Err(invalid());
+                    return Err(invalid(
+                        "receipt-only transition changed logical source metadata without source delta",
+                    ));
                 }
                 memory.extend([certificate_memory, descriptor_memory]);
                 links += 1;
@@ -162,22 +171,15 @@ impl Engine {
             if selected.metadata != canonical.0.metadata
                 || &selected.logical_metadata != canonical.0.logical_metadata()
             {
-                return Err(invalid());
+                return Err(invalid(
+                    "before release source metadata differs from canonical endpoint",
+                ));
             }
             // Eligibility is complete before opening delta table metadata or payloads.
             // Keep decoded descriptors and parsed native metadata admitted through
             // the last stream owner, rather than only through this planning call.
             let expected_schema = storage::identity::public_schema(native)?;
-            let public_rules = |schema: &iceberg::spec::Schema| {
-                schema
-                    .as_struct()
-                    .fields()
-                    .iter()
-                    .filter(|field| !storage::identity::hidden(&field.name))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            let expected_rules = public_rules(native.metadata().current_schema());
+            let expected_rules = comparison::public_rules(native.metadata().current_schema());
             let mut tables = Vec::new();
             for source in pins {
                 for (pin, weight) in [(source.removed, -1_i64), (source.added, 1_i64)] {
@@ -191,9 +193,12 @@ impl Engine {
                     let table = self.inner.objects.open_pin(&pin, budget).await?;
                     storage::identity::has_origins(table.metadata().current_schema())?;
                     if storage::identity::public_schema(&table)? != expected_schema
-                        || public_rules(table.metadata().current_schema()) != expected_rules
+                        || comparison::public_rules(table.metadata().current_schema())
+                            != expected_rules
                     {
-                        return Err(invalid());
+                        return Err(invalid(
+                            "change delta table public schema or field rules differ from endpoint",
+                        ));
                     }
                     if pin.rows != 0 {
                         tables.push(Delta {

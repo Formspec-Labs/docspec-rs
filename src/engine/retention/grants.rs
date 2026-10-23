@@ -210,17 +210,13 @@ impl Engine {
         self.admit_work(memory, move |engine| async move {
             engine.retirement_catalog()?;
             keys.sort();
-            if reason.trim().is_empty()
-                || keys.is_empty()
+            if keys.is_empty()
                 || keys.windows(2).any(|pair| pair[0] == pair[1])
                 || keys.iter().any(|key| !grant_key(key))
             {
                 return Err(invalid_retirement());
             }
-            let lock = engine.lock(&dataset).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&dataset).await?;
-            let rows = engine.inner.lifecycle.rows(&view).await?;
+            let (_guard, view, rows) = engine.open_retirement_view(&dataset, &reason).await?;
             let records = keys
                 .into_iter()
                 .map(|key| {

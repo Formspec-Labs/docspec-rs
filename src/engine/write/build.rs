@@ -29,11 +29,8 @@ struct RetainedCandidate {
     _memory: tokio::sync::OwnedSemaphorePermit,
 }
 
-fn invalid() -> Error {
-    Error::refusal(
-        "invalid_candidate_attempt",
-        "candidate intent differs from its protected operation generation",
-    )
+fn invalid(reason: &'static str) -> Error {
+    Error::refusal("invalid_candidate_attempt", reason)
 }
 
 fn key(
@@ -95,45 +92,60 @@ fn validate(
 ) -> Result<TableMetadata> {
     let (revision, _, operation) = rows
         .get_record::<Operation>(&format!("operation/{}", pending.operation))?
-        .ok_or_else(invalid)?;
+        .ok_or_else(|| invalid("candidate operation record is missing"))?;
     let (request_revision, _, request) = rows
         .get_record::<OperationRequest>(&format!("request/{}", pending.operation))?
-        .ok_or_else(invalid)?;
-    let intent_revision = rows.revision(key_value).ok_or_else(invalid)?;
+        .ok_or_else(|| invalid("candidate request record is missing"))?;
+    let intent_revision = rows
+        .revision(key_value)
+        .ok_or_else(|| invalid("candidate intent record revision is missing"))?;
     let (protection_revision, _, protection) = rows
         .get_record::<Protection>(&format!("protection/{}", pending.attempt))?
-        .ok_or_else(invalid)?;
-    if key_value
-        != key(
-            &pending.operation,
-            pending.operation_revision,
-            pending.processing_revision,
-            &pending.input,
-        )?
+        .ok_or_else(|| invalid("candidate protection record is missing"))?;
+    let expected_key = key(
+        &pending.operation,
+        pending.operation_revision,
+        pending.processing_revision,
+        &pending.input,
+    )?;
+    if key_value != expected_key
         || pending.processing_revision < 0
         || pending.processing_revision >= intent_revision
         || revision != pending.operation_revision
         || request_revision != revision
-        || pending.consumer != *request.dataset()
+        || intent_revision <= revision
+    {
+        return Err(invalid("candidate key or revision ordering differs"));
+    }
+    if pending.consumer != *request.dataset()
         || pending.operation != *request.operation()
         || pending.request_digest != operation.request_digest
         || pending.request_digest != fingerprint(&request)?
         || pending.eligibility != operation.eligibility
-        || intent_revision <= revision
-        || protection_revision != intent_revision
+    {
+        return Err(invalid(
+            "candidate intent differs from its protected operation generation",
+        ));
+    }
+    if protection_revision != intent_revision
         || protection.id != pending.attempt
         || protection.consumer != pending.consumer
         || protection.paths != [pending.prefix.clone()]
         || protection.purpose != format!("{}/processing", pending.operation)
         || protection.retired
-        || pending.metadata.owner != pending.consumer
+    {
+        return Err(invalid(
+            "candidate protection binding differs or is retired",
+        ));
+    }
+    if pending.metadata.owner != pending.consumer
         || pending.metadata.bytes != pending.metadata_json.len() as u64
         || blake3::hash(pending.metadata_json.as_bytes())
             .to_hex()
             .as_str()
             != pending.metadata.digest
     {
-        return Err(invalid());
+        return Err(invalid("candidate metadata digest or byte length differs"));
     }
     let native: TableMetadata = serde_json::from_str(&pending.metadata_json)?;
     let location: MetadataLocation = pending.metadata.path.parse()?;
@@ -142,7 +154,7 @@ fn validate(
         .metadata
         .path
         .strip_prefix(&root)
-        .ok_or_else(invalid)?;
+        .ok_or_else(|| invalid("candidate metadata path is outside table location"))?;
     if native.current_snapshot_id().is_some()
         || native.snapshots().len() != 0
         || pending.prefix != format!("{}/", native.location())
@@ -153,17 +165,19 @@ fn validate(
         || filename.contains('/')
         || native.properties() != &storage::table_properties()
     {
-        return Err(invalid());
+        return Err(invalid(
+            "candidate table metadata or location is not a fresh empty table",
+        ));
     }
     storage::validate_partition_spec(native.current_schema(), native.default_partition_spec())
-        .map_err(|_| invalid())?;
+        .map_err(|_| invalid("candidate partition spec is invalid for table schema"))?;
     if let OperationRequest::Build(build) = &request {
         storage::check_partition_by_matches(
             native.current_schema(),
             native.default_partition_spec(),
             &build.partition_by,
         )
-        .map_err(|_| invalid())?;
+        .map_err(|_| invalid("candidate partition spec differs from build request"))?;
     }
     Ok(native)
 }
@@ -189,6 +203,7 @@ impl Engine {
         operation: &'a Operation,
         admission: &'a PhaseResult,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let input = admission.outputs.first().ok_or_else(|| {
                 Error::refusal("corrupt_phase", "admission has no retained input")
@@ -306,7 +321,7 @@ impl Engine {
             summary
                 .get(name)
                 .and_then(|v| v.parse().ok())
-                .ok_or_else(invalid)
+                .ok_or_else(|| invalid("candidate snapshot summary is missing required metric"))
         };
         let rows = count("added-records")?;
         let metrics = WriteMetrics {
@@ -382,16 +397,7 @@ impl Engine {
         let parquet_path = local_input
             .as_ref()
             .map_or(input.path.as_str(), |local_ref| local_ref.path.as_str());
-        context
-            .register_parquet("input", parquet_path, ParquetReadOptions::default())
-            .await?;
-        let input_df = context.table("input").await?;
-        let frame = if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
-            validate_plan(input_df.logical_plan())?;
-            input_df
-        } else {
-            build_query(&context, &spec.sql).await?
-        };
+        let frame = super::plan_build_input(&context, parquet_path, &spec.sql).await?;
         check_build_fields(&frame)?;
         Ok(InitialSource::DataFrame(Box::new(frame)))
     }
@@ -408,7 +414,7 @@ impl Engine {
         let rows = lifecycle.rows(&view).await?;
         let revision = rows
             .revision(&format!("operation/{}", spec.operation))
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| invalid("operation revision is missing for candidate lookup"))?;
         let prior_processing = processing_revision(spec, operation, &rows)?;
         let key_value = key(&spec.operation, revision, prior_processing, input)?;
         self.decode_candidate(spec, input, &view, &key_value, &rows)
@@ -436,7 +442,7 @@ impl Engine {
         )?;
         let (_, _, saved) = rows
             .get_record::<CandidateAttempt>(key_value)?
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| invalid("candidate intent record disappeared during decode"))?;
         memory.merge(rows.reserve_decoded(budget, &[&format!("protection/{}", saved.attempt)])?);
         let native = self.check_candidate_intent(spec, input, view, key_value, &saved, rows)?;
         Ok(Some(RetainedCandidate {
@@ -458,7 +464,9 @@ impl Engine {
     ) -> Result<TableMetadata> {
         let native = validate(key_value, saved, rows)?;
         if saved.input != *input || saved.identifier.namespace() != view.identifier().namespace() {
-            return Err(invalid());
+            return Err(invalid(
+                "candidate input object or catalog namespace differs",
+            ));
         }
         let directory = self
             .inner
@@ -466,7 +474,9 @@ impl Engine {
             .child(spec.dataset.as_str())?
             .child(saved.attempt.as_str())?;
         if directory.protection_prefix()? != saved.prefix {
-            return Err(invalid());
+            return Err(invalid(
+                "candidate protection prefix differs from workspace root",
+            ));
         }
         self.inner
             .objects
@@ -486,7 +496,7 @@ impl Engine {
         let rows = lifecycle.rows(&view).await?;
         let revision = rows
             .revision(&format!("operation/{}", spec.operation))
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| invalid("operation revision is missing before candidate reservation"))?;
         let prior_processing = processing_revision(spec, operation, &rows)?;
         let key_value = key(&spec.operation, revision, prior_processing, input)?;
         if let Some(saved) = self.decode_candidate(spec, input, &view, &key_value, &rows)? {
@@ -520,7 +530,8 @@ impl Engine {
                 };
                 Ok((
                     metadata_ref,
-                    String::from_utf8(bytes).map_err(|_| invalid())?,
+                    String::from_utf8(bytes)
+                        .map_err(|_| invalid("serialized table metadata is not UTF-8"))?,
                     metadata,
                     memory,
                 ))
@@ -579,13 +590,15 @@ impl Engine {
         if rows.revision(&format!("operation/{}", spec.operation)) != Some(revision)
             || processing_revision(spec, operation, &rows)? != prior_processing
         {
-            return Err(invalid());
+            return Err(invalid(
+                "operation or processing revision advanced before candidate commit",
+            ));
         }
         if rows.contains_key(&key_value) {
             drop((pending, native, memory));
             return self
                 .decode_candidate(spec, input, &fresh, &key_value, &rows)?
-                .ok_or_else(invalid);
+                .ok_or_else(|| invalid("existing candidate intent could not be decoded"));
         }
         let records = vec![
             record(format!("protection/{attempt}"), protection)?,
@@ -596,13 +609,15 @@ impl Engine {
             self.check(&after, operation, &spec.operation).await?;
             let rows = lifecycle.rows(&after).await?;
             if processing_revision(spec, operation, &rows)? != prior_processing {
-                return Err(invalid());
+                return Err(invalid(
+                    "processing revision advanced after competing candidate commit",
+                ));
             }
             if rows.contains_key(&key_value) {
                 drop((pending, native, memory));
                 return self
                     .decode_candidate(spec, input, &after, &key_value, &rows)?
-                    .ok_or_else(invalid);
+                    .ok_or_else(|| invalid("competing candidate intent could not be decoded"));
             }
             return Err(error);
         }
@@ -626,17 +641,23 @@ fn check_candidate(table: &Table, initial: &TableMetadata, expected: &ObjectRef)
         || metadata.statistics_iter().next().is_some()
         || metadata.partition_statistics_iter().next().is_some()
     {
-        return Err(invalid());
+        return Err(invalid(
+            "loaded candidate table metadata differs from initial intent",
+        ));
     }
     if let Some(snapshot) = metadata.current_snapshot() {
         if metadata.snapshots().len() != 1
             || snapshot.parent_snapshot_id().is_some()
             || snapshot.summary().operation != iceberg::spec::Operation::Append
         {
-            return Err(invalid());
+            return Err(invalid(
+                "loaded candidate snapshot is not a single root append",
+            ));
         }
     } else if metadata != initial || table.metadata_location_result()? != expected.path {
-        return Err(invalid());
+        return Err(invalid(
+            "empty candidate metadata or location differs from expected intent",
+        ));
     }
     // Native writer paths are derived only from the retained table location and
     // unchanged fresh properties. Bound pinning checks each catalog-owned path

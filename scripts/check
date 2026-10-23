@@ -1,6 +1,23 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+
+for test_file in tests/*.rs; do
+    test_name=$(basename "$test_file" .rs)
+    if [ "$test_name" = "integration" ]; then
+        continue
+    fi
+    if ! grep -Eq "^mod ${test_name};$" tests/integration.rs \
+        && ! grep -Eq "^path = \"tests/${test_name}\\.rs\"$" Cargo.toml; then
+        echo "error: orphan test file '$test_file' is not registered in tests/integration.rs or Cargo.toml" >&2
+        exit 1
+    fi
+done
+
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
+
+PYTHONPATH="adapters/dagster/src:adapters/dagster/tests${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m unittest discover -s adapters/dagster/tests -p "test_*.py"
+

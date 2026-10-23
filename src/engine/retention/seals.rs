@@ -110,25 +110,17 @@ impl Engine {
             reason.to_owned(),
         );
         self.admit_work(memory, move |engine| async move {
-            engine.retirement_catalog()?;
-            if reason.trim().is_empty() {
-                return Err(invalid_retirement());
-            }
-            let lock = engine.lock(&family).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&family).await?;
-            let rows = engine.inner.lifecycle.rows(&view).await?;
-            let record =
-                validate_record(&rows, &view, &generation, &engine.inner.lifecycle.budget)?;
-            check_available(&rows, &view, &generation, &engine.inner.lifecycle.budget)?;
-            super::retirement::plan(
-                &view,
-                family,
-                retirement,
-                RetirementScope::GenerationSeal { generation },
-                reason,
-                vec![record],
-            )
+            let scope = RetirementScope::GenerationSeal {
+                generation: generation.clone(),
+            };
+            engine
+                .plan_retirement_in(family, retirement, scope, reason, |engine, view, rows| {
+                    let record =
+                        validate_record(rows, view, &generation, &engine.inner.lifecycle.budget)?;
+                    check_available(rows, view, &generation, &engine.inner.lifecycle.budget)?;
+                    Ok(vec![record])
+                })
+                .await
         })
         .await
     }

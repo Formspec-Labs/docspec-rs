@@ -14,9 +14,11 @@ use parquet::arrow::ArrowWriter;
 use std::{fs::File, path::Path, sync::Arc};
 
 pub(super) type Row = (Option<i64>, Option<String>);
+
 pub(super) fn id(value: &str) -> Id {
     Id::new(value).unwrap()
 }
+
 pub(super) fn limits() -> Limits {
     Limits {
         compute_threads: 2,
@@ -26,13 +28,26 @@ pub(super) fn limits() -> Limits {
         ..Limits::default()
     }
 }
+
+pub(super) fn write_parquet(path: &Path, batch: &RecordBatch, max_row_group_rows: Option<usize>) {
+    let props = max_row_group_rows.map(|rows| {
+        parquet::file::properties::WriterProperties::builder()
+            .set_max_row_group_row_count(Some(rows))
+            .build()
+    });
+    let mut writer =
+        ArrowWriter::try_new(File::create(path).unwrap(), batch.schema(), props).unwrap();
+    writer.write(batch).unwrap();
+    writer.close().unwrap();
+}
+
 pub(super) fn input(path: &Path, rows: &[Row]) -> InputSpec {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, true),
         Field::new("text", DataType::Utf8, true),
     ]));
     let batch = RecordBatch::try_new(
-        schema.clone(),
+        schema,
         vec![
             Arc::new(Int64Array::from(
                 rows.iter().map(|row| row.0).collect::<Vec<_>>(),
@@ -43,18 +58,7 @@ pub(super) fn input(path: &Path, rows: &[Row]) -> InputSpec {
         ],
     )
     .unwrap();
-    let mut writer = ArrowWriter::try_new(
-        File::create(path).unwrap(),
-        schema,
-        Some(
-            parquet::file::properties::WriterProperties::builder()
-                .set_max_row_group_row_count(Some(16))
-                .build(),
-        ),
-    )
-    .unwrap();
-    writer.write(&batch).unwrap();
-    writer.close().unwrap();
+    write_parquet(path, &batch, Some(16));
     InputSpec {
         path: path.to_string_lossy().into_owned(),
         digest: storage::digest(path).unwrap().0,

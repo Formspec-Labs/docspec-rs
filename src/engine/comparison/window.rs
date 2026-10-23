@@ -20,6 +20,7 @@ use futures::StreamExt;
 use std::{any::Any, fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
+/// Rewrites `plan` to admit per-partition window memory and guard input batch sizes before `BoundedWindowAggExec`.
 pub(super) fn admit(
     plan: Arc<dyn ExecutionPlan>,
     budget: &Budget,
@@ -101,6 +102,7 @@ fn refusal(code: &'static str, message: &'static str) -> DataFusionError {
     DataFusionError::External(Box::new(Error::refusal(code, message)))
 }
 
+/// Execution plan wrapper that holds window memory permits and enforces batch row/byte bounds.
 #[derive(Debug)]
 struct WindowInput {
     input: Arc<dyn ExecutionPlan>,

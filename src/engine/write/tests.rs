@@ -8,6 +8,36 @@ use iceberg::spec::{
 use iceberg::transaction::{AddColumn, ApplyTransactionAction, Transaction};
 use tempfile::TempDir;
 
+impl Engine {
+    pub(in crate::engine) async fn create_output(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        schema: Schema,
+    ) -> Result<Table> {
+        self.create_output_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            schema,
+        )
+        .await
+    }
+
+    pub(in crate::engine) async fn write_frame(
+        &self,
+        dataset: &Id,
+        directory: &Path,
+        dataframe: DataFrame,
+    ) -> Result<Prepared> {
+        self.write_frame_at(
+            dataset,
+            &locations::Location::Local(directory.to_owned()),
+            dataframe,
+        )
+        .await
+    }
+}
+
 type Row = (Option<i64>, Option<String>, Option<String>, Option<i64>);
 
 fn field(id: i32, name: &str, kind: PrimitiveType) -> Arc<NestedField> {
@@ -510,7 +540,11 @@ async fn empty_candidate_clears_snapshot_state_but_preserves_native_schema_histo
     .unwrap()
     .into_table();
     let candidate = engine
-        .replacement_output(&owner, &root.path().join("empty"), &native)
+        .replacement_output_at(
+            &owner,
+            &locations::Location::Local(root.path().join("empty")),
+            &native,
+        )
         .await
         .unwrap();
     assert_ne!(candidate.metadata().uuid(), native.metadata().uuid());

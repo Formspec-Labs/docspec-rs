@@ -28,9 +28,9 @@ struct SourceFile {
     rows: u64,
 }
 
-/// Parsed and qualified immutable facts shared across one operation's checks.
+/// Parsed and qualified immutable facts shared across one operation's scalar origin checks.
 #[derive(Default)]
-pub(in crate::engine) struct Checks {
+pub(in crate::engine) struct ScalarOriginChecks {
     identities: BTreeMap<String, ObjectRef>,
     originals: BTreeMap<String, Arc<ScalarOrigins>>,
     declarations: BTreeMap<String, Arc<OriginalDeclaration>>,
@@ -46,7 +46,56 @@ pub(in crate::engine) struct Checks {
     memory: Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
-impl Checks {
+fn check_identity(identities: &mut BTreeMap<String, ObjectRef>, object: &ObjectRef) -> Result<()> {
+    match identities.get(&object.path) {
+        Some(previous) if previous != object => Err(invalid_group(
+            "conflicting object identity for scalar origin artifact path",
+        )),
+        Some(_) => Ok(()),
+        None => {
+            identities.insert(object.path.clone(), object.clone());
+            Ok(())
+        }
+    }
+}
+
+fn admit_bytes(
+    total_bytes: &mut usize,
+    memory_permits: &mut Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    bytes: u64,
+    budget: &Budget,
+) -> Result<Arc<tokio::sync::OwnedSemaphorePermit>> {
+    let bytes = usize::try_from(bytes).map_err(|_| capacity())?;
+    *total_bytes = total_bytes.checked_add(bytes).ok_or_else(capacity)?;
+    if *total_bytes > budget.limits.max_metadata_bytes {
+        return Err(capacity());
+    }
+    // JSON trees, decoded Avro records, map entries and compiled schema facts
+    // coexist. Charge their expansion as well as the separately held input buffer.
+    let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
+    memory_permits.push(memory.clone());
+    Ok(memory)
+}
+
+async fn cached_manifest<T: serde::de::DeserializeOwned + Send + 'static>(
+    identities: &mut BTreeMap<String, ObjectRef>,
+    cache: &mut BTreeMap<String, Arc<T>>,
+    total_bytes: &mut usize,
+    memory_permits: &mut Vec<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    object: &ObjectRef,
+    budget: &Budget,
+) -> Result<Arc<T>> {
+    check_identity(identities, object)?;
+    if let Some(value) = cache.get(&object.path) {
+        return Ok(value.clone());
+    }
+    let memory = admit_bytes(total_bytes, memory_permits, object.bytes, budget)?;
+    let value: Arc<T> = Arc::new(read(object, budget, &mut 0, &memory).await?);
+    cache.insert(object.path.clone(), value.clone());
+    Ok(value)
+}
+
+impl ScalarOriginChecks {
     /// Checks supplemental fields using the same admitted original metadata cache.
     pub(in crate::engine) async fn qualification(
         &mut self,
@@ -59,11 +108,13 @@ impl Checks {
         crate::engine::corrections::check_association(proof, binding, source)?;
         self.check(
             &proof.origins,
-            source,
-            group,
-            &binding.definition,
-            &binding.input_fields,
-            &binding.native_field_ids,
+            ScalarOriginBinding {
+                source,
+                group,
+                definition: &binding.definition,
+                input_fields: &binding.input_fields,
+                native_field_ids: &binding.native_field_ids,
+            },
             budget,
         )
         .await?;
@@ -78,7 +129,9 @@ impl Checks {
     ) -> Result<()> {
         crate::engine::corrections::validate_qualification(proof)?;
         if proof.target != source.into() {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "dependency qualification target does not match source snapshot",
+            ));
         }
         let key = crate::engine::corrections::qualification_key(proof)?;
         let originals = self.original(&proof.origins, budget).await?;
@@ -164,14 +217,7 @@ impl Checks {
     }
 
     fn identity(&mut self, object: &ObjectRef) -> Result<()> {
-        match self.identities.get(&object.path) {
-            Some(previous) if previous != object => Err(invalid_group()),
-            Some(_) => Ok(()),
-            None => {
-                self.identities.insert(object.path.clone(), object.clone());
-                Ok(())
-            }
-        }
+        check_identity(&mut self.identities, object)
     }
 
     fn admit(
@@ -179,16 +225,7 @@ impl Checks {
         bytes: u64,
         budget: &Budget,
     ) -> Result<Arc<tokio::sync::OwnedSemaphorePermit>> {
-        let bytes = usize::try_from(bytes).map_err(|_| capacity())?;
-        self.bytes = self.bytes.checked_add(bytes).ok_or_else(capacity)?;
-        if self.bytes > budget.limits.max_metadata_bytes {
-            return Err(capacity());
-        }
-        // JSON trees, decoded Avro records, map entries and compiled schema facts
-        // coexist. Charge their expansion as well as the separately held input buffer.
-        let memory = Arc::new(budget.reserve(bytes.saturating_mul(8).saturating_add(4096))?);
-        self.memory.push(memory.clone());
-        Ok(memory)
+        admit_bytes(&mut self.bytes, &mut self.memory, bytes, budget)
     }
 
     async fn original(
@@ -196,14 +233,15 @@ impl Checks {
         object: &ObjectRef,
         budget: &Budget,
     ) -> Result<Arc<ScalarOrigins>> {
-        self.identity(object)?;
-        if let Some(value) = self.originals.get(&object.path) {
-            return Ok(value.clone());
-        }
-        let memory = self.admit(object.bytes, budget)?;
-        let value: Arc<ScalarOrigins> = Arc::new(read(object, budget, &mut 0, &memory).await?);
-        self.originals.insert(object.path.clone(), value.clone());
-        Ok(value)
+        cached_manifest(
+            &mut self.identities,
+            &mut self.originals,
+            &mut self.bytes,
+            &mut self.memory,
+            object,
+            budget,
+        )
+        .await
     }
 
     async fn declaration(
@@ -211,15 +249,15 @@ impl Checks {
         object: &ObjectRef,
         budget: &Budget,
     ) -> Result<Arc<OriginalDeclaration>> {
-        self.identity(object)?;
-        if let Some(value) = self.declarations.get(&object.path) {
-            return Ok(value.clone());
-        }
-        let memory = self.admit(object.bytes, budget)?;
-        let value: Arc<OriginalDeclaration> =
-            Arc::new(read(object, budget, &mut 0, &memory).await?);
-        self.declarations.insert(object.path.clone(), value.clone());
-        Ok(value)
+        cached_manifest(
+            &mut self.identities,
+            &mut self.declarations,
+            &mut self.bytes,
+            &mut self.memory,
+            object,
+            budget,
+        )
+        .await
     }
 
     async fn metadata(
@@ -227,14 +265,15 @@ impl Checks {
         object: &ObjectRef,
         budget: &Budget,
     ) -> Result<Arc<TableMetadata>> {
-        self.identity(object)?;
-        if let Some(value) = self.schemas.get(&object.path) {
-            return Ok(value.clone());
-        }
-        let memory = self.admit(object.bytes, budget)?;
-        let value: Arc<TableMetadata> = Arc::new(read(object, budget, &mut 0, &memory).await?);
-        self.schemas.insert(object.path.clone(), value.clone());
-        Ok(value)
+        cached_manifest(
+            &mut self.identities,
+            &mut self.schemas,
+            &mut self.bytes,
+            &mut self.memory,
+            object,
+            budget,
+        )
+        .await
     }
 
     async fn table(&mut self, reference: &NativeSnapshotRef, budget: &Budget) -> Result<Table> {
@@ -242,7 +281,9 @@ impl Checks {
         if metadata.current_snapshot_id() != reference.snapshot
             || metadata.current_schema_id() != reference.schema_id
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "table metadata snapshot or schema ID does not match snapshot reference",
+            ));
         }
         let objects = storage::Objects::for_path(&reference.metadata.path);
         Ok(Table::builder()
@@ -281,7 +322,9 @@ impl Checks {
             })
             .collect::<BTreeMap<_, _>>();
         if files.len() != inventory.data.len() {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "source snapshot inventory contains duplicate data file paths",
+            ));
         }
         let size = inputs::metadata_size(&(&key, &files), budget.limits.max_metadata_bytes)?;
         self.admit(size as u64, budget)?;
@@ -304,7 +347,9 @@ impl Checks {
         }
         let declaration = self.declaration(declaration, budget).await?;
         if declaration.processor != PROCESSOR {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "original scalar declaration processor does not match current processor",
+            ));
         }
         let schema = self.metadata(schema, budget).await?;
         let expressions = Expressions::compile(
@@ -347,7 +392,9 @@ impl Checks {
                 || old.execution != completion.execution
                 || &previous.schema != schema
             {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "cached file completion descriptor disagrees with current file completion",
+                ));
             }
             return Ok(previous.files.clone());
         }
@@ -364,20 +411,20 @@ impl Checks {
         Ok(files)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Check one immutable descriptor against its selected source and field-group binding"
-    )]
+    /// Checks one immutable scalar-origins descriptor against its selected source and field-group binding.
     pub(in crate::engine) async fn check(
         &mut self,
         object: &ObjectRef,
-        source: &TablePin,
-        group: &TablePin,
-        definition: &GroupDefinition,
-        input_fields: &BTreeMap<String, i32>,
-        native_field_ids: &BTreeMap<i32, i32>,
+        binding: ScalarOriginBinding<'_>,
         budget: &Budget,
     ) -> Result<()> {
+        let ScalarOriginBinding {
+            source,
+            group,
+            definition,
+            input_fields,
+            native_field_ids,
+        } = binding;
         let originals = self.original(object, budget).await?;
         // Association is caller-specific even when immutable metadata was checked.
         if object.owner != source.metadata.owner
@@ -387,7 +434,9 @@ impl Checks {
             || &originals.input_fields != input_fields
             || source.rows != group.rows
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "scalar origins owner, processor, definition, input fields, or row count disagrees with binding",
+            ));
         }
         self.identity(&originals.dependencies.source.metadata)?;
         self.identity(&originals.dependencies.output.metadata)?;
@@ -406,7 +455,9 @@ impl Checks {
         if current_source.current_schema_id() != source.schema_id
             || current_source.current_snapshot_id() != source.snapshot
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "source metadata current schema or snapshot ID disagrees with source pin",
+            ));
         }
         let expected = if let Some(expected) = self.associations.get(&association) {
             expected.clone()
@@ -442,7 +493,9 @@ impl Checks {
             || output_metadata.current_snapshot_id() != group.snapshot
             || output_metadata.current_schema_id() != group.schema_id
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "output group schema, field IDs, or snapshot disagrees with expected compilation",
+            ));
         }
         // Reusing parsed facts must not trust a different caller's object list or
         // row counts merely because its native snapshot fields still match.
@@ -454,7 +507,9 @@ impl Checks {
                 .as_ref()
                 .is_some_and(|objects| objects.len() != source.objects.len())
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "source or group pin contains duplicate object paths",
+            ));
         }
         for original in &originals.files {
             if source_objects.as_ref().is_some_and(|objects| {
@@ -466,7 +521,9 @@ impl Checks {
                 .iter()
                 .any(|reference| objects.get(reference.path.as_str()) != Some(&reference))
             {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "scalar origin file completion references an object absent from source or group pin",
+                ));
             }
         }
         if let Some(checked) = self.verified.get(&object.path) {
@@ -476,7 +533,9 @@ impl Checks {
             {
                 Ok(())
             } else {
-                Err(invalid_group())
+                Err(invalid_group(
+                    "cached verified scalar group disagrees with caller row count, objects, or dependencies",
+                ))
             };
         }
         let output = self.table(&originals.dependencies.output, budget).await?;
@@ -490,7 +549,9 @@ impl Checks {
         if captured_expressions.dependencies != expected.dependencies
             || captured_expressions.native != expected.native
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "captured source schema compiles to different dependencies or native schema",
+            ));
         }
         let source_files = self.source_files(&captured, budget).await?;
         let output_files = storage::snapshot_files(&output, budget).await?;
@@ -501,7 +562,9 @@ impl Checks {
                 .iter()
                 .any(|path| !objects.contains_key(path.as_str()))
         {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "group pin objects do not match snapshot manifest and data file inventory",
+            ));
         }
         let mut sources: BTreeMap<_, _> = source_files
             .iter()
@@ -513,34 +576,44 @@ impl Checks {
             .map(|file| (file.file_path(), file))
             .collect();
         if outputs.len() != output_files.data.len() {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "output snapshot inventory contains duplicate data file paths",
+            ));
         }
         let mut rows = 0u64;
         let mut generations = BTreeSet::new();
         for original in &originals.files {
             tokio::task::consume_budget().await;
             let file = &original.completion;
-            let captured_file = sources
-                .remove(file.source.path.as_str())
-                .ok_or_else(invalid_group)?;
+            let captured_file = sources.remove(file.source.path.as_str()).ok_or_else(|| {
+                invalid_group("scalar origin file is missing from captured source inventory")
+            })?;
             if file.source.bytes != captured_file.bytes
                 || file.rows != captured_file.rows
                 || !generations.insert(original.generation.key.as_str())
                 || original.generation.revision <= 0
             {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "scalar origin file bytes, rows, or generation revision is invalid or duplicated",
+                ));
             }
-            rows = rows.checked_add(file.rows).ok_or_else(invalid_group)?;
+            rows = rows
+                .checked_add(file.rows)
+                .ok_or_else(|| invalid_group("scalar origin file row counts overflow"))?;
             // An older completion stays explicitly unknown. Its output association
             // can still be checked; no later declaration is attributed to its work.
             if let Some(execution) = &file.execution {
-                let source_metadata = file.source_metadata.as_ref().ok_or_else(invalid_group)?;
+                let source_metadata = file.source_metadata.as_ref().ok_or_else(|| {
+                    invalid_group("scalar origin file execution is missing source_metadata")
+                })?;
                 let declaration = self.declaration(&execution.declaration, budget).await?;
                 if declaration.definition != originals.definition
                     || declaration.input_fields != originals.input_fields
                     || execution.declaration.owner != object.owner
                 {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "file execution declaration disagrees with scalar origins definition or owner",
+                    ));
                 }
                 let compiled = self
                     .compile(&execution.declaration, source_metadata, budget)
@@ -549,7 +622,9 @@ impl Checks {
                     || compiled.native != expected.native
                     || &compiled.native_field_ids != native_field_ids
                 {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "file execution compiled schema or dependencies disagree with group binding",
+                    ));
                 }
             }
             let scope = original
@@ -558,19 +633,29 @@ impl Checks {
                 .strip_prefix("phase/backfill/")
                 .and_then(|rest| rest.split_once('/'))
                 .and_then(|(scope, _)| scope.parse::<u64>().ok())
-                .ok_or_else(invalid_group)?;
+                .ok_or_else(|| {
+                    invalid_group("scalar origin generation key has an invalid backfill prefix")
+                })?;
             if original.generation.key != file_key(&file.source, &captured_expressions, scope)? {
-                return Err(invalid_group());
+                return Err(invalid_group(
+                    "scalar origin generation key does not match expected file key",
+                ));
             }
             for file in self.file(file, &expected.native, budget).await?.iter() {
-                let selected = outputs.remove(file.file_path()).ok_or_else(invalid_group)?;
+                let selected = outputs.remove(file.file_path()).ok_or_else(|| {
+                    invalid_group("completed scalar output file is missing from output snapshot")
+                })?;
                 if selected != file {
-                    return Err(invalid_group());
+                    return Err(invalid_group(
+                        "completed scalar output file descriptor disagrees with output snapshot entry",
+                    ));
                 }
             }
         }
         if !sources.is_empty() || !outputs.is_empty() || rows != group.rows {
-            return Err(invalid_group());
+            return Err(invalid_group(
+                "scalar origins do not cover all source and output files or total row count",
+            ));
         }
         let size = inputs::metadata_size(
             &(&group.objects, &expected.dependencies),
@@ -668,15 +753,17 @@ mod tests {
             budget,
         )
         .unwrap();
-        let mut checks = Checks::default();
+        let mut checks = ScalarOriginChecks::default();
         checks
             .check(
                 &object,
-                &source,
-                &group,
-                &definition,
-                &expressions.input_fields,
-                &expressions.native_field_ids,
+                ScalarOriginBinding {
+                    source: &source,
+                    group: &group,
+                    definition: &definition,
+                    input_fields: &expressions.input_fields,
+                    native_field_ids: &expressions.native_field_ids,
+                },
                 budget,
             )
             .await
@@ -724,11 +811,13 @@ mod tests {
             checks
                 .check(
                     &object,
-                    &changed_source,
-                    &group,
-                    &definition,
-                    &expressions.input_fields,
-                    &expressions.native_field_ids,
+                    ScalarOriginBinding {
+                        source: &changed_source,
+                        group: &group,
+                        definition: &definition,
+                        input_fields: &expressions.input_fields,
+                        native_field_ids: &expressions.native_field_ids,
+                    },
                     budget
                 )
                 .await
@@ -737,14 +826,16 @@ mod tests {
             "invalid_group"
         );
         assert_eq!(
-            Checks::default()
+            ScalarOriginChecks::default()
                 .check(
                     &object,
-                    &changed_source,
-                    &group,
-                    &definition,
-                    &expressions.input_fields,
-                    &expressions.native_field_ids,
+                    ScalarOriginBinding {
+                        source: &changed_source,
+                        group: &group,
+                        definition: &definition,
+                        input_fields: &expressions.input_fields,
+                        native_field_ids: &expressions.native_field_ids,
+                    },
                     budget
                 )
                 .await
@@ -759,11 +850,13 @@ mod tests {
         checks
             .check(
                 &object,
-                &source,
-                &group,
-                &definition,
-                &expressions.input_fields,
-                &expressions.native_field_ids,
+                ScalarOriginBinding {
+                    source: &source,
+                    group: &group,
+                    definition: &definition,
+                    input_fields: &expressions.input_fields,
+                    native_field_ids: &expressions.native_field_ids,
+                },
                 budget,
             )
             .await
@@ -780,11 +873,13 @@ mod tests {
             checks
                 .check(
                     &object,
-                    &wrong_source,
-                    &wrong_group,
-                    &definition,
-                    &expressions.input_fields,
-                    &expressions.native_field_ids,
+                    ScalarOriginBinding {
+                        source: &wrong_source,
+                        group: &wrong_group,
+                        definition: &definition,
+                        input_fields: &expressions.input_fields,
+                        native_field_ids: &expressions.native_field_ids,
+                    },
                     budget
                 )
                 .await
@@ -796,11 +891,13 @@ mod tests {
             checks
                 .check(
                     &object,
-                    &source,
-                    &wrong_group,
-                    &definition,
-                    &expressions.input_fields,
-                    &expressions.native_field_ids,
+                    ScalarOriginBinding {
+                        source: &source,
+                        group: &wrong_group,
+                        definition: &definition,
+                        input_fields: &expressions.input_fields,
+                        native_field_ids: &expressions.native_field_ids,
+                    },
                     budget
                 )
                 .await
@@ -812,11 +909,13 @@ mod tests {
             checks
                 .check(
                     &object,
-                    &source,
-                    &group,
-                    &definition,
-                    &expressions.input_fields,
-                    &wrong_binding,
+                    ScalarOriginBinding {
+                        source: &source,
+                        group: &group,
+                        definition: &definition,
+                        input_fields: &expressions.input_fields,
+                        native_field_ids: &wrong_binding,
+                    },
                     budget
                 )
                 .await

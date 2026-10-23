@@ -25,25 +25,38 @@ if DAGSTER_AVAILABLE:
 
 @unittest.skipUnless(DAGSTER_AVAILABLE, "Dagster is required for real Rust integration")
 class RustIntegrationTests(unittest.TestCase):
+    """End-to-end Dagster adapter qualification against a real loopback Rust host.
+
+    Set `DOCSPEC_BINARY` to a compiled `docspec` executable (built with `--features test-util`
+    for pause/resume recovery tests) and `DOCSPEC_TEST_INPUT` to a small (< 1 MiB) Parquet file.
+    """
+
     def test_same_native_request_reconciles_without_more_retained_writes(self):
+        """Replaying an identical `/run` request reconciles the retained release without new writes."""
         self._qualify("replay")
 
     def test_advertised_routes_select_native_receipts_update_schema_backfill_and_summary(self):
+        """Exercise `/plan`, `/run`, `/receipts/run`, `/updates/run`, `/schemas/run`, `/backfills/run`, `/refreshes/run`, and `/exports/run`."""
         self._qualify("routes")
 
     def test_native_export_response_loss_retries_without_retained_rewrites(self):
+        """Retrying `/exports/run` after lost HTTP response headers reconciles the single export artifact."""
         self._qualify("export")
 
     def test_native_completed_response_loss_retries_without_retained_rewrites(self):
+        """In-process Dagster step retry after lost HTTP response reconciles the completed `/run` release."""
         self._qualify("retry")
 
     def test_replacement_python_worker_reconciles_native_completed_response_loss(self):
+        """A replacement Python worker process reconciles a completed release after response loss."""
         self._qualify("replacement")
 
     def test_killed_python_worker_reconciles_unfinished_native_request(self):
+        """Killing the Python worker mid-flight leaves the Rust operation running to completion for replacement reconciliation."""
         self._qualify("workerkill")
 
     def test_killed_python_worker_and_native_host_resume_retained_processing(self):
+        """Killing both the Python worker and the Rust host mid-flight resumes from retained processing state without duplicating work."""
         self._qualify("hostkill")
 
     def _qualify(self, mode):

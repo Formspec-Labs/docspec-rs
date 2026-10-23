@@ -1,6 +1,6 @@
 //! Independent membership and reconstruction checks for applied native changes.
 
-use super::write::identifier as quote;
+use super::write::{any_rows, identifier as quote};
 use super::*;
 
 mod certificates;
@@ -11,6 +11,34 @@ pub(super) use certificates::{
     PreparedChanges, WRITE_RULES, change_selection, check_applied, check_certificate,
     check_prepared, local_certificate,
 };
+
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::refusal("invalid_changes", reason)
+}
+
+/// Builds and executes a bounded signed-multiset `GROUP BY ... HAVING ... LIMIT 1` SQL check,
+/// returning `true` when any group violates the invariant.
+pub(super) async fn any_signed_multiset_mismatch(
+    context: &SessionContext,
+    columns: &str,
+    branches: &[(&str, &[(&str, i64)])],
+    having: &str,
+) -> Result<bool> {
+    let union = branches
+        .iter()
+        .map(|(table, weights)| {
+            let weights = weights
+                .iter()
+                .map(|(alias, weight)| format!("CAST({weight} AS BIGINT) AS {alias}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("SELECT {columns}, {weights} FROM {table}")
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    let sql = format!("SELECT 1 FROM ({union}) GROUP BY {columns} HAVING {having} LIMIT 1");
+    any_rows(context.sql(&sql).await?).await
+}
 
 /// Independently reconstructs an optional applied transition from exact endpoints.
 ///
@@ -28,12 +56,6 @@ pub async fn verify_applied_changes(
     limits: Limits,
 ) -> Result<()> {
     certificates::check_bindings(changes)?;
-    let invalid = || {
-        Error::refusal(
-            "invalid_changes",
-            "applied transition differs from its exact endpoints",
-        )
-    };
     if changes.before != before.version_ref()
         || changes.operation != after.id
         || changes.before.dataset != after.dataset.dataset
@@ -43,7 +65,9 @@ pub async fn verify_applied_changes(
         || changes.rules != WRITE_RULES
         || (changes.source.is_none() && changes.receipts.is_none())
     {
-        return Err(invalid());
+        return Err(invalid(
+            "applied transition differs from its exact endpoints",
+        ));
     }
     let budget = Budget::new(limits)?;
     #[cfg(feature = "remote")]
@@ -59,7 +83,11 @@ pub async fn verify_applied_changes(
         incremental::qualify(spec, &before.dataset, after.dataset.eligibility, &budget).await?;
     }
     let mut checks = verification::Checks::with_objects(VerificationLevel::Deep, objects);
-    let source = after.dataset.groups.get("source").ok_or_else(invalid)?;
+    let source = after
+        .dataset
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid("after release lacks a source group"))?;
     checks.table(source, &budget).await?;
     verify_changes(
         &after.dataset.request,
@@ -84,7 +112,11 @@ pub async fn verify_applied_changes(
             )
             .await?;
         }
-        (None, Some(_)) => return Err(invalid()),
+        (None, Some(_)) => {
+            return Err(invalid(
+                "applied transition includes receipt changes for a result without receipts",
+            ));
+        }
         (None, None) => {}
     }
     Ok(())
@@ -97,12 +129,8 @@ pub(super) async fn verify_changes(
     budget: &Budget,
     checks: &mut verification::Checks,
 ) -> Result<()> {
-    let invalid = || {
-        Error::refusal(
-            "invalid_changes",
-            "change rows, schemas or endpoints differ from the captured request and result",
-        )
-    };
+    let default_reason =
+        "change rows, schemas or endpoints differ from the captured request and result";
     let (dataset, base, keys, changes) = match (request, changes) {
         (
             OperationRequest::Build(_)
@@ -120,12 +148,14 @@ pub(super) async fn verify_changes(
         {
             (
                 &spec.dataset,
-                spec.base.as_ref().ok_or_else(invalid)?,
+                spec.base.as_ref().ok_or_else(|| {
+                    invalid("incremental refresh change check lacks a base version")
+                })?,
                 refresh::output_keys(&spec.transform),
                 changes,
             )
         }
-        _ => return Err(invalid()),
+        _ => return Err(invalid(default_reason)),
     };
     let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes)?);
     let mut bytes = 0;
@@ -143,12 +173,16 @@ pub(super) async fn verify_changes(
     .await
     .map_err(|error| {
         if error.code() == "invalid_related_result" {
-            invalid()
+            invalid(default_reason)
         } else {
             error
         }
     })?;
-    let before_source = before.dataset.groups.get("source").ok_or_else(invalid)?;
+    let before_source = before
+        .dataset
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid(default_reason))?;
     if changes.base_version != *base
         || changes.before_metadata != before_source.metadata
         || changes.after_metadata != source.metadata
@@ -158,7 +192,7 @@ pub(super) async fn verify_changes(
             .and_then(|rows| rows.checked_add(changes.added.rows))
             != Some(source.rows)
     {
-        return Err(invalid());
+        return Err(invalid(default_reason));
     }
     verify_native_changes(before_source, source, &keys, changes, budget, checks).await
 }
@@ -172,19 +206,14 @@ pub(super) async fn verify_native_changes(
     budget: &Budget,
     checks: &mut verification::Checks,
 ) -> Result<()> {
-    let invalid = || {
-        Error::refusal(
-            "invalid_changes",
-            "applied rows, native schemas or endpoint counts disagree",
-        )
-    };
+    let default_reason = "applied rows, native schemas or endpoint counts disagree";
     if before_source
         .rows
         .checked_sub(changes.removed.rows)
         .and_then(|rows| rows.checked_add(changes.added.rows))
         != Some(source.rows)
     {
-        return Err(invalid());
+        return Err(invalid(default_reason));
     }
     // Shallow verification of the exact prior source avoids recursively scanning
     // every historical change chain while establishing the delta's before state.
@@ -209,7 +238,7 @@ pub(super) async fn verify_native_changes(
             native_after.metadata().current_schema(),
         )?
     {
-        return Err(invalid());
+        return Err(invalid(default_reason));
     }
     let context = budget.context();
     // Positional aliases keep arbitrary user field names separate from helpers.
@@ -252,7 +281,7 @@ pub(super) async fn verify_native_changes(
         if name != "before"
             && native.metadata().current_schema() != native_after.metadata().current_schema()
         {
-            return Err(invalid());
+            return Err(invalid(default_reason));
         }
         if !checks.deep() {
             continue;
@@ -277,18 +306,20 @@ pub(super) async fn verify_native_changes(
         return Ok(());
     }
     // One aggregate checks both invariants without decoding before/removed twice.
-    let union = [("before", 1, 1), ("removed", -1, -1), ("added", 0, 1), ("after", 0, -1)]
-        .iter()
-        .map(|(name, remaining, delta)| format!("SELECT {columns}, CAST({remaining} AS BIGINT) AS remaining, CAST({delta} AS BIGINT) AS delta FROM {name}"))
-        .collect::<Vec<_>>().join(" UNION ALL ");
-    let sql = format!(
-        "SELECT 1 FROM ({union}) GROUP BY {columns} HAVING SUM(remaining) < 0 OR SUM(delta) <> 0 LIMIT 1"
-    );
-    let mut stream = context.sql(&sql).await?.execute_stream().await?;
-    while let Some(batch) = stream.try_next().await? {
-        if batch.num_rows() != 0 {
-            return Err(invalid());
-        }
+    if any_signed_multiset_mismatch(
+        &context,
+        &columns,
+        &[
+            ("before", &[("remaining", 1), ("delta", 1)]),
+            ("removed", &[("remaining", -1), ("delta", -1)]),
+            ("added", &[("remaining", 0), ("delta", 1)]),
+            ("after", &[("remaining", 0), ("delta", -1)]),
+        ],
+        "SUM(remaining) < 0 OR SUM(delta) <> 0",
+    )
+    .await?
+    {
+        return Err(invalid(default_reason));
     }
     Ok(())
 }

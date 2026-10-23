@@ -56,6 +56,7 @@ pub(in crate::engine) async fn fixture(
         limits(),
         ownership,
         false,
+        None,
     )
     .unwrap();
     // This hybrid fixture uses a local filesystem lifecycle catalog; only

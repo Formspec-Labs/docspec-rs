@@ -1,6 +1,15 @@
-//! Bounded, request-local verification of semantic input dependencies.
+//! Bounded, request-local verification of semantic input dependencies and operation transitions.
 
 use super::*;
+use crate::evidence::EvidenceSpec;
+use backfill::{
+    check_names, invalid_group,
+    origins::{ScalarOriginBinding, ScalarOriginChecks},
+    verification::{
+        History, check_refreshed_groups, compatible_input_history, verify_computed_groups,
+    },
+};
+use std::collections::BTreeSet;
 
 type Key = (Id, Id);
 
@@ -9,7 +18,7 @@ pub(super) struct Checks {
     pub report: VerificationReport,
     inspect_tables: bool,
     objects: storage::Objects,
-    scalar_originals: Option<Box<backfill::origins::Checks>>,
+    scalar_originals: Option<Box<ScalarOriginChecks>>,
     known: BTreeMap<String, storage::CheckedFile>,
     _memory: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
@@ -103,32 +112,17 @@ impl Checks {
             .await
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "One descriptor is associated with one selected source and field group"
-    )]
+    /// Checks one immutable scalar-origins descriptor against its selected source and field group.
     pub async fn scalar_origins(
         &mut self,
         origins: Option<&ObjectRef>,
-        source: &TablePin,
-        group: &TablePin,
-        definition: &GroupDefinition,
-        input_fields: &BTreeMap<String, i32>,
-        native_field_ids: &BTreeMap<i32, i32>,
+        binding: ScalarOriginBinding<'_>,
         budget: &Budget,
     ) -> Result<()> {
         if let Some(origins) = origins {
             self.scalar_originals
                 .get_or_insert_with(Default::default)
-                .check(
-                    origins,
-                    source,
-                    group,
-                    definition,
-                    input_fields,
-                    native_field_ids,
-                    budget,
-                )
+                .check(origins, binding, budget)
                 .await?;
         }
         Ok(())
@@ -313,6 +307,397 @@ impl Checks {
             .ok_or_else(|| invalid("verified metadata counts overflow"))?;
         Ok(())
     }
+}
+
+/// Verifies top-level operation transition invariants (`Build`, `Update`, `Backfill`, `Refresh`,
+/// `Schema`, `Evidence`) and every attached computed field group on `dataset`.
+pub(crate) async fn verify_groups(
+    dataset: &DatasetPin,
+    budget: &Budget,
+    checks: &mut Checks,
+) -> Result<()> {
+    if dataset.groups.len() != dataset.computed.len() + 1 {
+        return Err(invalid_group(
+            "dataset group count does not equal source plus computed group count",
+        ));
+    }
+    check_names(dataset)?;
+    let source = dataset
+        .groups
+        .get("source")
+        .ok_or_else(|| invalid_group("dataset is missing source group"))?;
+    let mut history = History::new(budget, checks.objects().clone())?;
+    match &dataset.request {
+        OperationRequest::Build(spec) => {
+            verify_build_operation(dataset, spec, source, &mut history, budget).await?;
+        }
+        OperationRequest::Update(spec) => {
+            verify_update_operation(dataset, spec, &mut history, budget, checks).await?;
+        }
+        OperationRequest::Backfill(spec) => {
+            verify_backfill_operation(dataset, spec, source, &mut history).await?;
+        }
+        OperationRequest::Refresh(spec) => {
+            verify_refresh_operation(dataset, spec, &mut history, budget).await?;
+        }
+        OperationRequest::Schema(spec) => {
+            verify_schema_operation(dataset, spec, &mut history, budget).await?;
+        }
+        OperationRequest::Evidence(spec) => {
+            verify_evidence_operation(dataset, spec, &mut history).await?;
+        }
+    }
+    verify_computed_groups(dataset, source, &mut history, budget, checks).await
+}
+
+async fn verify_build_operation(
+    dataset: &DatasetPin,
+    spec: &RunSpec,
+    source: &TablePin,
+    history: &mut History<'_>,
+    budget: &Budget,
+) -> Result<()> {
+    if dataset.related.is_some() || dataset.inputs.len() != dataset.request.inputs().len() {
+        return Err(invalid_group(
+            "build release has unexpected related metadata or mismatched input count",
+        ));
+    }
+    if let Some(version) = &spec.base {
+        let parent = dataset
+            .parent_manifest
+            .as_ref()
+            .ok_or_else(|| invalid_group("rebuild release is missing parent_manifest"))?;
+        let base = history.read(parent).await?;
+        if base.dataset != dataset.dataset
+            || base.related.is_some()
+            || &base.version != version
+            || base.version == dataset.version
+        {
+            return Err(invalid_group(
+                "rebuild base dataset, related metadata, or version identity is invalid",
+            ));
+        }
+        if dataset.boundary <= base.boundary
+            || dataset.eligibility < base.eligibility
+            || (dataset.definition != base.definition && dataset.eligibility == base.eligibility)
+        {
+            return Err(invalid_group(
+                "rebuild boundary, eligibility, or definition progression is invalid",
+            ));
+        }
+        let partition_mismatch = (spec.partition_by.is_empty()
+            && dataset.partition_by != base.partition_by)
+            || (!spec.partition_by.is_empty()
+                && dataset.partition_by.len() != spec.partition_by.len());
+        if partition_mismatch {
+            return Err(invalid_group(
+                "rebuild partition specification disagrees with base or request",
+            ));
+        }
+        check_refreshed_groups(dataset, &base, parent)?;
+        let base_source = base
+            .groups
+            .get("source")
+            .ok_or_else(|| invalid_group("rebuild base is missing source group"))?;
+        schema::verify_rebuild(base_source, source, dataset.format, budget).await?;
+        if dataset.relationship != inputs::relationship(&dataset.request, Some(&base)) {
+            return Err(inputs::invalid_relationship());
+        }
+    } else {
+        let invalid_initial_build = !dataset.computed.is_empty()
+            || dataset.parent_manifest.is_some()
+            || (spec.partition_by.is_empty() && !dataset.partition_by.is_empty())
+            || (!spec.partition_by.is_empty()
+                && dataset.partition_by.len() != spec.partition_by.len());
+        if invalid_initial_build {
+            return Err(invalid_group(
+                "initial build cannot have computed groups, parent_manifest, or mismatched partitions",
+            ));
+        }
+        if dataset.relationship != inputs::relationship(&dataset.request, None) {
+            return Err(inputs::invalid_relationship());
+        }
+    }
+    Ok(())
+}
+
+async fn verify_update_operation(
+    dataset: &DatasetPin,
+    spec: &UpdateSpec,
+    history: &mut History<'_>,
+    budget: &Budget,
+    checks: &mut Checks,
+) -> Result<()> {
+    if dataset.related.is_some() {
+        return Err(invalid_group(
+            "update release cannot carry related refresh metadata",
+        ));
+    }
+    let parent = dataset
+        .parent_manifest
+        .as_ref()
+        .ok_or_else(|| invalid_group("update release is missing parent_manifest"))?;
+    let base = history.read(parent).await?;
+    if base.dataset != spec.dataset
+        || base.dataset != dataset.dataset
+        || base.version != spec.base
+        || base.version == dataset.version
+    {
+        return Err(invalid_group(
+            "update base dataset or version does not match specification",
+        ));
+    }
+    let mut expected_inputs = base.inputs.clone();
+    let mut prior_cursor = base.clone();
+    let mut visited = BTreeSet::from([prior_cursor.version.clone()]);
+    loop {
+        match &prior_cursor.request {
+            OperationRequest::Update(_) => {
+                for name in prior_cursor.request.inputs().keys() {
+                    expected_inputs.remove(&prior_cursor.request.input_key(name));
+                }
+                break;
+            }
+            OperationRequest::Evidence(_)
+            | OperationRequest::Backfill(_)
+            | OperationRequest::Schema(_) => {
+                let Some(prev_ref) = &prior_cursor.parent_manifest else {
+                    break;
+                };
+                let prev = history.read(prev_ref).await?;
+                if !visited.insert(prev.version.clone()) {
+                    return Err(invalid_group(
+                        "update ancestor history contains a version cycle",
+                    ));
+                }
+                prior_cursor = prev;
+            }
+            OperationRequest::Build(_) | OperationRequest::Refresh(_) => break,
+        }
+    }
+    let mut inherited_inputs = dataset.inputs.clone();
+    for name in dataset.request.inputs().keys() {
+        let key = dataset.request.input_key(name);
+        if expected_inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
+            return Err(invalid_group(
+                "update request input key collides with or is missing from dataset inputs",
+            ));
+        }
+    }
+    if inherited_inputs != expected_inputs
+        || base.related.is_some()
+        || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
+        || base.eligibility != dataset.eligibility
+        || dataset.boundary <= base.boundary
+        || dataset.definition != base.definition
+    {
+        return Err(invalid_group(
+            "update release inputs, relationship, eligibility, boundary, or definition disagrees with base",
+        ));
+    }
+    write::verify_update(dataset, &base, spec, budget, checks).await?;
+    check_refreshed_groups(dataset, &base, parent)
+}
+
+async fn verify_backfill_operation(
+    dataset: &DatasetPin,
+    spec: &BackfillSpec,
+    source: &TablePin,
+    history: &mut History<'_>,
+) -> Result<()> {
+    let selected = dataset
+        .computed
+        .get(spec.group.as_str())
+        .ok_or_else(|| invalid_group("backfill release is missing target computed group"))?;
+    if selected.request != dataset.request || selected.definition != spec.group_definition() {
+        return Err(invalid_group(
+            "backfill target group request or definition disagrees with backfill specification",
+        ));
+    }
+    let base = history.base(selected).await?;
+    let parent = history
+        .read(
+            dataset
+                .parent_manifest
+                .as_ref()
+                .ok_or_else(|| invalid_group("backfill release is missing parent_manifest"))?,
+        )
+        .await?;
+    if parent.dataset != dataset.dataset
+        || parent.version == dataset.version
+        || parent.groups.get("source") != Some(source)
+        || parent.inputs != dataset.inputs
+    {
+        return Err(invalid_group(
+            "backfill parent dataset, version, source group, or inputs disagree with release",
+        ));
+    }
+    if parent.related != dataset.related
+        || base.related != dataset.related
+        || parent.relationship != dataset.relationship
+        || base.relationship != dataset.relationship
+    {
+        return Err(invalid_group(
+            "backfill parent or base related metadata or source relationship disagrees with release",
+        ));
+    }
+    if parent.boundary != dataset.boundary
+        || parent.definition != dataset.definition
+        || parent.eligibility != dataset.eligibility
+        || base.boundary != dataset.boundary
+        || base.eligibility != dataset.eligibility
+    {
+        return Err(invalid_group(
+            "backfill parent or base boundary, definition, or eligibility disagrees with release",
+        ));
+    }
+    if parent.groups.get(spec.group.as_str()) != base.groups.get(spec.group.as_str())
+        || parent.computed.get(spec.group.as_str()) != base.computed.get(spec.group.as_str())
+        || parent.partition_by != dataset.partition_by
+        || base.partition_by != dataset.partition_by
+    {
+        return Err(invalid_group(
+            "backfill target group state or partition_by diverged between base and parent",
+        ));
+    }
+    compatible_input_history(&base, &parent, history).await?;
+    let mut inherited = dataset.computed.clone();
+    inherited.remove(spec.group.as_str());
+    let mut expected = parent.computed.clone();
+    expected.remove(spec.group.as_str());
+    if !corrections::inherits_groups(&inherited, &expected) {
+        return Err(invalid_group(
+            "backfill release does not preserve sibling computed group bindings from parent",
+        ));
+    }
+    for name in inherited.keys() {
+        if dataset.groups.get(name) != parent.groups.get(name) {
+            return Err(invalid_group(
+                "backfill release modified a sibling group table pin",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn verify_refresh_operation(
+    dataset: &DatasetPin,
+    spec: &RefreshSpec,
+    history: &mut History<'_>,
+    budget: &Budget,
+) -> Result<()> {
+    let related = dataset
+        .related
+        .as_ref()
+        .ok_or_else(|| invalid_group("refresh release is missing related metadata"))?;
+    if &related.request != spec
+        || related.coverage.inputs != spec.inputs()
+        || !dataset.inputs.is_empty()
+        || !dataset.partition_by.is_empty()
+    {
+        return Err(invalid_group(
+            "refresh release related specification, coverage inputs, or partition_by is invalid",
+        ));
+    }
+    if let Some(version) = &spec.base {
+        let parent = dataset
+            .parent_manifest
+            .as_ref()
+            .ok_or_else(|| invalid_group("refresh release with base is missing parent_manifest"))?;
+        let base = history.read(parent).await?;
+        if base.dataset != dataset.dataset
+            || &base.version != version
+            || base.version == dataset.version
+            || dataset.boundary <= base.boundary
+            || dataset.eligibility < base.eligibility
+            || (dataset.definition != base.definition && dataset.eligibility == base.eligibility)
+            || dataset.relationship != inputs::relationship(&dataset.request, Some(&base))
+            || base
+                .related
+                .as_ref()
+                .is_some_and(|previous| !previous.request.transform.same_roles(&spec.transform))
+        {
+            return Err(invalid_group(
+                "refresh base version, progression, relationship, or transform roles disagree with release",
+            ));
+        }
+        if spec.mode == RefreshMode::Incremental {
+            incremental::qualify(spec, &base, dataset.eligibility, budget).await?;
+        }
+        check_refreshed_groups(dataset, &base, parent)?;
+    } else if spec.mode == RefreshMode::Incremental
+        || !dataset.computed.is_empty()
+        || dataset.parent_manifest.is_some()
+        || dataset.relationship != inputs::relationship(&dataset.request, None)
+    {
+        return Err(invalid_group(
+            "initial refresh cannot be incremental or have computed groups, parent_manifest, or invalid relationship",
+        ));
+    }
+    Ok(())
+}
+
+async fn verify_schema_operation(
+    dataset: &DatasetPin,
+    spec: &SchemaSpec,
+    history: &mut History<'_>,
+    budget: &Budget,
+) -> Result<()> {
+    let parent = dataset
+        .parent_manifest
+        .as_ref()
+        .ok_or_else(|| invalid_group("schema release is missing parent_manifest"))?;
+    let base = history.read(parent).await?;
+    if base.partition_by != dataset.partition_by {
+        return Err(invalid_group(
+            "schema transition cannot modify dataset partition_by",
+        ));
+    }
+    schema::verify_transition(spec, &base, dataset, budget).await?;
+    check_refreshed_groups(dataset, &base, parent)
+}
+
+async fn verify_evidence_operation(
+    dataset: &DatasetPin,
+    spec: &EvidenceSpec,
+    history: &mut History<'_>,
+) -> Result<()> {
+    let parent = dataset
+        .parent_manifest
+        .as_ref()
+        .ok_or_else(|| invalid_group("evidence release is missing parent_manifest"))?;
+    let base = history.read(parent).await?;
+    let mut inherited_inputs = dataset.inputs.clone();
+    for name in dataset.request.inputs().keys() {
+        let key = dataset.request.input_key(name);
+        if base.inputs.contains_key(&key) || inherited_inputs.remove(&key).is_none() {
+            return Err(invalid_group(
+                "evidence request input key collides with base or is missing from dataset inputs",
+            ));
+        }
+    }
+    if base.dataset != dataset.dataset
+        || base.version != spec.base
+        || inherited_inputs != base.inputs
+        || dataset.groups != base.groups
+        || !corrections::inherits_groups(&dataset.computed, &base.computed)
+    {
+        return Err(invalid_group(
+            "evidence release dataset, base version, inputs, or groups disagree with base",
+        ));
+    }
+    if dataset.related != base.related
+        || dataset.relationship != base.relationship
+        || dataset.boundary != base.boundary
+        || dataset.eligibility != base.eligibility
+        || dataset.definition != base.definition
+        || dataset.partition_by != base.partition_by
+    {
+        return Err(invalid_group(
+            "evidence release modified related metadata, relationship, boundary, eligibility, definition, or partition_by",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

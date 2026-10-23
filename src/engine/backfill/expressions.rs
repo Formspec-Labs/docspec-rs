@@ -188,7 +188,9 @@ impl Expressions {
                     field.id,
                     inferred
                         .field_by_name(&field.name)
-                        .ok_or_else(invalid_group)?
+                        .ok_or_else(|| {
+                            invalid_group("inferred native schema is missing computed field")
+                        })?
                         .id,
                 ))
             })

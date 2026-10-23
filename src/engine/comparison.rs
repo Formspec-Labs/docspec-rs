@@ -17,11 +17,24 @@ use datafusion::{
 };
 use tokio::sync::OwnedSemaphorePermit;
 
+/// Admitted comparison execution plan holding the change descriptor, visible fields, and signed relation.
 struct Plan {
     descriptor: ChangeDescriptor,
     fields: Fields,
     relation: Option<DataFrame>,
     memory: Arc<OwnedSemaphorePermit>,
+}
+
+/// Qualified schema and field alignment metadata between two comparison endpoints.
+struct QualifiedSchemas {
+    computed: bool,
+    comparable: bool,
+    same_schema: bool,
+    before_keys: Vec<i32>,
+    after_keys: Vec<i32>,
+    fields: Fields,
+    after_fields: Fields,
+    field_ids: Vec<i32>,
 }
 
 impl Engine {
@@ -224,13 +237,13 @@ impl Engine {
         if before != after {
             resolve_release_with_objects(&self.inner.objects, after, budget).await?;
         }
-        let first = before.dataset.groups.get(group).ok_or_else(|| {
+        let canonical_first = before.dataset.groups.get(group).ok_or_else(|| {
             Error::refusal(
                 "missing_group",
                 "before release lacks the requested field group",
             )
         })?;
-        let second = after.dataset.groups.get(group).ok_or_else(|| {
+        let canonical_second = after.dataset.groups.get(group).ok_or_else(|| {
             Error::refusal(
                 "missing_group",
                 "after release lacks the requested field group",
@@ -238,10 +251,100 @@ impl Engine {
         })?;
         // Keep metadata, descriptor and schemas admitted with the returned plan/stream.
         let memory = Arc::new(budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(3))?);
-        let identical = first == second;
-        let (canonical_first, canonical_second) = (first, second);
+        let identical = canonical_first == canonical_second;
+        let (first, second, left, right) = self
+            .open_comparison_endpoints(
+                (&before_view, &after_view),
+                (before, after),
+                group,
+                (canonical_first, canonical_second),
+                identical,
+            )
+            .await?;
+        let schemas = self
+            .qualify_comparison_schemas(
+                (before, after),
+                group,
+                (canonical_first, canonical_second),
+                (&first, &second),
+                (&left, &right),
+            )
+            .await?;
+        let unchanged = identical && schemas.same_schema && !options.force_full;
+        let mut descriptor = ChangeDescriptor {
+            format: 1,
+            before: before.version_ref(),
+            after: after.version_ref(),
+            group: group.to_owned(),
+            identity: options.identity,
+            path: if unchanged {
+                ComparisonPath::Unchanged
+            } else {
+                ComparisonPath::Full
+            },
+            fallback: if !schemas.comparable {
+                Some(ComparisonFallback::SchemaChanged)
+            } else if unchanged {
+                None
+            } else if options.force_full {
+                Some(ComparisonFallback::Forced)
+            } else {
+                Some(ComparisonFallback::HistoryNotQualified)
+            },
+            field_ids: schemas.field_ids,
+            comparable_values: schemas.comparable,
+            before_key_field_ids: schemas.before_keys,
+            after_key_field_ids: schemas.after_keys,
+            effects: effects(before, after, schemas.same_schema),
+        };
+        let located = addresses || options.identity == ComparisonIdentity::Occurrences;
+        let relation = self
+            .build_comparison_relation(
+                &after_view,
+                (before, after),
+                group,
+                options,
+                (canonical_first, canonical_second),
+                (first, second),
+                (left, right),
+                (&schemas.fields, &schemas.after_fields),
+                (
+                    schemas.computed,
+                    schemas.comparable,
+                    schemas.same_schema,
+                    unchanged,
+                    located,
+                ),
+                &mut descriptor,
+            )
+            .await?;
+        Ok(Plan {
+            descriptor,
+            fields: schemas.fields,
+            relation,
+            memory,
+        })
+    }
+
+    async fn open_comparison_endpoints(
+        &self,
+        views: (&View, &View),
+        releases: (&ReleasePin, &ReleasePin),
+        group: &str,
+        canonical: (&TablePin, &TablePin),
+        identical: bool,
+    ) -> Result<(
+        TablePin,
+        TablePin,
+        iceberg::table::Table,
+        iceberg::table::Table,
+    )> {
+        let (before_view, after_view) = views;
+        let (before, after) = releases;
+        let (canonical_first, canonical_second) = canonical;
+        let budget = &self.inner.lifecycle.budget;
         let first = self
-            .representation_pin(&before_view, &before.id, group, first)
+            .resolve_representation_pin(before_view, group, canonical_first)
             .await?;
         let second = if identical
             && before_view.revision == after_view.revision
@@ -249,7 +352,7 @@ impl Engine {
         {
             first.clone()
         } else {
-            self.representation_pin(&after_view, &after.id, group, second)
+            self.resolve_representation_pin(after_view, group, canonical_second)
                 .await?
         };
         for pin in [&first, &second] {
@@ -266,10 +369,26 @@ impl Engine {
         } else {
             self.inner.objects.open_pin(&second, budget).await?
         };
+        Ok((first, second, left, right))
+    }
+
+    async fn qualify_comparison_schemas(
+        &self,
+        releases: (&ReleasePin, &ReleasePin),
+        group: &str,
+        canonical: (&TablePin, &TablePin),
+        selected: (&TablePin, &TablePin),
+        tables: (&iceberg::table::Table, &iceberg::table::Table),
+    ) -> Result<QualifiedSchemas> {
+        let (before, after) = releases;
+        let (canonical_first, canonical_second) = canonical;
+        let (first, second) = selected;
+        let (left, right) = tables;
+        let budget = &self.inner.lifecycle.budget;
         storage::identity::has_origins(left.metadata().current_schema())?;
         storage::identity::has_origins(right.metadata().current_schema())?;
-        let left_schema = storage::identity::public_schema(&left)?;
-        let right_schema = storage::identity::public_schema(&right)?;
+        let left_schema = storage::identity::public_schema(left)?;
+        let right_schema = storage::identity::public_schema(right)?;
         let computed = before.dataset.computed.contains_key(group);
         let same_kind = computed == after.dataset.computed.contains_key(group);
         if computed {
@@ -287,9 +406,11 @@ impl Engine {
             && before.dataset.dataset == after.dataset.dataset
         {
             let mut extra_metadata = 0usize;
-            for (canonical, selected) in [(canonical_first, &first), (canonical_second, &second)] {
-                if canonical != selected {
-                    if canonical.metadata.bytes > budget.limits.max_metadata_bytes as u64 {
+            for (canonical_pin, selected_pin) in
+                [(canonical_first, first), (canonical_second, second)]
+            {
+                if canonical_pin != selected_pin {
+                    if canonical_pin.metadata.bytes > budget.limits.max_metadata_bytes as u64 {
                         return Err(Error::refusal(
                             "metadata_capacity",
                             "canonical comparison metadata exceeds its allowance",
@@ -306,12 +427,12 @@ impl Engine {
                     .max_metadata_bytes
                     .saturating_mul(extra_metadata),
             )?;
-            let canonical_left = if canonical_first == &first {
+            let canonical_left = if canonical_first == first {
                 left.clone()
             } else {
                 self.inner.objects.open_pin(canonical_first, budget).await?
             };
-            let canonical_right = if canonical_second == &second {
+            let canonical_right = if canonical_second == second {
                 right.clone()
             } else {
                 self.inner
@@ -349,15 +470,6 @@ impl Engine {
             .collect::<Vec<_>>();
         before_keys.sort_unstable();
         after_keys.sort_unstable();
-        let public_rules = |schema: &iceberg::spec::Schema| {
-            schema
-                .as_struct()
-                .fields()
-                .iter()
-                .filter(|field| !storage::identity::hidden(&field.name))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
         let same_schema = same_kind
             && before_keys == after_keys
             && public_rules(left.metadata().current_schema())
@@ -407,34 +519,41 @@ impl Engine {
                     })
             })
             .collect::<Result<Vec<_>>>()?;
-        let unchanged = identical && same_schema && !options.force_full;
-        let mut descriptor = ChangeDescriptor {
-            format: 1,
-            before: before.version_ref(),
-            after: after.version_ref(),
-            group: group.to_owned(),
-            identity: options.identity,
-            path: if unchanged {
-                ComparisonPath::Unchanged
-            } else {
-                ComparisonPath::Full
-            },
-            fallback: if !comparable {
-                Some(ComparisonFallback::SchemaChanged)
-            } else if unchanged {
-                None
-            } else if options.force_full {
-                Some(ComparisonFallback::Forced)
-            } else {
-                Some(ComparisonFallback::HistoryNotQualified)
-            },
+        Ok(QualifiedSchemas {
+            computed,
+            comparable,
+            same_schema,
+            before_keys,
+            after_keys,
+            fields,
+            after_fields,
             field_ids,
-            comparable_values: comparable,
-            before_key_field_ids: before_keys,
-            after_key_field_ids: after_keys,
-            effects: effects(before, after, same_schema),
-        };
-        let located = addresses || options.identity == ComparisonIdentity::Occurrences;
+        })
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Relation builder chooses between forward change chain and full endpoint union"
+    )]
+    async fn build_comparison_relation(
+        &self,
+        after_view: &View,
+        releases: (&ReleasePin, &ReleasePin),
+        group: &str,
+        options: &ComparisonOptions,
+        canonical: (&TablePin, &TablePin),
+        selected: (TablePin, TablePin),
+        tables: (iceberg::table::Table, iceberg::table::Table),
+        visible_fields: (&Fields, &Fields),
+        flags: (bool, bool, bool, bool, bool),
+        descriptor: &mut ChangeDescriptor,
+    ) -> Result<Option<DataFrame>> {
+        let (before, after) = releases;
+        let (canonical_first, canonical_second) = canonical;
+        let (first, second) = selected;
+        let (left, right) = tables;
+        let (fields, after_fields) = visible_fields;
+        let (computed, comparable, same_schema, unchanged, located) = flags;
         let mut forward = None;
         if comparable && !unchanged && !options.force_full {
             let outcome = if group != "source" || computed {
@@ -443,7 +562,7 @@ impl Engine {
                 changes::Forward::Fallback(ComparisonFallback::SchemaChanged)
             } else {
                 self.change_chain(
-                    &after_view,
+                    after_view,
                     (before, after),
                     (canonical_first, canonical_second),
                     &left,
@@ -455,21 +574,22 @@ impl Engine {
                 changes::Forward::Eligible(chain) => {
                     descriptor.path = ComparisonPath::ForwardChanges;
                     descriptor.fallback = None;
-                    forward = Some(self.forward_relation(chain, &fields, located)?);
+                    forward = Some(self.forward_relation(chain, fields, located)?);
                 }
                 changes::Forward::Fallback(reason) => descriptor.fallback = Some(reason),
             }
         }
-        let relation = if !comparable || unchanged {
-            None
+        if !comparable || unchanged {
+            Ok(None)
         } else if let Some(relation) = forward {
-            relation
+            Ok(relation)
         } else {
+            let budget = &self.inner.lifecycle.budget;
             let context = self.context();
             let mut frames = Vec::new();
-            for (table, pin, selected, weight) in [
-                (left, first, &fields, -1_i64),
-                (right, second, &after_fields, 1_i64),
+            for (table, pin, selected_fields, weight) in [
+                (left, first, fields, -1_i64),
+                (right, second, after_fields, 1_i64),
             ] {
                 let provider = if located && !computed {
                     crate::query::occurrences(table, budget.clone(), Some(pin.rows))?
@@ -478,20 +598,19 @@ impl Engine {
                 };
                 frames.push(signed_frame(
                     context.read_table(provider)?,
-                    selected,
+                    selected_fields,
                     located,
                     weight,
                 )?);
             }
-            let after = frames.pop().expect("two endpoint frames");
-            Some(frames.pop().expect("two endpoint frames").union(after)?)
-        };
-        Ok(Plan {
-            descriptor,
-            fields,
-            relation,
-            memory,
-        })
+            let after_frame = frames.pop().expect("two endpoint frames");
+            Ok(Some(
+                frames
+                    .pop()
+                    .expect("two endpoint frames")
+                    .union(after_frame)?,
+            ))
+        }
     }
 
     async fn comparison_stream(&self, mut plan: Plan) -> Result<SendableRecordBatchStream> {
@@ -565,6 +684,18 @@ impl Engine {
     }
 }
 
+/// Returns the non-hidden root fields of an Iceberg [`iceberg::spec::Schema`] for rule comparison.
+pub(super) fn public_rules(schema: &iceberg::spec::Schema) -> Vec<Arc<iceberg::spec::NestedField>> {
+    schema
+        .as_struct()
+        .fields()
+        .iter()
+        .filter(|field| !storage::identity::hidden(&field.name))
+        .cloned()
+        .collect::<Vec<_>>()
+}
+
+/// Checks whether two Iceberg [`iceberg::spec::TableMetadata`] histories share a retained schema boundary.
 fn retained_schema_boundary(
     before: &iceberg::spec::TableMetadata,
     after: &iceberg::spec::TableMetadata,

@@ -140,6 +140,15 @@ class ClientTests(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(AdapterError):
                 DocSpecClient(**options)
 
+    def test_timeout_header_and_gateway_timeout_uncertainty_and_capabilities(self):
+        with server(reply({"routes": ["/run", "/plan"]})) as (url, requests):
+            caps = DocSpecClient(url, timeout_seconds=12.5).capabilities()
+        self.assertEqual(caps, {"routes": ["/run", "/plan"]})
+        self.assertEqual(requests, [("/capabilities", b"")])
+        with server(reply({"code": "request_timeout", "message": "HTTP request deadline elapsed"}, status=504)) as (url, _):
+            with self.assertRaises(UncertainOutcome):
+                DocSpecClient(url, timeout_seconds=1.5).submit("/run", REQUEST)
+
 
 if __name__ == "__main__":
     unittest.main()

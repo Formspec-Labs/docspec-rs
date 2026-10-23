@@ -76,16 +76,28 @@ impl Custody {
 impl Drop for Custody {
     fn drop(&mut self) {
         if !self.completed && !self.host.uncertain.swap(true, Ordering::AcqRel) {
-            // Tokio shutdown/forced abort may leave blocking or SQLite work alive.
-            // Quarantine only the host lock until process exit, not the catalog or
-            // execution runtime. No timeout can prove that old effects have ended.
+            // Deliberate leak: if a private worker task panics or is aborted during
+            // Tokio runtime shutdown while holding catalog/SQLite or blocking pool work,
+            // no timeout can prove that background side effects have ceased. Leaking one
+            // `Arc<Host>` reference keeps the OS `WorkspaceLock` held until process exit
+            // while marking the host `uncertain` so new engine calls fail closed.
             std::mem::forget(self.host.clone());
         }
     }
 }
 
+/// Ownership bundle moved into each spawned private worker task.
+///
+/// # Field Drop Order Invariant
+///
+/// Rust drops struct fields in declaration order:
+/// 1. `custody` MUST be declared first so that on abnormal task termination (panic or
+///    cancellation), `Custody::drop` marks `host.uncertain = true` (`Ordering::AcqRel`)
+///    and leaks the workspace lock *before* `_guard` is dropped.
+/// 2. `_guard` (the shared or exclusive `maintenance` lock guard) drops second, waking
+///    any `Engine::shutdown` waiter only after `host.uncertain` is guaranteed visible.
+/// 3. `_request` and `_task` semaphore permits drop last after the task body has exited.
 struct Admitted<G> {
-    // Poison the host before releasing maintenance admission on abnormal drop.
     custody: Custody,
     _guard: G,
     _request: OwnedSemaphorePermit,
@@ -128,6 +140,19 @@ impl Engine {
         Ok(())
     }
 
+    /// Validates admission state, captures the current Tokio runtime handle, and
+    /// reserves the poll-frame memory permit for a private worker task.
+    fn prepare_worker_task<F, Fut>(&self) -> Result<(Handle, OwnedSemaphorePermit)> {
+        self.check_admission()?;
+        let runtime = runtime()?;
+        let task = self.inner.lifecycle.budget.reserve(
+            std::mem::size_of::<Fut>()
+                .saturating_add(std::mem::size_of::<F>())
+                .saturating_add(4096),
+        )?;
+        Ok((runtime, task))
+    }
+
     pub(super) async fn admit_work<T, F, Fut>(
         &self,
         memory: OwnedSemaphorePermit,
@@ -138,13 +163,7 @@ impl Engine {
         F: FnOnce(Engine) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
-        self.check_admission()?;
-        let runtime = runtime()?;
-        let task = self.inner.lifecycle.budget.reserve(
-            std::mem::size_of::<Fut>()
-                .saturating_add(std::mem::size_of::<F>())
-                .saturating_add(4096),
-        )?;
+        let (runtime, task) = self.prepare_worker_task::<F, Fut>()?;
         // Cancellation while waiting starts no work. Once admitted there is no
         // await before spawning the task that owns the complete service future.
         let guard = self.inner.maintenance.clone().read_owned().await;
@@ -163,13 +182,7 @@ impl Engine {
         F: FnOnce(Engine) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
-        self.check_admission()?;
-        let runtime = runtime()?;
-        let task = self.inner.lifecycle.budget.reserve(
-            std::mem::size_of::<Fut>()
-                .saturating_add(std::mem::size_of::<F>())
-                .saturating_add(4096),
-        )?;
+        let (runtime, task) = self.prepare_worker_task::<F, Fut>()?;
         let guard = self.inner.maintenance.clone().write_owned().await;
         self.check_admission()?;
         self.spawn_work(runtime, guard, memory, task, operation)
@@ -185,13 +198,7 @@ impl Engine {
         F: FnOnce(Engine) -> Fut + Send + 'static,
         Fut: Future<Output = Result<SendableRecordBatchStream>> + Send + 'static,
     {
-        self.check_admission()?;
-        let runtime = runtime()?;
-        let task = self.inner.lifecycle.budget.reserve(
-            std::mem::size_of::<Fut>()
-                .saturating_add(std::mem::size_of::<F>())
-                .saturating_add(4096),
-        )?;
+        let (runtime, task) = self.prepare_worker_task::<F, Fut>()?;
         let guard = Arc::new(self.inner.maintenance.clone().read_owned().await);
         self.check_admission()?;
         // Share this admission instead of reacquiring after a writer has queued.

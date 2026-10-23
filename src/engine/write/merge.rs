@@ -7,14 +7,45 @@
 //! - `Min`: keep the minimum non-null value across prior and incoming.
 //! - `Max`: keep the maximum non-null value across prior and incoming.
 //! - `SetUnion`: Deduplicated list union in canonical ascending element order.
+//!
+//! ### Three-Valued Presence & Supplied-Bit Precedence
+//! When a table schema has evolved or declares write defaults, each defaultable source
+//! column `c` (with Iceberg field ID `id`) is paired with a hidden boolean tracking
+//! column `__docspec_supplied_<id>`. During merge, each cell is classified into one of
+//! three states:
+//! 1. **Present** (`!val.is_null() && supplied`): an explicitly supplied non-null value.
+//! 2. **Explicitly supplied NULL** (`val.is_null() && supplied`): the caller explicitly
+//!    wrote `NULL` rather than omitting the column.
+//! 3. **Omitted / defaulted NULL** (`val.is_null() && !supplied`): the column was omitted
+//!    by the writer and filled with `NULL`.
+//!
+//! Precedence rules across strategies:
+//! - `Replace`: always selects the winning row's value and its `supplied` bit (`incoming`
+//!   when `incoming_wins`, else `prior`).
+//! - `LatestOrBackfill`: prefers a **Present** value from the winning side, then a
+//!   **Present** value from the losing side (backfill), then an **Explicitly supplied NULL**
+//!   over an **Omitted NULL**, and finally falls back to the winning side. The output
+//!   `supplied` bit is taken from whichever side contributed the chosen cell.
+//! - `Min` / `Max`: compares values only when both sides are **Present**; if only one
+//!   side is **Present**, that side wins; if neither is **Present**, an **Explicitly
+//!   supplied NULL** beats an **Omitted NULL**. The output `supplied` bit is taken from
+//!   the side that contributed the chosen cell.
+//! - `SetUnion`: unions non-null list elements from both sides in ascending order; if
+//!   both lists are `NULL`, the result is `NULL`. Its `supplied` bit is
+//!   `!merged_val.is_null() && (prior_supplied || incoming_supplied)`.
 
 use super::*;
 use crate::model::{UpdateMergeSpec, UpdateMergeStrategy};
 use arrow::{
-    array::{Array, ArrayRef, GenericListArray, OffsetSizeTrait, StructArray, new_empty_array},
-    buffer::OffsetBuffer,
+    array::{
+        Array, ArrayRef, BooleanArray, GenericListArray, OffsetSizeTrait, StructArray, UInt32Array,
+        new_empty_array, new_null_array,
+    },
+    buffer::{NullBuffer, OffsetBuffer},
+    compute::{concat, interleave_record_batch, kernels::zip::zip, take},
     datatypes::{DataType, Field, FieldRef, Schema as ArrowSchema, SchemaRef},
     record_batch::RecordBatch,
+    row::{RowConverter, SortField},
 };
 use datafusion::{
     catalog::streaming::StreamingTable,
@@ -30,6 +61,62 @@ use std::{
     sync::Mutex,
 };
 use tokio::sync::OwnedSemaphorePermit;
+
+/// Schema-resolved column indices and merge rules for one `apply_merge` invocation.
+struct MergeSchemaContext {
+    arrow_schema: Arc<ArrowSchema>,
+    key_indices: Vec<usize>,
+    key_set: BTreeSet<usize>,
+    order_by_index: Option<usize>,
+    strategies: BTreeMap<String, UpdateMergeStrategy>,
+    supplied_flag_for_col: BTreeMap<usize, usize>,
+    is_supplied_flag_col: BTreeSet<usize>,
+}
+
+impl MergeSchemaContext {
+    fn resolve(native_schema: &Schema, keys: &[String], merge: &UpdateMergeSpec) -> Result<Self> {
+        let arrow_schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(native_schema)?);
+        let key_indices: Vec<usize> = keys
+            .iter()
+            .map(|k| {
+                arrow_schema
+                    .index_of(k)
+                    .map_err(|_| Error::refusal("unknown_key", "update key is absent from schema"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let key_set: BTreeSet<usize> = key_indices.iter().copied().collect();
+        let order_by_index: Option<usize> = match &merge.order_by {
+            Some(col_name) => Some(arrow_schema.index_of(col_name).map_err(|_| {
+                Error::refusal(
+                    "invalid_merge",
+                    format!("merge order_by column '{col_name}' is absent from schema"),
+                )
+            })?),
+            None => None,
+        };
+        let mut supplied_flag_for_col: BTreeMap<usize, usize> = BTreeMap::new();
+        let mut is_supplied_flag_col: BTreeSet<usize> = BTreeSet::new();
+        for (flag_idx, field) in arrow_schema.fields().iter().enumerate() {
+            if let Some(source_id) = storage::defaults::supplied_id(field.name()) {
+                is_supplied_flag_col.insert(flag_idx);
+                if let Some(source_field) = native_schema.field_by_id(source_id)
+                    && let Ok(col_idx) = arrow_schema.index_of(&source_field.name)
+                {
+                    supplied_flag_for_col.insert(col_idx, flag_idx);
+                }
+            }
+        }
+        Ok(Self {
+            arrow_schema,
+            key_indices,
+            key_set,
+            order_by_index,
+            strategies: merge.columns.clone(),
+            supplied_flag_for_col,
+            is_supplied_flag_col,
+        })
+    }
+}
 
 /// Validates a declarative merge specification against the current native schema and key columns.
 pub(in crate::engine) fn validate(
@@ -109,7 +196,8 @@ pub(in crate::engine) fn validate(
 }
 
 /// Applies column-level merge rules between `prior` rows from `before` and `incoming`
-/// replacement rows, folding any intra-batch duplicate keys in `incoming` first.
+/// replacement rows using vectorized Arrow `RowConverter`, `interleave_record_batch`,
+/// and `zip` kernels, folding any intra-batch duplicate keys in `incoming` first.
 pub(in crate::engine) async fn apply_merge(
     context: &SessionContext,
     prior: DataFrame,
@@ -120,49 +208,25 @@ pub(in crate::engine) async fn apply_merge(
     budget: &Budget,
 ) -> Result<DataFrame> {
     validate(merge, native_schema, keys)?;
-    let arrow_schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(native_schema)?);
-
-    let key_indices: Vec<usize> = keys
+    let ctx = MergeSchemaContext::resolve(native_schema, keys, merge)?;
+    let key_sort_fields: Vec<SortField> = ctx
+        .key_indices
         .iter()
-        .map(|k| {
-            arrow_schema
-                .index_of(k)
-                .map_err(|_| Error::refusal("unknown_key", "update key is absent from schema"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let order_by_index: Option<usize> = match &merge.order_by {
-        Some(col_name) => Some(arrow_schema.index_of(col_name).map_err(|_| {
-            Error::refusal(
-                "invalid_merge",
-                format!("merge order_by column '{col_name}' is absent from schema"),
-            )
-        })?),
-        None => None,
-    };
-
-    // Map each `__docspec_supplied_<id>` column to its data column index via field ID lookup.
-    let mut supplied_flag_for_col: BTreeMap<usize, usize> = BTreeMap::new();
-    let mut is_supplied_flag_col: BTreeSet<usize> = BTreeSet::new();
-    for (flag_idx, field) in arrow_schema.fields().iter().enumerate() {
-        if let Some(source_id) = storage::defaults::supplied_id(field.name()) {
-            is_supplied_flag_col.insert(flag_idx);
-            if let Some(source_field) = native_schema.field_by_id(source_id)
-                && let Ok(col_idx) = arrow_schema.index_of(&source_field.name)
-            {
-                supplied_flag_for_col.insert(col_idx, flag_idx);
-            }
-        }
-    }
+        .map(|&idx| SortField::new(ctx.arrow_schema.field(idx).data_type().clone()))
+        .collect();
+    let key_converter = RowConverter::new(key_sort_fields)?;
 
     let mut arena = MergeArena::new(budget);
 
-    // Stream prior rows batch-by-batch, reserving incremental scalar sizes and dropping
-    // each input RecordBatch and its batch permit immediately after folding its rows.
-    let mut prior_by_key: BTreeMap<Vec<OrdScalar>, Vec<ScalarValue>> = BTreeMap::new();
+    // Collect aligned prior batches and index row locations by encoded key bytes.
+    let mut prior_batches: Vec<RecordBatch> = Vec::new();
+    let mut prior_by_key: BTreeMap<Box<[u8]>, Vec<(usize, usize)>> = BTreeMap::new();
     {
         let mut prior_stream = prior.execute_stream().await?;
         while let Some(batch) = prior_stream.try_next().await? {
+            if batch.num_rows() == 0 {
+                continue;
+            }
             let batch_bytes = batch.get_array_memory_size();
             if batch_bytes > budget.limits.max_batch_bytes {
                 return Err(Error::refusal(
@@ -174,49 +238,46 @@ pub(in crate::engine) async fn apply_merge(
                 ));
             }
             let _batch_permit = budget.reserve(batch_bytes)?;
-            let projected = align_batch(&batch, &arrow_schema)?;
+            let projected = align_batch(&batch, &ctx.arrow_schema)?;
             drop(batch);
+            arena.reserve(projected.get_array_memory_size())?;
+            let key_cols: Vec<ArrayRef> = ctx
+                .key_indices
+                .iter()
+                .map(|&idx| projected.column(idx).clone())
+                .collect();
+            let rows = key_converter.convert_columns(&key_cols)?;
+            let batch_idx = prior_batches.len();
             for row_idx in 0..projected.num_rows() {
-                let row_vals = extract_row(&projected, row_idx)?;
-                let key_tuple = key_indices
-                    .iter()
-                    .map(|&k_idx| OrdScalar(row_vals[k_idx].clone()))
-                    .collect::<Vec<_>>();
-                if let Some(existing) = prior_by_key.get_mut(&key_tuple) {
-                    let before_bytes = row_scalar_bytes(existing);
-                    let merged = merge_row_pair(
-                        existing,
-                        &row_vals,
-                        &arrow_schema,
-                        &key_indices,
-                        order_by_index,
-                        &merge.columns,
-                        &supplied_flag_for_col,
-                        &is_supplied_flag_col,
-                    )?;
-                    let after_bytes = row_scalar_bytes(&merged);
-                    if after_bytes > before_bytes {
-                        arena.reserve(after_bytes - before_bytes)?;
-                    }
-                    *existing = merged;
+                let key_bytes: Box<[u8]> = rows.row(row_idx).as_ref().into();
+                if let Some(locs) = prior_by_key.get_mut(&key_bytes) {
+                    arena.reserve(std::mem::size_of::<(usize, usize)>())?;
+                    locs.push((batch_idx, row_idx));
                 } else {
                     arena.reserve(
-                        key_scalar_bytes(&key_tuple).saturating_add(row_scalar_bytes(&row_vals)),
+                        key_bytes
+                            .len()
+                            .saturating_add(std::mem::size_of::<(usize, usize)>()),
                     )?;
-                    prior_by_key.insert(key_tuple, row_vals);
+                    prior_by_key.insert(key_bytes, vec![(batch_idx, row_idx)]);
                 }
             }
+            prior_batches.push(projected);
         }
     }
 
-    // Stream incoming rows batch-by-batch, preserving first-seen key order and input ordinal.
-    let mut key_order: Vec<Vec<OrdScalar>> = Vec::new();
-    let mut incoming_by_key: BTreeMap<Vec<OrdScalar>, Vec<(usize, Vec<ScalarValue>)>> =
-        BTreeMap::new();
+    // Collect aligned incoming batches and index row locations by encoded key bytes.
+    type IndexedKeyLocations = BTreeMap<Box<[u8]>, Vec<(usize, (usize, usize))>>;
+    let mut incoming_batches: Vec<RecordBatch> = Vec::new();
+    let mut key_order: Vec<Box<[u8]>> = Vec::new();
+    let mut incoming_by_key: IndexedKeyLocations = BTreeMap::new();
     let mut ordinal = 0usize;
     {
         let mut incoming_stream = incoming.execute_stream().await?;
         while let Some(batch) = incoming_stream.try_next().await? {
+            if batch.num_rows() == 0 {
+                continue;
+            }
             let batch_bytes = batch.get_array_memory_size();
             if batch_bytes > budget.limits.max_batch_bytes {
                 return Err(Error::refusal(
@@ -228,111 +289,543 @@ pub(in crate::engine) async fn apply_merge(
                 ));
             }
             let _batch_permit = budget.reserve(batch_bytes)?;
-            let projected = align_batch(&batch, &arrow_schema)?;
+            let projected = align_batch(&batch, &ctx.arrow_schema)?;
             drop(batch);
+            arena.reserve(projected.get_array_memory_size())?;
+            let key_cols: Vec<ArrayRef> = ctx
+                .key_indices
+                .iter()
+                .map(|&idx| projected.column(idx).clone())
+                .collect();
+            let rows = key_converter.convert_columns(&key_cols)?;
+            let batch_idx = incoming_batches.len();
             for row_idx in 0..projected.num_rows() {
-                let row_vals = extract_row(&projected, row_idx)?;
-                let key_tuple = key_indices
-                    .iter()
-                    .map(|&k_idx| OrdScalar(row_vals[k_idx].clone()))
-                    .collect::<Vec<_>>();
-                let row_bytes = row_scalar_bytes(&row_vals);
-                if let Some(group) = incoming_by_key.get_mut(&key_tuple) {
-                    arena.reserve(row_bytes.saturating_add(std::mem::size_of::<usize>()))?;
-                    group.push((ordinal, row_vals));
+                let key_bytes: Box<[u8]> = rows.row(row_idx).as_ref().into();
+                if let Some(group) = incoming_by_key.get_mut(&key_bytes) {
+                    arena.reserve(std::mem::size_of::<(usize, (usize, usize))>())?;
+                    group.push((ordinal, (batch_idx, row_idx)));
                 } else {
-                    let key_bytes = key_scalar_bytes(&key_tuple);
                     arena.reserve(
                         key_bytes
+                            .len()
                             .saturating_mul(2)
-                            .saturating_add(row_bytes)
-                            .saturating_add(std::mem::size_of::<usize>()),
+                            .saturating_add(std::mem::size_of::<(usize, (usize, usize))>()),
                     )?;
-                    key_order.push(key_tuple.clone());
-                    incoming_by_key.insert(key_tuple, vec![(ordinal, row_vals)]);
+                    key_order.push(key_bytes.clone());
+                    incoming_by_key.insert(key_bytes, vec![(ordinal, (batch_idx, row_idx))]);
                 }
                 ordinal += 1;
             }
+            incoming_batches.push(projected);
         }
     }
 
-    let mut merged_rows: Vec<Vec<ScalarValue>> = Vec::with_capacity(key_order.len());
-    for key_tuple in key_order {
-        let mut group = incoming_by_key.remove(&key_tuple).unwrap_or_default();
-        let group_bytes: usize = group.iter().map(|(_, r)| row_scalar_bytes(r)).sum();
-        if group.len() > 1
-            && let Some(ob_idx) = order_by_index
-        {
-            // Fold intra-batch duplicates ordered by (order_by ASC NULLS FIRST, input_ordinal ASC).
-            group.sort_by(|(ord_a, row_a), (ord_b, row_b)| {
-                compare_nulls_first(&row_a[ob_idx], &row_b[ob_idx]).then_with(|| ord_a.cmp(ord_b))
-            });
-        }
-        let mut iter = group.into_iter().map(|(_, row)| row);
-        let Some(first_incoming) = iter.next() else {
-            continue;
-        };
-        let mut folded_incoming =
-            normalize_single_row(first_incoming, &arrow_schema, &merge.columns)?;
-        for next_incoming in iter {
-            folded_incoming = merge_row_pair(
-                &folded_incoming,
-                &next_incoming,
-                &arrow_schema,
-                &key_indices,
-                order_by_index,
-                &merge.columns,
-                &supplied_flag_for_col,
-                &is_supplied_flag_col,
-            )?;
-        }
-
-        let prior_row = prior_by_key.remove(&key_tuple);
-        let prior_bytes = prior_row.as_ref().map_or(0, |r| row_scalar_bytes(r));
-        let final_row = if let Some(prior_row) = &prior_row {
-            merge_row_pair(
-                prior_row,
-                &folded_incoming,
-                &arrow_schema,
-                &key_indices,
-                order_by_index,
-                &merge.columns,
-                &supplied_flag_for_col,
-                &is_supplied_flag_col,
-            )?
-        } else {
-            clear_origins(folded_incoming, &arrow_schema)
-        };
-        let final_bytes = row_scalar_bytes(&final_row);
-        let consumed_bytes = group_bytes.saturating_add(prior_bytes);
-        if final_bytes > consumed_bytes {
-            arena.reserve(final_bytes - consumed_bytes)?;
-        }
-        merged_rows.push(final_row);
-    }
-    drop(prior_by_key);
-    drop(incoming_by_key);
-
-    if merged_rows.is_empty() {
+    if key_order.is_empty() {
         drop(arena);
-        let provider = datafusion::datasource::empty::EmptyTable::new(arrow_schema);
+        let provider = datafusion::datasource::empty::EmptyTable::new(ctx.arrow_schema);
         return Ok(context.read_table(Arc::new(provider))?);
     }
+
+    // Pre-encode `order_by` values across incoming batches if any key has duplicates.
+    let has_incoming_dups = incoming_by_key.values().any(|g| g.len() > 1);
+    let incoming_ob_rows = match (ctx.order_by_index, has_incoming_dups) {
+        (Some(ob_idx), true) => {
+            let ob_converter = RowConverter::new(vec![SortField::new(
+                ctx.arrow_schema.field(ob_idx).data_type().clone(),
+            )])?;
+            Some(
+                incoming_batches
+                    .iter()
+                    .map(|b| ob_converter.convert_columns(&[b.column(ob_idx).clone()]))
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            )
+        }
+        _ => None,
+    };
+
+    let mut ordered_incoming_groups: Vec<Vec<(usize, usize)>> = Vec::with_capacity(key_order.len());
+    let mut prior_groups_for_keys: Vec<Option<Vec<(usize, usize)>>> =
+        Vec::with_capacity(key_order.len());
+    for key_bytes in &key_order {
+        let mut group = incoming_by_key.remove(key_bytes).unwrap_or_default();
+        if group.len() > 1
+            && let Some(ob_rows) = &incoming_ob_rows
+        {
+            // Fold intra-batch duplicates ordered by (order_by ASC NULLS FIRST, input_ordinal ASC).
+            group.sort_by(|(ord_a, (ba, ra)), (ord_b, (bb, rb))| {
+                ob_rows[*ba]
+                    .row(*ra)
+                    .cmp(&ob_rows[*bb].row(*rb))
+                    .then_with(|| ord_a.cmp(ord_b))
+            });
+        }
+        ordered_incoming_groups.push(group.into_iter().map(|(_, loc)| loc).collect());
+        prior_groups_for_keys.push(prior_by_key.remove(key_bytes));
+    }
+    drop(key_order);
+    drop(incoming_by_key);
+    drop(prior_by_key);
+    drop(incoming_ob_rows);
+
+    let folded_incoming = fold_grouped_rows(
+        &incoming_batches,
+        &ordered_incoming_groups,
+        &ctx,
+        true,
+        &mut arena,
+    )?;
+    drop(incoming_batches);
+    drop(ordered_incoming_groups);
+
+    let merged_batch = if prior_groups_for_keys.iter().any(Option::is_some) {
+        let mut matched_key_positions = Vec::new();
+        let mut matched_prior_groups = Vec::new();
+        for (pos, group) in prior_groups_for_keys.into_iter().enumerate() {
+            if let Some(locs) = group
+                && !locs.is_empty()
+            {
+                matched_key_positions.push(pos);
+                matched_prior_groups.push(locs);
+            }
+        }
+        let folded_prior = fold_grouped_rows(
+            &prior_batches,
+            &matched_prior_groups,
+            &ctx,
+            false,
+            &mut arena,
+        )?;
+        drop(prior_batches);
+        let incoming_subset = take_rows(&folded_incoming, &matched_key_positions)?;
+        let merged_subset = merge_batches_vectorized(&folded_prior, &incoming_subset, &ctx)?;
+        splice_merged_subset(
+            &folded_incoming,
+            &merged_subset,
+            &matched_key_positions,
+            &ctx.arrow_schema,
+        )?
+    } else {
+        drop(prior_batches);
+        folded_incoming
+    };
 
     drop(arena);
     let chunk_rows = budget.limits.batch_rows.max(1);
     let mut batches: VecDeque<(RecordBatch, OwnedSemaphorePermit)> = VecDeque::new();
-    for chunk in merged_rows.chunks(chunk_rows) {
-        append_bounded_batches(chunk, &arrow_schema, budget, &mut batches)?;
+    let total_rows = merged_batch.num_rows();
+    for start in (0..total_rows).step_by(chunk_rows) {
+        let len = (total_rows - start).min(chunk_rows);
+        append_bounded_batch_slice(&merged_batch, start, len, budget, &mut batches)?;
     }
-    drop(merged_rows);
+    drop(merged_batch);
 
     let partition = Arc::new(BudgetedBatchPartition {
-        schema: arrow_schema.clone(),
+        schema: ctx.arrow_schema.clone(),
         batches: Arc::new(Mutex::new(batches)),
     });
-    let streaming_table = StreamingTable::try_new(arrow_schema, vec![partition])?;
+    let streaming_table = StreamingTable::try_new(ctx.arrow_schema, vec![partition])?;
     Ok(context.read_table(Arc::new(streaming_table))?)
+}
+
+/// Folds a list of per-key row location groups into a single `RecordBatch` of length
+/// `groups.len()` using vectorized `interleave_record_batch` and `merge_batches_vectorized`.
+fn fold_grouped_rows(
+    source_batches: &[RecordBatch],
+    groups: &[Vec<(usize, usize)>],
+    ctx: &MergeSchemaContext,
+    normalize_initial: bool,
+    arena: &mut MergeArena<'_>,
+) -> Result<RecordBatch> {
+    let batch_refs: Vec<&RecordBatch> = source_batches.iter().collect();
+    let first_indices: Vec<(usize, usize)> = groups.iter().map(|g| g[0]).collect();
+    let mut acc = interleave_record_batch(&batch_refs, &first_indices)?;
+    if normalize_initial {
+        acc = normalize_batch_columns(&acc, ctx)?;
+    }
+    arena.reserve(acc.get_array_memory_size())?;
+
+    let max_len = groups.iter().map(Vec::len).max().unwrap_or(0);
+    for step in 1..max_len {
+        let mut active_positions = Vec::new();
+        let mut step_indices = Vec::new();
+        for (pos, group) in groups.iter().enumerate() {
+            if let Some(&loc) = group.get(step) {
+                active_positions.push(pos);
+                step_indices.push(loc);
+            }
+        }
+        let acc_subset = take_rows(&acc, &active_positions)?;
+        let next_subset = interleave_record_batch(&batch_refs, &step_indices)?;
+        let merged_subset = merge_batches_vectorized(&acc_subset, &next_subset, ctx)?;
+        let before_bytes = acc.get_array_memory_size();
+        acc = splice_merged_subset(&acc, &merged_subset, &active_positions, &ctx.arrow_schema)?;
+        let after_bytes = acc.get_array_memory_size();
+        if after_bytes > before_bytes {
+            arena.reserve(after_bytes - before_bytes)?;
+        }
+    }
+    Ok(acc)
+}
+
+fn take_rows(batch: &RecordBatch, positions: &[usize]) -> Result<RecordBatch> {
+    let indices = UInt32Array::from_iter_values(positions.iter().map(|&p| p as u32));
+    let cols = batch
+        .columns()
+        .iter()
+        .map(|col| Ok(take(col.as_ref(), &indices, None)?))
+        .collect::<Result<Vec<ArrayRef>>>()?;
+    Ok(RecordBatch::try_new(batch.schema(), cols)?)
+}
+
+fn splice_merged_subset(
+    base: &RecordBatch,
+    replacement_subset: &RecordBatch,
+    subset_positions: &[usize],
+    schema: &Arc<ArrowSchema>,
+) -> Result<RecordBatch> {
+    if subset_positions.len() == base.num_rows() {
+        return Ok(replacement_subset.clone());
+    }
+    let mut mapping = vec![(0usize, 0usize); base.num_rows()];
+    for (idx, item) in mapping.iter_mut().enumerate() {
+        *item = (0, idx);
+    }
+    for (sub_idx, &pos) in subset_positions.iter().enumerate() {
+        mapping[pos] = (1, sub_idx);
+    }
+    let _ = schema;
+    Ok(interleave_record_batch(
+        &[base, replacement_subset],
+        &mapping,
+    )?)
+}
+
+/// Normalizes a newly gathered batch (deduplicating `SetUnion` list columns and clearing
+/// origin columns) without per-cell `ScalarValue` unpacking.
+fn normalize_batch_columns(batch: &RecordBatch, ctx: &MergeSchemaContext) -> Result<RecordBatch> {
+    let num_rows = batch.num_rows();
+    let mut cols = Vec::with_capacity(batch.num_columns());
+    for (col_idx, field) in ctx.arrow_schema.fields().iter().enumerate() {
+        let lower = field.name().to_ascii_lowercase();
+        if lower == storage::identity::ORIGIN_FILE || lower == storage::identity::ORIGIN_ROW {
+            cols.push(new_null_array(field.data_type(), num_rows));
+        } else if matches!(
+            ctx.strategies.get(field.name()),
+            Some(UpdateMergeStrategy::SetUnion)
+        ) {
+            let empty_null = new_null_array(field.data_type(), num_rows);
+            cols.push(set_union_arrays(&empty_null, batch.column(col_idx), field)?);
+        } else {
+            cols.push(batch.column(col_idx).clone());
+        }
+    }
+    Ok(RecordBatch::try_new(ctx.arrow_schema.clone(), cols)?)
+}
+
+/// Vectorized column-by-column merge of two 1-to-1 key-aligned `RecordBatch`es.
+fn merge_batches_vectorized(
+    prior: &RecordBatch,
+    incoming: &RecordBatch,
+    ctx: &MergeSchemaContext,
+) -> Result<RecordBatch> {
+    let num_rows = prior.num_rows();
+    let incoming_wins = compute_incoming_wins(prior, incoming, ctx.order_by_index)?;
+    let mut out_cols: Vec<Option<ArrayRef>> = vec![None; ctx.arrow_schema.fields().len()];
+
+    for &k_idx in &ctx.key_indices {
+        out_cols[k_idx] = Some(incoming.column(k_idx).clone());
+    }
+
+    for (col_idx, field) in ctx.arrow_schema.fields().iter().enumerate() {
+        if ctx.key_set.contains(&col_idx) || ctx.is_supplied_flag_col.contains(&col_idx) {
+            continue;
+        }
+        let lower = field.name().to_ascii_lowercase();
+        if lower == storage::identity::ORIGIN_FILE || lower == storage::identity::ORIGIN_ROW {
+            out_cols[col_idx] = Some(new_null_array(field.data_type(), num_rows));
+            continue;
+        }
+
+        let strategy = ctx
+            .strategies
+            .get(field.name())
+            .copied()
+            .unwrap_or(UpdateMergeStrategy::Replace);
+        let p_col = prior.column(col_idx);
+        let i_col = incoming.column(col_idx);
+        let flag_idx = ctx.supplied_flag_for_col.get(&col_idx).copied();
+        let p_flag_arr =
+            flag_idx.and_then(|idx| prior.column(idx).as_any().downcast_ref::<BooleanArray>());
+        let i_flag_arr =
+            flag_idx.and_then(|idx| incoming.column(idx).as_any().downcast_ref::<BooleanArray>());
+
+        let (merged_col, picked_incoming) = match strategy {
+            UpdateMergeStrategy::SetUnion => {
+                let unioned = set_union_arrays(p_col, i_col, field)?;
+                (unioned, incoming_wins.clone())
+            }
+            UpdateMergeStrategy::Replace => {
+                let merged = zip(&incoming_wins, &i_col, &p_col)?;
+                (merged, incoming_wins.clone())
+            }
+            UpdateMergeStrategy::LatestOrBackfill
+            | UpdateMergeStrategy::Min
+            | UpdateMergeStrategy::Max => {
+                let pick_inc = select_scalar_winner(
+                    strategy,
+                    p_col,
+                    i_col,
+                    p_flag_arr,
+                    i_flag_arr,
+                    &incoming_wins,
+                )?;
+                let merged = zip(&pick_inc, &i_col, &p_col)?;
+                (merged, pick_inc)
+            }
+        };
+
+        if let Some(f_idx) = flag_idx {
+            let mut flags = Vec::with_capacity(num_rows);
+            for row in 0..num_rows {
+                let p_flag = p_flag_arr.is_some_and(|a| !a.is_null(row) && a.value(row));
+                let i_flag = i_flag_arr.is_some_and(|a| !a.is_null(row) && a.value(row));
+                let merged_flag = match strategy {
+                    UpdateMergeStrategy::SetUnion => !merged_col.is_null(row) && (p_flag || i_flag),
+                    UpdateMergeStrategy::Replace
+                    | UpdateMergeStrategy::LatestOrBackfill
+                    | UpdateMergeStrategy::Min
+                    | UpdateMergeStrategy::Max => {
+                        if picked_incoming.value(row) {
+                            i_flag
+                        } else {
+                            p_flag
+                        }
+                    }
+                };
+                flags.push(Some(merged_flag));
+            }
+            out_cols[f_idx] = Some(Arc::new(BooleanArray::from(flags)));
+        }
+        out_cols[col_idx] = Some(merged_col);
+    }
+
+    let final_cols = out_cols
+        .into_iter()
+        .enumerate()
+        .map(|(idx, col)| col.unwrap_or_else(|| incoming.column(idx).clone()))
+        .collect();
+    Ok(RecordBatch::try_new(ctx.arrow_schema.clone(), final_cols)?)
+}
+
+fn compute_incoming_wins(
+    prior: &RecordBatch,
+    incoming: &RecordBatch,
+    order_by_index: Option<usize>,
+) -> Result<BooleanArray> {
+    let num_rows = prior.num_rows();
+    let Some(ob_idx) = order_by_index else {
+        return Ok(BooleanArray::from(vec![true; num_rows]));
+    };
+    let p_ord = prior.column(ob_idx);
+    let i_ord = incoming.column(ob_idx);
+    let converter = RowConverter::new(vec![SortField::new(p_ord.data_type().clone())])?;
+    let p_rows = converter.convert_columns(std::slice::from_ref(p_ord))?;
+    let i_rows = converter.convert_columns(std::slice::from_ref(i_ord))?;
+    let mut wins = Vec::with_capacity(num_rows);
+    for row in 0..num_rows {
+        let win = p_ord.is_null(row) || (!i_ord.is_null(row) && i_rows.row(row) >= p_rows.row(row));
+        wins.push(Some(win));
+    }
+    Ok(BooleanArray::from(wins))
+}
+
+fn select_scalar_winner(
+    strategy: UpdateMergeStrategy,
+    p_col: &ArrayRef,
+    i_col: &ArrayRef,
+    p_flag_arr: Option<&BooleanArray>,
+    i_flag_arr: Option<&BooleanArray>,
+    incoming_wins: &BooleanArray,
+) -> Result<BooleanArray> {
+    let num_rows = p_col.len();
+    let row_cmp = if matches!(
+        strategy,
+        UpdateMergeStrategy::Min | UpdateMergeStrategy::Max
+    ) {
+        let converter = RowConverter::new(vec![SortField::new(p_col.data_type().clone())])?;
+        Some((
+            converter.convert_columns(std::slice::from_ref(p_col))?,
+            converter.convert_columns(std::slice::from_ref(i_col))?,
+        ))
+    } else {
+        None
+    };
+
+    let mut pick_incoming = Vec::with_capacity(num_rows);
+    for row in 0..num_rows {
+        let p_supplied = p_flag_arr.is_none_or(|a| !a.is_null(row) && a.value(row));
+        let i_supplied = i_flag_arr.is_none_or(|a| !a.is_null(row) && a.value(row));
+        let p_present = !p_col.is_null(row) && p_supplied;
+        let i_present = !i_col.is_null(row) && i_supplied;
+
+        let take_inc = match strategy {
+            UpdateMergeStrategy::LatestOrBackfill => {
+                if incoming_wins.value(row) {
+                    if i_present {
+                        true
+                    } else {
+                        !(p_present || (p_supplied && !i_supplied))
+                    }
+                } else if p_present {
+                    false
+                } else {
+                    i_present || (i_supplied && !p_supplied)
+                }
+            }
+            UpdateMergeStrategy::Min => match (p_present, i_present, row_cmp.as_ref()) {
+                (false, true, _) => true,
+                (true, false, _) => false,
+                (false, false, _) => !p_supplied || i_supplied,
+                (true, true, Some((p_rows, i_rows))) => i_rows.row(row) < p_rows.row(row),
+                (true, true, None) => incoming_wins.value(row),
+            },
+            UpdateMergeStrategy::Max => match (p_present, i_present, row_cmp.as_ref()) {
+                (false, true, _) => true,
+                (true, false, _) => false,
+                (false, false, _) => !p_supplied || i_supplied,
+                (true, true, Some((p_rows, i_rows))) => i_rows.row(row) > p_rows.row(row),
+                (true, true, None) => incoming_wins.value(row),
+            },
+            UpdateMergeStrategy::Replace | UpdateMergeStrategy::SetUnion => {
+                incoming_wins.value(row)
+            }
+        };
+        pick_incoming.push(Some(take_inc));
+    }
+    Ok(BooleanArray::from(pick_incoming))
+}
+
+fn set_union_arrays(prior: &ArrayRef, incoming: &ArrayRef, field: &FieldRef) -> Result<ArrayRef> {
+    match field.data_type() {
+        DataType::List(item_field) => set_union_generic_list::<i32>(prior, incoming, item_field),
+        DataType::LargeList(item_field) => {
+            set_union_generic_list::<i64>(prior, incoming, item_field)
+        }
+        other => Err(Error::refusal(
+            "invalid_merge",
+            format!("set_union requires a List or LargeList column, found {other:?}"),
+        )),
+    }
+}
+
+fn set_union_generic_list<O: OffsetSizeTrait>(
+    prior: &ArrayRef,
+    incoming: &ArrayRef,
+    item_field: &FieldRef,
+) -> Result<ArrayRef> {
+    let p_list = prior
+        .as_any()
+        .downcast_ref::<GenericListArray<O>>()
+        .ok_or_else(|| Error::refusal("invalid_merge", "expected list array in set_union"))?;
+    let i_list = incoming
+        .as_any()
+        .downcast_ref::<GenericListArray<O>>()
+        .ok_or_else(|| Error::refusal("invalid_merge", "expected list array in set_union"))?;
+
+    let num_rows = p_list.len();
+    let p_values = coerce_array_to_field(p_list.values(), item_field)?;
+    let i_values = coerce_array_to_field(i_list.values(), item_field)?;
+    let combined_values = concat(&[p_values.as_ref(), i_values.as_ref()])?;
+    let p_values_len = p_values.len();
+
+    let converter = RowConverter::new(vec![SortField::new(item_field.data_type().clone())])?;
+    let encoded_items = converter.convert_columns(std::slice::from_ref(&combined_values))?;
+
+    let p_offsets = p_list.offsets();
+    let i_offsets = i_list.offsets();
+    let mut take_indices: Vec<u32> = Vec::new();
+    let mut lengths: Vec<usize> = Vec::with_capacity(num_rows);
+    let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
+
+    for row in 0..num_rows {
+        let p_null = p_list.is_null(row);
+        let i_null = i_list.is_null(row);
+        if p_null && i_null {
+            lengths.push(0);
+            validity.push(false);
+            continue;
+        }
+        validity.push(true);
+        let mut row_items: Vec<(arrow::row::Row<'_>, u32)> = Vec::new();
+        if !p_null {
+            let start = p_offsets[row].as_usize();
+            let end = p_offsets[row + 1].as_usize();
+            for idx in start..end {
+                row_items.push((encoded_items.row(idx), idx as u32));
+            }
+        }
+        if !i_null {
+            let start = i_offsets[row].as_usize();
+            let end = i_offsets[row + 1].as_usize();
+            for idx in start..end {
+                let combined_idx = p_values_len + idx;
+                row_items.push((encoded_items.row(combined_idx), combined_idx as u32));
+            }
+        }
+        row_items.sort_by(|(ra, _), (rb, _)| ra.cmp(rb));
+        row_items.dedup_by(|(ra, _), (rb, _)| ra == rb);
+        lengths.push(row_items.len());
+        take_indices.extend(row_items.into_iter().map(|(_, idx)| idx));
+    }
+
+    let indices_arr = UInt32Array::from(take_indices);
+    let deduped_values = if indices_arr.is_empty() {
+        new_empty_array(item_field.data_type())
+    } else {
+        take(combined_values.as_ref(), &indices_arr, None)?
+    };
+    let deduped_values = coerce_array_to_field(&deduped_values, item_field)?;
+    let offsets = OffsetBuffer::<O>::from_lengths(lengths);
+    let nulls = NullBuffer::from(validity);
+    Ok(Arc::new(GenericListArray::<O>::try_new(
+        item_field.clone(),
+        offsets,
+        deduped_values,
+        Some(nulls),
+    )?))
+}
+
+fn append_bounded_batch_slice(
+    merged_batch: &RecordBatch,
+    offset: usize,
+    len: usize,
+    budget: &Budget,
+    out: &mut VecDeque<(RecordBatch, OwnedSemaphorePermit)>,
+) -> Result<()> {
+    if len == 0 {
+        return Ok(());
+    }
+    let batch = storage::compact_batch_slice(merged_batch, offset, len)?;
+    let bytes = batch.get_array_memory_size();
+    if bytes > budget.limits.max_batch_bytes {
+        if len <= 1 {
+            return Err(Error::refusal(
+                "oversized_batch",
+                format!(
+                    "merged row uses {bytes} bytes, exceeding the {} byte allowance",
+                    budget.limits.max_batch_bytes
+                ),
+            ));
+        }
+        drop(batch);
+        let mid = len / 2;
+        append_bounded_batch_slice(merged_batch, offset, mid, budget, out)?;
+        append_bounded_batch_slice(merged_batch, offset + mid, len - mid, budget, out)?;
+        return Ok(());
+    }
+    let permit = budget.reserve(bytes)?;
+    out.push_back((batch, permit));
+    Ok(())
 }
 
 struct MergeArena<'a> {
@@ -361,56 +854,6 @@ impl<'a> MergeArena<'a> {
     }
 }
 
-fn row_scalar_bytes(row: &[ScalarValue]) -> usize {
-    row.iter().map(ScalarValue::size).sum()
-}
-
-fn key_scalar_bytes(key: &[OrdScalar]) -> usize {
-    key.iter().map(|k| k.0.size()).sum()
-}
-
-fn rows_to_batch(rows: &[Vec<ScalarValue>], schema: &Arc<ArrowSchema>) -> Result<RecordBatch> {
-    let mut columns: Vec<ArrayRef> = Vec::with_capacity(schema.fields().len());
-    for (col_idx, field) in schema.fields().iter().enumerate() {
-        let scalars: Vec<ScalarValue> = rows.iter().map(|row| row[col_idx].clone()).collect();
-        let array = scalars_to_array(scalars, field)?;
-        columns.push(array);
-    }
-    Ok(RecordBatch::try_new(schema.clone(), columns)?)
-}
-
-fn append_bounded_batches(
-    slice: &[Vec<ScalarValue>],
-    schema: &Arc<ArrowSchema>,
-    budget: &Budget,
-    out: &mut VecDeque<(RecordBatch, OwnedSemaphorePermit)>,
-) -> Result<()> {
-    if slice.is_empty() {
-        return Ok(());
-    }
-    let batch = rows_to_batch(slice, schema)?;
-    let bytes = batch.get_array_memory_size();
-    if bytes > budget.limits.max_batch_bytes {
-        if slice.len() <= 1 {
-            return Err(Error::refusal(
-                "oversized_batch",
-                format!(
-                    "merged row uses {bytes} bytes, exceeding the {} byte allowance",
-                    budget.limits.max_batch_bytes
-                ),
-            ));
-        }
-        drop(batch);
-        let mid = slice.len() / 2;
-        append_bounded_batches(&slice[..mid], schema, budget, out)?;
-        append_bounded_batches(&slice[mid..], schema, budget, out)?;
-        return Ok(());
-    }
-    let permit = budget.reserve(bytes)?;
-    out.push_back((batch, permit));
-    Ok(())
-}
-
 #[derive(Debug)]
 struct BudgetedBatchPartition {
     schema: SchemaRef,
@@ -427,8 +870,17 @@ impl PartitionStream for BudgetedBatchPartition {
         let stream = futures::stream::unfold(
             (queue, None::<OwnedSemaphorePermit>),
             |(queue, _prev_permit)| async move {
-                let next = queue.lock().ok()?.pop_front();
-                next.map(|(batch, permit)| (Ok(batch), (queue, Some(permit))))
+                let next = match queue.lock() {
+                    Ok(mut guard) => Ok(guard.pop_front()),
+                    Err(_) => Err(datafusion::error::DataFusionError::Execution(
+                        "merge batch partition mutex poisoned".into(),
+                    )),
+                };
+                match next {
+                    Ok(Some((batch, permit))) => Some((Ok(batch), (queue, Some(permit)))),
+                    Ok(None) => None,
+                    Err(err) => Some((Err(err), (queue, None))),
+                }
             },
         );
         Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), stream))
@@ -451,8 +903,7 @@ fn align_batch(batch: &RecordBatch, target_schema: &ArrowSchema) -> Result<Recor
         if let Ok(idx) = batch.schema().index_of(field.name()) {
             cols.push(coerce_array_to_field(batch.column(idx), field)?);
         } else if storage::identity::hidden(&field.name().to_ascii_lowercase()) {
-            let null_scalar = ScalarValue::try_from(field.data_type())?;
-            cols.push(null_scalar.to_array_of_size(batch.num_rows())?);
+            cols.push(new_null_array(field.data_type(), batch.num_rows()));
         } else {
             return Err(Error::refusal(
                 "schema_mismatch",
@@ -461,270 +912,6 @@ fn align_batch(batch: &RecordBatch, target_schema: &ArrowSchema) -> Result<Recor
         }
     }
     Ok(RecordBatch::try_new(Arc::new(target_schema.clone()), cols)?)
-}
-
-fn extract_row(batch: &RecordBatch, row_idx: usize) -> Result<Vec<ScalarValue>> {
-    let mut vals = Vec::with_capacity(batch.num_columns());
-    for col_idx in 0..batch.num_columns() {
-        vals.push(ScalarValue::try_from_array(
-            batch.column(col_idx).as_ref(),
-            row_idx,
-        )?);
-    }
-    Ok(vals)
-}
-
-fn normalize_single_row(
-    mut row: Vec<ScalarValue>,
-    schema: &ArrowSchema,
-    strategies: &BTreeMap<String, UpdateMergeStrategy>,
-) -> Result<Vec<ScalarValue>> {
-    for (col_idx, field) in schema.fields().iter().enumerate() {
-        if matches!(
-            strategies.get(field.name()),
-            Some(UpdateMergeStrategy::SetUnion)
-        ) {
-            row[col_idx] = set_union_scalars(
-                &ScalarValue::try_from(field.data_type())?,
-                &row[col_idx],
-                field,
-            )?;
-        }
-    }
-    Ok(clear_origins(row, schema))
-}
-
-fn clear_origins(mut row: Vec<ScalarValue>, schema: &ArrowSchema) -> Vec<ScalarValue> {
-    for (col_idx, field) in schema.fields().iter().enumerate() {
-        let lower = field.name().to_ascii_lowercase();
-        if lower == storage::identity::ORIGIN_FILE {
-            row[col_idx] = ScalarValue::Utf8(None);
-        } else if lower == storage::identity::ORIGIN_ROW {
-            row[col_idx] = ScalarValue::Int64(None);
-        }
-    }
-    row
-}
-
-#[allow(clippy::too_many_arguments)]
-fn merge_row_pair(
-    prior: &[ScalarValue],
-    incoming: &[ScalarValue],
-    schema: &ArrowSchema,
-    key_indices: &[usize],
-    order_by_index: Option<usize>,
-    strategies: &BTreeMap<String, UpdateMergeStrategy>,
-    supplied_flag_for_col: &BTreeMap<usize, usize>,
-    is_supplied_flag_col: &BTreeSet<usize>,
-) -> Result<Vec<ScalarValue>> {
-    let incoming_wins = match order_by_index {
-        None => true,
-        Some(ob_idx) => {
-            let p_ord = &prior[ob_idx];
-            let i_ord = &incoming[ob_idx];
-            p_ord.is_null() || (!i_ord.is_null() && compare_non_null(i_ord, p_ord).is_ge())
-        }
-    };
-
-    let mut out = prior.to_vec();
-    for &k_idx in key_indices {
-        out[k_idx] = incoming[k_idx].clone();
-    }
-
-    for (col_idx, field) in schema.fields().iter().enumerate() {
-        if key_indices.contains(&col_idx) || is_supplied_flag_col.contains(&col_idx) {
-            continue;
-        }
-        let lower = field.name().to_ascii_lowercase();
-        if lower == storage::identity::ORIGIN_FILE {
-            out[col_idx] = ScalarValue::Utf8(None);
-            continue;
-        }
-        if lower == storage::identity::ORIGIN_ROW {
-            out[col_idx] = ScalarValue::Int64(None);
-            continue;
-        }
-
-        let strategy = strategies
-            .get(field.name())
-            .copied()
-            .unwrap_or(UpdateMergeStrategy::Replace);
-        let p_val = &prior[col_idx];
-        let i_val = &incoming[col_idx];
-        let flag_idx = supplied_flag_for_col.get(&col_idx).copied();
-        let p_supplied =
-            flag_idx.is_none_or(|f_idx| matches!(prior[f_idx], ScalarValue::Boolean(Some(true))));
-        let i_supplied = flag_idx
-            .is_none_or(|f_idx| matches!(incoming[f_idx], ScalarValue::Boolean(Some(true))));
-        let p_present = !p_val.is_null() && p_supplied;
-        let i_present = !i_val.is_null() && i_supplied;
-
-        let (merged_val, picked_incoming) = match strategy {
-            UpdateMergeStrategy::Replace => {
-                if incoming_wins {
-                    (i_val.clone(), true)
-                } else {
-                    (p_val.clone(), false)
-                }
-            }
-            UpdateMergeStrategy::LatestOrBackfill => {
-                if incoming_wins {
-                    if i_present {
-                        (i_val.clone(), true)
-                    } else if p_present || (p_supplied && !i_supplied) {
-                        (p_val.clone(), false)
-                    } else {
-                        (i_val.clone(), true)
-                    }
-                } else if p_present {
-                    (p_val.clone(), false)
-                } else if i_present || (i_supplied && !p_supplied) {
-                    (i_val.clone(), true)
-                } else {
-                    (p_val.clone(), false)
-                }
-            }
-            UpdateMergeStrategy::Min => match (p_present, i_present) {
-                (false, true) => (i_val.clone(), true),
-                (true, false) => (p_val.clone(), false),
-                (false, false) => {
-                    if p_supplied && !i_supplied {
-                        (p_val.clone(), false)
-                    } else {
-                        (i_val.clone(), true)
-                    }
-                }
-                (true, true) => {
-                    if compare_non_null(i_val, p_val).is_lt() {
-                        (i_val.clone(), true)
-                    } else {
-                        (p_val.clone(), false)
-                    }
-                }
-            },
-            UpdateMergeStrategy::Max => match (p_present, i_present) {
-                (false, true) => (i_val.clone(), true),
-                (true, false) => (p_val.clone(), false),
-                (false, false) => {
-                    if p_supplied && !i_supplied {
-                        (p_val.clone(), false)
-                    } else {
-                        (i_val.clone(), true)
-                    }
-                }
-                (true, true) => {
-                    if compare_non_null(i_val, p_val).is_gt() {
-                        (i_val.clone(), true)
-                    } else {
-                        (p_val.clone(), false)
-                    }
-                }
-            },
-            UpdateMergeStrategy::SetUnion => {
-                let unioned = set_union_scalars(p_val, i_val, field)?;
-                (unioned, incoming_wins)
-            }
-        };
-
-        if let Some(f_idx) = flag_idx {
-            let p_flag = matches!(prior[f_idx], ScalarValue::Boolean(Some(true)));
-            let i_flag = matches!(incoming[f_idx], ScalarValue::Boolean(Some(true)));
-            let merged_flag = match strategy {
-                UpdateMergeStrategy::SetUnion => !merged_val.is_null() && (p_flag || i_flag),
-                UpdateMergeStrategy::Replace
-                | UpdateMergeStrategy::LatestOrBackfill
-                | UpdateMergeStrategy::Min
-                | UpdateMergeStrategy::Max => {
-                    if picked_incoming {
-                        i_flag
-                    } else {
-                        p_flag
-                    }
-                }
-            };
-            out[f_idx] = ScalarValue::Boolean(Some(merged_flag));
-        }
-        out[col_idx] = merged_val;
-    }
-
-    Ok(out)
-}
-
-fn set_union_scalars(
-    prior: &ScalarValue,
-    incoming: &ScalarValue,
-    field: &FieldRef,
-) -> Result<ScalarValue> {
-    match field.data_type() {
-        DataType::List(item_field) => {
-            let (p_null, p_items) = extract_list_elements(prior)?;
-            let (i_null, i_items) = extract_list_elements(incoming)?;
-            if p_null && i_null {
-                return Ok(ScalarValue::List(Arc::new(
-                    GenericListArray::<i32>::new_null(item_field.clone(), 1),
-                )));
-            }
-            let deduped = dedup_elements(p_items, i_items);
-            let values_arr = scalars_to_array(deduped, item_field)?;
-            let offsets = OffsetBuffer::from_lengths([values_arr.len()]);
-            let list_arr =
-                GenericListArray::<i32>::try_new(item_field.clone(), offsets, values_arr, None)?;
-            Ok(ScalarValue::List(Arc::new(list_arr)))
-        }
-        DataType::LargeList(item_field) => {
-            let (p_null, p_items) = extract_list_elements(prior)?;
-            let (i_null, i_items) = extract_list_elements(incoming)?;
-            if p_null && i_null {
-                return Ok(ScalarValue::LargeList(Arc::new(
-                    GenericListArray::<i64>::new_null(item_field.clone(), 1),
-                )));
-            }
-            let deduped = dedup_elements(p_items, i_items);
-            let values_arr = scalars_to_array(deduped, item_field)?;
-            let offsets = OffsetBuffer::from_lengths([values_arr.len()]);
-            let list_arr =
-                GenericListArray::<i64>::try_new(item_field.clone(), offsets, values_arr, None)?;
-            Ok(ScalarValue::LargeList(Arc::new(list_arr)))
-        }
-        other => Err(Error::refusal(
-            "invalid_merge",
-            format!("set_union requires a List or LargeList column, found {other:?}"),
-        )),
-    }
-}
-
-fn extract_list_elements(val: &ScalarValue) -> Result<(bool, Vec<ScalarValue>)> {
-    match val {
-        ScalarValue::List(arr) => extract_generic_list_elements(arr.as_ref()),
-        ScalarValue::LargeList(arr) => extract_generic_list_elements(arr.as_ref()),
-        ScalarValue::Null => Ok((true, Vec::new())),
-        other => Err(Error::refusal(
-            "invalid_merge",
-            format!("expected list scalar value in set_union, found {other:?}"),
-        )),
-    }
-}
-
-fn extract_generic_list_elements<O: OffsetSizeTrait>(
-    arr: &GenericListArray<O>,
-) -> Result<(bool, Vec<ScalarValue>)> {
-    if arr.len() == 0 || arr.is_null(0) {
-        return Ok((true, Vec::new()));
-    }
-    let values = arr.value(0);
-    let mut items = Vec::with_capacity(values.len());
-    for i in 0..values.len() {
-        items.push(ScalarValue::try_from_array(values.as_ref(), i)?);
-    }
-    Ok((false, items))
-}
-
-fn dedup_elements(prior: Vec<ScalarValue>, incoming: Vec<ScalarValue>) -> Vec<ScalarValue> {
-    let mut seen: BTreeSet<OrdScalar> = BTreeSet::new();
-    for item in prior.into_iter().chain(incoming) {
-        seen.insert(OrdScalar(item));
-    }
-    seen.into_iter().map(|ord| ord.0).collect()
 }
 
 pub(in crate::engine) fn scalars_to_array(
@@ -804,8 +991,7 @@ pub(in crate::engine) fn coerce_array_to_field(
     }
 }
 
-/// Total ordering wrapper around `ScalarValue` used for deterministic key maps,
-/// `order_by` comparisons, and `SetUnion` element deduplication.
+/// Total ordering wrapper around `ScalarValue` used by custom UDAF accumulators.
 #[derive(Clone, Debug)]
 pub(in crate::engine) struct OrdScalar(pub ScalarValue);
 
@@ -845,42 +1031,17 @@ pub(in crate::engine) fn compare_non_null(a: &ScalarValue, b: &ScalarValue) -> s
     if let Some(ord) = a.partial_cmp(b) {
         return ord;
     }
-    match (a, b) {
-        (ScalarValue::Struct(sa), ScalarValue::Struct(sb)) => {
-            for (ca, cb) in sa.columns().iter().zip(sb.columns().iter()) {
-                let va = ScalarValue::try_from_array(ca.as_ref(), 0).unwrap_or(ScalarValue::Null);
-                let vb = ScalarValue::try_from_array(cb.as_ref(), 0).unwrap_or(ScalarValue::Null);
-                let ord = compare_nulls_first(&va, &vb);
-                if !ord.is_eq() {
-                    return ord;
-                }
-            }
-            sa.num_columns().cmp(&sb.num_columns())
-        }
-        (ScalarValue::List(la), ScalarValue::List(lb)) => {
-            let (_, ea) = extract_generic_list_elements(la.as_ref()).unwrap_or((true, Vec::new()));
-            let (_, eb) = extract_generic_list_elements(lb.as_ref()).unwrap_or((true, Vec::new()));
-            for (va, vb) in ea.iter().zip(eb.iter()) {
-                let ord = compare_nulls_first(va, vb);
-                if !ord.is_eq() {
-                    return ord;
-                }
-            }
-            ea.len().cmp(&eb.len())
-        }
-        (ScalarValue::LargeList(la), ScalarValue::LargeList(lb)) => {
-            let (_, ea) = extract_generic_list_elements(la.as_ref()).unwrap_or((true, Vec::new()));
-            let (_, eb) = extract_generic_list_elements(lb.as_ref()).unwrap_or((true, Vec::new()));
-            for (va, vb) in ea.iter().zip(eb.iter()) {
-                let ord = compare_nulls_first(va, vb);
-                if !ord.is_eq() {
-                    return ord;
-                }
-            }
-            ea.len().cmp(&eb.len())
-        }
-        _ => format!("{a:?}").cmp(&format!("{b:?}")),
+    if a.data_type() == b.data_type()
+        && let Ok(converter) = RowConverter::new(vec![SortField::new(a.data_type())])
+        && let (Ok(arr_a), Ok(arr_b)) = (a.to_array(), b.to_array())
+        && let (Ok(rows_a), Ok(rows_b)) = (
+            converter.convert_columns(&[arr_a]),
+            converter.convert_columns(&[arr_b]),
+        )
+    {
+        return rows_a.row(0).cmp(&rows_b.row(0));
     }
+    a.data_type().to_string().cmp(&b.data_type().to_string())
 }
 
 #[cfg(test)]
@@ -923,9 +1084,6 @@ mod tests {
             .build()
             .unwrap();
 
-        // Build 4 individual 1-row batches (~450 bytes each) so each input batch fits under
-        // `max_batch_bytes = 900`, while a 4-row `batch_rows = 4` merged chunk (~1500 bytes)
-        // exceeds `max_batch_bytes = 900` and must be bisected by `append_bounded_batches`.
         let make_single_row = |id: i64, ts: i64, text: &str| -> RecordBatch {
             RecordBatch::try_new(
                 arrow_schema.clone(),

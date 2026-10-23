@@ -1,11 +1,31 @@
 //! Bounded local source admission fencing for continuous field-group cutover.
+//!
+//! # Dual-Clock Lease Model
+//!
+//! `SourceFence` records carry two expiration timestamps so liveness checks remain
+//! sound across both single-host and shared-catalog multi-worker deployments:
+//!
+//! - **Same-host monotonic deadline (`expires_millis`)**: When the inspecting engine
+//!   shares the fence's `host` instance UUID (`self.host == host`), liveness and
+//!   renewal are evaluated against the process-monotonic clock (`Host::monotonic_millis`).
+//!   This prevents NTP adjustments or wall-clock jumps from prematurely expiring or
+//!   arbitrarily extending a local cutover fence.
+//! - **Cross-process wall-clock deadline (`unix_expires_millis`)**: When a different
+//!   worker process inspects the fence (`self.host != host`):
+//!   - If `owned_catalog` is `true` (single-host mode), a foreign `host` UUID means the
+//!     previous process has exited, so the fence is immediately treated as expired.
+//!   - If `owned_catalog` is `false` (shared catalog across workers), process-monotonic
+//!     clocks are incomparable across hosts, so liveness is evaluated against
+//!     `unix_expires_millis` (`Host::unix_millis`), bounded by `MAX_FENCE_MILLIS`.
 
 use super::*;
+use std::future::Future;
 
 // Cutover may stop new admissions for at most five minutes per generation.
 // Retries reuse that generation without extending its deadline.
 const MAX_FENCE_MILLIS: u64 = 300_000;
 
+/// Durable source admission lease stored in the dataset's catalog lifecycle view.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::engine) struct SourceFence {
@@ -121,17 +141,6 @@ impl Engine {
         .await
     }
 
-    #[cfg(test)]
-    pub(in crate::engine) async fn acquire_source_fence(
-        &self,
-        dataset: &Id,
-        owner: &Id,
-        millis: u64,
-    ) -> Result<SourceFence> {
-        self.acquire_source_fence_guarded(dataset, owner, millis, None)
-            .await
-    }
-
     async fn acquire_source_fence_guarded(
         &self,
         dataset: &Id,
@@ -147,70 +156,64 @@ impl Engine {
         }
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
-        for attempt in 0..4 {
-            let view = self.inner.lifecycle.open(dataset).await?;
-            if let Some(intent) = intent {
-                // Parent termination and fence acquisition share this lock and view.
-                self.check_continuous_fence_owner(&view, intent).await?;
-            }
-            let now = self.inner.host.monotonic_millis()?;
-            let unix_now = worker::Host::unix_millis()?;
-            let previous = self.source_fence(&view).await?;
-            if let Some(fence) = &previous
-                && fence.live_for(
-                    &self.inner.host.instance,
-                    self.inner.owned_catalog,
-                    now,
-                    unix_now,
-                )?
-            {
-                if &fence.owner == owner && fence.host == self.inner.host.instance {
-                    return Ok(fence.clone());
-                }
-                return Err(Error::refusal(
+        self.retry_fence_commit(
+            || {
+                Err(Error::refusal(
                     "source_fenced",
-                    "another continuous cutover owns the source fence; retry after it closes or expires",
-                ));
-            }
-            let epoch = previous
-                .as_ref()
-                .map_or(Some(1), |prev| prev.epoch.checked_add(1))
-                .ok_or_else(|| invalid_fence("source fence epoch overflow"))?;
-            let fence = SourceFence {
-                dataset: dataset.clone(),
-                owner: owner.clone(),
-                token: uuid::Uuid::new_v4().to_string(),
-                host: self.inner.host.instance.clone(),
-                expires_millis: now
-                    .checked_add(millis)
-                    .ok_or_else(|| invalid_fence("source fence monotonic deadline overflow"))?,
-                unix_expires_millis: unix_now
-                    .checked_add(millis)
-                    .ok_or_else(|| invalid_fence("source fence wall-clock deadline overflow"))?,
-                closed: false,
-                epoch,
-            };
-            match self
-                .inner
-                .lifecycle
-                .commit(&view, vec![record("source-fence", &fence)?])
-                .await
-            {
-                Ok(_) => return Ok(fence),
-                Err(error)
-                    if !self.inner.owned_catalog
-                        && attempt < 3
-                        && matches!(
-                            error.code(),
-                            "stale_authority" | "catalog_conflict" | "catalog"
-                        ) => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Err(Error::refusal(
-            "source_fenced",
-            "concurrent source fence modification conflicted; retry after it settles",
-        ))
+                    "concurrent source fence modification conflicted; retry after it settles",
+                ))
+            },
+            || async {
+                let view = self.inner.lifecycle.open(dataset).await?;
+                if let Some(intent) = intent {
+                    // Parent termination and fence acquisition share this lock and view.
+                    self.check_continuous_fence_owner(&view, intent).await?;
+                }
+                let now = self.inner.host.monotonic_millis()?;
+                let unix_now = worker::Host::unix_millis()?;
+                let previous = self.source_fence(&view).await?;
+                if let Some(fence) = &previous
+                    && fence.live_for(
+                        &self.inner.host.instance,
+                        self.inner.owned_catalog,
+                        now,
+                        unix_now,
+                    )?
+                {
+                    if &fence.owner == owner && fence.host == self.inner.host.instance {
+                        return Ok(fence.clone());
+                    }
+                    return Err(Error::refusal(
+                        "source_fenced",
+                        "another continuous cutover owns the source fence; retry after it closes or expires",
+                    ));
+                }
+                let epoch = previous
+                    .as_ref()
+                    .map_or(Some(1), |prev| prev.epoch.checked_add(1))
+                    .ok_or_else(|| invalid_fence("source fence epoch overflow"))?;
+                let fence = SourceFence {
+                    dataset: dataset.clone(),
+                    owner: owner.clone(),
+                    token: uuid::Uuid::new_v4().to_string(),
+                    host: self.inner.host.instance.clone(),
+                    expires_millis: now.checked_add(millis).ok_or_else(|| {
+                        invalid_fence("source fence monotonic deadline overflow")
+                    })?,
+                    unix_expires_millis: unix_now.checked_add(millis).ok_or_else(|| {
+                        invalid_fence("source fence wall-clock deadline overflow")
+                    })?,
+                    closed: false,
+                    epoch,
+                };
+                self.inner
+                    .lifecycle
+                    .commit(&view, vec![record("source-fence", &fence)?])
+                    .await?;
+                Ok(fence)
+            },
+        )
+        .await
     }
 
     /// Checks the exact live fence against the caller's locked selecting view.
@@ -250,22 +253,43 @@ impl Engine {
         validate_record(fence)?;
         let lock = self.lock(&fence.dataset).await;
         let _guard = lock.lock().await;
+        self.retry_fence_commit(
+            || Ok(()),
+            || async {
+                let view = self.inner.lifecycle.open(&fence.dataset).await?;
+                let Some(current) = self.source_fence(&view).await? else {
+                    return Ok(());
+                };
+                if current != *fence
+                    || !current.live(
+                        &self.inner.host.instance,
+                        self.inner.host.monotonic_millis()?,
+                    )?
+                {
+                    return Ok(());
+                }
+                let closed = self.closed_source_fence_record(&view, fence).await?;
+                self.inner
+                    .lifecycle
+                    .commit(&view, vec![closed])
+                    .await
+                    .map(|_| ())
+            },
+        )
+        .await
+    }
+
+    /// Executes up to four optimistic catalog commit attempts when running against a
+    /// shared catalog, retrying transient authority or catalog conflicts.
+    async fn retry_fence_commit<T, E, Step, Fut>(&self, exhausted: E, mut step: Step) -> Result<T>
+    where
+        E: FnOnce() -> Result<T>,
+        Step: FnMut() -> Fut,
+        Fut: Future<Output = Result<T>>,
+    {
         for attempt in 0..4 {
-            let view = self.inner.lifecycle.open(&fence.dataset).await?;
-            let Some(current) = self.source_fence(&view).await? else {
-                return Ok(());
-            };
-            if current != *fence
-                || !current.live(
-                    &self.inner.host.instance,
-                    self.inner.host.monotonic_millis()?,
-                )?
-            {
-                return Ok(());
-            }
-            let closed = self.closed_source_fence_record(&view, fence).await?;
-            match self.inner.lifecycle.commit(&view, vec![closed]).await {
-                Ok(_) => return Ok(()),
+            match step().await {
+                Ok(value) => return Ok(value),
                 Err(error)
                     if !self.inner.owned_catalog
                         && attempt < 3
@@ -276,7 +300,7 @@ impl Engine {
                 Err(error) => return Err(error),
             }
         }
-        Ok(())
+        exhausted()
     }
 }
 
@@ -287,6 +311,18 @@ fn invalid_fence(message: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Engine {
+        pub(in crate::engine) async fn acquire_source_fence(
+            &self,
+            dataset: &Id,
+            owner: &Id,
+            millis: u64,
+        ) -> Result<SourceFence> {
+            self.acquire_source_fence_guarded(dataset, owner, millis, None)
+                .await
+        }
+    }
 
     fn fence() -> SourceFence {
         SourceFence {

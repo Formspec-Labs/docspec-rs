@@ -3,7 +3,17 @@
 use super::*;
 
 mod checks;
-pub(in crate::engine) use checks::Checks;
+pub(in crate::engine) use checks::ScalarOriginChecks;
+
+/// Borrowed source, output group, and compiled field-binding context for scalar verification.
+#[derive(Clone, Copy)]
+pub(in crate::engine) struct ScalarOriginBinding<'a> {
+    pub(in crate::engine) source: &'a TablePin,
+    pub(in crate::engine) group: &'a TablePin,
+    pub(in crate::engine) definition: &'a GroupDefinition,
+    pub(in crate::engine) input_fields: &'a BTreeMap<String, i32>,
+    pub(in crate::engine) native_field_ids: &'a BTreeMap<i32, i32>,
+}
 
 /// The exact declaration compiled for newly computed files.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

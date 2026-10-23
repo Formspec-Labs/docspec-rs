@@ -15,13 +15,19 @@ pub(crate) enum Objects {
 }
 
 impl Objects {
-    pub(crate) fn for_path(path: &str) -> Self {
+    pub(crate) fn try_for_path(path: &str) -> Result<Self> {
         #[cfg(feature = "remote")]
         if let Some(objects) = super::remote::RemoteObjects::for_uri(path) {
-            return Self::Remote(objects);
+            return Ok(Self::Remote(objects));
         }
-        let _ = path;
-        Self::Local
+        if is_remote_uri(path) {
+            return Err(unregistered_remote_uri());
+        }
+        Ok(Self::Local)
+    }
+
+    pub(crate) fn for_path(path: &str) -> Self {
+        Self::try_for_path(path).unwrap_or(Self::Local)
     }
 
     pub(crate) fn file_io(&self) -> iceberg::io::FileIO {
@@ -39,16 +45,14 @@ impl Objects {
         pin: &crate::model::TablePin,
         budget: &crate::budget::Budget,
     ) -> Result<Table> {
+        self.validate_path(&pin.metadata.path)?;
+        for object in &pin.objects {
+            self.validate_path(&object.path)?;
+        }
         match self {
             Self::Local => super::open_pin(pin, budget).await,
             #[cfg(feature = "remote")]
-            Self::Remote(objects) => {
-                self.validate_path(&pin.metadata.path)?;
-                for object in &pin.objects {
-                    self.validate_path(&object.path)?;
-                }
-                super::open_pin_with_io(pin, objects.file_io(), budget).await
-            }
+            Self::Remote(objects) => super::open_pin_with_io(pin, objects.file_io(), budget).await,
         }
     }
 
@@ -136,6 +140,7 @@ impl Objects {
         budget: &crate::budget::Budget,
     ) -> Result<super::SnapshotFiles> {
         if !self.is_remote() {
+            self.validate_path(table.metadata().location())?;
             return super::snapshot_files(table, budget).await;
         }
         let table = self.bind_table(table)?.into_native();
@@ -225,6 +230,7 @@ impl Objects {
         budget: &crate::budget::Budget,
         _resuming: bool,
     ) -> Result<ObjectRef> {
+        self.validate_path(&expected.path)?;
         match self {
             Self::Local => {
                 let expected = expected.clone();
@@ -326,7 +332,13 @@ impl Objects {
     // Remote runtime lifetime begins here, on the currently driven runtime.
     pub(crate) fn bind_table(&self, table: &Table) -> Result<PinTable> {
         match self {
-            Self::Local => Ok(PinTable::local(table)),
+            Self::Local => {
+                self.validate_path(table.metadata().location())?;
+                if let Some(location) = table.metadata_location() {
+                    self.validate_path(location)?;
+                }
+                Ok(PinTable::local(table))
+            }
             #[cfg(feature = "remote")]
             Self::Remote(objects) => PinTable::remote(
                 table.identifier().clone(),
@@ -344,6 +356,7 @@ impl Objects {
         bytes: Vec<u8>,
         _handle: &tokio::runtime::Handle,
     ) -> Result<()> {
+        self.validate_path(path)?;
         match self {
             Self::Local => super::write_new(Path::new(path), &bytes),
             #[cfg(feature = "remote")]
@@ -416,6 +429,7 @@ impl Objects {
         _handle: &tokio::runtime::Handle,
         allow_absence: bool,
     ) -> Result<bool> {
+        self.validate_path(&expected.path)?;
         let corrupt = || {
             Error::refusal(
                 "corrupt_object",
@@ -471,11 +485,12 @@ impl Objects {
         }
     }
 
-    pub(super) fn validate_path(&self, _path: &str) -> Result<()> {
+    pub(super) fn validate_path(&self, path: &str) -> Result<()> {
         match self {
+            Self::Local if is_remote_uri(path) => Err(unregistered_remote_uri()),
             Self::Local => Ok(()),
             #[cfg(feature = "remote")]
-            Self::Remote(objects) => objects.validate_path(_path),
+            Self::Remote(objects) => objects.validate_path(path),
         }
     }
 
@@ -488,6 +503,7 @@ impl Objects {
     }
 
     pub(super) fn pin_root(&self, location: &str) -> Result<PinRoot> {
+        self.validate_path(location)?;
         match self {
             Self::Local => Ok(PinRoot::Local(std::fs::canonicalize(location)?)),
             #[cfg(feature = "remote")]
@@ -500,6 +516,7 @@ impl Objects {
         expected: &ObjectRef,
         _handle: &tokio::runtime::Handle,
     ) -> Result<()> {
+        self.validate_path(&expected.path)?;
         match self {
             Self::Local => super::check_object_available(expected),
             #[cfg(feature = "remote")]
@@ -513,6 +530,7 @@ impl Objects {
         path: &str,
         _handle: &tokio::runtime::Handle,
     ) -> Result<ObjectRef> {
+        self.validate_path(path)?;
         match self {
             Self::Local => super::object(owner, Path::new(path)),
             #[cfg(feature = "remote")]
@@ -652,5 +670,63 @@ pub(crate) fn valid_object_locator(path: &str) -> bool {
     {
         let _ = path;
         false
+    }
+}
+
+pub(crate) fn is_remote_uri(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    ["s3://", "gs://", "az://", "http://", "https://"]
+        .iter()
+        .any(|scheme| {
+            bytes
+                .get(..scheme.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme.as_bytes()))
+        })
+}
+
+pub(crate) fn unregistered_remote_uri() -> Error {
+    Error::refusal(
+        "remote_scope",
+        "remote URI is not registered with a configured owned prefix",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::{Budget, Limits};
+
+    #[tokio::test]
+    async fn unregistered_remote_uris_fail_fast_with_remote_scope() {
+        let budget = Budget::new(Limits::default()).unwrap();
+        let owner = Id::new("owner").unwrap();
+        for uri in [
+            "s3://unregistered-bucket/prefix/metadata.json",
+            "gs://bucket/prefix/metadata.json",
+            "az://container/prefix/metadata.json",
+            "http://127.0.0.1:9000/bucket/metadata.json",
+            "https://s3.amazonaws.com/bucket/metadata.json",
+        ] {
+            assert_eq!(
+                Objects::try_for_path(uri).unwrap_err().code(),
+                "remote_scope",
+                "{uri}"
+            );
+            let objects = Objects::for_path(uri);
+            assert_eq!(
+                objects.validate_retained_path(uri).unwrap_err().code(),
+                "remote_scope",
+                "{uri}"
+            );
+            assert_eq!(
+                objects
+                    .identify(&owner, uri, &budget)
+                    .await
+                    .unwrap_err()
+                    .code(),
+                "remote_scope",
+                "{uri}"
+            );
+        }
     }
 }

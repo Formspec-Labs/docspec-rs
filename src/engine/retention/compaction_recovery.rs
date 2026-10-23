@@ -233,38 +233,35 @@ impl Engine {
             reason.to_owned(),
         );
         self.admit_work(memory, move |engine| async move {
-            engine.retirement_catalog()?;
-            if reason.trim().is_empty() {
-                return Err(invalid_retirement());
-            }
-            let lock = engine.lock(&dataset).await;
-            let _guard = lock.lock().await;
-            let view = engine.inner.lifecycle.open(&dataset).await?;
-            let rows = engine.inner.lifecycle.rows(&view).await?;
-            let key = format!("compaction-request/{operation}");
-            if let Some(revision) = rows.revision(&key)
-                && record_retired(&rows, &view, &key, revision, &engine.inner.lifecycle.budget)?
-            {
-                return Err(Error::refusal(
-                    "compaction_retired",
-                    "compaction recovery is already retired",
-                ));
-            }
-            let records = collect(
-                &rows,
-                &view,
-                &operation,
-                &engine.inner.root,
-                &engine.inner.lifecycle.budget,
-            )?;
-            retirement::plan(
-                &view,
-                dataset,
-                retirement,
-                RetirementScope::CompactionRecovery { operation },
-                reason,
-                records,
-            )
+            let scope = RetirementScope::CompactionRecovery {
+                operation: operation.clone(),
+            };
+            engine
+                .plan_retirement_in(dataset, retirement, scope, reason, |engine, view, rows| {
+                    let key = format!("compaction-request/{operation}");
+                    if let Some(revision) = rows.revision(&key)
+                        && record_retired(
+                            rows,
+                            view,
+                            &key,
+                            revision,
+                            &engine.inner.lifecycle.budget,
+                        )?
+                    {
+                        return Err(Error::refusal(
+                            "compaction_retired",
+                            "compaction recovery is already retired",
+                        ));
+                    }
+                    collect(
+                        rows,
+                        view,
+                        &operation,
+                        &engine.inner.root,
+                        &engine.inner.lifecycle.budget,
+                    )
+                })
+                .await
         })
         .await
     }

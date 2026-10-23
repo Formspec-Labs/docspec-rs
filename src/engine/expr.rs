@@ -5,7 +5,15 @@ use crate::model::{
     AggregateFunction, AggregateTransform, BinaryOp, ComparisonOp, JoinSide, JoinTransform,
     LiteralValue, Predicate, ScalarExpr,
 };
-use arrow::datatypes::Schema as ArrowSchema;
+use arrow::datatypes::{DataType, Schema as ArrowSchema};
+use datafusion::{
+    common::{
+        DFSchema, ScalarValue,
+        tree_node::{TreeNode, TreeNodeRecursion},
+    },
+    execution::{FunctionRegistry, context::SessionContext},
+    logical_expr::{BinaryExpr, Case, Expr, Operator, Volatility, col, lit},
+};
 use std::collections::{BTreeMap, BTreeSet};
 use write::identifier as quote;
 
@@ -87,17 +95,20 @@ pub(super) fn validate_scalar_expr(expr: &ScalarExpr) -> Result<()> {
             }
             Ok(())
         }
-        ScalarExpr::Coalesce { exprs } => {
+        ScalarExpr::Coalesce { exprs } | ScalarExpr::Concat { exprs } => {
             if exprs.is_empty() {
                 return Err(Error::refusal(
                     "invalid_refresh",
-                    "coalesce expression requires at least one argument",
+                    "coalesce/concat expression requires at least one argument",
                 ));
             }
             for item in exprs {
                 validate_scalar_expr(item)?;
             }
             Ok(())
+        }
+        ScalarExpr::Lower { expr } | ScalarExpr::Upper { expr } | ScalarExpr::Trim { expr } => {
+            validate_scalar_expr(expr)
         }
         ScalarExpr::Binary { left, right, .. } => {
             validate_scalar_expr(left)?;
@@ -256,11 +267,14 @@ pub(super) fn collect_scalar_refs(expr: &ScalarExpr, out: &mut BTreeSet<String>)
             Ok(())
         }
         ScalarExpr::Literal { .. } => Ok(()),
-        ScalarExpr::Coalesce { exprs } => {
+        ScalarExpr::Coalesce { exprs } | ScalarExpr::Concat { exprs } => {
             for e in exprs {
                 collect_scalar_refs(e, out)?;
             }
             Ok(())
+        }
+        ScalarExpr::Lower { expr } | ScalarExpr::Upper { expr } | ScalarExpr::Trim { expr } => {
+            collect_scalar_refs(expr, out)
         }
         ScalarExpr::Binary { left, right, .. } => {
             collect_scalar_refs(left, out)?;
@@ -349,6 +363,25 @@ where
                 .map(|e| render_scalar_with_resolver(e, resolve))
                 .collect::<Result<Vec<_>>>()?;
             Ok(format!("COALESCE({})", args.join(", ")))
+        }
+        ScalarExpr::Concat { exprs } => {
+            let args = exprs
+                .iter()
+                .map(|e| render_scalar_with_resolver(e, resolve))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(format!("CONCAT({})", args.join(", ")))
+        }
+        ScalarExpr::Lower { expr } => {
+            let inner = render_scalar_with_resolver(expr, resolve)?;
+            Ok(format!("LOWER({inner})"))
+        }
+        ScalarExpr::Upper { expr } => {
+            let inner = render_scalar_with_resolver(expr, resolve)?;
+            Ok(format!("UPPER({inner})"))
+        }
+        ScalarExpr::Trim { expr } => {
+            let inner = render_scalar_with_resolver(expr, resolve)?;
+            Ok(format!("TRIM({inner})"))
         }
         ScalarExpr::Binary { left, op, right } => {
             let l = render_scalar_with_resolver(left, resolve)?;
@@ -970,4 +1003,320 @@ fn flatten_and<'a>(pred: &'a Predicate, out: &mut Vec<&'a Predicate>) {
     } else {
         out.push(pred);
     }
+}
+
+fn scalar_column_hint(s: &ScalarExpr) -> Option<&str> {
+    if let ScalarExpr::Column { field } = s {
+        Some(field.as_str())
+    } else {
+        None
+    }
+}
+
+/// Compiles a canonical `Predicate` into a validated row-local DataFusion `Expr`.
+pub(super) fn compile_df_predicate(
+    context: &SessionContext,
+    df_schema: &DFSchema,
+    predicate: &Predicate,
+) -> Result<Expr> {
+    let compile_bin = |left: &ScalarExpr, right: &ScalarExpr, op: Operator| -> Result<Expr> {
+        let l_hint = scalar_column_hint(left);
+        let r_hint = scalar_column_hint(right);
+        let l_expr = compile_df_scalar_expr_with_hint(context, df_schema, left, r_hint)?;
+        let r_expr = compile_df_scalar_expr_with_hint(context, df_schema, right, l_hint)?;
+        Ok(Expr::BinaryExpr(BinaryExpr::new(
+            Box::new(l_expr),
+            op,
+            Box::new(r_expr),
+        )))
+    };
+
+    let expr = match predicate {
+        Predicate::Sql { expr } => context.parse_sql_expr(expr, df_schema)?,
+        Predicate::Comparison { left, op, right } => {
+            let df_op = match op {
+                ComparisonOp::Eq => Operator::Eq,
+                ComparisonOp::NotEq => Operator::NotEq,
+                ComparisonOp::Lt => Operator::Lt,
+                ComparisonOp::LtEq => Operator::LtEq,
+                ComparisonOp::Gt => Operator::Gt,
+                ComparisonOp::GtEq => Operator::GtEq,
+            };
+            compile_bin(left, right, df_op)?
+        }
+        Predicate::Eq { left, right } => compile_bin(left, right, Operator::Eq)?,
+        Predicate::NotEq { left, right } => compile_bin(left, right, Operator::NotEq)?,
+        Predicate::Lt { left, right } => compile_bin(left, right, Operator::Lt)?,
+        Predicate::LtEq { left, right } => compile_bin(left, right, Operator::LtEq)?,
+        Predicate::Gt { left, right } => compile_bin(left, right, Operator::Gt)?,
+        Predicate::GtEq { left, right } => compile_bin(left, right, Operator::GtEq)?,
+        Predicate::IsNull { expr } => compile_df_scalar_expr(context, df_schema, expr)?.is_null(),
+        Predicate::IsNotNull { expr } => {
+            compile_df_scalar_expr(context, df_schema, expr)?.is_not_null()
+        }
+        Predicate::InList {
+            expr,
+            list,
+            negated,
+        } => {
+            let col_hint = scalar_column_hint(expr);
+            let target = compile_df_scalar_expr(context, df_schema, expr)?;
+            let items = list
+                .iter()
+                .map(|v| compile_df_scalar_expr_with_hint(context, df_schema, v, col_hint))
+                .collect::<Result<Vec<_>>>()?;
+            target.in_list(items, *negated)
+        }
+        Predicate::And { exprs } => {
+            let mut iter = exprs.iter();
+            let Some(first) = iter.next() else {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "AND predicate requires at least one branch",
+                ));
+            };
+            let mut acc = compile_df_predicate(context, df_schema, first)?;
+            for next in iter {
+                acc = acc.and(compile_df_predicate(context, df_schema, next)?);
+            }
+            acc
+        }
+        Predicate::Or { exprs } => {
+            let mut iter = exprs.iter();
+            let Some(first) = iter.next() else {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "OR predicate requires at least one branch",
+                ));
+            };
+            let mut acc = compile_df_predicate(context, df_schema, first)?;
+            for next in iter {
+                acc = acc.or(compile_df_predicate(context, df_schema, next)?);
+            }
+            acc
+        }
+        Predicate::Not { expr } => {
+            let inner = compile_df_predicate(context, df_schema, expr)?;
+            Expr::Not(Box::new(inner))
+        }
+    };
+    validate_export_df_expr(&expr)?;
+    Ok(expr)
+}
+
+/// Compiles a canonical `ScalarExpr` into a validated row-local DataFusion `Expr`.
+pub(super) fn compile_df_scalar_expr(
+    context: &SessionContext,
+    df_schema: &DFSchema,
+    scalar: &ScalarExpr,
+) -> Result<Expr> {
+    compile_df_scalar_expr_with_hint(context, df_schema, scalar, None)
+}
+
+pub(super) fn compile_df_scalar_expr_with_hint(
+    context: &SessionContext,
+    df_schema: &DFSchema,
+    scalar: &ScalarExpr,
+    column_hint: Option<&str>,
+) -> Result<Expr> {
+    let expr = match scalar {
+        ScalarExpr::Sql { expr } => context.parse_sql_expr(expr, df_schema)?,
+        ScalarExpr::Column { field } => col(quote(field)),
+        ScalarExpr::Literal { value } => literal_to_df_expr(df_schema, column_hint, value)?,
+        ScalarExpr::Case {
+            when_then,
+            else_expr,
+        } => {
+            if when_then.is_empty() {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "CASE expression requires at least one WHEN branch",
+                ));
+            }
+            let mut when_then_expr = Vec::with_capacity(when_then.len());
+            for branch in when_then {
+                let w = compile_df_predicate(context, df_schema, &branch.when)?;
+                let t = compile_df_scalar_expr_with_hint(
+                    context,
+                    df_schema,
+                    &branch.then,
+                    column_hint,
+                )?;
+                when_then_expr.push((Box::new(w), Box::new(t)));
+            }
+            let else_box = match else_expr {
+                Some(e) => Some(Box::new(compile_df_scalar_expr_with_hint(
+                    context,
+                    df_schema,
+                    e,
+                    column_hint,
+                )?)),
+                None => Some(Box::new(literal_to_df_expr(
+                    df_schema,
+                    column_hint,
+                    &LiteralValue::Null,
+                )?)),
+            };
+            Expr::Case(Case::new(None, when_then_expr, else_box))
+        }
+        ScalarExpr::Coalesce { exprs } => {
+            if exprs.is_empty() {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "COALESCE expression requires at least one argument",
+                ));
+            }
+            let args = exprs
+                .iter()
+                .map(|e| compile_df_scalar_expr_with_hint(context, df_schema, e, column_hint))
+                .collect::<Result<Vec<_>>>()?;
+            context.udf("coalesce")?.call(args)
+        }
+        ScalarExpr::Concat { exprs } => {
+            if exprs.is_empty() {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "CONCAT expression requires at least one argument",
+                ));
+            }
+            let args = exprs
+                .iter()
+                .map(|e| compile_df_scalar_expr_with_hint(context, df_schema, e, column_hint))
+                .collect::<Result<Vec<_>>>()?;
+            context.udf("concat")?.call(args)
+        }
+        ScalarExpr::Lower { expr } => {
+            let inner = compile_df_scalar_expr_with_hint(context, df_schema, expr, column_hint)?;
+            context.udf("lower")?.call(vec![inner])
+        }
+        ScalarExpr::Upper { expr } => {
+            let inner = compile_df_scalar_expr_with_hint(context, df_schema, expr, column_hint)?;
+            context.udf("upper")?.call(vec![inner])
+        }
+        ScalarExpr::Trim { expr } => {
+            let inner = compile_df_scalar_expr_with_hint(context, df_schema, expr, column_hint)?;
+            context.udf("trim")?.call(vec![inner])
+        }
+        ScalarExpr::Binary { left, op, right } => {
+            let l_hint = scalar_column_hint(left);
+            let r_hint = scalar_column_hint(right);
+            let l_expr = compile_df_scalar_expr_with_hint(context, df_schema, left, r_hint)?;
+            let r_expr = compile_df_scalar_expr_with_hint(context, df_schema, right, l_hint)?;
+            let df_op = match op {
+                BinaryOp::Add => Operator::Plus,
+                BinaryOp::Subtract => Operator::Minus,
+                BinaryOp::Multiply => Operator::Multiply,
+                BinaryOp::Divide => Operator::Divide,
+                BinaryOp::Modulo => Operator::Modulo,
+                BinaryOp::Concat => Operator::StringConcat,
+            };
+            Expr::BinaryExpr(BinaryExpr::new(Box::new(l_expr), df_op, Box::new(r_expr)))
+        }
+        ScalarExpr::Cast { expr, data_type } => {
+            let inner = render_scalar_with_resolver(expr, &|c| Ok(quote(c)))?;
+            context.parse_sql_expr(&format!("CAST({inner} AS {data_type})"), df_schema)?
+        }
+        ScalarExpr::Predicate { predicate } => compile_df_predicate(context, df_schema, predicate)?,
+    };
+    validate_export_df_expr(&expr)?;
+    Ok(expr)
+}
+
+fn literal_to_df_expr(
+    df_schema: &DFSchema,
+    column_hint: Option<&str>,
+    value: &LiteralValue,
+) -> Result<Expr> {
+    match value {
+        LiteralValue::Null => {
+            if let Some(col_name) = column_hint
+                && let Ok(field) = df_schema.field_with_unqualified_name(col_name)
+                && let Ok(sv) = ScalarValue::try_from(field.data_type())
+            {
+                return Ok(lit(sv));
+            }
+            Ok(lit(ScalarValue::Utf8(None)))
+        }
+        LiteralValue::Bool(b) => Ok(lit(*b)),
+        LiteralValue::Int64(i) => {
+            if let Some(col_name) = column_hint
+                && let Ok(field) = df_schema.field_with_unqualified_name(col_name)
+                && matches!(field.data_type(), DataType::Int32)
+                && let Ok(i32_val) = i32::try_from(*i)
+            {
+                return Ok(lit(i32_val));
+            }
+            Ok(lit(*i))
+        }
+        LiteralValue::Float64(f) => {
+            if !f.is_finite() {
+                return Err(Error::refusal(
+                    "invalid_export",
+                    "non-finite float literal in export expression",
+                ));
+            }
+            Ok(lit(*f))
+        }
+        LiteralValue::String(s) => Ok(lit(s.clone())),
+    }
+}
+
+fn validate_export_df_expr(expr: &Expr) -> Result<()> {
+    let mut bad_disclosure = false;
+    let mut bad_nonlocal = false;
+    let _ = expr.apply(|part| {
+        if let Expr::Column(column) = part
+            && (storage::identity::hidden(&column.name)
+                || column.name.to_ascii_lowercase().starts_with("__docspec_"))
+        {
+            bad_disclosure = true;
+            return Ok(TreeNodeRecursion::Stop);
+        }
+        let allowed = match part {
+            Expr::Alias(_)
+            | Expr::Column(_)
+            | Expr::Literal(_, _)
+            | Expr::BinaryExpr(_)
+            | Expr::Like(_)
+            | Expr::SimilarTo(_)
+            | Expr::Not(_)
+            | Expr::Negative(_)
+            | Expr::IsNull(_)
+            | Expr::IsNotNull(_)
+            | Expr::IsTrue(_)
+            | Expr::IsFalse(_)
+            | Expr::IsUnknown(_)
+            | Expr::IsNotTrue(_)
+            | Expr::IsNotFalse(_)
+            | Expr::IsNotUnknown(_)
+            | Expr::Between(_)
+            | Expr::Case(_)
+            | Expr::Cast(_)
+            | Expr::TryCast(_)
+            | Expr::InList(_) => true,
+            Expr::ScalarFunction(func) => {
+                func.func.signature().volatility == Volatility::Immutable
+                    && func.func.name() != "arrow_metadata"
+            }
+            _ => false,
+        };
+        if !allowed {
+            bad_nonlocal = true;
+            return Ok(TreeNodeRecursion::Stop);
+        }
+        Ok(TreeNodeRecursion::Continue)
+    });
+    if bad_disclosure {
+        return Err(Error::refusal(
+            "export_disclosure",
+            "internal occurrence and evidence fields cannot be referenced in export expressions",
+        ));
+    }
+    if bad_nonlocal {
+        return Err(Error::refusal(
+            "invalid_export",
+            "export expressions must be row-local and immutable",
+        ));
+    }
+    Ok(())
 }

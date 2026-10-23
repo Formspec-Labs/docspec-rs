@@ -249,7 +249,6 @@ pub(crate) fn fresh_metadata_at(schema: Schema, location: &str) -> Result<TableM
     fresh_partitioned_metadata_at(&schema, location, UnboundPartitionSpec::builder().build())
 }
 
-#[allow(dead_code)]
 pub(crate) fn fresh_partitioned_metadata(
     schema: &Schema,
     directory: &Path,
@@ -553,7 +552,7 @@ pub(super) fn sync_candidate_parent(expected: &crate::model::ObjectRef) -> Resul
     let parent = Path::new(&expected.path)
         .parent()
         .ok_or_else(|| Error::refusal("metadata_location", "candidate metadata needs a parent"))?;
-    std::fs::File::open(parent)?.sync_all()?;
+    super::sync_directory(parent)?;
     Ok(())
 }
 

@@ -12,8 +12,12 @@ use iceberg::{
 };
 
 pub(super) mod build;
+mod compaction;
 pub(super) mod merge;
 mod verification;
+pub(super) use super::sql_validation::{
+    check_build_arrow_schema, check_build_fields, is_identity_source_projection, plan_build_input,
+};
 pub(super) use verification::verify_update;
 
 pub(super) struct Prepared {
@@ -82,152 +86,103 @@ async fn open_captured_source_with_objects(
     Ok(native)
 }
 
-pub(super) fn check_build_arrow_schema(schema: &arrow::datatypes::Schema) -> Result<()> {
-    if schema.fields().iter().any(|f| {
-        f.name()
-            .to_ascii_lowercase()
-            .starts_with(storage::defaults::SUPPLIED_PREFIX)
-            || storage::identity::hidden(&f.name().to_ascii_lowercase())
-    }) {
+pub(super) async fn normalize_replacement_input(
+    context: &SessionContext,
+    native: &Table,
+    keys: &[String],
+    budget: &Budget,
+) -> Result<DataFrame> {
+    let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
+    let mut replacement =
+        coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
+    if storage::defaults::has_supplied(native.metadata().current_schema())
+        || storage::identity::has_origins(native.metadata().current_schema())?
+    {
+        replacement = schema::normalize(
+            replacement,
+            native.metadata().current_schema(),
+            keys,
+            budget,
+        )
+        .await?;
+    }
+    if !same_fields(&schema, replacement.schema().as_arrow())? {
         return Err(Error::refusal(
-            "reserved_field",
-            "supplied-state columns require an evolved source schema",
+            "schema_mismatch",
+            "replacement rows must match the base field names, types and nullability",
         ));
     }
-    Ok(())
+    Ok(replacement)
 }
 
-fn check_build_fields(frame: &DataFrame) -> Result<()> {
-    check_build_arrow_schema(frame.schema().as_arrow())
-}
-
-pub(super) async fn build_query(context: &SessionContext, sql: &str) -> Result<DataFrame> {
-    let options = datafusion::execution::context::SQLOptions::new()
-        .with_allow_ddl(false)
-        .with_allow_dml(false)
-        .with_allow_statements(false);
-    let dataframe = context.sql_with_options(sql, options).await?;
-    validate_plan(dataframe.logical_plan())?;
-    Ok(dataframe)
-}
-
-/// Returns `true` when `sql` is a pure identity projection over `input`
-/// (`SELECT * FROM input` or `SELECT c1, c2, ... FROM input` matching `input_schema`
-/// fields in exact order with no filtering, grouping, ordering, aliasing, or expressions).
-pub fn is_identity_source_projection(sql: &str, input_schema: &arrow::datatypes::Schema) -> bool {
-    use datafusion::sql::sqlparser::{
-        ast::{Expr, GroupByExpr, ObjectNamePart, SelectItem, SetExpr, Statement, TableFactor},
-        dialect::GenericDialect,
-        parser::Parser,
+pub(super) async fn build_update_scope(
+    context: &SessionContext,
+    replacement: &DataFrame,
+    spec: &UpdateSpec,
+    schema: &arrow::datatypes::Schema,
+) -> Result<DataFrame> {
+    let key_columns = || {
+        spec.keys
+            .iter()
+            .map(|key| col(datafusion::common::Column::from_name(key)))
+            .collect::<Vec<_>>()
     };
-    let Ok(statements) = Parser::parse_sql(&GenericDialect {}, sql) else {
-        return false;
-    };
-    if statements.len() != 1 {
-        return false;
-    }
-    let Statement::Query(query) = &statements[0] else {
-        return false;
-    };
-    if query.with.is_some()
-        || query.order_by.is_some()
-        || query.limit_clause.is_some()
-        || query.fetch.is_some()
-        || !query.locks.is_empty()
-        || query.for_clause.is_some()
-        || query.settings.is_some()
-        || query.format_clause.is_some()
-    {
-        return false;
-    }
-    let SetExpr::Select(select) = query.body.as_ref() else {
-        return false;
-    };
-    if select.distinct.is_some()
-        || select.top.is_some()
-        || select.into.is_some()
-        || select.selection.is_some()
-        || !matches!(
-            &select.group_by,
-            GroupByExpr::Expressions(exprs, modifiers) if exprs.is_empty() && modifiers.is_empty()
-        )
-        || !select.cluster_by.is_empty()
-        || !select.distribute_by.is_empty()
-        || !select.sort_by.is_empty()
-        || select.having.is_some()
-        || !select.named_window.is_empty()
-        || select.qualify.is_some()
-        || select.prewhere.is_some()
-        || select.value_table_mode.is_some()
-        || !select.lateral_views.is_empty()
-        || !select.connect_by.is_empty()
-        || select.from.len() != 1
-    {
-        return false;
-    }
-    let table_with_joins = &select.from[0];
-    if !table_with_joins.joins.is_empty() {
-        return false;
-    }
-    let TableFactor::Table {
-        name,
-        alias: None,
-        args: None,
-        with_hints,
-        version: None,
-        with_ordinality: false,
-        partitions,
-        json_path: None,
-        sample: None,
-        index_hints,
-    } = &table_with_joins.relation
-    else {
-        return false;
-    };
-    if !with_hints.is_empty()
-        || !partitions.is_empty()
-        || !index_hints.is_empty()
-        || name.0.len() != 1
-    {
-        return false;
-    }
-    let ObjectNamePart::Identifier(table_ident) = &name.0[0] else {
-        return false;
-    };
-    let is_input_table = if table_ident.quote_style.is_some() {
-        table_ident.value == "input"
-    } else {
-        table_ident.value.eq_ignore_ascii_case("input")
-    };
-    if !is_input_table {
-        return false;
-    }
-    if select.projection.len() == 1
-        && let SelectItem::Wildcard(options) = &select.projection[0]
-    {
-        return options.opt_ilike.is_none()
-            && options.opt_exclude.is_none()
-            && options.opt_except.is_none()
-            && options.opt_replace.is_none()
-            && options.opt_rename.is_none();
-    }
-    if select.projection.len() != input_schema.fields().len() {
-        return false;
-    }
-    select
-        .projection
-        .iter()
-        .zip(input_schema.fields().iter())
-        .all(|(item, field)| match item {
-            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
-                if ident.quote_style.is_some() {
-                    ident.value == *field.name()
-                } else {
-                    ident.value.eq_ignore_ascii_case(field.name()) && ident.value == *field.name()
-                }
+    let mut scope = replacement.clone().select(key_columns())?.distinct()?;
+    if spec.deletions.is_some() {
+        let deletions = coerce_dataframe_for_schema(context.table("deletions").await?, schema)?;
+        context.deregister_table("deletions")?;
+        context.register_table("deletions", deletions.clone().into_view())?;
+        let expected_keys = spec
+            .keys
+            .iter()
+            .map(|key| {
+                schema
+                    .field_with_name(key)
+                    .map(|field| field.clone().with_nullable(true))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let supplied_keys = spec
+            .keys
+            .iter()
+            .map(|key| {
+                deletions
+                    .schema()
+                    .as_arrow()
+                    .field_with_name(key)
+                    .ok()
+                    .map(|field| field.clone().with_nullable(true))
+            })
+            .collect::<Option<Vec<_>>>();
+        if deletions.schema().fields().len() != spec.keys.len()
+            || match supplied_keys {
+                Some(fields) => !same_fields(
+                    &arrow::datatypes::Schema::new(expected_keys),
+                    &arrow::datatypes::Schema::new(fields),
+                )?,
+                None => true,
             }
-            _ => false,
-        })
+        {
+            return Err(Error::refusal(
+                "schema_mismatch",
+                "deletion rows must contain exactly the typed key fields",
+            ));
+        }
+        if any_rows(key_join(
+            replacement.clone(),
+            deletions.clone(),
+            &spec.keys,
+            datafusion::logical_expr::JoinType::Inner,
+        )?)
+        .await?
+        {
+            return Err(Error::refusal(
+                "conflicting_update",
+                "replacement and deletion keys overlap",
+            ));
+        }
+        scope = scope.union(deletions.select(key_columns())?)?.distinct()?;
+    }
+    Ok(scope)
 }
 
 impl Engine {
@@ -258,21 +213,6 @@ impl Engine {
             &self.inner.lifecycle.budget,
             shared,
             known_files,
-        )
-        .await
-    }
-
-    #[cfg(test)]
-    pub(super) async fn create_output(
-        &self,
-        dataset: &Id,
-        directory: &Path,
-        schema: Schema,
-    ) -> Result<Table> {
-        self.create_output_at(
-            dataset,
-            &locations::Location::Local(directory.to_owned()),
-            schema,
         )
         .await
     }
@@ -309,20 +249,6 @@ impl Engine {
             let unbound = storage::build_unbound_partition_spec(&schema, &partition_by)?;
             storage::fresh_partitioned_metadata(&schema, &directory, unbound)
         })
-        .await
-    }
-
-    pub(super) async fn replacement_output(
-        &self,
-        dataset: &Id,
-        directory: &Path,
-        source: &Table,
-    ) -> Result<Table> {
-        self.replacement_output_at(
-            dataset,
-            &locations::Location::Local(directory.to_owned()),
-            source,
-        )
         .await
     }
 
@@ -367,22 +293,14 @@ impl Engine {
         directory: &'a Path,
         admission: &'a PhaseResult,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let input = admission.outputs.first().ok_or_else(|| {
                 Error::refusal("corrupt_phase", "admission has no retained input")
             })?;
             let context = self.context();
-            context
-                .register_parquet("input", &input.path, ParquetReadOptions::default())
-                .await?;
-            let input_df = context.table("input").await?;
-            let dataframe =
-                if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {
-                    validate_plan(input_df.logical_plan())?;
-                    input_df
-                } else {
-                    build_query(&context, &spec.sql).await?
-                };
+            let dataframe = plan_build_input(&context, &input.path, &spec.sql).await?;
+            let local_location = locations::Location::Local(directory.to_owned());
             if let Some(base) = &spec.base {
                 let release = self.release_admitted(&spec.dataset, base).await?;
                 let native = storage::open_pin(
@@ -410,7 +328,7 @@ impl Engine {
                 )
                 .await?;
                 let table = self
-                    .replacement_output(&spec.dataset, directory, &native)
+                    .replacement_output_at(&spec.dataset, &local_location, &native)
                     .await?;
                 let mut prepared = self.write_output(&spec.dataset, table, dataframe).await?;
                 prepared.schema_input = Some(release.dataset.groups["source"].metadata.clone());
@@ -426,22 +344,9 @@ impl Engine {
                     .await?;
                 return self.write_output(&spec.dataset, table, dataframe).await;
             }
-            self.write_frame(&spec.dataset, directory, dataframe).await
+            self.write_frame_at(&spec.dataset, &local_location, dataframe)
+                .await
         })
-    }
-
-    pub(super) async fn write_frame(
-        &self,
-        dataset: &Id,
-        directory: &Path,
-        dataframe: DataFrame,
-    ) -> Result<Prepared> {
-        self.write_frame_at(
-            dataset,
-            &locations::Location::Local(directory.to_owned()),
-            dataframe,
-        )
-        .await
     }
 
     pub(super) async fn write_frame_at(
@@ -511,6 +416,7 @@ impl Engine {
         admission: &'a PhaseResult,
         captured_source: Option<&'a TablePin>,
     ) -> futures::future::BoxFuture<'a, Result<Prepared>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let base = self.release_admitted(&spec.dataset, &spec.base).await?;
             let canonical_before = base
@@ -579,27 +485,15 @@ impl Engine {
             }
             let schema =
                 iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;
-            let mut replacement =
-                coerce_dataframe_for_schema(context.table("replacements").await?, &schema)?;
-            if storage::defaults::has_supplied(native.metadata().current_schema())
-                || storage::identity::has_origins(native.metadata().current_schema())?
-            {
-                replacement = schema::normalize(
-                    replacement,
-                    native.metadata().current_schema(),
-                    &spec.keys,
-                    &self.inner.lifecycle.budget,
-                )
-                .await?;
-            }
+            let replacement = normalize_replacement_input(
+                &context,
+                &native,
+                &spec.keys,
+                &self.inner.lifecycle.budget,
+            )
+            .await?;
             context.deregister_table("replacements")?;
             context.register_table("replacements", replacement.clone().into_view())?;
-            if !same_fields(&schema, replacement.schema().as_arrow())? {
-                return Err(Error::refusal(
-                    "schema_mismatch",
-                    "replacement rows must match the base field names, types and nullability",
-                ));
-            }
             let mut field_ids = Vec::new();
             for key in &spec.keys {
                 let field = native
@@ -614,74 +508,7 @@ impl Engine {
             if let Some(merge_spec) = &spec.merge {
                 merge::validate(merge_spec, native.metadata().current_schema(), &spec.keys)?;
             }
-            let keys = spec
-                .keys
-                .iter()
-                .map(|key| identifier(key))
-                .collect::<Vec<_>>()
-                .join(", ");
-            if spec.deletions.is_some() {
-                let deletions =
-                    coerce_dataframe_for_schema(context.table("deletions").await?, &schema)?;
-                context.deregister_table("deletions")?;
-                context.register_table("deletions", deletions.clone().into_view())?;
-                let expected_keys = spec
-                    .keys
-                    .iter()
-                    .map(|key| {
-                        schema
-                            .field_with_name(key)
-                            .map(|field| field.clone().with_nullable(true))
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                let supplied_keys = spec
-                    .keys
-                    .iter()
-                    .map(|key| {
-                        deletions
-                            .schema()
-                            .as_arrow()
-                            .field_with_name(key)
-                            .ok()
-                            .map(|field| field.clone().with_nullable(true))
-                    })
-                    .collect::<Option<Vec<_>>>();
-                if deletions.schema().fields().len() != spec.keys.len()
-                    || match supplied_keys {
-                        Some(fields) => !same_fields(
-                            &arrow::datatypes::Schema::new(expected_keys),
-                            &arrow::datatypes::Schema::new(fields),
-                        )?,
-                        None => true,
-                    }
-                {
-                    return Err(Error::refusal(
-                        "schema_mismatch",
-                        "deletion rows must contain exactly the typed key fields",
-                    ));
-                }
-                if any_rows(key_join(
-                    context.table("replacements").await?,
-                    context.table("deletions").await?,
-                    &spec.keys,
-                    datafusion::logical_expr::JoinType::Inner,
-                )?)
-                .await?
-                {
-                    return Err(Error::refusal(
-                        "conflicting_update",
-                        "replacement and deletion keys overlap",
-                    ));
-                }
-            }
-            let scope_sql = if spec.deletions.is_some() {
-                format!(
-                    "SELECT DISTINCT {keys} FROM replacements UNION SELECT DISTINCT {keys} FROM deletions"
-                )
-            } else {
-                format!("SELECT DISTINCT {keys} FROM replacements")
-            };
-            let scope = context.sql(&scope_sql).await?;
+            let scope = build_update_scope(&context, &replacement, spec, &schema).await?;
             let applied = self
                 .replace_keys_with_merge(
                     Replacement {
@@ -772,6 +599,7 @@ impl Engine {
         request: Replacement<'a>,
         merge: Option<&'a UpdateMergeSpec>,
     ) -> futures::future::BoxFuture<'a, Result<Applied>> {
+        // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             let Replacement {
                 dataset,
@@ -846,112 +674,24 @@ impl Engine {
                 context.register_table("affected_keys", prepared_keys.into_view())?;
             }
             let scan = Arc::new(storage::OccurrenceScan::values(&native, budget, inventory).await?);
-            let mut shared = Vec::new();
-            let mut changed = Vec::new();
-            let mut rewrite_bytes = 0_u64;
-            let mut files_probed = 0_u64;
-            let mut files_skipped_by_pruning = 0_u64;
-            if key_files.is_empty() {
-                files_skipped_by_pruning = scan.files().count() as u64;
-                shared.extend(scan.files().cloned());
-            } else {
-                let native_schema = native.metadata().current_schema();
-                let partition_spec = native.metadata().default_partition_spec();
-                let key_table_schema = scope_table.metadata().current_schema();
-                // Exact affected points when they fit one batch allowance; otherwise
-                // only the coarser affected-interval test below applies.
-                let points = key_points::KeyPoints::collect(
-                    &context,
-                    native_schema,
-                    partition_spec,
-                    keys,
-                    budget,
-                )
-                .await?;
-                let affected_keys_df = context.table("affected_keys").await?;
-                let mut outcomes = Vec::new();
-                let mut candidates = Vec::new();
-                for (index, file) in scan.files().enumerate() {
-                    if !file_may_overlap_key_files(
-                        native_schema,
-                        partition_spec,
-                        key_table_schema,
-                        keys,
-                        &key_files,
-                        file,
-                    ) || points
-                        .as_ref()
-                        .is_some_and(|points| !points.may_contain(native_schema, keys, file))
-                    {
-                        files_skipped_by_pruning = files_skipped_by_pruning.saturating_add(1);
-                        outcomes.push(Some(file.clone()));
-                    } else {
-                        outcomes.push(None);
-                        candidates.push((index, file.clone()));
-                    }
-                }
-                files_probed = candidates.len() as u64;
-                let probed = futures::stream::iter(candidates.into_iter().map(|(index, file)| {
-                    let context = &context;
-                    let scan = &scan;
-                    let affected_keys_df = &affected_keys_df;
-                    let schema = &schema;
-                    let marker = &marker;
-                    async move {
-                        let key_probe = context.read_table(crate::query::file(
-                            scan.clone(),
-                            file.file_path().to_owned(),
-                            Some(keys),
-                            budget.clone(),
-                        )?)?;
-                        if any_rows(key_join(
-                            key_probe,
-                            affected_keys_df.clone(),
-                            keys,
-                            datafusion::logical_expr::JoinType::Inner,
-                        )?)
-                        .await?
-                        {
-                            // Replace the key-only probe with the complete selected native schema.
-                            let full_file = context.read_table(crate::query::file(
-                                scan.clone(),
-                                file.file_path().to_owned(),
-                                None,
-                                budget.clone(),
-                            )?)?;
-                            // One joined decode supplies both kept rows and actual removed rows.
-                            let mut columns = schema
-                                .fields()
-                                .iter()
-                                .map(|field| qualified("l", field.name()))
-                                .collect::<Vec<_>>();
-                            columns.push(qualified("r", marker).is_not_null().alias(marker));
-                            let joined = key_join(
-                                full_file,
-                                affected_keys_df.clone(),
-                                keys,
-                                datafusion::logical_expr::JoinType::Left,
-                            )?
-                            .select(columns)?;
-                            Ok::<_, Error>((index, file, Some(joined)))
-                        } else {
-                            Ok((index, file, None))
-                        }
-                    }
-                }))
-                .buffered(16)
-                .try_collect::<Vec<_>>()
-                .await?;
-                for (index, file, changed_df) in probed {
-                    if let Some(df) = changed_df {
-                        rewrite_bytes = rewrite_bytes.saturating_add(file.file_size_in_bytes());
-                        changed.push(df);
-                    } else {
-                        outcomes[index] = Some(file);
-                    }
-                }
-                shared.extend(outcomes.into_iter().flatten());
-            }
+            let compaction::ProbedFiles {
+                mut shared,
+                changed,
+                rewrite_bytes,
+                files_probed,
+                files_skipped_by_pruning,
+            } = compaction::probe_affected_files(
+                &context,
+                &native,
+                &scope_table,
+                keys,
+                &key_files,
+                &scan,
+                &schema,
+                &marker,
+                budget,
+            )
+            .await?;
             // Remote output consumes retained object storage; host preflight
             // covers scratch and bounded writer buffers, not those remote bytes.
             let required = if directory.is_local() {
@@ -1088,109 +828,17 @@ impl Engine {
             }
             metrics.rows_removed = removed_files.iter().map(|file| file.record_count()).sum();
             metrics.rows_added = added_files.iter().map(|file| file.record_count()).sum();
-            let small_threshold =
-                (budget.limits.max_batch_bytes as u64 / 8).clamp(64 << 10, 512 << 10);
-            let mut partition_groups: Vec<Vec<usize>> = Vec::new();
-            let mut partition_index: std::collections::HashMap<iceberg::spec::Struct, usize> =
-                std::collections::HashMap::new();
-            for (idx, file) in shared.iter().enumerate() {
-                if let Some(&pos) = partition_index.get(file.partition()) {
-                    partition_groups[pos].push(idx);
-                } else {
-                    let pos = partition_groups.len();
-                    partition_index.insert(file.partition().clone(), pos);
-                    partition_groups.push(vec![idx]);
-                }
-            }
-            let coalesced_files = if (metrics.rows_removed != 0 || metrics.rows_added != 0)
-                && storage::identity::has_origins(native.metadata().current_schema())?
-            {
-                let mut indices = Vec::new();
-                for group in partition_groups {
-                    let small_files = group
-                        .iter()
-                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
-                        .count();
-                    let small_dirs = group
-                        .iter()
-                        .filter(|&&idx| shared[idx].file_size_in_bytes() < small_threshold)
-                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .len();
-                    let part_files = group.len();
-                    let part_dirs = group
-                        .iter()
-                        .filter_map(|&idx| Path::new(shared[idx].file_path()).parent())
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .len();
-                    if small_files >= 24 && small_dirs >= 2 {
-                        indices = group
-                            .into_iter()
-                            .filter(|&idx| shared[idx].file_size_in_bytes() < small_threshold)
-                            .take(32)
-                            .collect();
-                        break;
-                    } else if part_files > 48 && part_dirs >= 2 {
-                        let mut by_size = group
-                            .iter()
-                            .map(|&idx| (shared[idx].file_size_in_bytes(), idx))
-                            .collect::<Vec<_>>();
-                        by_size.sort_unstable_by_key(|(bytes, _)| *bytes);
-                        let take = (group.len().saturating_sub(32)).clamp(16, 32);
-                        let mut selected = by_size
-                            .into_iter()
-                            .take(take)
-                            .map(|(_, idx)| idx)
-                            .collect::<Vec<_>>();
-                        selected.sort_unstable();
-                        indices = selected;
-                        break;
-                    }
-                }
-                let coalesce_bytes = indices
-                    .iter()
-                    .map(|&idx| shared[idx].file_size_in_bytes())
-                    .sum::<u64>();
-                let reserve = coalesce_bytes
-                    .saturating_mul(2)
-                    .saturating_add(budget.limits.scratch_bytes);
-                if directory.is_local() && fs2::available_space(&self.inner.root)? < reserve {
-                    indices.clear();
-                }
-                if indices.len() >= 2 {
-                    let selected_set = indices
-                        .into_iter()
-                        .collect::<std::collections::BTreeSet<_>>();
-                    let mut remaining = Vec::with_capacity(shared.len() - selected_set.len());
-                    let mut paths = Vec::with_capacity(selected_set.len());
-                    for (idx, file) in shared.into_iter().enumerate() {
-                        if selected_set.contains(&idx) {
-                            paths.push(file.file_path().to_owned());
-                        } else {
-                            remaining.push(file);
-                        }
-                    }
-                    shared = remaining;
-                    let scan_for_coalesce = scan.clone();
-                    let coalesced_stream = futures::stream::iter(paths)
-                        .map(move |path| scan_for_coalesce.read_file(&path, budget))
-                        .try_flatten();
-                    let target_file_bytes = usize::try_from(coalesce_bytes)
-                        .unwrap_or(usize::MAX)
-                        .max(budget.limits.max_batch_bytes);
-                    storage::write_batches_sized(
-                        &candidate,
-                        coalesced_stream,
-                        budget,
-                        target_file_bytes,
-                    )
-                    .await?
-                } else {
-                    Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+            let coalesced_files = compaction::coalesce_small_partition_files(
+                &self.inner.root,
+                &directory,
+                &native,
+                &candidate,
+                &mut shared,
+                &scan,
+                metrics.rows_removed != 0 || metrics.rows_added != 0,
+                budget,
+            )
+            .await?;
             metrics.data_files_written = key_files_written
                 + (kept_files.len()
                     + removed_files.len()
@@ -1384,151 +1032,6 @@ async fn execute(
         .map(|batch| batch.map_err(Error::from))
         .boxed())
 }
-
-pub(super) fn untruncated_bound(
-    datum: &iceberg::spec::Datum,
-) -> Option<iceberg::spec::PrimitiveLiteral> {
-    use iceberg::spec::PrimitiveLiteral;
-    let lit = PrimitiveLiteral::from(datum.clone());
-    match &lit {
-        // Chunk statistics truncate variable-width bounds at `STATISTICS_TRUNCATE_BYTES`.
-        // Only treat bounds strictly shorter than that limit as exact interval endpoints.
-        PrimitiveLiteral::String(s) if s.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
-        PrimitiveLiteral::Binary(b) if b.len() >= crate::storage::STATISTICS_TRUNCATE_BYTES => None,
-        PrimitiveLiteral::AboveMax | PrimitiveLiteral::BelowMin => None,
-        _ if lit.is_nan() => None,
-        _ => Some(lit),
-    }
-}
-
-fn file_may_overlap_key_files(
-    native_schema: &iceberg::spec::Schema,
-    partition_spec: &iceberg::spec::PartitionSpec,
-    scope_schema: &iceberg::spec::Schema,
-    keys: &[String],
-    key_files: &[iceberg::spec::DataFile],
-    file: &iceberg::spec::DataFile,
-) -> bool {
-    file_may_overlap_mapped_key_files(
-        native_schema,
-        partition_spec,
-        scope_schema,
-        keys,
-        keys,
-        key_files,
-        file,
-    )
-}
-
-pub(super) fn file_may_overlap_mapped_key_files(
-    native_schema: &iceberg::spec::Schema,
-    partition_spec: &iceberg::spec::PartitionSpec,
-    scope_schema: &iceberg::spec::Schema,
-    native_keys: &[String],
-    scope_keys: &[String],
-    key_files: &[iceberg::spec::DataFile],
-    file: &iceberg::spec::DataFile,
-) -> bool {
-    if key_files.is_empty() {
-        return false;
-    }
-    for (native_key, scope_key) in native_keys.iter().zip(scope_keys) {
-        let (Some(native_field), Some(scope_field)) = (
-            native_schema.field_by_name(native_key),
-            scope_schema.field_by_name(scope_key),
-        ) else {
-            continue;
-        };
-        let (native_id, scope_id) = (native_field.id, scope_field.id);
-        let file_may_have_null = file
-            .null_value_counts()
-            .get(&native_id)
-            .copied()
-            .unwrap_or(1)
-            > 0;
-        let keys_may_have_null = key_files
-            .iter()
-            .any(|kf| kf.null_value_counts().get(&scope_id).copied().unwrap_or(1) > 0);
-        // Check order-preserving partition tuple bounds first so files whose column
-        // bounds are absent or truncated still prune in O(1) from partition metadata.
-        for (part_idx, pf) in partition_spec.fields().iter().enumerate() {
-            if pf.source_id != native_id || !storage::is_order_preserving_transform(pf.transform) {
-                continue;
-            }
-            let Some(slot) = file.partition().fields().get(part_idx) else {
-                continue;
-            };
-            match slot {
-                None => {
-                    if !keys_may_have_null {
-                        return false;
-                    }
-                }
-                Some(iceberg::spec::Literal::Primitive(file_part)) => {
-                    let all_disjoint = key_files.iter().all(|kf| {
-                        let (Some(kf_low), Some(kf_high)) = (
-                            kf.lower_bounds().get(&scope_id).and_then(untruncated_bound),
-                            kf.upper_bounds().get(&scope_id).and_then(untruncated_bound),
-                        ) else {
-                            return false;
-                        };
-                        let (Some(part_low), Some(part_high)) = (
-                            storage::compute_partition_literal(
-                                pf.transform,
-                                &native_field.field_type,
-                                &kf_low,
-                            ),
-                            storage::compute_partition_literal(
-                                pf.transform,
-                                &native_field.field_type,
-                                &kf_high,
-                            ),
-                        ) else {
-                            return false;
-                        };
-                        part_low <= part_high && (&part_high < file_part || &part_low > file_part)
-                    });
-                    if all_disjoint {
-                        return false;
-                    }
-                }
-                _ => {}
-            }
-        }
-        // `key_join` uses `IsNotDistinctFrom`, so a possible NULL on both sides can match.
-        if file_may_have_null && keys_may_have_null {
-            continue;
-        }
-        let (Some(file_low), Some(file_high)) = (
-            file.lower_bounds()
-                .get(&native_id)
-                .and_then(untruncated_bound),
-            file.upper_bounds()
-                .get(&native_id)
-                .and_then(untruncated_bound),
-        ) else {
-            continue;
-        };
-        if file_low > file_high {
-            continue;
-        }
-        let all_disjoint = key_files.iter().all(|kf| {
-            let (Some(kf_low), Some(kf_high)) = (
-                kf.lower_bounds().get(&scope_id).and_then(untruncated_bound),
-                kf.upper_bounds().get(&scope_id).and_then(untruncated_bound),
-            ) else {
-                return false;
-            };
-            kf_low <= kf_high && (kf_high < file_low || kf_low > file_high)
-        });
-        if all_disjoint {
-            return false;
-        }
-    }
-    true
-}
-
-pub(super) mod key_points;
 
 #[cfg(test)]
 mod tests;

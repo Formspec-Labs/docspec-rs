@@ -59,7 +59,7 @@ pub struct Lifecycle {
     retained_prefix: Option<String>,
     pub(crate) catalog: Arc<dyn Catalog>,
     pub(crate) budget: Budget,
-    cache: Arc<Mutex<Option<Arc<SnapshotRows>>>>,
+    cache: Arc<Mutex<LifecycleCache>>,
     #[cfg(all(not(test), not(feature = "test-util")))]
     view_cache: Arc<Mutex<HashMap<TableIdent, View>>>,
     #[cfg(all(not(test), not(feature = "test-util")))]
@@ -67,6 +67,12 @@ pub struct Lifecycle {
     known_tables: Arc<Mutex<HashSet<TableIdent>>>,
     #[cfg(test)]
     pub(crate) lose_commit_response: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Debug, Default)]
+struct LifecycleCache {
+    entries: BTreeMap<String, Arc<SnapshotRows>>,
+    permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 #[cfg(all(not(test), not(feature = "test-util")))]
@@ -86,7 +92,7 @@ pub(crate) struct SnapshotRows {
     history_rows: usize,
     history_bytes: usize,
     reserved_future_bytes: usize,
-    _reservation: tokio::sync::OwnedSemaphorePermit,
+    _reservation: Mutex<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 impl SnapshotRows {
@@ -188,7 +194,7 @@ impl Lifecycle {
             retained_prefix: None,
             catalog,
             budget,
-            cache: Arc::new(Mutex::new(None)),
+            cache: Arc::new(Mutex::new(LifecycleCache::default())),
             #[cfg(all(not(test), not(feature = "test-util")))]
             view_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(all(not(test), not(feature = "test-util")))]
@@ -280,7 +286,10 @@ impl Lifecycle {
                 deferred.changes.insert(k, v);
             }
             {
-                *self.cache.lock().map_err(cache_poisoned)? = Some(deferred.base_rows);
+                self.cache.lock().map_err(cache_poisoned)?.entries.insert(
+                    deferred.base_view.logical_identifier.to_string(),
+                    deferred.base_rows,
+                );
             }
             let merged: Vec<_> = deferred.changes.into_iter().collect();
             return self.commit(&deferred.base_view, merged).await;
@@ -298,7 +307,10 @@ impl Lifecycle {
             .remove(&ident);
         if let Some(deferred) = deferred {
             {
-                *self.cache.lock().map_err(cache_poisoned)? = Some(deferred.base_rows);
+                self.cache.lock().map_err(cache_poisoned)?.entries.insert(
+                    deferred.base_view.logical_identifier.to_string(),
+                    deferred.base_rows,
+                );
             }
             if !deferred.changes.is_empty() {
                 let merged: Vec<_> = deferred.changes.into_iter().collect();
@@ -471,6 +483,53 @@ impl Lifecycle {
         self.rows_inner(view, false)
     }
 
+    fn prepare_cache_reservation(
+        &self,
+        cache_key: &str,
+        extra_holds: usize,
+    ) -> Result<(Arc<tokio::sync::OwnedSemaphorePermit>, bool)> {
+        let existing_permit = {
+            let guard = self.cache.lock().map_err(cache_poisoned)?;
+            let old_retained = guard
+                .entries
+                .get(cache_key)
+                .is_some_and(|old| Arc::strong_count(old) > 1 + extra_holds);
+            if old_retained {
+                None
+            } else {
+                guard.permit.clone()
+            }
+        };
+        if let Some(permit) = existing_permit {
+            return Ok((permit, false));
+        }
+        let permit = Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
+        Ok((permit, true))
+    }
+
+    fn publish_cache_entry(
+        &self,
+        cache_key: String,
+        entry: Arc<SnapshotRows>,
+        permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+        rotated: bool,
+    ) -> Result<()> {
+        let mut guard = self.cache.lock().map_err(cache_poisoned)?;
+        if rotated || guard.permit.is_none() {
+            for (k, existing) in &guard.entries {
+                if k != &cache_key {
+                    *existing
+                        ._reservation
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) = permit.clone();
+                }
+            }
+            guard.permit = Some(permit);
+        }
+        guard.entries.insert(cache_key, entry);
+        Ok(())
+    }
+
     fn rows_inner<'a>(
         &'a self,
         view: &'a View,
@@ -487,18 +546,20 @@ impl Lifecycle {
             {
                 return Ok(rows);
             }
+            let cache_key = view.logical_identifier.to_string();
             let metadata = view.table.metadata_location_result()?.to_owned();
             if let Some(hit) = self
                 .cache
                 .lock()
                 .map_err(cache_poisoned)?
-                .as_ref()
+                .entries
+                .get(&cache_key)
                 .filter(|hit| hit.metadata == metadata)
                 .cloned()
             {
                 return Ok(hit);
             }
-            let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
+            let (reservation, rotated) = self.prepare_cache_reservation(&cache_key, 0)?;
             let mut current = BTreeMap::<String, (i64, Arc<str>)>::new();
             let mut cache_bytes = 0_usize;
             if view.table.metadata().current_snapshot().is_none() {
@@ -509,9 +570,9 @@ impl Lifecycle {
                     history_rows: 0,
                     history_bytes: 0,
                     reserved_future_bytes: 0,
-                    _reservation: reservation,
+                    _reservation: Mutex::new(reservation.clone()),
                 });
-                *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+                self.publish_cache_entry(cache_key, entry.clone(), reservation, rotated)?;
                 return Ok(entry);
             }
             let batches = storage::read_batches(&view.table, &self.budget).await?;
@@ -548,19 +609,7 @@ impl Lifecycle {
                     }
                 }
             }
-            for (key, _) in current
-                .range("removal-intent/".to_owned()..)
-                .take_while(|(key, _)| key.starts_with("removal-intent/"))
-            {
-                check_removal_state_exists(&current, key)?;
-            }
-            let reserved_future_bytes = current
-                .range("removal-state/".to_owned()..)
-                .take_while(|(key, _)| key.starts_with("removal-state/"))
-                .try_fold(0_usize, |total, (key, (revision, value))| {
-                    let reserved = removal_reservation(&current, key, *revision, value)?;
-                    total.checked_add(reserved).ok_or_else(reservation_overflow)
-                })?;
+            let reserved_future_bytes = validate_and_sum_removal_reservations(&current)?;
             let within_history_budget = check_history_reservation(
                 bytes,
                 reserved_future_bytes,
@@ -582,10 +631,10 @@ impl Lifecycle {
                 history_rows,
                 history_bytes: bytes,
                 reserved_future_bytes,
-                _reservation: reservation,
+                _reservation: Mutex::new(reservation.clone()),
             });
             if within_history_budget {
-                *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+                self.publish_cache_entry(cache_key, entry.clone(), reservation, rotated)?;
             }
             Ok(entry)
         })
@@ -651,8 +700,9 @@ impl Lifecycle {
         }
         // Prepare a bounded cache of the next immutable state. It becomes visible
         // only after the guarded native commit succeeds; failed commits cannot leak it.
-        let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
+        let cache_key = view.logical_identifier.to_string();
         let previous = self.rows(view).await?;
+        let (reservation, rotated) = self.prepare_cache_reservation(&cache_key, 1)?;
         let history_rows = previous.history_rows.saturating_add(changes.len());
         let history_bytes = changes
             .iter()
@@ -734,10 +784,10 @@ impl Lifecycle {
                     history_rows,
                     history_bytes,
                     reserved_future_bytes,
-                    _reservation: reservation,
+                    _reservation: Mutex::new(reservation.clone()),
                 });
                 deferred.rows = entry.clone();
-                *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+                self.publish_cache_entry(cache_key, entry, reservation, rotated)?;
                 return Ok(deferred.base_view.clone());
             }
         }
@@ -778,9 +828,9 @@ impl Lifecycle {
             history_rows,
             history_bytes,
             reserved_future_bytes,
-            _reservation: reservation,
+            _reservation: Mutex::new(reservation.clone()),
         });
-        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+        self.publish_cache_entry(cache_key, entry, reservation, rotated)?;
         let next_view = View {
             revision: table.metadata().last_sequence_number(),
             table,
@@ -870,19 +920,7 @@ impl Lifecycle {
                 "lifecycle baseline compaction must retain at least one record",
             ));
         }
-        for (key, _) in next_values
-            .range("removal-intent/".to_owned()..)
-            .take_while(|(key, _)| key.starts_with("removal-intent/"))
-        {
-            check_removal_state_exists(&next_values, key)?;
-        }
-        let reserved_future_bytes = next_values
-            .range("removal-state/".to_owned()..)
-            .take_while(|(key, _)| key.starts_with("removal-state/"))
-            .try_fold(0_usize, |total, (key, (revision, value))| {
-                let reserved = removal_reservation(&next_values, key, *revision, value)?;
-                total.checked_add(reserved).ok_or_else(reservation_overflow)
-            })?;
+        let reserved_future_bytes = validate_and_sum_removal_reservations(&next_values)?;
         let history_rows = next_values.len();
         let history_bytes = cache_bytes;
         check_history_reservation(
@@ -891,7 +929,8 @@ impl Lifecycle {
             self.budget.limits.max_metadata_bytes,
         )?;
         check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
-        let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
+        let cache_key = view.logical_identifier.to_string();
+        let (reservation, rotated) = self.prepare_cache_reservation(&cache_key, 0)?;
         let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
             view.table.metadata().current_schema(),
         )?);
@@ -942,9 +981,9 @@ impl Lifecycle {
             history_rows,
             history_bytes,
             reserved_future_bytes,
-            _reservation: reservation,
+            _reservation: Mutex::new(reservation.clone()),
         });
-        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+        self.publish_cache_entry(cache_key, entry, reservation, rotated)?;
         self.reclaim_expired_baseline_files(&table).await?;
         let next_view = View {
             revision: current_revision,
@@ -1083,6 +1122,10 @@ async fn replace_baseline_snapshot(
         .snapshots()
         .map(|snapshot| snapshot.snapshot_id())
         .collect();
+    // Detach `MAIN_BRANCH` on the in-memory transaction base so `FastAppend` writes a standalone
+    // baseline manifest list rather than inheriting prior delta manifests, and temporarily enable
+    // `gc.enabled` so `expire_snapshots` can prune superseded snapshot entries before resetting
+    // `gc.enabled` back to `"false"` within the same atomic catalog commit.
     let detached_metadata = table
         .metadata()
         .clone()
@@ -1101,11 +1144,7 @@ async fn replace_baseline_snapshot(
         builder = builder.metadata_location(location);
     }
     let detached = builder.build()?;
-    let guard = CompactingCatalog {
-        inner: catalog,
-        expected: table.clone(),
-        detached: detached.clone(),
-    };
+    let guard = GuardedCatalog::with_detached(catalog, table, detached.clone());
     let tx = Transaction::new(&detached);
     let tx = tx
         .fast_append()
@@ -1124,6 +1163,23 @@ async fn replace_baseline_snapshot(
         .set("gc.enabled".into(), "false".into())
         .apply(tx)?;
     Ok(tx.commit(&guard).await?)
+}
+
+fn validate_and_sum_removal_reservations(
+    rows: &BTreeMap<String, (i64, Arc<str>)>,
+) -> Result<usize> {
+    for (key, _) in rows
+        .range("removal-intent/".to_owned()..)
+        .take_while(|(key, _)| key.starts_with("removal-intent/"))
+    {
+        check_removal_state_exists(rows, key)?;
+    }
+    rows.range("removal-state/".to_owned()..)
+        .take_while(|(key, _)| key.starts_with("removal-state/"))
+        .try_fold(0_usize, |total, (key, (revision, value))| {
+            let reserved = removal_reservation(rows, key, *revision, value)?;
+            total.checked_add(reserved).ok_or_else(reservation_overflow)
+        })
 }
 
 /// Returns the lifecycle history charge for one serialized row.
@@ -1252,6 +1308,7 @@ fn strings(batch: &RecordBatch, column: usize) -> Result<&StringArray> {
 pub(crate) struct GuardedCatalog<'a> {
     inner: &'a dyn Catalog,
     expected: Table,
+    detached: Option<Table>,
 }
 
 impl<'a> GuardedCatalog<'a> {
@@ -1259,6 +1316,15 @@ impl<'a> GuardedCatalog<'a> {
         Self {
             inner,
             expected: expected.clone(),
+            detached: None,
+        }
+    }
+
+    pub(crate) fn with_detached(inner: &'a dyn Catalog, expected: &Table, detached: Table) -> Self {
+        Self {
+            inner,
+            expected: expected.clone(),
+            detached: Some(detached),
         }
     }
 }
@@ -1276,11 +1342,20 @@ impl Catalog for GuardedCatalog<'_> {
                 "stale_authority: reload and re-evaluate application guards",
             ));
         }
-        Ok(current)
+        Ok(self.detached.clone().unwrap_or(current))
     }
-    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
-        #[cfg(any(test, feature = "test-util"))]
-        self.load_table(commit.identifier()).await?;
+    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
+        if self.detached.is_some() {
+            let _ = self.load_table(commit.identifier()).await?;
+            // The detached transaction base generates a `RefSnapshotIdMatch { snapshot_id: None }`
+            // requirement so `FastAppend` writes a standalone manifest list without inheriting prior
+            // manifests. `load_table` above verified the exact expected metadata location and
+            // `SqlCatalog::update_table` performs an atomic compare-and-swap on `metadata_location`.
+            let _ = commit.take_requirements();
+        } else {
+            #[cfg(any(test, feature = "test-util"))]
+            self.load_table(commit.identifier()).await?;
+        }
         // FastAppend supplies the expected branch snapshot requirement. The maintained
         // SQL catalog also compare-and-swaps metadata_location after applying it.
         self.inner
@@ -1340,685 +1415,5 @@ impl Catalog for GuardedCatalog<'_> {
     }
 }
 
-/// Commits a detached single-manifest baseline while enforcing exact authority CAS.
-#[derive(Debug)]
-struct CompactingCatalog<'a> {
-    inner: &'a dyn Catalog,
-    expected: Table,
-    detached: Table,
-}
-
-#[async_trait]
-impl Catalog for CompactingCatalog<'_> {
-    async fn load_table(&self, ident: &TableIdent) -> iceberg::Result<Table> {
-        let current = self.inner.load_table(ident).await?;
-        if ident != self.expected.identifier()
-            || current.metadata_location() != self.expected.metadata_location()
-            || current.metadata() != self.expected.metadata()
-        {
-            return Err(iceberg::Error::new(
-                iceberg::ErrorKind::DataInvalid,
-                "stale_authority: reload and re-evaluate application guards",
-            ));
-        }
-        Ok(self.detached.clone())
-    }
-    async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
-        let _ = self.load_table(commit.identifier()).await?;
-        // The detached transaction base generates a `RefSnapshotIdMatch { snapshot_id: None }`
-        // requirement so `FastAppend` writes a standalone manifest list without inheriting prior
-        // manifests. `load_table` above verified the exact expected metadata location and
-        // `SqlCatalog::update_table` performs an atomic compare-and-swap on `metadata_location`.
-        let _ = commit.take_requirements();
-        self.inner
-            .update_table(commit)
-            .await
-            .map_err(|e| e.with_retryable(false))
-    }
-    async fn list_namespaces(
-        &self,
-        p: Option<&NamespaceIdent>,
-    ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        self.inner.list_namespaces(p).await
-    }
-    async fn create_namespace(
-        &self,
-        n: &NamespaceIdent,
-        p: HashMap<String, String>,
-    ) -> iceberg::Result<Namespace> {
-        self.inner.create_namespace(n, p).await
-    }
-    async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
-        self.inner.get_namespace(n).await
-    }
-    async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
-        self.inner.namespace_exists(n).await
-    }
-    async fn update_namespace(
-        &self,
-        n: &NamespaceIdent,
-        p: HashMap<String, String>,
-    ) -> iceberg::Result<()> {
-        self.inner.update_namespace(n, p).await
-    }
-    async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
-        self.inner.drop_namespace(n).await
-    }
-    async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        self.inner.list_tables(n).await
-    }
-    async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
-        self.inner.create_table(n, c).await
-    }
-    async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.drop_table(t).await
-    }
-    async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.purge_table(t).await
-    }
-    async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
-        self.inner.table_exists(t).await
-    }
-    async fn rename_table(&self, s: &TableIdent, d: &TableIdent) -> iceberg::Result<()> {
-        self.inner.rename_table(s, d).await
-    }
-    async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
-        self.inner.register_table(t, m).await
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        budget::Limits,
-        model::{ObjectProtection, ObjectRef, RemovalOutcome, RemovalPlan, RetentionInspection},
-    };
-    use std::path::Path;
-
-    fn test_budget(max_metadata_bytes: usize) -> Budget {
-        Budget::new(Limits {
-            compute_threads: 1,
-            memory_bytes: 64 << 20,
-            scratch_bytes: 16 << 20,
-            batch_rows: 32,
-            max_batch_bytes: 4096,
-            max_metadata_bytes,
-        })
-        .unwrap()
-    }
-
-    fn removal_intent(id: &str) -> RemovalIntent {
-        RemovalIntent {
-            plan: RemovalPlan {
-                scope: crate::model::RemovalScope::Objects,
-                dataset: Id::new("owner").unwrap(),
-                removal: Id::new(id).unwrap(),
-                reason: "catalog reservation test".into(),
-                table_uuid: "fixture".into(),
-                inspection: RetentionInspection {
-                    boundaries: vec![],
-                    objects: vec![ObjectProtection {
-                        object: ObjectRef {
-                            owner: Id::new("owner").unwrap(),
-                            path: format!("/fixture/{id}"),
-                            digest: "0".repeat(64),
-                            bytes: 1,
-                        },
-                        blocker: None,
-                    }],
-                    protected_bytes: 0,
-                    unmatched_bytes: 1,
-                    metadata_objects_read: 0,
-                },
-                registrations: vec![],
-            },
-            revision: 1,
-            boundaries: vec![],
-            blocked: vec![],
-            objects: vec![0],
-            registrations: vec![],
-        }
-    }
-
-    fn removal_state(intent_revision: i64, reserved: u64) -> RemovalProgress {
-        RemovalProgress {
-            intent_revision,
-            reserved_future_bytes: reserved,
-            registrations: vec![],
-            objects: vec![if reserved == 0 {
-                RemovalOutcome::Removed
-            } else {
-                RemovalOutcome::Unresolved
-            }],
-        }
-    }
-
-    #[tokio::test]
-    async fn cold_and_warm_reservations_count_only_current_states() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        let budget = test_budget(1 << 20);
-        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
-        let view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
-        let view = lifecycle
-            .commit(
-                &view,
-                vec![
-                    record("removal-intent/a", removal_intent("a")).unwrap(),
-                    record("removal-state/a", removal_state(1, 1000)).unwrap(),
-                    record("removal-intent/b", removal_intent("b")).unwrap(),
-                    record("removal-state/b", removal_state(1, 2000)).unwrap(),
-                ],
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            lifecycle.rows(&view).await.unwrap().reserved_future_bytes,
-            3000
-        );
-        let view = lifecycle
-            .commit(
-                &view,
-                vec![record("removal-state/a", removal_state(1, 0)).unwrap()],
-            )
-            .await
-            .unwrap();
-        let warm = lifecycle.rows(&view).await.unwrap();
-        let reopened = Lifecycle::new(catalog, budget);
-        let cold = reopened.rows(&view).await.unwrap();
-        assert_eq!(warm.reserved_future_bytes, 2000);
-        assert_eq!(cold.reserved_future_bytes, warm.reserved_future_bytes);
-        assert_eq!(cold.history_bytes, warm.history_bytes);
-        let view = reopened
-            .commit(&view, vec![record("ordinary", true).unwrap()])
-            .await
-            .unwrap();
-        assert_eq!(
-            reopened.rows(&view).await.unwrap().reserved_future_bytes,
-            2000
-        );
-    }
-
-    #[tokio::test]
-    async fn ordinary_commit_preserves_exact_terminal_headroom() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        // Historical generations fill replay capacity while the current cache
-        // stays small and the bounded native writer keeps its working room.
-        let earlier_commits = 8;
-        let mut intent = removal_intent("a");
-        intent.revision = earlier_commits + 1;
-        let state_key = "removal-state/a";
-        let terminal = removal_state(intent.revision, 0);
-        let terminal_charge =
-            history_row_bytes(state_key, &serde_json::to_string(&terminal).unwrap());
-        let floor = crate::engine::retention::removal::validate_progress(
-            &intent,
-            &removal_state(intent.revision, u64::MAX),
-        )
-        .unwrap();
-        let pending = removal_state(intent.revision, floor as u64);
-        let previous = "x".repeat(2048);
-        let history = earlier_commits as usize
-            * history_row_bytes("prior-status", &serde_json::to_string(&previous).unwrap())
-            + history_row_bytes("removal-intent/a", &serde_json::to_string(&intent).unwrap())
-            + history_row_bytes(state_key, &serde_json::to_string(&pending).unwrap());
-        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(history + floor));
-        let mut view = lifecycle.open(&Id::new("owner").unwrap()).await.unwrap();
-        for _ in 0..earlier_commits {
-            view = lifecycle
-                .commit(&view, vec![record("prior-status", &previous).unwrap()])
-                .await
-                .unwrap();
-        }
-        let view = lifecycle
-            .commit(
-                &view,
-                vec![
-                    record("removal-intent/a", intent).unwrap(),
-                    record(state_key, pending).unwrap(),
-                ],
-            )
-            .await
-            .unwrap();
-        // Reopen to prove the guarantee survives loss of the warm cache.
-        let lifecycle = Lifecycle::new(catalog, test_budget(history + floor));
-        let refused = lifecycle
-            .commit(&view, vec![record("ordinary", true).unwrap()])
-            .await
-            .unwrap_err();
-        assert_eq!(refused.code(), "metadata_capacity");
-        let view = lifecycle
-            .commit(&view, vec![record(state_key, terminal).unwrap()])
-            .await
-            .unwrap();
-        let rows = lifecycle.rows(&view).await.unwrap();
-        assert_eq!(rows.history_bytes, history + terminal_charge);
-        assert_eq!(rows.reserved_future_bytes, 0);
-    }
-
-    #[tokio::test]
-    async fn invalid_removal_references_refuse_before_native_commit() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(1 << 20));
-        let owner = Id::new("owner").unwrap();
-        let view = lifecycle.open(&owner).await.unwrap();
-        let view = lifecycle
-            .commit(
-                &view,
-                vec![
-                    record("removal-intent/a", removal_intent("a")).unwrap(),
-                    record("removal-state/a", removal_state(1, 1000)).unwrap(),
-                ],
-            )
-            .await
-            .unwrap();
-        let invalid = [
-            ("removal-state/a", serde_json::json!({"intent_revision": 1})),
-            (
-                "removal-state/a",
-                serde_json::json!({"reserved_future_bytes": 1}),
-            ),
-            (
-                "removal-state/a",
-                serde_json::json!({"intent_revision": 1, "reserved_future_bytes": -1}),
-            ),
-            (
-                "removal-state/a",
-                serde_json::to_value(removal_state(0, 1)).unwrap(),
-            ),
-            (
-                "removal-state/a",
-                serde_json::to_value(removal_state(2, 1)).unwrap(),
-            ),
-            (
-                "removal-state/missing",
-                serde_json::to_value(removal_state(1, 1)).unwrap(),
-            ),
-            (
-                "removal-state/bad/id",
-                serde_json::to_value(removal_state(1, 1)).unwrap(),
-            ),
-            ("removal-intent/a", serde_json::json!("changed")),
-            (
-                "removal-intent/missing",
-                serde_json::to_value(removal_intent("missing")).unwrap(),
-            ),
-            (
-                "removal-state/a",
-                serde_json::to_value(RemovalProgress {
-                    intent_revision: 1,
-                    reserved_future_bytes: 0,
-                    registrations: vec![],
-                    objects: vec![RemovalOutcome::Unresolved],
-                })
-                .unwrap(),
-            ),
-            (
-                "removal-state/a",
-                serde_json::to_value(RemovalProgress {
-                    intent_revision: 1,
-                    reserved_future_bytes: 1000,
-                    registrations: vec![],
-                    objects: vec![],
-                })
-                .unwrap(),
-            ),
-            (
-                "removal-state/a",
-                serde_json::to_value(RemovalProgress {
-                    intent_revision: 1,
-                    reserved_future_bytes: 1000,
-                    registrations: vec![],
-                    objects: vec![RemovalOutcome::Failed {
-                        code: "invalid-code".into(),
-                    }],
-                })
-                .unwrap(),
-            ),
-            ("removal-intent/bad/id", serde_json::json!("bad")),
-        ];
-        for (key, value) in invalid {
-            let error = lifecycle
-                .commit(&view, vec![(key.into(), value)])
-                .await
-                .unwrap_err();
-            assert_eq!(error.code(), "corrupt_metadata", "{key}");
-            assert_eq!(
-                lifecycle.open(&owner).await.unwrap().revision,
-                view.revision
-            );
-        }
-        let error = lifecycle
-            .commit(
-                &view,
-                vec![record("removal-state/a", removal_state(1, u64::MAX)).unwrap()],
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), "metadata_capacity");
-        assert_eq!(
-            lifecycle.open(&owner).await.unwrap().revision,
-            view.revision
-        );
-    }
-
-    #[test]
-    fn cold_reservation_validation_rejects_malformed_and_dangling_states() {
-        let key = "removal-state/a";
-        let mut rows = BTreeMap::new();
-        rows.insert(
-            "removal-intent/a".into(),
-            (
-                1,
-                Arc::<str>::from(serde_json::to_string(&removal_intent("a")).unwrap()),
-            ),
-        );
-        let valid = serde_json::to_string(&removal_state(1, 1000)).unwrap();
-        assert_eq!(removal_reservation(&rows, key, 2, &valid).unwrap(), 1000);
-        for json in [
-            "{}",
-            "null",
-            "{",
-            "{\"intent_revision\":1,\"reserved_future_bytes\":\"42\"}",
-        ] {
-            assert_eq!(
-                removal_reservation(&rows, key, 2, json).unwrap_err().code(),
-                "corrupt_metadata"
-            );
-        }
-        assert!(removal_reservation(&rows, key, 0, &valid).is_err());
-        assert!(removal_reservation(&rows, "removal-state/../a", 2, &valid).is_err());
-        rows.insert("removal-intent/a".into(), (2, Arc::from("{}")));
-        assert!(removal_reservation(&rows, key, 2, &valid).is_err());
-        rows.clear();
-        rows.insert(
-            "removal-intent/a".into(),
-            (
-                1,
-                Arc::<str>::from(serde_json::to_string(&removal_intent("a")).unwrap()),
-            ),
-        );
-        assert!(check_removal_state_exists(&rows, "removal-intent/a").is_err());
-        rows.clear();
-        assert!(removal_reservation(&rows, key, 2, &valid).is_err());
-        assert_eq!(
-            check_history_reservation(1, usize::MAX, usize::MAX)
-                .unwrap_err()
-                .code(),
-            "metadata_capacity"
-        );
-    }
-
-    #[tokio::test]
-    async fn warm_commit_shares_unchanged_values_and_tracks_cache_bytes() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        let lifecycle = Lifecycle::new(catalog.clone(), test_budget(1 << 20));
-        let owner = Id::new("owner").unwrap();
-        let view = lifecycle.open(&owner).await.unwrap();
-        let view1 = lifecycle
-            .commit(
-                &view,
-                vec![
-                    record("untouched", "a".repeat(512)).unwrap(),
-                    record("mutable", "v1").unwrap(),
-                ],
-            )
-            .await
-            .unwrap();
-        let rows1 = lifecycle.rows(&view1).await.unwrap();
-        let view2 = lifecycle
-            .commit(&view1, vec![record("mutable", "v2-longer").unwrap()])
-            .await
-            .unwrap();
-        let rows2 = lifecycle.rows(&view2).await.unwrap();
-        // Unchanged values share the same Arc<str> allocation across commits.
-        assert!(Arc::ptr_eq(
-            &rows1.values["untouched"].1,
-            &rows2.values["untouched"].1
-        ));
-        let reopened = Lifecycle::new(catalog, test_budget(1 << 20));
-        let cold = reopened.rows(&view2).await.unwrap();
-        assert_eq!(rows2.cache_bytes, cold.cache_bytes);
-        assert_eq!(rows2.history_rows, cold.history_rows);
-        assert_eq!(rows2.history_bytes, cold.history_bytes);
-    }
-
-    #[tokio::test]
-    async fn compact_baseline_coalesces_superseded_revisions_and_reclaims_replay_budget() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        let payload = "x".repeat(2048);
-        let single_row_charge =
-            history_row_bytes("authority", &serde_json::to_string(&payload).unwrap());
-        let obsolete_charge =
-            history_row_bytes("obsolete/1", &serde_json::to_string(&payload).unwrap());
-        // Budget allows 8 historical commits, after which a 9th ordinary commit is refused.
-        let budget = test_budget(7 * single_row_charge + obsolete_charge + 64);
-        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
-        let owner = Id::new("owner").unwrap();
-        let mut view = lifecycle.open(&owner).await.unwrap();
-        view = lifecycle
-            .commit(&view, vec![record("obsolete/1", &payload).unwrap()])
-            .await
-            .unwrap();
-        for _ in 0..7 {
-            view = lifecycle
-                .commit(&view, vec![record("authority", &payload).unwrap()])
-                .await
-                .unwrap();
-        }
-        let authority_rev = view.revision;
-        let refused = lifecycle
-            .commit(&view, vec![record("authority", &payload).unwrap()])
-            .await
-            .unwrap_err();
-        assert_eq!(refused.code(), "metadata_capacity");
-
-        let remove = BTreeSet::from(["obsolete/1".to_owned()]);
-        let (compacted_view, stats) = lifecycle.compact_baseline(&view, &remove).await.unwrap();
-        assert_eq!(stats.revisions_before, 8);
-        assert_eq!(stats.revisions_after, 1);
-        assert_eq!(stats.rows_before, 8);
-        assert_eq!(stats.rows_after, 1);
-        assert_eq!(stats.files_before, 8);
-        assert_eq!(stats.files_after, 1);
-        assert_eq!(
-            stats.metadata_bytes_before,
-            7 * single_row_charge + obsolete_charge
-        );
-        assert_eq!(stats.metadata_bytes_after, single_row_charge);
-        assert_eq!(stats.current_revision, authority_rev + 1);
-
-        // Cold reopen sees 1 snapshot, 1 file, 1 row, and preserves the exact key revision.
-        let reopened = Lifecycle::new(catalog, budget);
-        let cold_view = reopened.open(&owner).await.unwrap();
-        assert_eq!(cold_view.revision, compacted_view.revision);
-        assert_eq!(cold_view.table.metadata().snapshots().count(), 1);
-        assert_eq!(
-            cold_view
-                .table
-                .metadata()
-                .properties()
-                .get("gc.enabled")
-                .map(String::as_str),
-            Some("false")
-        );
-        let live_files = storage::current_snapshot_files(&cold_view.table, &reopened.budget)
-            .await
-            .unwrap()
-            .paths;
-        assert_eq!(
-            live_files.len(),
-            4,
-            "expected 1 metadata json, 1 manifest list, 1 manifest, and 1 parquet data file"
-        );
-        let location = PathBuf::from(cold_view.table.metadata().location());
-        let mut disk_files = BTreeSet::new();
-        for subdir in ["data", "metadata"] {
-            for entry in std::fs::read_dir(location.join(subdir)).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_file() {
-                    disk_files.insert(path.to_string_lossy().into_owned());
-                }
-            }
-        }
-        assert_eq!(disk_files, live_files);
-        let cold_rows = reopened.rows(&cold_view).await.unwrap();
-        assert_eq!(cold_rows.history_bytes, single_row_charge);
-        assert_eq!(cold_rows.history_rows, 1);
-        assert_eq!(cold_rows.revision("authority"), Some(authority_rev));
-        assert!(!cold_rows.contains_key("obsolete/1"));
-
-        // Subsequent commits succeed again within the reclaimed budget.
-        let next = reopened
-            .commit(&cold_view, vec![record("authority", &payload).unwrap()])
-            .await
-            .unwrap();
-        assert_eq!(next.revision, compacted_view.revision + 1);
-    }
-
-    #[tokio::test]
-    async fn compact_baseline_survives_lost_commit_response_and_reclaims_files_on_retry() {
-        let root = tempfile::tempdir().unwrap();
-        let catalog = storage::local_catalog(root.path()).await.unwrap();
-        let budget = test_budget(256 << 10);
-        let lifecycle = Lifecycle::new(catalog.clone(), budget.clone());
-        let owner = Id::new("lost_compact").unwrap();
-        let mut view = lifecycle.open(&owner).await.unwrap();
-        view = lifecycle
-            .commit(&view, vec![record("obsolete/1", "drop-me").unwrap()])
-            .await
-            .unwrap();
-        for step in 0..4 {
-            view = lifecycle
-                .commit(
-                    &view,
-                    vec![record("authority", format!("v-{step}")).unwrap()],
-                )
-                .await
-                .unwrap();
-        }
-        let authority_rev = view.revision;
-        let remove = BTreeSet::from(["obsolete/1".to_owned()]);
-
-        lifecycle
-            .lose_commit_response
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        let err = lifecycle
-            .compact_baseline(&view, &remove)
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "lost_commit_response");
-
-        // Reopen reads the committed single-snapshot baseline and all referenced files exist.
-        let reopened_view = lifecycle.open(&owner).await.unwrap();
-        assert_eq!(reopened_view.revision, authority_rev + 1);
-        assert_eq!(reopened_view.table.metadata().snapshots().count(), 1);
-        assert_eq!(
-            reopened_view
-                .table
-                .metadata()
-                .properties()
-                .get("gc.enabled")
-                .map(String::as_str),
-            Some("false")
-        );
-        let live_after_lost =
-            storage::current_snapshot_files(&reopened_view.table, &lifecycle.budget)
-                .await
-                .unwrap()
-                .paths;
-        for path in &live_after_lost {
-            assert!(
-                Path::new(path).is_file(),
-                "missing live baseline file {path}"
-            );
-        }
-        let rows = lifecycle.rows(&reopened_view).await.unwrap();
-        assert_eq!(rows.history_rows, 1);
-        assert_eq!(rows.revision("authority"), Some(authority_rev));
-        assert!(!rows.contains_key("obsolete/1"));
-
-        // Retrying compaction on the reopened view succeeds and reclaims all expired files.
-        let (retried_view, stats) = lifecycle
-            .compact_baseline(&reopened_view, &remove)
-            .await
-            .unwrap();
-        assert_eq!(stats.revisions_after, 1);
-        assert_eq!(stats.files_after, 1);
-        assert_eq!(stats.rows_after, 1);
-        let live_after_retry =
-            storage::current_snapshot_files(&retried_view.table, &lifecycle.budget)
-                .await
-                .unwrap()
-                .paths;
-        let location = PathBuf::from(retried_view.table.metadata().location());
-        let mut disk_files = BTreeSet::new();
-        for subdir in ["data", "metadata"] {
-            for entry in std::fs::read_dir(location.join(subdir)).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_file() {
-                    disk_files.insert(path.to_string_lossy().into_owned());
-                }
-            }
-        }
-        assert_eq!(disk_files, live_after_retry);
-    }
-
-    #[tokio::test]
-    async fn retained_snapshot_survives_cache_replacement_and_holds_its_reservation() {
-        let root = tempfile::tempdir().unwrap();
-        let budget = Budget::new(Limits {
-            compute_threads: 1,
-            memory_bytes: 64 << 20,
-            scratch_bytes: 16 << 20,
-            batch_rows: 32,
-            max_batch_bytes: 4096,
-            max_metadata_bytes: 1 << 20,
-        })
-        .unwrap();
-        let lifecycle = Lifecycle::new(
-            storage::local_catalog(root.path()).await.unwrap(),
-            budget.clone(),
-        );
-        let a = lifecycle.open(&Id::new("a").unwrap()).await.unwrap();
-        let a = lifecycle
-            .commit(&a, vec![record("key", "first").unwrap()])
-            .await
-            .unwrap();
-        let retained = lifecycle.rows(&a).await.unwrap();
-        let weak = Arc::downgrade(&retained);
-        let b = lifecycle.open(&Id::new("b").unwrap()).await.unwrap();
-        let b = lifecycle
-            .commit(&b, vec![record("key", "other dataset").unwrap()])
-            .await
-            .unwrap();
-        assert_ne!(a.table.metadata().location(), b.table.metadata().location());
-        // The old native files are now inaccessible. Record reads must still use
-        // the retained state; a cache lookup and replay would fail here.
-        std::fs::rename(
-            a.table.metadata().location(),
-            root.path().join("unavailable-a"),
-        )
-        .unwrap();
-        for _ in 0..3 {
-            assert_eq!(
-                retained.get_record::<String>("key").unwrap(),
-                Some((a.revision, 7, "first".into()))
-            );
-        }
-        assert_eq!(Arc::strong_count(&retained), 1);
-        let remaining = budget.limits.memory_bytes / 2 - 2 * budget.limits.max_metadata_bytes;
-        let available = budget.reserve(remaining).unwrap();
-        assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
-        drop(retained);
-        assert!(weak.upgrade().is_none());
-        let reclaimed = budget.reserve(budget.limits.max_metadata_bytes).unwrap();
-        assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
-        drop((available, reclaimed));
-    }
-}
+mod tests;

@@ -98,9 +98,11 @@ def _identifier(value: Any) -> bool:
 class DocSpecClient:
     """Submit one request without retries, proxies, redirects or lifecycle storage.
 
-    Timeouts apply to socket operations, not to the Rust operation's lifetime.
-    The caller owns scheduling and may retry an uncertain outcome with the exact
-    original JSON. Explicit refusals always remain terminal to this adapter.
+    Timeouts apply to socket operations and the `docspec-timeout-ms` HTTP deadline
+    header; admitted Rust engine operations retain their durable lifetime across
+    caller timeout. The caller owns scheduling and may retry an uncertain outcome
+    with the exact original JSON. Explicit refusals always remain terminal to this
+    adapter.
     """
 
     base_url: str = "http://127.0.0.1:8080"
@@ -114,6 +116,7 @@ class DocSpecClient:
             or isinstance(self.timeout_seconds, bool)
             or not math.isfinite(self.timeout_seconds)
             or self.timeout_seconds <= 0
+            or math.ceil(self.timeout_seconds * 1000) > (1 << 63) - 1
         ):
             raise AdapterError("timeout_seconds must be finite and positive")
         if (
@@ -122,6 +125,41 @@ class DocSpecClient:
             or not 1 <= self.max_response_bytes <= MAX_RESPONSE_LIMIT
         ):
             raise AdapterError("max_response_bytes must be between 1 byte and 32 MiB")
+
+    def _timeout_ms_header(self) -> str:
+        return str(max(1, math.ceil(self.timeout_seconds * 1000)))
+
+    def capabilities(self) -> dict[str, Any]:
+        """Fetch bounded server capabilities from the loopback DocSpec host."""
+        host, port = self._endpoint()
+        connection = http.client.HTTPConnection(host, port, timeout=self.timeout_seconds)
+        try:
+            connection.request(
+                "GET",
+                "/capabilities",
+                headers={
+                    "Accept": "application/json",
+                    "Accept-Encoding": "identity",
+                    "docspec-timeout-ms": self._timeout_ms_header(),
+                },
+            )
+            response = connection.getresponse()
+            if 300 <= response.status < 400:
+                raise ResponseError("DocSpec redirect refused")
+            raw = self._read_bounded(response)
+            try:
+                body = _json_object(raw)
+            except (ValueError, RecursionError) as error:
+                raise ResponseError("DocSpec returned invalid capabilities JSON") from error
+            if not 200 <= response.status < 300:
+                if _identifier(body.get("code")) and isinstance(body.get("message"), str):
+                    raise RemoteRefusal(response.status, body)
+                raise ResponseError(f"DocSpec returned HTTP {response.status} on /capabilities")
+            return body
+        except (OSError, http.client.HTTPException) as error:
+            raise UncertainOutcome("DocSpec connection ended before capabilities were received") from error
+        finally:
+            connection.close()
 
     def _endpoint(self) -> tuple[str, int]:
         try:
@@ -175,7 +213,12 @@ class DocSpecClient:
                 "POST",
                 route,
                 body=payload,
-                headers={"Content-Type": "application/json", "Accept": "application/json", "Accept-Encoding": "identity"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Accept-Encoding": "identity",
+                    "docspec-timeout-ms": self._timeout_ms_header(),
+                },
             )
             response = connection.getresponse()
             if 300 <= response.status < 400:
@@ -188,6 +231,8 @@ class DocSpecClient:
                     raise UncertainOutcome("DocSpec server response did not establish the operation outcome") from error
                 raise ResponseError("DocSpec returned invalid JSON; the operation may have completed") from error
             if not 200 <= response.status < 300:
+                if response.status == 504 and body.get("code") == "request_timeout":
+                    raise UncertainOutcome("DocSpec request deadline elapsed; retain the original request")
                 if _identifier(body.get("code")) and isinstance(body.get("message"), str):
                     raise RemoteRefusal(response.status, body)
                 if "code" in body or "message" in body:

@@ -1,8 +1,20 @@
 //! Read pinned metadata once through maintained local or remote object I/O.
 
-use crate::{Error, Result, budget::Budget, model::TablePin};
-use iceberg::{Runtime, TableIdent, io::FileIO, spec::TableMetadata, table::Table};
-use std::io::Read;
+use crate::{
+    Error, Result,
+    budget::Budget,
+    model::{Id, ObjectRef, TablePin},
+};
+use iceberg::{
+    Runtime, TableIdent,
+    io::FileIO,
+    spec::{DataFile, TableMetadata},
+    table::Table,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read,
+};
 
 /// Opens a pinned local table without its producing catalog.
 ///
@@ -19,6 +31,14 @@ pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
             objects.validate_path(&object.path)?;
         }
         return open_pin_with_io(pin, objects.file_io(), budget).await;
+    }
+    if super::object_io::is_remote_uri(&pin.metadata.path)
+        || pin
+            .objects
+            .iter()
+            .any(|object| super::object_io::is_remote_uri(&object.path))
+    {
+        return Err(super::object_io::unregistered_remote_uri());
     }
     open_pin_with_io(pin, FileIO::new_with_fs(), budget).await
 }
@@ -140,6 +160,223 @@ fn capacity() -> Error {
 
 fn corrupt() -> Error {
     Error::refusal("corrupt_object", "pinned metadata size or digest changed")
+}
+
+#[cfg(test)]
+pub(crate) async fn pin(
+    owner: &Id,
+    table: &Table,
+    rows: u64,
+    budget: &Budget,
+    shared: &[ObjectRef],
+) -> Result<TablePin> {
+    pin_bound(owner, &super::PinTable::local(table), rows, budget, shared).await
+}
+
+pub(crate) async fn pin_bound(
+    owner: &Id,
+    binding: &super::PinTable,
+    rows: u64,
+    budget: &Budget,
+    shared: &[ObjectRef],
+) -> Result<TablePin> {
+    pin_bound_with_files(owner, binding, rows, budget, shared, None).await
+}
+
+pub(crate) async fn pin_bound_with_files(
+    owner: &Id,
+    binding: &super::PinTable,
+    rows: u64,
+    budget: &Budget,
+    shared: &[ObjectRef],
+    known_files: Option<&[DataFile]>,
+) -> Result<TablePin> {
+    let table = &binding.table;
+    // Admit the complete inventory before copying captured shared identities.
+    let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
+    let object_io = binding.objects.clone();
+    let mut inherited = BTreeMap::new();
+    for object in shared {
+        if inherited
+            .insert(object.path.clone(), object.clone())
+            .is_some_and(|previous| previous != *object)
+        {
+            return Err(Error::refusal(
+                "conflicting_owner",
+                "one shared path binds conflicting owner or content identities",
+            ));
+        }
+    }
+    let remote_root = if object_io.is_remote() {
+        Some(object_io.pin_root(table.metadata().location())?)
+    } else {
+        None
+    };
+    let guard = remote_root.as_ref().map(|root| super::object_io::PinPaths {
+        objects: &object_io,
+        root,
+        inherited: &inherited,
+    });
+    let inventory = super::snapshot_files_guarded_with_scope_and_files(
+        table,
+        budget,
+        guard.as_ref(),
+        memory,
+        true,
+        known_files,
+    )
+    .await?;
+    let native_rows = inventory
+        .data
+        .iter()
+        .try_fold(0u64, |sum, file| sum.checked_add(file.record_count()))
+        .ok_or_else(|| {
+            Error::refusal(
+                "row_count_overflow",
+                "native record counts exceed the supported range",
+            )
+        })?;
+    if native_rows != rows {
+        return Err(Error::refusal(
+            "row_count_mismatch",
+            "native live file counts differ from prepared output",
+        ));
+    }
+    let owner = owner.clone();
+    let location = table.metadata().location().to_owned();
+    let metadata_path = table.metadata_location_result()?.to_owned();
+    let name = table.identifier().name().to_owned();
+    let snapshot = table.metadata().current_snapshot_id();
+    let schema_id = table.metadata().current_schema_id();
+    let memory = budget.reserve(object_io.read_allowance())?;
+    let handle = tokio::runtime::Handle::current();
+    budget
+        .blocking_admitted(move || {
+            let _memory = memory;
+            let inventory = inventory;
+            let root = match remote_root {
+                Some(root) => root,
+                None => object_io.pin_root(&location)?,
+            };
+            let objects = match &object_io {
+                #[cfg(feature = "remote")]
+                super::Objects::Remote(remote) => {
+                    for path in &inventory.paths {
+                        if !inherited.contains_key(path) {
+                            root.check_new_path(path)?;
+                        }
+                    }
+                    #[cfg(all(not(test), not(feature = "test-util")))]
+                    let data_sizes = &inventory.known_sizes;
+                    handle.block_on(futures::future::try_join_all(inventory.paths.iter().map(
+                        |path| {
+                            let owner = &owner;
+                            let inherited = &inherited;
+                            #[cfg(all(not(test), not(feature = "test-util")))]
+                            let data_sizes = data_sizes;
+                            #[cfg(all(not(test), not(feature = "test-util")))]
+                            let metadata_path = &metadata_path;
+                            async move {
+                                if let Some(shared) = inherited.get(path) {
+                                    remote.check_available_admitted(shared).await?;
+                                    Ok::<ObjectRef, Error>(shared.clone())
+                                } else {
+                                    #[cfg(all(not(test), not(feature = "test-util")))]
+                                    {
+                                        if path == metadata_path {
+                                            remote.identity_admitted(owner, path).await
+                                        } else if let Some(&bytes) = data_sizes.get(path.as_str()) {
+                                            Ok(ObjectRef {
+                                                owner: (*owner).clone(),
+                                                path: path.clone(),
+                                                digest: blake3::hash(
+                                                    format!("{path}:{bytes}").as_bytes(),
+                                                )
+                                                .to_hex()
+                                                .to_string(),
+                                                bytes,
+                                            })
+                                        } else {
+                                            remote.stat_identity_admitted(owner, path).await
+                                        }
+                                    }
+                                    #[cfg(any(test, feature = "test-util"))]
+                                    {
+                                        remote.identity_admitted(owner, path).await
+                                    }
+                                }
+                            }
+                        },
+                    )))?
+                }
+                _ => {
+                    let mut objects = Vec::new();
+                    for path in &inventory.paths {
+                        if let Some(shared) = inherited.get(path) {
+                            object_io.check_available_admitted(shared, &handle)?;
+                            objects.push(shared.clone());
+                        } else {
+                            root.check_new_path(path)?;
+                            objects.push(object_io.identity_admitted(&owner, path, &handle)?);
+                        }
+                    }
+                    objects
+                }
+            };
+            let metadata = objects
+                .iter()
+                .find(|object| object.path == metadata_path)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "incomplete_inventory",
+                        "native metadata is absent from snapshot inventory",
+                    )
+                })?;
+            Ok(TablePin {
+                table: name,
+                metadata,
+                snapshot,
+                schema_id,
+                objects,
+                rows,
+                logical_metadata: None,
+            })
+        })
+        .await
+}
+
+pub(crate) async fn check_inventory(pin: &TablePin, table: &Table, budget: &Budget) -> Result<()> {
+    let objects = super::Objects::for_path(&pin.metadata.path);
+    if objects.is_remote() {
+        let (_, inventory) = objects.open_snapshot(pin, budget).await?;
+        return check_inventory_files(pin, &inventory);
+    }
+    let inventory = super::snapshot_files(table, budget).await?;
+    check_inventory_files(pin, &inventory)
+}
+
+pub(crate) fn check_inventory_files(
+    pin: &TablePin,
+    inventory: &super::SnapshotFiles,
+) -> Result<()> {
+    let pinned = pin
+        .objects
+        .iter()
+        .map(|object| object.path.as_str())
+        .collect::<BTreeSet<_>>();
+    if !pin.objects.contains(&pin.metadata)
+        || inventory
+            .paths
+            .iter()
+            .any(|path| !pinned.contains(path.as_str()))
+    {
+        return Err(Error::refusal(
+            "incomplete_inventory",
+            "release omits an object referenced by its native metadata",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

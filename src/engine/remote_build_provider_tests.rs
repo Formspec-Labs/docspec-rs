@@ -59,6 +59,7 @@ fn compose(host: &Path, remote: storage::remote::RemoteStorage) -> Result<Engine
         },
         ownership,
         false,
+        None,
     )
 }
 

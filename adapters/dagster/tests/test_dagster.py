@@ -1,7 +1,9 @@
 """Exercise native Dagster execution and retry events against a loopback HTTP peer."""
 
 import importlib.util
+import os
 import unittest
+from unittest.mock import patch
 
 from http_fixture import RELEASE, REQUEST, reply, server
 
@@ -19,11 +21,17 @@ if DAGSTER_AVAILABLE:
 @unittest.skipUnless(DAGSTER_AVAILABLE, "Dagster is not installed; install the adapter's pinned dependency")
 class DagsterTests(unittest.TestCase):
     def execute(self, url, *, selected_job=None, retries=1, max_response_bytes=1024):
-        return (selected_job or docspec_job).execute_in_process(
-            run_config={"ops": {"docspec_operation": {"config": {"route": "/run", "request_json": REQUEST}}}},
-            resources={"docspec": DocSpecResource(base_url=url, uncertain_retries=retries, retry_delay_seconds=0, max_response_bytes=max_response_bytes)},
-            raise_on_error=False,
-        )
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k.upper() not in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "DAGSTER_HOME")
+        }
+        with patch.dict("os.environ", clean_env, clear=True):
+            return (selected_job or docspec_job).execute_in_process(
+                run_config={"ops": {"docspec_operation": {"config": {"route": "/run", "request_json": REQUEST}}}},
+                resources={"docspec": DocSpecResource(base_url=url, uncertain_retries=retries, retry_delay_seconds=0, max_response_bytes=max_response_bytes)},
+                raise_on_error=False,
+            )
 
     def test_native_execution_emits_only_identity_metadata(self):
         with server(reply({**RELEASE, "private_inventory": ["must-not-be-emitted"]})) as (url, requests):
