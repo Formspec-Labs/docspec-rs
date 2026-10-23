@@ -6,7 +6,10 @@ use arrow::{
     compute::{filter_record_batch, not},
     record_batch::RecordBatch,
 };
-use iceberg::{spec::Schema, table::Table};
+use iceberg::{
+    spec::{DataFile, Schema},
+    table::Table,
+};
 
 pub(super) mod build;
 pub(super) mod merge;
@@ -239,6 +242,26 @@ impl Engine {
         storage::pin_bound(dataset, &table, rows, &self.inner.lifecycle.budget, shared).await
     }
 
+    pub(super) async fn pin_output_with_files(
+        &self,
+        dataset: &Id,
+        table: &Table,
+        rows: u64,
+        shared: &[ObjectRef],
+        known_files: Option<&[DataFile]>,
+    ) -> Result<TablePin> {
+        let table = self.inner.objects.bind_table(table)?;
+        storage::pin_bound_with_files(
+            dataset,
+            &table,
+            rows,
+            &self.inner.lifecycle.budget,
+            shared,
+            known_files,
+        )
+        .await
+    }
+
     #[cfg(test)]
     pub(super) async fn create_output(
         &self,
@@ -468,8 +491,11 @@ impl Engine {
             rows_added: rows,
             ..WriteMetrics::default()
         };
-        let table = storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files).await?;
-        let table = self.pin_output(dataset, &table, rows, &[]).await?;
+        let table =
+            storage::append(&table, self.inner.lifecycle.catalog.as_ref(), files.clone()).await?;
+        let table = self
+            .pin_output_with_files(dataset, &table, rows, &[], Some(&files))
+            .await?;
         Ok(Prepared {
             table,
             changes: None,
@@ -526,9 +552,29 @@ impl Engine {
             };
         let context = self.context();
         let request = OperationRequest::Update(spec.clone());
-        for ((name, _), object) in request.inputs().iter().zip(&admission.outputs) {
+        for ((name, source_spec), object) in request.inputs().iter().zip(&admission.outputs) {
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            let local_path = if self.inner.objects.is_remote() {
+                let candidate = ObjectRef {
+                    owner: object.owner.clone(),
+                    path: source_spec.path.clone(),
+                    digest: object.digest.clone(),
+                    bytes: object.bytes,
+                };
+                storage::verify_object(&candidate)
+                    .ok()
+                    .map(|()| candidate.path)
+            } else {
+                None
+            };
+            #[cfg(any(test, feature = "test-util"))]
+            let local_path: Option<String> = {
+                let _ = source_spec;
+                None
+            };
+            let parquet_path = local_path.as_deref().unwrap_or(&object.path);
             context
-                .register_parquet(name.as_str(), &object.path, ParquetReadOptions::default())
+                .register_parquet(name.as_str(), parquet_path, ParquetReadOptions::default())
                 .await?;
         }
         let schema = iceberg::arrow::schema_to_arrow_schema(native.metadata().current_schema())?;

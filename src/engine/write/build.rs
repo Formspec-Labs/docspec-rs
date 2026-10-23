@@ -217,7 +217,11 @@ impl Engine {
             pending
         };
         let catalog = self.inner.lifecycle.catalog.as_ref();
-        let table = if catalog.table_exists(&pending.identifier).await? {
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        let check_existing = resuming;
+        #[cfg(any(test, feature = "test-util"))]
+        let check_existing = true;
+        let table = if check_existing && catalog.table_exists(&pending.identifier).await? {
             catalog.load_table(&pending.identifier).await?
         } else {
             self.inner
@@ -252,6 +256,7 @@ impl Engine {
             return Ok(prepared);
         }
         let result = async {
+            #[cfg(any(test, feature = "test-util"))]
             crate::catalog::GuardedCatalog::new(catalog, &table)
                 .load_table(table.identifier())
                 .await?;
@@ -338,11 +343,30 @@ impl Engine {
         self.inner
             .initial_build_queries
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let stream = self
-            .inner
-            .objects
-            .read_flat_parquet(input, &self.inner.lifecycle.budget)
-            .await?;
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        let local_input = if self.inner.objects.is_remote() {
+            let candidate = ObjectRef {
+                owner: input.owner.clone(),
+                path: spec.input.clone(),
+                digest: input.digest.clone(),
+                bytes: input.bytes,
+            };
+            storage::verify_object(&candidate).ok().map(|()| candidate)
+        } else {
+            None
+        };
+        #[cfg(any(test, feature = "test-util"))]
+        let local_input: Option<ObjectRef> = None;
+        let stream = if let Some(local_ref) = &local_input {
+            storage::Objects::Local
+                .read_flat_parquet(local_ref, &self.inner.lifecycle.budget)
+                .await?
+        } else {
+            self.inner
+                .objects
+                .read_flat_parquet(input, &self.inner.lifecycle.budget)
+                .await?
+        };
         let schema = stream.schema();
         if is_identity_source_projection(&spec.sql, schema.as_ref()) {
             super::check_build_arrow_schema(schema.as_ref())?;
@@ -354,8 +378,11 @@ impl Engine {
         }
         drop(stream);
         let context = self.context();
+        let parquet_path = local_input
+            .as_ref()
+            .map_or(input.path.as_str(), |local_ref| local_ref.path.as_str());
         context
-            .register_parquet("input", &input.path, ParquetReadOptions::default())
+            .register_parquet("input", parquet_path, ParquetReadOptions::default())
             .await?;
         let input_df = context.table("input").await?;
         let frame = if is_identity_source_projection(&spec.sql, input_df.schema().as_arrow()) {

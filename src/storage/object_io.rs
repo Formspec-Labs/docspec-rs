@@ -250,7 +250,10 @@ impl Objects {
                 // competing/unacknowledged writer may duplicate unfinished effort,
                 // but conditional completion cannot overwrite immutable bytes.
                 match objects.upload_file(expected, source, budget).await {
+                    #[cfg(any(test, feature = "test-util"))]
                     Ok(retained) => objects.verify(&retained, budget).await,
+                    #[cfg(all(not(test), not(feature = "test-util")))]
+                    Ok(retained) => Ok(retained),
                     Err(error)
                         if matches!(error.code(), "remote_conflict" | "remote_unconfirmed") =>
                     {

@@ -142,6 +142,59 @@ impl Checks {
         self.inspect_tables
     }
 
+    /// Trust immutable files from a freshly written table pin in the same request.
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub async fn trust_pin(&mut self, pin: &TablePin, budget: &Budget) -> Result<()> {
+        self.admit(budget)?;
+        let mut bytes = self.known.values().fold(0usize, |sum, file| {
+            sum.saturating_add(file.estimated_bytes())
+        });
+        let (table, inventory) = self.objects.open_snapshot(pin, budget).await?;
+        let schemas = Arc::new(
+            table
+                .metadata()
+                .schemas_iter()
+                .map(|schema| storage::schema_identity(schema.as_struct()))
+                .collect::<Result<std::collections::BTreeSet<_>>>()?,
+        );
+        let objects: BTreeMap<_, _> = pin
+            .objects
+            .iter()
+            .map(|object| (object.path.as_str(), object))
+            .collect();
+        for file in &inventory.data {
+            let object = objects
+                .get(file.file_path())
+                .ok_or_else(|| invalid("completed table has no data-file identity"))?;
+            let known = storage::CheckedFile {
+                object: (*object).clone(),
+                schemas: schemas.clone(),
+                rows: file.record_count(),
+            };
+            bytes = bytes
+                .saturating_add(known.estimated_bytes())
+                .saturating_sub(
+                    self.known
+                        .get(&object.path)
+                        .map_or(0, storage::CheckedFile::estimated_bytes),
+                );
+            if bytes > budget.limits.max_metadata_bytes {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "checked-file inventory exceeds metadata allowance",
+                ));
+            }
+            if let Some(previous) = self.known.insert(object.path.clone(), known)
+                && (previous.object != **object || previous.rows != file.record_count())
+            {
+                return Err(invalid(
+                    "completed tables disagree about shared file identity",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Trust immutable files from the operation's already completed captured base.
     pub async fn trust(&mut self, release: &ReleasePin, budget: &Budget) -> Result<()> {
         self.admit(budget)?;

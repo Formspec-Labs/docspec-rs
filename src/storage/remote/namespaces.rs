@@ -8,6 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Default)]
 pub(super) struct Scope {
     root: Option<NamespaceIdent>,
+    root_ready: std::sync::atomic::AtomicBool,
 }
 
 impl Scope {
@@ -24,6 +25,7 @@ impl Scope {
                 "docspec_generation_{}",
                 generation.simple()
             ))),
+            root_ready: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -133,13 +135,16 @@ impl Scope {
     ) -> iceberg::Result<Namespace> {
         let physical = self.physical(namespace)?;
         if let Some(root) = &self.root
-            && !catalog.namespace_exists(root).await?
+            && !self.root_ready.load(std::sync::atomic::Ordering::Relaxed)
         {
-            match catalog.create_namespace(root, HashMap::new()).await {
-                Ok(_) => {}
-                Err(error) if error.kind() == iceberg::ErrorKind::NamespaceAlreadyExists => {}
-                Err(error) => return Err(error),
+            if !catalog.namespace_exists(root).await? {
+                match catalog.create_namespace(root, HashMap::new()).await {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == iceberg::ErrorKind::NamespaceAlreadyExists => {}
+                    Err(error) => return Err(error),
+                }
             }
+            self.root_ready.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.namespace(catalog.create_namespace(&physical, properties).await?)
     }

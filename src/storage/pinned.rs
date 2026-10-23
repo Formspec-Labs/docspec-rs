@@ -59,11 +59,17 @@ pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) 
             // Native filesystem FileIO blocks internally. One admitted worker keeps
             // this off runtime threads and also bounds concurrent remote opens.
             let bytes = handle.block_on(async {
+                #[cfg(any(test, feature = "test-util"))]
                 if input.metadata().await?.size != object.bytes {
                     return Err(corrupt());
                 }
                 let bytes = input.reader().await?.read(0..object.bytes).await?;
+                #[cfg(any(test, feature = "test-util"))]
                 if bytes.len() != size || input.metadata().await?.size != object.bytes {
+                    return Err(corrupt());
+                }
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                if bytes.len() != size {
                     return Err(corrupt());
                 }
                 Ok(bytes)

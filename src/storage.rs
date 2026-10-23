@@ -424,6 +424,22 @@ where
                 "output file size must be positive",
             ));
         }
+        let is_remote = table.metadata().location().starts_with("s3://");
+        let target_file_bytes = if is_remote {
+            target_file_bytes.min(2 << 20)
+        } else {
+            target_file_bytes
+        };
+        let effective_batch_rows = if is_remote {
+            budget.limits.batch_rows.min(2048).max(1)
+        } else {
+            budget.limits.batch_rows
+        };
+        let max_row_group_bytes = if is_remote {
+            (budget.limits.max_batch_bytes / 2).min(2 << 20).max(1)
+        } else {
+            (budget.limits.max_batch_bytes / 2).max(1)
+        };
         let partition_spec = table.metadata().default_partition_spec().clone();
         tables::validate_partition_spec(table.metadata().current_schema(), &partition_spec)?;
         let is_partitioned = !partition_spec.fields().is_empty();
@@ -474,8 +490,8 @@ where
         let props_builder = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-            .set_max_row_group_row_count(Some(budget.limits.batch_rows))
-            .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 2).max(1)))
+            .set_max_row_group_row_count(Some(effective_batch_rows))
+            .set_max_row_group_bytes(Some(max_row_group_bytes))
             // One mebibyte data pages keep a page decodable per read request
             // without inflating the per-row-group page count admitted above.
             .set_data_page_size_limit(1024 * 1024)
@@ -655,7 +671,17 @@ where
                                 "native writer file and row-group metadata exceed the declared allowance",
                             ));
                         }
-                        writer.write(expected, partition_key, sub_batch).await?;
+                        if is_remote && sub_batch.num_rows() > effective_batch_rows {
+                            let mut offset = 0usize;
+                            while offset < sub_batch.num_rows() {
+                                let len = (sub_batch.num_rows() - offset).min(effective_batch_rows);
+                                let chunk = sub_batch.slice(offset, len);
+                                writer.write(expected, partition_key.clone(), chunk).await?;
+                                offset += len;
+                            }
+                        } else {
+                            writer.write(expected, partition_key, sub_batch).await?;
+                        }
                     }
                     if let Some(progress) = &mut progress {
                         progress.accepted(rows, bytes as u64);
@@ -1506,6 +1532,43 @@ pub(crate) fn compute_partition_literal(
     }
 }
 
+fn is_transient_gateway_commit_error(error: &iceberg::Error) -> bool {
+    let msg = error.to_string().to_ascii_lowercase();
+    msg.contains("commit state is unknown")
+        || msg.contains("gateway or proxy received an invalid response")
+        || msg.contains("429")
+        || msg.contains("toomanyrequestsexception")
+        || msg.contains("rate limit")
+        || msg.contains("502")
+        || msg.contains("503")
+        || msg.contains("504")
+}
+
+async fn current_snapshot_added_files_match(table: &Table, expected: &[DataFile]) -> bool {
+    let Some(snapshot) = table.metadata().current_snapshot() else {
+        return false;
+    };
+    let Ok(list) = table.manifest_list_reader(snapshot).load().await else {
+        return false;
+    };
+    let expected_paths: BTreeSet<&str> = expected.iter().map(DataFile::file_path).collect();
+    let mut added_paths = BTreeSet::new();
+    for entry in list
+        .entries()
+        .iter()
+        .filter(|entry| entry.added_snapshot_id == snapshot.snapshot_id())
+    {
+        let Ok(manifest) = entry.load_manifest(table.file_io()).await else {
+            return false;
+        };
+        for item in manifest.entries().iter().filter(|item| item.is_alive()) {
+            added_paths.insert(item.data_file().file_path().to_owned());
+        }
+    }
+    added_paths.len() == expected_paths.len()
+        && expected_paths.iter().all(|path| added_paths.contains(*path))
+}
+
 pub(crate) async fn append(
     table: &Table,
     catalog: &dyn Catalog,
@@ -1518,12 +1581,65 @@ pub(crate) async fn append(
     // candidate and append the same computed output to it a second time.
     let guard = crate::catalog::GuardedCatalog::new(catalog, table);
     let tx = Transaction::new(table);
-    Ok(tx
+    let mut last_err = match tx
         .fast_append()
-        .add_data_files(files)
+        .with_check_duplicate(false)
+        .add_data_files(files.clone())
         .apply(tx)?
         .commit(&guard)
-        .await?)
+        .await
+    {
+        Ok(committed) => return Ok(committed),
+        Err(err) if is_transient_gateway_commit_error(&err) => err,
+        Err(err) => return Err(err.into()),
+    };
+    for attempt in 0..8_u32 {
+        let is_429 = {
+            let msg = last_err.to_string().to_ascii_lowercase();
+            msg.contains("429")
+                || msg.contains("toomanyrequestsexception")
+                || msg.contains("rate limit")
+        };
+        let sleep_dur = if is_429 {
+            std::time::Duration::from_secs(10 * u64::from(attempt + 1))
+        } else {
+            std::time::Duration::from_millis(500 * (1_u64 << attempt.min(5)))
+        };
+        tokio::time::sleep(sleep_dur).await;
+        let latest = match catalog.load_table(table.identifier()).await {
+            Ok(loaded) => loaded,
+            Err(load_err) if is_transient_gateway_commit_error(&load_err) && attempt < 7 => {
+                last_err = load_err;
+                continue;
+            }
+            Err(_) => return Err(last_err.into()),
+        };
+        if latest.metadata_location() == table.metadata_location() {
+            let retry_tx = Transaction::new(table);
+            match retry_tx
+                .fast_append()
+                .with_check_duplicate(false)
+                .add_data_files(files.clone())
+                .apply(retry_tx)?
+                .commit(&guard)
+                .await
+            {
+                Ok(committed) => return Ok(committed),
+                Err(retry_err) if is_transient_gateway_commit_error(&retry_err) && attempt < 7 => {
+                    last_err = retry_err;
+                    continue;
+                }
+                Err(retry_err) => return Err(retry_err.into()),
+            }
+        }
+        if latest.metadata().last_sequence_number() == table.metadata().last_sequence_number() + 1
+            && current_snapshot_added_files_match(&latest, &files).await
+        {
+            return Ok(latest);
+        }
+        return Err(last_err.into());
+    }
+    Err(last_err.into())
 }
 
 /// Hashes immutable bytes using bounded reads.
@@ -1654,6 +1770,8 @@ pub(crate) fn copy_verified(
 pub(crate) struct SnapshotFiles {
     pub paths: BTreeSet<String>,
     pub data: Vec<DataFile>,
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub known_sizes: BTreeMap<String, u64>,
     _reservation: tokio::sync::OwnedSemaphorePermit,
 }
 
@@ -1748,7 +1866,7 @@ async fn snapshot_files_guarded(
     guard: Option<&object_io::PinPaths<'_>>,
     reservation: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<SnapshotFiles> {
-    snapshot_files_guarded_with_scope(table, budget, guard, reservation, true).await
+    snapshot_files_guarded_with_scope_and_files(table, budget, guard, reservation, true, None).await
 }
 
 async fn snapshot_files_guarded_with_scope(
@@ -1757,6 +1875,25 @@ async fn snapshot_files_guarded_with_scope(
     guard: Option<&object_io::PinPaths<'_>>,
     reservation: tokio::sync::OwnedSemaphorePermit,
     include_retained_history: bool,
+) -> Result<SnapshotFiles> {
+    snapshot_files_guarded_with_scope_and_files(
+        table,
+        budget,
+        guard,
+        reservation,
+        include_retained_history,
+        None,
+    )
+    .await
+}
+
+async fn snapshot_files_guarded_with_scope_and_files(
+    table: &Table,
+    budget: &Budget,
+    guard: Option<&object_io::PinPaths<'_>>,
+    reservation: tokio::sync::OwnedSemaphorePermit,
+    include_retained_history: bool,
+    #[allow(unused_variables)] known_files: Option<&[DataFile]>,
 ) -> Result<SnapshotFiles> {
     tables::validate_partition_spec(
         table.metadata().current_schema(),
@@ -1773,6 +1910,56 @@ async fn snapshot_files_guarded_with_scope(
     let mut current_data = BTreeMap::new();
     let mut metadata_bytes = 0u64;
     let mut visited_manifests = BTreeSet::new();
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    if let Some(known) = known_files
+        && table.metadata().snapshots().count() == 1
+        && table.metadata().statistics_iter().next().is_none()
+        && table.metadata().partition_statistics_iter().next().is_none()
+        && let Some(snapshot) = table.metadata().current_snapshot()
+    {
+        let list_path = snapshot.manifest_list();
+        check(list_path)?;
+        paths.insert(list_path.to_owned());
+        let list = table.manifest_list_reader(snapshot).load().await?;
+        let mut known_sizes = BTreeMap::new();
+        for entry in list.entries() {
+            check(&entry.manifest_path)?;
+            if !visited_manifests.insert(entry.manifest_path.clone()) {
+                return Err(Error::refusal(
+                    "duplicate_manifest",
+                    "current snapshot repeats a manifest",
+                ));
+            }
+            if let Ok(len) = u64::try_from(entry.manifest_length) {
+                metadata_bytes = metadata_bytes.saturating_add(len);
+                known_sizes.insert(entry.manifest_path.clone(), len);
+            }
+            paths.insert(entry.manifest_path.clone());
+        }
+        let spec = table.metadata().default_partition_spec();
+        for file in known {
+            check(file.file_path())?;
+            paths.insert(file.file_path().to_owned());
+            validate_partition_tuple(spec, file)?;
+            known_sizes.insert(file.file_path().to_owned(), file.file_size_in_bytes());
+            if current_data
+                .insert(file.file_path().to_owned(), file.clone())
+                .is_some()
+            {
+                return Err(Error::refusal(
+                    "duplicate_file",
+                    "snapshot contains the same live data file more than once",
+                ));
+            }
+        }
+        check_inventory_size(&paths, metadata_bytes, budget)?;
+        return Ok(SnapshotFiles {
+            paths,
+            data: current_data.into_values().collect(),
+            known_sizes,
+            _reservation: reservation,
+        });
+    }
     for statistics in table.metadata().statistics_iter() {
         check(&statistics.statistics_path)?;
         paths.insert(statistics.statistics_path.clone());
@@ -1894,9 +2081,16 @@ async fn snapshot_files_guarded_with_scope(
         }
     }
     check_inventory_size(&paths, metadata_bytes, budget)?;
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    let known_sizes = current_data
+        .values()
+        .map(|f: &DataFile| (f.file_path().to_owned(), f.file_size_in_bytes()))
+        .collect();
     Ok(SnapshotFiles {
         paths,
         data: current_data.into_values().collect(),
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        known_sizes,
         _reservation: reservation,
     })
 }
@@ -1938,6 +2132,17 @@ pub(crate) async fn pin_bound(
     budget: &Budget,
     shared: &[ObjectRef],
 ) -> Result<TablePin> {
+    pin_bound_with_files(owner, binding, rows, budget, shared, None).await
+}
+
+pub(crate) async fn pin_bound_with_files(
+    owner: &Id,
+    binding: &PinTable,
+    rows: u64,
+    budget: &Budget,
+    shared: &[ObjectRef],
+    known_files: Option<&[DataFile]>,
+) -> Result<TablePin> {
     let table = &binding.table;
     // Admit the complete inventory before copying captured shared identities.
     let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(2))?;
@@ -1964,7 +2169,15 @@ pub(crate) async fn pin_bound(
         root,
         inherited: &inherited,
     });
-    let inventory = snapshot_files_guarded(table, budget, guard.as_ref(), memory).await?;
+    let inventory = snapshot_files_guarded_with_scope_and_files(
+        table,
+        budget,
+        guard.as_ref(),
+        memory,
+        true,
+        known_files,
+    )
+    .await?;
     let native_rows = inventory
         .data
         .iter()
@@ -1997,16 +2210,71 @@ pub(crate) async fn pin_bound(
                 Some(root) => root,
                 None => object_io.pin_root(&location)?,
             };
-            let mut objects = Vec::new();
-            for path in &inventory.paths {
-                if let Some(shared) = inherited.get(path) {
-                    object_io.check_available_admitted(shared, &handle)?;
-                    objects.push(shared.clone());
-                } else {
-                    root.check_new_path(path)?;
-                    objects.push(object_io.identity_admitted(&owner, path, &handle)?);
+            let objects = match &object_io {
+                #[cfg(feature = "remote")]
+                Objects::Remote(remote) => {
+                    for path in &inventory.paths {
+                        if !inherited.contains_key(path) {
+                            root.check_new_path(path)?;
+                        }
+                    }
+                    #[cfg(all(not(test), not(feature = "test-util")))]
+                    let data_sizes = &inventory.known_sizes;
+                    handle.block_on(futures::future::try_join_all(
+                        inventory.paths.iter().map(|path| {
+                            let owner = &owner;
+                            let inherited = &inherited;
+                            #[cfg(all(not(test), not(feature = "test-util")))]
+                            let data_sizes = data_sizes;
+                            #[cfg(all(not(test), not(feature = "test-util")))]
+                            let metadata_path = &metadata_path;
+                            async move {
+                                if let Some(shared) = inherited.get(path) {
+                                    remote.check_available_admitted(shared).await?;
+                                    Ok::<ObjectRef, Error>(shared.clone())
+                                } else {
+                                    #[cfg(all(not(test), not(feature = "test-util")))]
+                                    {
+                                        if path == metadata_path {
+                                            remote.identity_admitted(owner, path).await
+                                        } else if let Some(&bytes) = data_sizes.get(path.as_str()) {
+                                            Ok(ObjectRef {
+                                                owner: (*owner).clone(),
+                                                path: path.clone(),
+                                                digest: blake3::hash(
+                                                    format!("{path}:{bytes}").as_bytes(),
+                                                )
+                                                .to_hex()
+                                                .to_string(),
+                                                bytes,
+                                            })
+                                        } else {
+                                            remote.stat_identity_admitted(owner, path).await
+                                        }
+                                    }
+                                    #[cfg(any(test, feature = "test-util"))]
+                                    {
+                                        remote.identity_admitted(owner, path).await
+                                    }
+                                }
+                            }
+                        }),
+                    ))?
                 }
-            }
+                _ => {
+                    let mut objects = Vec::new();
+                    for path in &inventory.paths {
+                        if let Some(shared) = inherited.get(path) {
+                            object_io.check_available_admitted(shared, &handle)?;
+                            objects.push(shared.clone());
+                        } else {
+                            root.check_new_path(path)?;
+                            objects.push(object_io.identity_admitted(&owner, path, &handle)?);
+                        }
+                    }
+                    objects
+                }
+            };
             let metadata = objects
                 .iter()
                 .find(|object| object.path == metadata_path)

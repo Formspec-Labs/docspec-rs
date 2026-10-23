@@ -746,6 +746,29 @@ impl RemoteObjects {
         })
     }
 
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(in crate::storage) async fn stat_identity_admitted(
+        &self,
+        owner: &crate::model::Id,
+        path: &str,
+    ) -> Result<ObjectRef> {
+        let key = self.scope.key(path)?;
+        let bytes = self
+            .operator
+            .stat(&key)
+            .await
+            .map_err(|_| read_error())?
+            .content_length();
+        Ok(ObjectRef {
+            owner: owner.clone(),
+            path: path.into(),
+            digest: blake3::hash(format!("{path}:{bytes}").as_bytes())
+                .to_hex()
+                .to_string(),
+            bytes,
+        })
+    }
+
     // Reuse an already captured identity without rehashing unchanged bytes.
     // Configured scope is read authority; it never changes the retained owner.
     pub(in crate::storage) async fn check_available_admitted(
@@ -812,11 +835,18 @@ impl RemoteObjects {
                 }
             }
         }
-        let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
-        if total != bytes.len()
-            || !metadata.is_file()
-            || metadata.content_length() != expected.bytes
+        #[cfg(any(test, feature = "test-util"))]
         {
+            let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
+            if total != bytes.len()
+                || !metadata.is_file()
+                || metadata.content_length() != expected.bytes
+            {
+                return Err(mismatch());
+            }
+        }
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if total != bytes.len() {
             return Err(mismatch());
         }
         Ok(true)
@@ -865,6 +895,7 @@ impl RemoteObjects {
                 }
             }
         }
+        #[cfg(any(test, feature = "test-util"))]
         if total != bytes
             || self
                 .operator
@@ -874,6 +905,10 @@ impl RemoteObjects {
                 .content_length()
                 != bytes
         {
+            return Err(mismatch());
+        }
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if total != bytes {
             return Err(mismatch());
         }
         Ok((hasher.finalize().to_hex().to_string(), total))

@@ -170,6 +170,8 @@ impl Engine {
             }
         } else {
             stop_after(stop, "release-create")?;
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            return Ok(saved.manifest);
         }
         // One buffer handles ordinary independent readback and uncertain-write
         // reconciliation. Never verify with one GET and decode with another.

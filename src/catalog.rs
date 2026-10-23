@@ -25,7 +25,7 @@ use iceberg::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -59,9 +59,23 @@ pub struct Lifecycle {
     retained_prefix: Option<String>,
     pub(crate) catalog: Arc<dyn Catalog>,
     pub(crate) budget: Budget,
-    cache: Arc<Mutex<Option<Arc<SnapshotRows>>>>,
+    cache: Arc<Mutex<HashMap<String, Arc<SnapshotRows>>>>,
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    view_cache: Arc<Mutex<HashMap<TableIdent, View>>>,
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    deferred_commit: Arc<Mutex<HashMap<TableIdent, DeferredCommit>>>,
+    known_tables: Arc<Mutex<HashSet<TableIdent>>>,
     #[cfg(test)]
     pub(crate) lose_commit_response: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(all(not(test), not(feature = "test-util")))]
+#[derive(Debug)]
+struct DeferredCommit {
+    base_view: View,
+    base_rows: Arc<SnapshotRows>,
+    changes: BTreeMap<String, serde_json::Value>,
+    rows: Arc<SnapshotRows>,
 }
 
 #[derive(Debug)]
@@ -174,7 +188,12 @@ impl Lifecycle {
             retained_prefix: None,
             catalog,
             budget,
-            cache: Arc::new(Mutex::new(None)),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            view_cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            deferred_commit: Arc::new(Mutex::new(HashMap::new())),
+            known_tables: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             lose_commit_response: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -185,19 +204,171 @@ impl Lifecycle {
         self
     }
 
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(crate) fn cached_view(&self, dataset: &Id) -> Option<View> {
+        let ident = lifecycle_ident(dataset);
+        if let Some(view) = self
+            .deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ident)
+            .map(|d| d.base_view.clone())
+        {
+            return Some(view);
+        }
+        self.view_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ident)
+            .cloned()
+    }
+
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(crate) fn set_cached_view(&self, view: View) {
+        let mut guard = self.view_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.len() >= 256 {
+            guard.clear();
+        }
+        guard.insert(view.logical_identifier.clone(), view);
+    }
+
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(crate) async fn begin_deferred(&self, dataset: &Id) -> Result<()> {
+        let view = self.open(dataset).await?;
+        let rows = self.rows(&view).await?;
+        self.deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                view.logical_identifier.clone(),
+                DeferredCommit {
+                    base_view: view,
+                    base_rows: rows.clone(),
+                    changes: BTreeMap::new(),
+                    rows,
+                },
+            );
+        Ok(())
+    }
+
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(crate) async fn commit_flushing_deferred(
+        &self,
+        view: &View,
+        final_changes: Vec<(String, serde_json::Value)>,
+    ) -> Result<View> {
+        let deferred = self
+            .deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&view.logical_identifier);
+        if let Some(mut deferred) = deferred {
+            if final_changes.is_empty() {
+                return Err(Error::refusal(
+                    "empty_commit",
+                    "a lifecycle commit must change state",
+                ));
+            }
+            let unique: BTreeSet<_> = final_changes.iter().map(|(k, _)| k).collect();
+            if unique.len() != final_changes.len() {
+                return Err(Error::refusal(
+                    "duplicate_key",
+                    "each lifecycle key may change only once per commit",
+                ));
+            }
+            for (k, v) in final_changes {
+                deferred.changes.insert(k, v);
+            }
+            {
+                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+                if cache.len() >= 64 {
+                    cache.clear();
+                }
+                cache.insert(deferred.base_rows.metadata.clone(), deferred.base_rows);
+            }
+            let merged: Vec<_> = deferred.changes.into_iter().collect();
+            return self.commit(&deferred.base_view, merged).await;
+        }
+        self.commit(view, final_changes).await
+    }
+
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    pub(crate) async fn flush_deferred(&self, dataset: &Id) -> Result<()> {
+        let ident = lifecycle_ident(dataset);
+        let deferred = self
+            .deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&ident);
+        if let Some(deferred) = deferred {
+            {
+                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+                if cache.len() >= 64 {
+                    cache.clear();
+                }
+                cache.insert(deferred.base_rows.metadata.clone(), deferred.base_rows);
+            }
+            if !deferred.changes.is_empty() {
+                let merged: Vec<_> = deferred.changes.into_iter().collect();
+                self.commit(&deferred.base_view, merged).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Opens or creates a dataset's lifecycle authority.
     ///
     /// # Errors
     /// Returns catalog or schema errors; callers serialize first-time creation.
     pub async fn open(&self, dataset: &Id) -> Result<View> {
         let ident = lifecycle_ident(dataset);
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if let Some(view) = self
+            .deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ident)
+            .map(|d| d.base_view.clone())
+        {
+            return Ok(view);
+        }
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if let Some(cached) = self
+            .view_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ident)
+            .cloned()
+        {
+            return Ok(cached);
+        }
+        let is_known = self
+            .known_tables
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&ident);
+        if is_known {
+            if let Ok(table) = self.catalog.load_table(&ident).await {
+                let view = View {
+                    revision: table.metadata().last_sequence_number(),
+                    table,
+                    logical_identifier: ident,
+                };
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                {
+                    self.set_cached_view(view.clone());
+                }
+                return Ok(view);
+            }
+        }
         let namespace = ident.namespace().clone();
-        if !self.catalog.namespace_exists(&namespace).await? {
+        let namespace_existed = self.catalog.namespace_exists(&namespace).await?;
+        if !namespace_existed {
             self.catalog
                 .create_namespace(&namespace, HashMap::new())
                 .await?;
         }
-        let table = if self.catalog.table_exists(&ident).await? {
+        let table = if namespace_existed && self.catalog.table_exists(&ident).await? {
             self.catalog.load_table(&ident).await?
         } else {
             let schema = Schema::new(vec![
@@ -205,30 +376,68 @@ impl Lifecycle {
                 Field::new("revision", DataType::Int64, false),
                 Field::new("value", DataType::Utf8, false),
             ]);
-            self.catalog
-                .create_table(
-                    &namespace,
-                    TableCreation::builder()
-                        .name("lifecycle".into())
-                        .location_opt(self.retained_prefix.as_ref().map(|prefix| {
-                            format!(
-                                "{prefix}/{dataset}/{}/lifecycle",
-                                uuid::Uuid::new_v4().simple()
-                            )
-                        }))
-                        .schema(iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
-                            &schema,
-                        )?)
-                        .properties(storage::table_properties())
-                        .build(),
-                )
-                .await?
+            let mut attempt = 0u32;
+            loop {
+                match self
+                    .catalog
+                    .create_table(
+                        &namespace,
+                        TableCreation::builder()
+                            .name("lifecycle".into())
+                            .location_opt(self.retained_prefix.as_ref().map(|prefix| {
+                                format!(
+                                    "{prefix}/{dataset}/{}/lifecycle",
+                                    uuid::Uuid::new_v4().simple()
+                                )
+                            }))
+                            .schema(iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
+                                &schema,
+                            )?)
+                            .properties(storage::table_properties())
+                            .build(),
+                    )
+                    .await
+                {
+                    Ok(table) => break table,
+                    Err(err) if err.kind() == iceberg::ErrorKind::TableAlreadyExists => {
+                        break self.catalog.load_table(&ident).await?;
+                    }
+                    Err(err)
+                        if attempt < 8
+                            && ({
+                                let msg = err.to_string().to_ascii_lowercase();
+                                msg.contains("429")
+                                    || msg.contains("toomanyrequestsexception")
+                                    || msg.contains("rate limit")
+                                    || msg.contains("502")
+                                    || msg.contains("503")
+                                    || msg.contains("504")
+                            }) =>
+                    {
+                        tokio::time::sleep(std::time::Duration::from_secs(
+                            10 * u64::from(attempt + 1),
+                        ))
+                        .await;
+                        attempt += 1;
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
         };
-        Ok(View {
+        self.known_tables
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(ident.clone());
+        let view = View {
             revision: table.metadata().last_sequence_number(),
             table,
             logical_identifier: ident,
-        })
+        };
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        {
+            self.set_cached_view(view.clone());
+        }
+        Ok(view)
     }
 
     /// Reads the latest value at an exact authority boundary.
@@ -271,13 +480,22 @@ impl Lifecycle {
         view: &View,
         enforce_history_budget: bool,
     ) -> Result<Arc<SnapshotRows>> {
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if let Some(rows) = self
+            .deferred_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&view.logical_identifier)
+            .map(|d| d.rows.clone())
+        {
+            return Ok(rows);
+        }
         let metadata = view.table.metadata_location_result()?.to_owned();
         if let Some(hit) = self
             .cache
             .lock()
             .map_err(cache_poisoned)?
-            .as_ref()
-            .filter(|entry| entry.metadata == metadata)
+            .get(&metadata)
             .cloned()
         {
             return Ok(hit);
@@ -287,7 +505,7 @@ impl Lifecycle {
         let mut cache_bytes = 0_usize;
         if view.table.metadata().current_snapshot().is_none() {
             let entry = Arc::new(SnapshotRows {
-                metadata,
+                metadata: metadata.clone(),
                 values: current,
                 cache_bytes,
                 history_rows: 0,
@@ -295,7 +513,11 @@ impl Lifecycle {
                 reserved_future_bytes: 0,
                 _reservation: reservation,
             });
-            *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+            if cache.len() >= 64 {
+                cache.clear();
+            }
+            cache.insert(metadata, entry.clone());
             return Ok(entry);
         }
         let batches = storage::read_batches(&view.table, &self.budget).await?;
@@ -360,7 +582,7 @@ impl Lifecycle {
         }
         check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
         let entry = Arc::new(SnapshotRows {
-            metadata,
+            metadata: metadata.clone(),
             values: current,
             cache_bytes,
             history_rows,
@@ -369,7 +591,11 @@ impl Lifecycle {
             _reservation: reservation,
         });
         if within_history_budget {
-            *self.cache.lock().map_err(cache_poisoned)? = Some(entry.clone());
+            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+            if cache.len() >= 64 {
+                cache.clear();
+            }
+            cache.insert(metadata, entry.clone());
         }
         Ok(entry)
     }
@@ -427,8 +653,11 @@ impl Lifecycle {
                 )),
             ],
         )?;
-        let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
-        guard.load_table(view.table.identifier()).await?;
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
+            guard.load_table(view.table.identifier()).await?;
+        }
         // Prepare a bounded cache of the next immutable state. It becomes visible
         // only after the guarded native commit succeeds; failed commits cannot leak it.
         let reservation = self.budget.reserve(self.budget.limits.max_metadata_bytes)?;
@@ -492,13 +721,51 @@ impl Lifecycle {
             self.budget.limits.max_metadata_bytes,
         )?;
         check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        {
+            let mut guard = self.deferred_commit.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(deferred) = guard.get_mut(&view.logical_identifier) {
+                for (k, v) in changes {
+                    deferred.changes.insert(k, v);
+                }
+                let meta = deferred.base_view.table.metadata_location_result()?.to_owned();
+                let entry = Arc::new(SnapshotRows {
+                    metadata: meta.clone(),
+                    values: next_values,
+                    cache_bytes,
+                    history_rows,
+                    history_bytes,
+                    reserved_future_bytes,
+                    _reservation: reservation,
+                });
+                deferred.rows = entry.clone();
+                let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+                if cache.len() >= 64 {
+                    cache.clear();
+                }
+                cache.insert(meta, entry);
+                return Ok(deferred.base_view.clone());
+            }
+        }
         let files = storage::write_catalog_batches(
             &view.table,
             futures::stream::iter(vec![Ok(batch)]),
             &self.budget,
         )
         .await?;
-        let table = storage::append(&view.table, self.catalog.as_ref(), files).await?;
+        let table = match storage::append(&view.table, self.catalog.as_ref(), files).await {
+            Ok(table) => table,
+            Err(error) => {
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                {
+                    self.view_cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&view.logical_identifier);
+                }
+                return Err(error);
+            }
+        };
         #[cfg(test)]
         if self
             .lose_commit_response
@@ -509,8 +776,9 @@ impl Lifecycle {
                 "test interruption after native commit and before cache publication",
             ));
         }
+        let meta = table.metadata_location_result()?.to_owned();
         let entry = Arc::new(SnapshotRows {
-            metadata: table.metadata_location_result()?.to_owned(),
+            metadata: meta.clone(),
             values: next_values,
             cache_bytes,
             history_rows,
@@ -518,12 +786,23 @@ impl Lifecycle {
             reserved_future_bytes,
             _reservation: reservation,
         });
-        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
-        Ok(View {
+        {
+            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+            if cache.len() >= 64 {
+                cache.clear();
+            }
+            cache.insert(meta, entry);
+        }
+        let next_view = View {
             revision: table.metadata().last_sequence_number(),
             table,
             logical_identifier: view.logical_identifier.clone(),
-        })
+        };
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        {
+            self.set_cached_view(next_view.clone());
+        }
+        Ok(next_view)
     }
 
     /// Rewrites the lifecycle table to one baseline snapshot of live, unpruned records.
@@ -547,8 +826,11 @@ impl Lifecycle {
         remove_keys: &BTreeSet<String>,
         upsert_records: &[(String, serde_json::Value)],
     ) -> Result<(View, LifecycleCompactionResult)> {
-        let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
-        guard.load_table(view.table.identifier()).await?;
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            let guard = GuardedCatalog::new(self.catalog.as_ref(), &view.table);
+            guard.load_table(view.table.identifier()).await?;
+        }
         if view.table.metadata().current_snapshot().is_none() {
             return Ok((
                 view.clone(),
@@ -638,7 +920,19 @@ impl Lifecycle {
         )
         .await?;
         let files_after = files.len();
-        let table = replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await?;
+        let table = match replace_baseline_snapshot(&view.table, self.catalog.as_ref(), files).await {
+            Ok(table) => table,
+            Err(error) => {
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                {
+                    self.view_cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&view.logical_identifier);
+                }
+                return Err(error);
+            }
+        };
         #[cfg(test)]
         if self
             .lose_commit_response
@@ -651,8 +945,9 @@ impl Lifecycle {
         }
         let revisions_after = table.metadata().snapshots().count();
         let current_revision = table.metadata().last_sequence_number();
+        let meta = table.metadata_location_result()?.to_owned();
         let entry = Arc::new(SnapshotRows {
-            metadata: table.metadata_location_result()?.to_owned(),
+            metadata: meta.clone(),
             values: next_values,
             cache_bytes,
             history_rows,
@@ -660,14 +955,25 @@ impl Lifecycle {
             reserved_future_bytes,
             _reservation: reservation,
         });
-        *self.cache.lock().map_err(cache_poisoned)? = Some(entry);
+        {
+            let mut cache = self.cache.lock().map_err(cache_poisoned)?;
+            if cache.len() >= 64 {
+                cache.clear();
+            }
+            cache.insert(meta, entry);
+        }
         self.reclaim_expired_baseline_files(&table).await?;
+        let next_view = View {
+            revision: current_revision,
+            table,
+            logical_identifier: view.logical_identifier.clone(),
+        };
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        {
+            self.set_cached_view(next_view.clone());
+        }
         Ok((
-            View {
-                revision: current_revision,
-                table,
-                logical_identifier: view.logical_identifier.clone(),
-            },
+            next_view,
             LifecycleCompactionResult {
                 revisions_before,
                 revisions_after,
@@ -818,7 +1124,11 @@ async fn replace_baseline_snapshot(
         detached: detached.clone(),
     };
     let tx = Transaction::new(&detached);
-    let tx = tx.fast_append().add_data_files(files).apply(tx)?;
+    let tx = tx
+        .fast_append()
+        .with_check_duplicate(false)
+        .add_data_files(files)
+        .apply(tx)?;
     let tx = if old_snapshot_ids.is_empty() {
         tx
     } else {
@@ -986,6 +1296,7 @@ impl Catalog for GuardedCatalog<'_> {
         Ok(current)
     }
     async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        #[cfg(any(test, feature = "test-util"))]
         self.load_table(commit.identifier()).await?;
         // FastAppend supplies the expected branch snapshot requirement. The maintained
         // SQL catalog also compare-and-swaps metadata_location after applying it.

@@ -322,6 +322,9 @@ impl Engine {
         if let Some(fence) = fence {
             records.push(self.closed_source_fence_record(view, fence).await?);
         }
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        lifecycle.commit_flushing_deferred(view, records).await?;
+        #[cfg(any(test, feature = "test-util"))]
         lifecycle.commit(view, records).await?;
         Ok(())
     }

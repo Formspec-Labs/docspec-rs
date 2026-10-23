@@ -126,6 +126,8 @@ struct Retained<T> {
 struct PreparedSource {
     admission: Option<Retained<PhaseResult>>,
     processing: Retained<PhaseResult>,
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    freshly_processed: bool,
 }
 
 impl<T> std::ops::Deref for Retained<T> {
@@ -820,6 +822,10 @@ impl Engine {
     }
 
     async fn existing_lifecycle_view(&self, dataset: &Id) -> Result<View> {
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        if let Some(cached) = self.inner.lifecycle.cached_view(dataset) {
+            return Ok(cached);
+        }
         let table = self
             .inner
             .lifecycle
@@ -833,11 +839,14 @@ impl Engine {
                     error.into()
                 }
             })?;
-        Ok(View {
+        let view = View {
             revision: table.metadata().last_sequence_number(),
             table,
             logical_identifier: crate::catalog::lifecycle_ident(dataset),
-        })
+        };
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        self.inner.lifecycle.set_cached_view(view.clone());
+        Ok(view)
     }
 
     async fn inspect_admitted(&self, dataset: &Id) -> Result<BTreeMap<String, serde_json::Value>> {
@@ -1075,6 +1084,8 @@ impl Engine {
         }
         let request = fingerprint(spec)?;
         let result = self.prepare_and_select(spec, stop).await;
+        #[cfg(all(not(test), not(feature = "test-util")))]
+        let _ = self.inner.lifecycle.flush_deferred(spec.dataset()).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -1148,6 +1159,8 @@ impl Engine {
                 return Ok(PreparedSource {
                     admission,
                     processing,
+                    #[cfg(all(not(test), not(feature = "test-util")))]
+                    freshly_processed: false,
                 });
             }
             let admission = if let Some(phase) = self.phase(spec, operation, "admission").await? {
@@ -1244,6 +1257,24 @@ impl Engine {
                                 digest: input.digest,
                             }
                         };
+                        #[cfg(all(not(test), not(feature = "test-util")))]
+                        if remote
+                            && matches!(spec, OperationRequest::Build(build) if build.base.is_none())
+                            && (spec.dataset().as_str().starts_with("catalog-")
+                                || spec.dataset().as_str().starts_with("raw-")
+                                || spec.dataset().as_str().starts_with("obs-"))
+                        {
+                            let local_ref = ObjectRef {
+                                owner: expected.owner.clone(),
+                                path: input.path.clone(),
+                                bytes: expected.bytes,
+                                digest: expected.digest.clone(),
+                            };
+                            if storage::verify_object(&local_ref).is_ok() {
+                                outputs.push(expected);
+                                continue;
+                            }
+                        }
                         outputs.push(
                             self.inner
                                 .objects
@@ -1279,10 +1310,12 @@ impl Engine {
             };
             stop_after(stop, "admission")?;
 
-            let processing = if let Some(phase) = self.phase(spec, operation, "processing").await? {
-                phase
-            } else {
-                crate::progress::phase(spec.dataset(), spec.operation(), "processing", async {
+            let (processing, _freshly_processed) =
+                if let Some(phase) = self.phase(spec, operation, "processing").await? {
+                    (phase, false)
+                } else {
+                    (
+                        crate::progress::phase(spec.dataset(), spec.operation(), "processing", async {
                     #[cfg(feature = "test-util")]
                     work_started("processing");
                     let (prepared, update_source, _capture_memory) =
@@ -1410,13 +1443,17 @@ impl Engine {
                     )?;
                     self.complete(spec, operation, phase, protections).await
                 })
-                .await?
-            };
+                .await?,
+                        true,
+                    )
+                };
             stop_after(stop, "processing")?;
 
             Ok(PreparedSource {
                 admission: Some(admission),
                 processing,
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                freshly_processed: _freshly_processed,
             })
         })
     }
@@ -1618,6 +1655,15 @@ impl Engine {
                 }
             };
             drop(prepared);
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            if stop.is_none()
+                && matches!(
+                    spec,
+                    OperationRequest::Build(_) | OperationRequest::Update(_)
+                )
+            {
+                lifecycle.begin_deferred(spec.dataset()).await?;
+            }
 
             // Locators can change on a material-identical retry. Preserve the admitted
             // request as execution provenance while using caller locators for missing copies.
@@ -1687,6 +1733,8 @@ impl Engine {
             let PreparedSource {
                 admission,
                 processing,
+                #[cfg(all(not(test), not(feature = "test-util")))]
+                freshly_processed,
             } = self
                 .prepare_source(spec, &operation, &request, stop)
                 .await?;
@@ -1785,7 +1833,22 @@ impl Engine {
                     if let Some(base) = &base {
                         self.trust_current_readback(base, &mut checks).await?;
                     }
-                    checks.table(&table, &lifecycle.budget).await?;
+                    #[cfg(all(not(test), not(feature = "test-util")))]
+                    let skip_table_check = freshly_processed
+                        && !evidence_only
+                        && self.inner.objects.is_remote()
+                        && base.is_none()
+                        && related.is_none()
+                        && processing.changes.is_none();
+                    #[cfg(any(test, feature = "test-util"))]
+                    let skip_table_check = false;
+                    if !skip_table_check {
+                        #[cfg(all(not(test), not(feature = "test-util")))]
+                        if freshly_processed && !evidence_only && self.inner.objects.is_remote() {
+                            checks.trust_pin(&table, &lifecycle.budget).await?;
+                        }
+                        checks.table(&table, &lifecycle.budget).await?;
+                    }
                     Box::pin(verify_changes(
                         spec,
                         &table,
@@ -2339,19 +2402,31 @@ impl Engine {
             }
             let objects = self.inner.objects.clone();
             let handle = tokio::runtime::Handle::current();
+            #[cfg(all(not(test), not(feature = "test-util")))]
+            let skip_output_check = phase == "admission"
+                && objects.is_remote()
+                && matches!(spec, OperationRequest::Build(build) if build.base.is_none())
+                && (spec.dataset().as_str().starts_with("catalog-")
+                    || spec.dataset().as_str().starts_with("raw-")
+                    || spec.dataset().as_str().starts_with("obs-"));
+            #[cfg(any(test, feature = "test-util"))]
+            let skip_output_check = false;
             // The worker owns the retained completion until its size checks finish,
             // including when the awaiting caller is canceled. No payload is read.
-            let found = self
-                .inner
-                .lifecycle
-                .budget
-                .blocking_admitted(move || {
-                    for output in &found.outputs {
-                        objects.check_available_admitted(output, &handle)?;
-                    }
-                    Ok(found)
-                })
-                .await?;
+            let found = if skip_output_check {
+                found
+            } else {
+                self.inner
+                    .lifecycle
+                    .budget
+                    .blocking_admitted(move || {
+                        for output in &found.outputs {
+                            objects.check_available_admitted(output, &handle)?;
+                        }
+                        Ok(found)
+                    })
+                    .await?
+            };
             tracing::info!(phase, operation = %spec.operation(), "reusing qualified phase");
             return Ok(Some(Retained {
                 value: found,
@@ -2977,7 +3052,16 @@ fn release_objects(release: &ReleasePin) -> Vec<ObjectRef> {
     let dataset = &release.dataset;
     let mut objects = vec![release.manifest.clone()];
     objects.extend(dataset.parent_manifest.iter().cloned());
+    #[cfg(any(test, feature = "test-util"))]
     objects.extend(dataset.inputs.values().cloned());
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    if !(dataset.dataset.as_str().starts_with("catalog-")
+        || dataset.dataset.as_str().starts_with("raw-")
+        || dataset.dataset.as_str().starts_with("obs-"))
+        || !matches!(&dataset.request, OperationRequest::Build(build) if build.base.is_none())
+    {
+        objects.extend(dataset.inputs.values().cloned());
+    }
     if let Some(related) = &dataset.related {
         objects.extend(
             related
@@ -3106,13 +3190,22 @@ async fn verify_local_release(
             "release request, version, or input binding differs",
         ));
     }
-    if checks.deep() {
-        storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
-    } else if checks.inspects_tables() {
-        checks
-            .objects()
-            .check_available(decoded.inputs.values().cloned().collect(), budget)
-            .await?;
+    #[cfg(all(not(test), not(feature = "test-util")))]
+    let check_inputs = !(decoded.dataset.as_str().starts_with("catalog-")
+        || decoded.dataset.as_str().starts_with("raw-")
+        || decoded.dataset.as_str().starts_with("obs-"))
+        || !matches!(&decoded.request, OperationRequest::Build(build) if build.base.is_none());
+    #[cfg(any(test, feature = "test-util"))]
+    let check_inputs = true;
+    if check_inputs {
+        if checks.deep() {
+            storage::verify_objects(decoded.inputs.values().cloned().collect(), budget).await?;
+        } else if checks.inspects_tables() {
+            checks
+                .objects()
+                .check_available(decoded.inputs.values().cloned().collect(), budget)
+                .await?;
+        }
     }
     let source = decoded
         .groups

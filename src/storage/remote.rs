@@ -235,43 +235,94 @@ impl fmt::Debug for RemoteCatalog {
     }
 }
 
+fn is_rate_limited_or_transient(error: &iceberg::Error) -> bool {
+    let msg = error.to_string().to_ascii_lowercase();
+    msg.contains("429")
+        || msg.contains("toomanyrequestsexception")
+        || msg.contains("rate limit")
+        || msg.contains("502")
+        || msg.contains("503")
+        || msg.contains("504")
+}
+
+async fn retry_catalog_op<T, F, Fut>(mut op: F) -> iceberg::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = iceberg::Result<T>>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match op().await {
+            Ok(v) => return Ok(v),
+            Err(err) if is_rate_limited_or_transient(&err) && attempt < 8 => {
+                let msg = err.to_string().to_ascii_lowercase();
+                let is_429 = msg.contains("429")
+                    || msg.contains("toomanyrequestsexception")
+                    || msg.contains("rate limit");
+                let delay = if is_429 {
+                    Duration::from_secs(10 * u64::from(attempt + 1))
+                } else {
+                    Duration::from_millis(500 * (1u64 << attempt.min(5)))
+                };
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 #[async_trait]
 impl Catalog for RemoteCatalog {
     async fn list_namespaces(
         &self,
         p: Option<&NamespaceIdent>,
     ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        self.scope.list_namespaces(self.inner.as_ref(), p).await
+        retry_catalog_op(|| self.scope.list_namespaces(self.inner.as_ref(), p)).await
     }
     async fn create_namespace(
         &self,
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<Namespace> {
-        self.scope.create_namespace(self.inner.as_ref(), n, p).await
+        retry_catalog_op(|| {
+            let p = p.clone();
+            async move {
+                match self.scope.create_namespace(self.inner.as_ref(), n, p).await {
+                    Ok(ns) => Ok(ns),
+                    Err(err) if err.kind() == iceberg::ErrorKind::NamespaceAlreadyExists => {
+                        self.get_namespace(n).await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+        })
+        .await
     }
     async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
-        let namespace = self.inner.get_namespace(&self.scope.physical(n)?).await?;
+        let physical = self.scope.physical(n)?;
+        let namespace = retry_catalog_op(|| self.inner.get_namespace(&physical)).await?;
         self.scope.namespace(namespace)
     }
     async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
-        self.inner.namespace_exists(&self.scope.physical(n)?).await
+        let physical = self.scope.physical(n)?;
+        retry_catalog_op(|| self.inner.namespace_exists(&physical)).await
     }
     async fn update_namespace(
         &self,
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<()> {
-        self.inner
-            .update_namespace(&self.scope.physical(n)?, p)
-            .await
+        let physical = self.scope.physical(n)?;
+        retry_catalog_op(|| self.inner.update_namespace(&physical, p.clone())).await
     }
     async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
-        self.inner.drop_namespace(&self.scope.physical(n)?).await
+        let physical = self.scope.physical(n)?;
+        retry_catalog_op(|| self.inner.drop_namespace(&physical)).await
     }
     async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        self.inner
-            .list_tables(&self.scope.physical(n)?)
+        let physical = self.scope.physical(n)?;
+        retry_catalog_op(|| self.inner.list_tables(&physical))
             .await?
             .into_iter()
             .map(|table| self.scope.logical_table(&table))
@@ -281,31 +332,29 @@ impl Catalog for RemoteCatalog {
         self.inner.create_table(&self.scope.physical(n)?, c).await
     }
     async fn load_table(&self, t: &TableIdent) -> iceberg::Result<Table> {
-        self.inner.load_table(&self.scope.physical_table(t)?).await
+        let physical = self.scope.physical_table(t)?;
+        retry_catalog_op(|| self.inner.load_table(&physical)).await
     }
     async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.drop_table(&self.scope.physical_table(t)?).await
+        let physical = self.scope.physical_table(t)?;
+        retry_catalog_op(|| self.inner.drop_table(&physical)).await
     }
     async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
-        self.inner.purge_table(&self.scope.physical_table(t)?).await
+        let physical = self.scope.physical_table(t)?;
+        retry_catalog_op(|| self.inner.purge_table(&physical)).await
     }
     async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
-        self.inner
-            .table_exists(&self.scope.physical_table(t)?)
-            .await
+        let physical = self.scope.physical_table(t)?;
+        retry_catalog_op(|| self.inner.table_exists(&physical)).await
     }
     async fn rename_table(&self, s: &TableIdent, d: &TableIdent) -> iceberg::Result<()> {
-        self.inner
-            .rename_table(
-                &self.scope.physical_table(s)?,
-                &self.scope.physical_table(d)?,
-            )
-            .await
+        let ps = self.scope.physical_table(s)?;
+        let pd = self.scope.physical_table(d)?;
+        retry_catalog_op(|| self.inner.rename_table(&ps, &pd)).await
     }
     async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
-        self.inner
-            .register_table(&self.scope.physical_table(t)?, m)
-            .await
+        let physical = self.scope.physical_table(t)?;
+        retry_catalog_op(|| self.inner.register_table(&physical, m.clone())).await
     }
     async fn update_table(&self, c: TableCommit) -> iceberg::Result<Table> {
         // Native Table identifiers remain physical, so requirements and updates
