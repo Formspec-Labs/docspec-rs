@@ -144,3 +144,46 @@ mod qualification_tests {
         assert!(compacted_file(&writers,&writers).is_none());
     }
 }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use parquet::arrow::async_reader::AsyncFileReader;
+
+    #[tokio::test]
+    async fn both_arms_use_the_engine_writer_and_their_pinned_native_layout() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let catalog = docspec::storage::local_catalog(root.path()).await?;
+        let ns = NamespaceIdent::new("m1_layout".into());
+        catalog.create_namespace(&ns,HashMap::new()).await?;
+        for capped in [true,false] {
+            let name = if capped {"capped"} else {"uncapped"};
+            let ident = TableIdent::new(ns.clone(),name.into());
+            let table = create_table(catalog.as_ref(),&ident,&root.path().join(name).to_string_lossy()).await?;
+            assert!(files(&table,0,5000,!capped).await.is_err());
+            let written = files(&table,0,5000,capped).await?;
+            assert!(!written.is_empty());
+            let mut groups = Vec::new();
+            for file in &written {
+                let mut reader = iceberg::arrow::ArrowFileReader::new(
+                    iceberg::io::FileMetadata {size:file.file_size_in_bytes()},
+                    table.file_io().new_input(file.file_path())?.reader().await?);
+                let footer = reader.get_metadata(None).await?;
+                groups.extend(footer.row_groups().iter().map(|g|g.num_rows()));
+            }
+            assert_eq!(groups.iter().sum::<i64>(),5000);
+            if capped {assert!(groups.len()>1 && groups.iter().all(|n|*n<=2048));}
+            else {assert_eq!(groups,vec![5000]);}
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn failure_reports_keep_stage_and_refuse_to_print_dynamic_secrets() {
+        let error = anyhow::anyhow!(String::from("Bearer never-report-this-value"));
+        let report = failure_report(&error,"Observe");
+        assert_eq!(report["stage"],"Observe");
+        assert_eq!(report["status"],"failed");
+        assert!(!report.to_string().contains("never-report-this-value"));
+    }
+}
