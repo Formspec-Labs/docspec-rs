@@ -52,7 +52,7 @@ fn many_struct_elements_are_admitted_before_compaction_and_cast() {
         result.is_err(),
         "large nested copy was admitted beyond its pool"
     );
-    let error = result.err().expect("checked refusal");
+    let error = result.expect_err("checked refusal");
     assert_eq!(error.code(), "capacity");
     // Refusal must release every partial reservation.
     assert!(budget.reserve(16 << 20).is_ok());
