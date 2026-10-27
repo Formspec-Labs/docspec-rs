@@ -118,6 +118,8 @@ struct ReleaseOutputArgs {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run a declarative multi-input SQL job without a lifecycle workspace.
+    Job(SpecArg),
     /// Wait after a durable handoff so the qualification harness can kill this process.
     #[cfg(feature = "test-util")]
     #[command(hide = true)]
@@ -538,8 +540,24 @@ async fn async_main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse_from(normalize_cli_args(std::env::args_os()));
     check_startup(&cli)?;
+    if matches!(&cli.command, Command::Job(_)) && cli.limits.is_none() {
+        return Err(docspec::Error::refusal(
+            "invalid_budget",
+            "SQL job requires --limits for its execution host",
+        )
+        .into());
+    }
     let limits: Limits = cli.limits.map(read_json).transpose()?.unwrap_or_default();
     match cli.command {
+        Command::Job(SpecArg { spec }) => {
+            match read_json::<docspec::job::JobSpec>(spec)?.run(limits).await {
+                Ok(result) => print_json(&result)?,
+                Err(failure) => {
+                    print_json(&failure.report())?;
+                    return Err(failure.into());
+                }
+            }
+        }
         Command::Hash { input } => {
             let (digest, bytes) = storage::digest(&input)?;
             print_json(&serde_json::json!({"digest": digest, "bytes": bytes}))?;
@@ -1233,6 +1251,7 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
         if matches!(
             &cli.command,
             Command::Hash { .. }
+                | Command::Job(_)
                 | Command::Verify { .. }
                 | Command::VerifyInputs { .. }
                 | Command::RestoreLocal { .. }

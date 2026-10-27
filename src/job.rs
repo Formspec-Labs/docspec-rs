@@ -3,6 +3,8 @@
 mod export;
 mod json_lines;
 mod materialized;
+mod query_result;
+mod spec;
 
 use crate::{
     Result,
@@ -18,6 +20,11 @@ use std::path::{Path, PathBuf};
 pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
+pub use query_result::QueryResult;
+pub use spec::{
+    JobFailure, JobInput, JobOutput, JobResult, JobSpec, OutputResult, SqlQuery, SqlStep,
+    StepResult,
+};
 
 /// An embedded SQL job. Output frames retain their source and memory ownership.
 pub struct Job {
@@ -27,6 +34,21 @@ pub struct Job {
 }
 
 impl Job {
+    /// Registers a reusable logical view without collecting its rows.
+    ///
+    /// # Errors
+    /// Refuses an existing name or an invalid or volatile SQL expression.
+    pub async fn register_view(&self, name: &str, sql: &str) -> Result<()> {
+        if self.context.table_exist(name)? {
+            return Err(crate::Error::refusal(
+                "invalid_spec",
+                "named step already exists",
+            ));
+        }
+        let frame = self.sql(sql).await?;
+        self.context.register_table(name, frame.into_view())?;
+        Ok(())
+    }
     /// Creates a job with a caller-owned scratch directory and explicit limits.
     ///
     /// # Errors

@@ -22,8 +22,10 @@ use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
 use std::{any::Any, path::Path, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StepStorage {
+    View,
     Memory,
     Scratch,
 }

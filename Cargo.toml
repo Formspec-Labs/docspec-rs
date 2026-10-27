@@ -35,6 +35,7 @@ remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:openda
 [dependencies]
 anyhow = "1"
 arrow = { version = "58", features = ["ipc", "json"] }
+arrow-schema = { version = "=58.4.0", features = ["serde"] }
 async-trait = "0.1"
 axum = "0.8"
 blake3 = "1"

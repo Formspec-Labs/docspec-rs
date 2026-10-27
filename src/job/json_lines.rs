@@ -27,7 +27,8 @@ use std::{
 };
 
 /// One source file and its stable, non-secret evidence key.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonLinesFile {
     pub key: String,
     pub path: PathBuf,
