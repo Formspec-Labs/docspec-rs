@@ -893,3 +893,35 @@ async fn configured_inspection_refuses_manifest_scope_before_native_decode() {
     );
     fixture.finish();
 }
+
+#[tokio::test]
+async fn selected_native_input_scans_populated_objects_with_explicit_io() {
+    let (metadata, mut inventory) = native_inventory(LIST, MANIFEST).await;
+    let path = format!("{ROOT}/metadata/selected.json");
+    inventory.insert(path.clone(), serde_json::to_vec(&metadata).unwrap());
+    let fixture = ReadFixture::inventory(inventory);
+    let root = tempfile::tempdir().unwrap();
+    let remote = crate::storage::remote::RemoteStorage {
+        catalog: crate::storage::local_catalog(&root.path().join("catalog"))
+            .await
+            .unwrap(),
+        objects: fixture.objects(),
+        maintenance_generation: None,
+    };
+    let spec:crate::job::JobSpec=serde_json::from_value(serde_json::json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"native_table","name":"selected","metadata_location":path,"table_uuid":metadata.uuid(),"snapshot":metadata.current_snapshot_id(),"schema_id":metadata.current_schema_id()}],"steps":[],"outputs":[],"queries":[{"name":"values","sql":"SELECT id FROM selected WHERE id>20"}]})).unwrap();
+    let result = spec
+        .run_with_remote(Limits::default(), remote)
+        .await
+        .unwrap();
+    assert_eq!(result.queries[0].data, serde_json::json!([{"id":42}]));
+    let requests = fixture.finish();
+    assert!(requests.iter().all(|(method, _)| method == "GET"));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(_, range)| range
+                == &Some(format!("bytes=0-{}", Limits::default().max_metadata_bytes)))
+            .count(),
+        1
+    );
+}

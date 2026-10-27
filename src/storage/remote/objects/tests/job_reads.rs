@@ -111,3 +111,55 @@ async fn explicit_remote_job_reuses_its_connection_without_lifecycle() {
         )]
     );
 }
+
+#[tokio::test]
+async fn selected_metadata_one_capped_get_preserves_explicit_remote_io() {
+    let metadata = metadata();
+    let plain = serde_json::to_vec(&metadata).unwrap();
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gzip.write_all(&plain).unwrap();
+    for bytes in [plain, gzip.finish().unwrap()] {
+        let pin = pin(&bytes, &metadata);
+        let fixture = ReadFixture::inventory(HashMap::from([(pin.metadata.path.clone(), bytes)]));
+        let root = tempfile::tempdir().unwrap();
+        let remote = crate::storage::remote::RemoteStorage {
+            catalog: crate::storage::local_catalog(&root.path().join("catalog"))
+                .await
+                .unwrap(),
+            objects: fixture.objects(),
+            maintenance_generation: None,
+        };
+        let spec:crate::job::JobSpec=serde_json::from_value(serde_json::json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"native_table","name":"selected","metadata_location":pin.metadata.path,"table_uuid":metadata.uuid(),"snapshot":null,"schema_id":metadata.current_schema_id()}],"steps":[],"outputs":[],"queries":[{"name":"n","sql":"SELECT count(*) AS n FROM selected"}]})).unwrap();
+        let result = spec
+            .run_with_remote(Limits::default(), remote)
+            .await
+            .unwrap();
+        assert_eq!(result.queries[0].data, serde_json::json!([{"n":0}]));
+        assert_eq!(
+            fixture.finish(),
+            vec![(
+                "GET".into(),
+                Some(format!("bytes=0-{}", Limits::default().max_metadata_bytes))
+            )]
+        );
+    }
+}
+#[tokio::test]
+async fn selected_metadata_scope_refusal_performs_no_request() {
+    let fixture = ReadFixture::inventory(HashMap::new());
+    let selection = crate::storage::NativeTableSnapshot {
+        metadata_location: "s3://bucket/outside/metadata.json".into(),
+        table_uuid: metadata().uuid(),
+        snapshot: None,
+        schema_id: 0,
+    };
+    let error = crate::storage::open_snapshot(
+        &selection,
+        Some(&fixture.objects()),
+        &Budget::new(Limits::default()).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), "remote_scope");
+    assert!(fixture.finish().is_empty());
+}
