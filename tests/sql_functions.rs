@@ -151,3 +151,38 @@ async fn json_output_expansion_and_unsupported_values_refuse() {
         );
     }
 }
+
+#[tokio::test]
+async fn non_scalar_url_expansion_admits_retained_capacity_before_parsing() {
+    use arrow::{array::StringArray, record_batch::RecordBatch};
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("url.parquet");
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::Utf8,
+        false,
+    )]));
+    let value = format!("https://example.test/{}", "é".repeat(300000));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![Arc::new(StringArray::from(vec![value]))],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let spec: JobSpec = serde_json::from_value(json!({
+        "scratch":root.path().join("scratch"),
+        "inputs":[{"kind":"parquet","name":"urls","path":path}],
+        "steps":[],"outputs":[],
+        "queries":[{"name":"n","sql":"SELECT length(url_resolve(value,cast(NULL AS VARCHAR))) AS n FROM urls"}]
+    })).unwrap();
+    let mut small = limits();
+    small.memory_bytes = 8 << 20;
+    small.max_batch_bytes = 2 << 20;
+    let error = spec.run(small).await.unwrap_err().to_string();
+    assert!(error.contains("function output"), "{error}");
+}
