@@ -327,3 +327,58 @@ async fn released_names_keep_existing_frames_and_free_scratch_at_last_use() {
     assert!(scratch_files(&scratch).is_empty());
     assert!(job.release("held").is_err());
 }
+
+#[tokio::test]
+async fn plain_and_gzip_json_lines_share_exact_evidence_and_conflict_behavior() {
+    use docspec::job::JobSpec;
+    use serde_json::json;
+    let root = tempfile::tempdir().unwrap();
+    let raw = b"{\"id\":1,\"value\":\"first\"}\n{\"id\":\"conflict\",\"value\":\"second\"}";
+    let plain = root.path().join("plain.gz");
+    std::fs::write(&plain, raw).unwrap();
+    let gzip = root.path().join("gzip.jsonl");
+    let mut writer = GzEncoder::new(std::fs::File::create(&gzip).unwrap(), Compression::fast());
+    writer.write_all(raw).unwrap();
+    writer.finish().unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("value", DataType::Utf8, true),
+    ]);
+    let mut results = Vec::new();
+    for path in [plain, gzip] {
+        let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"input","files":[{"key":"same/evidence","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":[{"name":"rows","sql":"SELECT * FROM input ORDER BY __source_line"}]})).unwrap();
+        results.push(spec.run(limits()).await.unwrap().queries.remove(0).data);
+    }
+    assert_eq!(results[0], results[1]);
+    assert_eq!(results[0][1]["id"], serde_json::Value::Null);
+    assert_eq!(
+        results[0][0]["__raw_line"],
+        std::str::from_utf8(raw)
+            .unwrap()
+            .split_inclusive('\n')
+            .next()
+            .unwrap()
+    );
+    assert_eq!(results[0][1]["__source_line"], 2);
+    assert_eq!(results[0][1]["__source_key"], "same/evidence");
+    let broken = root.path().join("broken.jsonl");
+    std::fs::write(&broken, [0x1f, 0x8b, 0x08]).unwrap();
+    let job = Job::new(limits(), root.path().join("broken-scratch")).unwrap();
+    job.register_json_lines(
+        "broken",
+        vec![JsonLinesFile {
+            key: "broken/evidence".into(),
+            path: broken,
+        }],
+        Arc::new(schema),
+    )
+    .unwrap();
+    assert!(
+        job.sql("SELECT * FROM broken")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .is_err()
+    );
+}
