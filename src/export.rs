@@ -5,6 +5,9 @@ pub use crate::model::{
     TaggedScalarExpr, WhenThen,
 };
 use crate::model::{Id, ObjectRef, OperationId, VersionRef};
+mod portable;
+pub(crate) use portable::{portable_batch, portable_data_type, portable_schema};
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

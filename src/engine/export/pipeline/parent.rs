@@ -109,8 +109,9 @@ pub(super) fn sanitize_or_assign_field(
         | DataType::Time64(_)
         | DataType::Timestamp(_, _)
         | DataType::Decimal128(_, _) => field.data_type().clone(),
-        DataType::Utf8View => DataType::Utf8,
-        DataType::BinaryView => DataType::Binary,
+        DataType::Utf8View | DataType::BinaryView => {
+            crate::export::portable_data_type(field.data_type())
+        }
         DataType::List(item) => DataType::List(Arc::new(sanitize_or_assign_field(
             root_name,
             item,

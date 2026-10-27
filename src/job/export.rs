@@ -121,7 +121,7 @@ pub(super) async fn export(
         })
         .collect::<Vec<_>>();
     let frame = frame.sort(order)?;
-    let input_schema = std::sync::Arc::new(frame.schema().as_arrow().clone());
+    let input_schema = crate::export::portable_schema(frame.schema().as_arrow());
     let output_indices = if settings.columns.is_empty() {
         (0..input_schema.fields().len()).collect::<Vec<_>>()
     } else {
@@ -270,6 +270,7 @@ pub(super) async fn export(
     let mut rows = 0u64;
     loop {
         let exhausted = if let Some(batch) = stream.try_next().await? {
+            let batch = crate::export::portable_batch(batch, coalescer.schema(), budget)?;
             if batch.get_array_memory_size() > budget.limits.max_batch_bytes {
                 return Err(Error::refusal(
                     "capacity",

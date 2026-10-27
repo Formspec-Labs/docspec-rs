@@ -126,7 +126,7 @@ pub(super) async fn materialize(
     }
     let frame = context.sql(sql).await?;
     crate::query::validate_immutable_functions(frame.logical_plan())?;
-    let schema = Arc::new(frame.schema().as_arrow().clone());
+    let schema = crate::export::portable_schema(frame.schema().as_arrow());
     let mut stream = frame.execute_stream().await?;
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
@@ -137,6 +137,7 @@ pub(super) async fn materialize(
     let mut writer_memory = None;
     let mut writer: Option<ArrowWriter<std::fs::File>> = None;
     while let Some(batch) = stream.try_next().await? {
+        let batch = crate::export::portable_batch(batch, schema.clone(), budget)?;
         rows += batch.num_rows();
         let size = batch.get_array_memory_size();
         if size > budget.limits.max_batch_bytes {
