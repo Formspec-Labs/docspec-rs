@@ -1,6 +1,9 @@
 //! Declarative job execution uses the embedded SQL service directly.
 // Rust guideline compliant 2026-02-21
-use super::{ComponentsSettings, ExportSettings, ExportedFile, Job, JsonLinesFile, StepStorage};
+use super::{
+    ComponentsSettings, ExportSettings, ExportedFile, Job, JsonLinesFile, StepStorage,
+    TableOperation, TableOperationResult,
+};
 use crate::{Error, Result, budget::Limits, model::TablePin};
 use arrow::datatypes::Schema;
 use serde::{Deserialize, Serialize};
@@ -93,6 +96,10 @@ pub struct JobOutput {
 #[serde(deny_unknown_fields)]
 pub struct JobSpec {
     pub scratch: PathBuf,
+    #[serde(default)]
+    pub catalog_root: Option<PathBuf>,
+    #[serde(default)]
+    pub table_operations: Vec<TableOperation>,
     pub inputs: Vec<JobInput>,
     pub steps: Vec<JobStep>,
     pub outputs: Vec<JobOutput>,
@@ -126,6 +133,8 @@ pub struct OutputResult {
 /// Machine-readable local results; no clock or process identity enters them.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub table_operations: Vec<TableOperationResult>,
     pub steps: Vec<StepResult>,
     pub outputs: Vec<OutputResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,18 +171,44 @@ impl JobSpec {
     /// Refuses duplicate names/paths before I/O and propagates input, SQL,
     /// resource and export failures. Completed outputs remain create-only.
     pub async fn run(&self, limits: Limits) -> std::result::Result<JobResult, JobFailure> {
+        self.run_injected(limits, None).await
+    }
+
+    /// Executes with an explicitly injected native catalog and no lifecycle store.
+    ///
+    /// # Errors
+    /// Refuses conflicting local catalog selection or the same job failures as `run`.
+    pub async fn run_with_catalog(
+        &self,
+        limits: Limits,
+        catalog: Arc<dyn iceberg::Catalog>,
+    ) -> std::result::Result<JobResult, JobFailure> {
+        self.run_injected(limits, Some(catalog)).await
+    }
+
+    async fn run_injected(
+        &self,
+        limits: Limits,
+        catalog: Option<Arc<dyn iceberg::Catalog>>,
+    ) -> std::result::Result<JobResult, JobFailure> {
         let mut completed = JobResult {
+            table_operations: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
             queries: Vec::new(),
         };
-        match self.execute(limits, &mut completed).await {
+        match self.execute(limits, &mut completed, catalog).await {
             Ok(()) => Ok(completed),
             Err(error) => Err(JobFailure { completed, error }),
         }
     }
 
-    async fn execute(&self, limits: Limits, result: &mut JobResult) -> Result<()> {
+    async fn execute(
+        &self,
+        limits: Limits,
+        result: &mut JobResult,
+        catalog: Option<Arc<dyn iceberg::Catalog>>,
+    ) -> Result<()> {
         let mut names = BTreeSet::new();
         for name in self
             .inputs
@@ -187,6 +222,19 @@ impl JobSpec {
                     "duplicate or empty input/step name",
                 ));
             }
+        }
+        TableOperation::validate_all(&self.table_operations, names)?;
+        if catalog.is_some() && self.catalog_root.is_some() {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "injected and local catalog authority cannot be combined",
+            ));
+        }
+        if !self.table_operations.is_empty() && catalog.is_none() && self.catalog_root.is_none() {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "table operations require an explicit catalog",
+            ));
         }
         let mut names = BTreeSet::new();
         let mut paths = BTreeSet::new();
@@ -258,6 +306,29 @@ impl JobSpec {
                 name: step.name().to_owned(),
                 storage,
             });
+        }
+        let catalog = if !self.table_operations.is_empty() {
+            match catalog {
+                Some(catalog) => Some(catalog),
+                None => Some(
+                    crate::storage::local_catalog(
+                        self.catalog_root.as_ref().expect("validated local catalog"),
+                    )
+                    .await?,
+                ),
+            }
+        } else {
+            None
+        };
+        for operation in &self.table_operations {
+            result.table_operations.push(
+                operation
+                    .execute(
+                        &job,
+                        catalog.as_ref().expect("operation owns catalog").as_ref(),
+                    )
+                    .await?,
+            );
         }
         for output in &self.outputs {
             let file = job

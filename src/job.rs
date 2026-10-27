@@ -8,6 +8,7 @@ mod json_lines;
 mod materialized;
 mod query_result;
 mod spec;
+mod table_operations;
 pub mod tables;
 
 use crate::{
@@ -30,6 +31,7 @@ pub use spec::{
     ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
     SqlQuery, SqlStep, StepResult,
 };
+pub use table_operations::{TableOperation, TableOperationResult};
 
 /// An embedded SQL job. Output frames retain their source and memory ownership.
 pub struct Job {
@@ -141,9 +143,17 @@ impl Job {
     /// # Errors
     /// Refuses changed metadata, an absent pinned snapshot, or provider failures.
     pub async fn register_iceberg(&self, name: &str, pin: &crate::model::TablePin) -> Result<()> {
-        use iceberg_datafusion::table::IcebergStaticTableProvider;
         let table = crate::storage::open_pin(pin, &self.budget).await?;
-        let provider = match pin.snapshot {
+        self.register_native_table(name, table).await
+    }
+
+    pub(super) async fn register_native_table(
+        &self,
+        name: &str,
+        table: iceberg::table::Table,
+    ) -> Result<()> {
+        use iceberg_datafusion::table::IcebergStaticTableProvider;
+        let provider = match table.metadata().current_snapshot_id() {
             Some(snapshot) => {
                 IcebergStaticTableProvider::try_new_from_table_snapshot(table, snapshot).await?
             }

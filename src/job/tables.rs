@@ -128,21 +128,37 @@ where
 /// Refuses an absent metadata location or changed UUID/metadata. Catalog purge
 /// errors propagate without blind retry; the caller must reload and recheck.
 pub async fn purge_if_current(catalog: &dyn Catalog, selected: &Table) -> Result<()> {
-    if selected.metadata_location().is_none() {
-        return Err(Error::refusal(
-            "invalid_spec",
-            "purge requires committed table metadata",
-        ));
-    }
-    let current = catalog.load_table(selected.identifier()).await?;
-    if current.metadata().uuid() != selected.metadata().uuid()
-        || current.metadata_location() != selected.metadata_location()
+    let metadata = selected
+        .metadata_location()
+        .ok_or_else(|| Error::refusal("invalid_spec", "purge requires committed table metadata"))?;
+    purge_selected(
+        catalog,
+        selected.identifier(),
+        selected.metadata().uuid(),
+        metadata,
+    )
+    .await
+}
+
+/// Purges one exact native UUID and metadata reference after reloading authority.
+///
+/// # Errors
+/// Refuses changed authority or any native catalog failure, without blind retry.
+pub async fn purge_selected(
+    catalog: &dyn Catalog,
+    table: &TableIdent,
+    table_uuid: uuid::Uuid,
+    metadata_location: &str,
+) -> Result<()> {
+    let current = catalog.load_table(table).await?;
+    if current.metadata().uuid() != table_uuid
+        || current.metadata_location() != Some(metadata_location)
     {
         return Err(Error::refusal(
             "stale_authority",
             "table changed before purge",
         ));
     }
-    catalog.purge_table(selected.identifier()).await?;
+    catalog.purge_table(table).await?;
     Ok(())
 }

@@ -2,7 +2,7 @@
 // Rust guideline compliant 2026-02-21
 use docspec::{budget::Limits, job::JobSpec};
 use iceberg::{
-    Catalog, NamespaceIdent, TableIdent,
+    NamespaceIdent, TableIdent,
     spec::{NestedField, PrimitiveType, Schema, Type},
 };
 use serde_json::{Value, json};

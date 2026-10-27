@@ -83,6 +83,35 @@ nothing; unrelated errors propagate. File layout and table creation properties
 remain caller choices, using `storage::write_batches_with_layout` and native
 `Catalog::create_table` rather than a second creation implementation.
 
+A job can declare `catalog_root` for an explicit local native catalog and
+`table_operations` after its ordinary inputs and steps. Embedded callers can use
+`run_with_catalog(limits, catalog)` instead; local and injected authority cannot
+be combined. No lifecycle workspace is opened. Operations run before exports
+and metadata queries, and completed operation reports survive later failure.
+
+Operations use strict tagged shapes: `create_namespace` supplies `name`,
+`namespace` and `properties`; `create` supplies `name`, `table`, `location`, native
+Iceberg `schema`, `format_version`, `properties`, and optional native
+`partition_spec`/`sort_order`. Creation refuses existing names. `purge` supplies
+`name`, `table`, `table_uuid` and exact `metadata_location`.
+
+An `append` supplies `name`, `table`, distinct `current_table` and `work_table`
+binding names, `sql`, `identity_sql` and `layout`. Each conflict reloads native
+authority, rebinds the current table and materializes the work SQL once. Actual
+empty work performs no commit. Nonempty work requires exactly one nonempty
+string cell from identity SQL over the materialized work. That identity must
+cover the selected immutable rows and writer definition. The native writer
+streams the same retained work using the job's shared budget. The temporary
+bindings are released after success or refusal. Preparation repeats at most
+four times; identity ordering may cost `O(W log W)` for `W` selected rows.
+
+Table identifiers use native JSON, for example
+`{"namespace":["archive"],"name":"captures"}`. Layout is
+`{"file_bytes":2097152,"row_group_rows":2048,"row_group_bytes":2097152}`;
+the caller chooses these values within its limits. Results retain UUID,
+metadata location, snapshot/schema IDs and the newly written file paths, row
+counts and sizes without reopening completed data files.
+
 `job::tables::purge_if_current` checks the selected UUID and metadata location
 against the catalog, then makes one purge attempt. The REST adapter never blindly
 retries purge. After any uncertain result, the caller must reload authority and
