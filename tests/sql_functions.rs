@@ -49,7 +49,7 @@ async fn http_dates_are_nullable_utc_values_without_application_retry_policy() {
     }
     assert_eq!(
         scalar("SELECT arrow_typeof(http_date(cast(NULL AS VARCHAR))) AS kind").await,
-        json!([{"kind":"Timestamp(Microsecond, Some(\"UTC\"))"}])
+        json!([{"kind":"Timestamp(µs, \"UTC\")"}])
     );
 }
 
