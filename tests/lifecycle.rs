@@ -1129,3 +1129,43 @@ async fn completed_plan_remains_complete_after_later_selection_without_reselecti
     assert_eq!(engine.latest(&spec.dataset).await.unwrap(), later);
     assert_eq!(engine.inspect(&spec.dataset).await.unwrap(), before);
 }
+
+#[tokio::test]
+async fn ordinary_cli_commits_reusable_phases_before_final_selection() {
+    // Exercise the ordinary binary as well as test-util builds. A completed
+    // source phase must not exist only in an in-process deferred map.
+    let root = TempDir::new().unwrap();
+    let spec = fixture(root.path());
+    let request = root.path().join("request.json");
+    let profile = root.path().join("limits.json");
+    let workspace = root.path().join("workspace");
+    std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
+    std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace").arg(&workspace).arg("--limits").arg(&profile)
+        .arg("run").arg(&request).output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let catalog = storage::local_catalog(&workspace).await.unwrap();
+    let budget = Budget::new(limits()).unwrap();
+    let mut phases = std::collections::BTreeSet::new();
+    let mut revisions = std::collections::BTreeSet::new();
+    for namespace in catalog.list_namespaces(None).await.unwrap() {
+        for identifier in catalog.list_tables(&namespace).await.unwrap() {
+            if identifier.name() != "lifecycle" { continue; }
+            let table = catalog.load_table(&identifier).await.unwrap();
+            let mut stream = storage::read_batches(&table, &budget).await.unwrap();
+            while let Some(batch) = stream.try_next().await.unwrap() {
+                let keys = batch.column_by_name("key").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
+                let numbers = batch.column_by_name("revision").unwrap().as_any().downcast_ref::<Int64Array>().unwrap();
+                for index in 0..batch.num_rows() {
+                    if keys.value(index).starts_with("phase/") {
+                        phases.insert(keys.value(index).to_owned());
+                        revisions.insert(numbers.value(index));
+                    }
+                }
+            }
+        }
+    }
+    assert!(phases.len() > 1, "fixture must retain multiple reusable phases");
+    assert!(revisions.len() > 1, "completed phases were deferred into final selection");
+}
