@@ -256,3 +256,42 @@ mod cap_qualification_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod observation_evidence_tests {
+    use super::*;
+    #[test]
+    fn compactor_attribution_requires_same_generation_and_complete_successful_writes() -> Result<()> {
+        let identity = json!({"namespace":"ns","table":"growth","table_uuid":"uuid","writer_profile":"engine-v1-uncapped","binary_blake3":"pin"});
+        let mut previous = identity.clone();
+        previous["rows_per_day"] = json!(4);
+        previous["rows_equal"] = json!(true);
+        previous["day"] = json!(0);
+        previous["data_paths"] = json!(["old"]);
+        let mut record = identity.clone();
+        record["batches"] = json!([{"day":1,"commits":1,"work_list_rows":4,"committed_snapshot":7,"files":[{"path":"new","bytes":8,"rows":4}]}]);
+        let known = writer_evidence(Some(&previous), &[record.clone()], &identity, 1, 4)?;
+        assert!(known.contains("old") && known.contains("new"));
+        for field in ["namespace","table","table_uuid","writer_profile","binary_blake3","rows_per_day","rows_equal"] {
+            let mut bad = previous.clone();
+            bad[field] = json!("wrong");
+            assert!(writer_evidence(Some(&bad), &[record.clone()], &identity, 1, 4).is_err(), "{field}");
+        }
+        for field in ["namespace","table","table_uuid","writer_profile","binary_blake3"] {
+            let mut bad = record.clone();
+            bad[field] = json!("wrong");
+            assert!(writer_evidence(Some(&previous), &[bad], &identity, 1, 4).is_err(), "{field}");
+        }
+        for files in [json!([]),json!([{"path":"new","bytes":8,"rows":3}]),json!([{"path":"new","bytes":0,"rows":4}])] {
+            let mut bad = record.clone(); bad["batches"][0]["files"] = files;
+            assert!(writer_evidence(Some(&previous), &[bad], &identity, 1, 4).is_err());
+        }
+        let mut noop = record;
+        noop["batches"][0]["commits"] = json!(0);
+        noop["batches"][0]["files"] = json!([]);
+        noop["batches"][0]["work_list_rows"] = json!(0);
+        assert!(writer_evidence(Some(&previous), &[noop], &identity, 1, 4).is_err());
+        assert!(writer_evidence(Some(&previous), &[], &identity, -1, 4).is_err());
+        Ok(())
+    }
+}
