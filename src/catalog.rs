@@ -1192,16 +1192,13 @@ impl Catalog for GuardedCatalog<'_> {
         Ok(self.detached.clone().unwrap_or(current))
     }
     async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
+        let _ = self.load_table(commit.identifier()).await?;
         if self.detached.is_some() {
-            let _ = self.load_table(commit.identifier()).await?;
             // The detached transaction base generates a `RefSnapshotIdMatch { snapshot_id: None }`
             // requirement so `FastAppend` writes a standalone manifest list without inheriting prior
             // manifests. `load_table` above verified the exact expected metadata location and
             // `SqlCatalog::update_table` performs an atomic compare-and-swap on `metadata_location`.
             let _ = commit.take_requirements();
-        } else {
-            #[cfg(any(test, feature = "test-util"))]
-            self.load_table(commit.identifier()).await?;
         }
         // FastAppend supplies the expected branch snapshot requirement. The maintained
         // SQL catalog also compare-and-swaps metadata_location after applying it.
