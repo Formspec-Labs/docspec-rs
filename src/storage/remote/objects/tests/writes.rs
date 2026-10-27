@@ -249,6 +249,10 @@ impl WriteFixture {
     }
 
     pub(crate) fn for_path(behavior: Behavior, expected_path: String) -> Self {
+        Self::for_path_with_limit(behavior, expected_path, 3 * CHUNK)
+    }
+
+    fn for_path_with_limit(behavior: Behavior, expected_path: String, max_body: usize) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let stop = Arc::new(AtomicBool::new(false));
@@ -268,7 +272,7 @@ impl WriteFixture {
                 socket.set_nonblocking(false).unwrap();
                 socket.set_read_timeout(Some(DEADLINE)).unwrap();
                 socket.set_write_timeout(Some(DEADLINE)).unwrap();
-                let request = Request::read(&mut socket);
+                let request = Request::read(&mut socket, max_body);
                 report
                     .requests
                     .push((request.method.clone(), request.range.clone()));
@@ -493,7 +497,7 @@ struct Request {
 }
 
 impl Request {
-    fn read(socket: &mut TcpStream) -> Self {
+    fn read(socket: &mut TcpStream, max_body: usize) -> Self {
         let mut header = Vec::new();
         while !header.ends_with(b"\r\n\r\n") {
             let mut byte = [0];
@@ -517,7 +521,7 @@ impl Request {
         let length = value("content-length")
             .map(|value| value.parse::<usize>().unwrap())
             .unwrap_or(0);
-        assert!(length <= 3 * CHUNK);
+        assert!(length <= max_body);
         let mut body = vec![0; length];
         socket.read_exact(&mut body).unwrap();
         Self {
@@ -983,30 +987,36 @@ fn upload_spec(path: &std::path::Path, bytes: &[u8]) -> super::super::FileUpload
 async fn known_release_file_uses_one_conditional_md5_put_without_readback() {
     use base64::Engine as _;
     use sha2::Digest;
-    let bytes = vec![37; CHUNK + 17];
-    let source = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(source.path(), &bytes).unwrap();
-    let spec = upload_spec(source.path(), &bytes);
-    let fixture = WriteFixture::new(Behavior::AcceptPut);
-    let budget = Budget::new(Limits {
-        memory_bytes: 128 << 20,
-        ..Default::default()
-    })
-    .unwrap();
-    assert_eq!(
-        fixture.objects().create_file(&spec, &budget).await.unwrap(),
-        super::super::CreateFileResult::Created
-    );
-    let report = fixture.finish();
-    assert_eq!(report.requests, vec![("PUT".into(), None)]);
-    assert_eq!(
-        report.content_md5,
-        vec![Some(
-            base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&bytes))
-        )]
-    );
-    assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
-    assert!(report.parts.is_empty());
+    for (size, memory_bytes) in [(CHUNK + 17, 128 << 20), (6 * CHUNK + 17, 256 << 20)] {
+        let bytes = vec![37; size];
+        let source = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(source.path(), &bytes).unwrap();
+        let spec = upload_spec(source.path(), &bytes);
+        let fixture = WriteFixture::for_path_with_limit(
+            Behavior::AcceptPut,
+            "/bucket/owned/file.bin".into(),
+            size,
+        );
+        let budget = Budget::new(Limits {
+            memory_bytes,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            fixture.objects().create_file(&spec, &budget).await.unwrap(),
+            super::super::CreateFileResult::Created
+        );
+        let report = fixture.finish();
+        assert_eq!(report.requests, vec![("PUT".into(), None)]);
+        assert_eq!(
+            report.content_md5,
+            vec![Some(
+                base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&bytes))
+            )]
+        );
+        assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+        assert!(report.parts.is_empty());
+    }
 }
 #[tokio::test]
 async fn existing_release_file_is_not_read_back_and_changed_source_never_writes() {
