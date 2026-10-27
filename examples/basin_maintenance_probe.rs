@@ -103,6 +103,14 @@ fn required(name: &str) -> Result<String> {
     std::env::var(name).map_err(|_| anyhow::anyhow!("missing probe configuration {name}"))
 }
 
+fn validate_build_profile(debug_assertions: bool) -> Result<()> {
+    ensure!(
+        !debug_assertions,
+        "remote measurement requires the optimized --release build"
+    );
+    Ok(())
+}
+
 async fn connect() -> Result<(Arc<dyn Catalog>, Operator, String)> {
     let bucket = required("DOCSPEC_M1_BUCKET")?;
     ensure!(
@@ -258,6 +266,7 @@ fn writer_evidence(
             "table_uuid",
             "writer_profile",
             "binary_blake3",
+            "release_build",
         ]
         .iter()
         .all(|key| !identity[key].is_null() && record[key] == identity[key])
@@ -450,7 +459,7 @@ async fn observe(
         .map(|path| Ok(serde_json::from_slice::<Value>(&std::fs::read(path)?)?))
         .collect::<Result<Vec<_>>>()?;
     let identity = json!({"namespace":args.namespace,"table":args.table,
-        "table_uuid":table.metadata().uuid(),"binary_blake3":binary,
+        "table_uuid":table.metadata().uuid(),"binary_blake3":binary,"release_build":!cfg!(debug_assertions),
         "writer_profile":table.metadata().properties().get("probe.writer-profile")});
     let known = writer_evidence(
         previous.as_ref(),
@@ -553,6 +562,7 @@ async fn run(args: Args) -> Result<()> {
         args.allow_scratch_writes,
         "explicit --allow-scratch-writes required, including observation startup"
     );
+    validate_build_profile(cfg!(debug_assertions))?;
     let binary = docspec::storage::digest(&std::env::current_exe()?)?.0;
     let (catalog, operator, bucket) = connect().await?;
     let namespace = NamespaceIdent::new(args.namespace.clone());
@@ -638,6 +648,7 @@ async fn run(args: Args) -> Result<()> {
         }
     }
     result["binary_blake3"] = json!(binary);
+    result["release_build"] = json!(!cfg!(debug_assertions));
     result["namespace"] = json!(args.namespace);
     result["table"] = json!(args.table);
     std::fs::write(args.output, serde_json::to_vec_pretty(&result)?)?;
@@ -1098,7 +1109,10 @@ mod qualification_tests {
             "iceberg"
         );
         reports.last_mut().unwrap()["release_build"] = json!(false);
-        assert_eq!(decision_report(ns, &reports)?["capacity_decision"], "incomplete");
+        assert_eq!(
+            decision_report(ns, &reports)?["capacity_decision"],
+            "incomplete"
+        );
         reports.last_mut().unwrap()["release_build"] = json!(true);
         reports.last_mut().unwrap()["rows_per_day"] = json!(1);
         assert_eq!(
@@ -1167,6 +1181,7 @@ fn projection_for(namespace: &str, reports: &[Value]) -> Result<Value> {
                 && report["table_uuid"] == uuid
                 && report["rows_per_day"] == rows
                 && report["writer_profile"] == "engine-v1-uncapped"
+                && report["release_build"] == true
                 && report["binary_blake3"] == binary,
             "growth workload identity changed"
         );
@@ -1276,6 +1291,7 @@ fn decision_report(namespace: &str, reports: &[Value]) -> Result<Value> {
     let projected = reports.iter().filter(|r| r["projected"] == true).find(|r| {
         r["namespace"] == namespace
             && r["table"] == "projected"
+            && r["release_build"] == true
             && r["rows_per_day"] == projection["rows_per_day"]
             && r["writer_profile"] == projection["writer_profile"]
             && r["binary_blake3"] == projection["binary_blake3"]
@@ -1357,7 +1373,8 @@ fn cap_decision(namespace: &str, reports: &[Value]) -> Result<Value> {
         let Some(pin) = r["binary_blake3"].as_str() else {
             return Ok(incomplete());
         };
-        if r["writer_profile"] != expected
+        if r["release_build"] != true
+            || r["writer_profile"] != expected
             || generations[arm].as_deref().is_some_and(|id| id != uuid)
             || binary.as_deref().is_some_and(|id| id != pin)
         {
