@@ -368,39 +368,62 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
     Ok(out)
 }
 
-fn compatible_native_type(
+fn aligned_native_type(
     source: &arrow::datatypes::DataType,
     target: &arrow::datatypes::DataType,
-) -> bool {
+) -> Option<arrow::datatypes::DataType> {
     use arrow::datatypes::DataType;
     if source == target {
-        return true;
+        return Some(target.clone());
     }
     match (source, target) {
-        (DataType::List(a), DataType::List(b))
-        | (DataType::LargeList(a), DataType::LargeList(b)) => {
-            compatible_native_type(a.data_type(), b.data_type())
+        (DataType::List(a), DataType::List(b)) => {
+            Some(DataType::List(Arc::new(b.as_ref().clone().with_data_type(
+                aligned_native_type(a.data_type(), b.data_type())?,
+            ))))
         }
+        (DataType::LargeList(a), DataType::LargeList(b)) => Some(DataType::LargeList(Arc::new(
+            b.as_ref()
+                .clone()
+                .with_data_type(aligned_native_type(a.data_type(), b.data_type())?),
+        ))),
         (DataType::FixedSizeList(a, n), DataType::FixedSizeList(b, m)) if n == m => {
-            compatible_native_type(a.data_type(), b.data_type())
+            Some(DataType::FixedSizeList(
+                Arc::new(
+                    b.as_ref()
+                        .clone()
+                        .with_data_type(aligned_native_type(a.data_type(), b.data_type())?),
+                ),
+                *m,
+            ))
         }
         (DataType::Struct(source), DataType::Struct(target)) => {
             let fields = source
                 .iter()
                 .map(|field| (field.name(), field.data_type()))
                 .collect::<std::collections::BTreeMap<_, _>>();
-            fields.len() == source.len()
-                && source.len() == target.len()
-                && target.iter().all(|field| {
-                    fields
-                        .get(field.name())
-                        .is_some_and(|source| compatible_native_type(source, field.data_type()))
+            if fields.len() != source.len() || source.len() != target.len() {
+                return None;
+            }
+            target
+                .iter()
+                .map(|field| {
+                    let source = fields.get(field.name())?;
+                    Some(Arc::new(field.as_ref().clone().with_data_type(
+                        aligned_native_type(source, field.data_type())?,
+                    )))
                 })
+                .collect::<Option<Vec<_>>>()
+                .map(|fields| DataType::Struct(fields.into()))
         }
+        // The maintained writer accepts views directly. Flattening shared views
+        // can multiply payload bytes, so preserve storage rather than casting.
+        (DataType::Utf8View, DataType::Utf8 | DataType::LargeUtf8)
+        | (DataType::BinaryView, DataType::Binary | DataType::LargeBinary) => Some(source.clone()),
         // Preserve the existing lossless scalar whitelist. Broad Arrow cast
         // admission would also permit truncation and positional struct fallback.
-        (DataType::Timestamp(unit, Some(_)), DataType::Timestamp(target, Some(_))) => {
-            unit == target
+        (DataType::Timestamp(unit, Some(_)), DataType::Timestamp(target_unit, Some(_))) => {
+            (unit == target_unit).then(|| target.clone())
         }
         (
             DataType::Int8 | DataType::Int16 | DataType::UInt8 | DataType::UInt16,
@@ -410,8 +433,8 @@ fn compatible_native_type(
         | (DataType::Binary, DataType::LargeBinary)
         | (DataType::LargeBinary, DataType::Binary)
         | (DataType::Utf8, DataType::LargeUtf8)
-        | (DataType::LargeUtf8, DataType::Utf8) => true,
-        _ => false,
+        | (DataType::LargeUtf8, DataType::Utf8) => Some(target.clone()),
+        _ => None,
     }
 }
 
@@ -433,13 +456,19 @@ pub(crate) fn align_native_batch(
                     "writer field is absent from native schema",
                 )
             })?;
-            if !compatible_native_type(field.data_type(), target.data_type()) {
-                return Err(Error::refusal(
-                    "schema_mismatch",
-                    "writer field has an incompatible native type",
-                ));
-            }
-            Ok(target.clone())
+            let aligned =
+                aligned_native_type(field.data_type(), target.data_type()).ok_or_else(|| {
+                    Error::refusal(
+                        "schema_mismatch",
+                        format!(
+                            "writer field {} has incompatible native types: {:?} -> {:?}",
+                            field.name(),
+                            field.data_type(),
+                            target.data_type()
+                        ),
+                    )
+                })?;
+            Ok(target.clone().with_data_type(aligned))
         })
         .collect::<Result<Vec<_>>>()?;
     let conversion = source
@@ -447,16 +476,6 @@ pub(crate) fn align_native_batch(
         .iter()
         .zip(&fields)
         .any(|(a, b)| a.data_type() != b.data_type());
-    let nested = source.fields().iter().zip(&fields).any(|(field, target)| {
-        field.data_type() != target.data_type()
-            && matches!(
-                field.data_type(),
-                DataType::List(_)
-                    | DataType::LargeList(_)
-                    | DataType::FixedSizeList(_, _)
-                    | DataType::Struct(_)
-            )
-    });
     // The whitelist widens values at most fourfold. Cover retained input,
     // slice, compacted children, casts and aligned buffer rounding before any
     // copy; writer-owned retained buffers have their separate lifetime admission.
@@ -475,11 +494,6 @@ pub(crate) fn align_native_batch(
     } else {
         None
     };
-    let batch = if nested {
-        compact_batch_slice(&batch, 0, batch.num_rows())?
-    } else {
-        batch
-    };
     let options = arrow::compute::CastOptions {
         safe: false,
         ..Default::default()
@@ -487,13 +501,33 @@ pub(crate) fn align_native_batch(
     let columns = batch
         .columns()
         .iter()
+        .zip(source.fields())
         .zip(&fields)
-        .map(|(array, target)| {
+        .map(|((array, field), target)| {
             if array.data_type() == target.data_type() {
                 Ok(array.clone())
             } else {
+                // Trim unused child nulls only in a column being aligned;
+                // unrelated columns keep their existing buffers.
+                let array = if matches!(
+                    array.data_type(),
+                    DataType::List(_)
+                        | DataType::LargeList(_)
+                        | DataType::FixedSizeList(_, _)
+                        | DataType::Struct(_)
+                ) {
+                    let one = RecordBatch::try_new(
+                        Arc::new(Schema::new(vec![field.clone()])),
+                        vec![array.clone()],
+                    )?;
+                    compact_batch_slice(&one, 0, batch.num_rows())?
+                        .column(0)
+                        .clone()
+                } else {
+                    array.clone()
+                };
                 Ok(arrow::compute::cast_with_options(
-                    array,
+                    &array,
                     target.data_type(),
                     &options,
                 )?)
