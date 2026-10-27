@@ -304,3 +304,55 @@ async fn output_temporary_file_obeys_shared_disk_quota() {
     );
     assert!(!path.exists());
 }
+
+#[tokio::test]
+async fn parquet_and_materialized_strings_use_the_executed_schema() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("source.parquet");
+    super::scalar::input(
+        &input,
+        &[
+            (Some(2), Some("second".into())),
+            (Some(1), Some("first".into())),
+        ],
+    );
+    let job = Job::new(Limits::default(), root.path().join("scratch")).unwrap();
+    job.register_parquet("items", &input).await.unwrap();
+    job.materialize("cached", "SELECT id,text,'a' AS kind FROM items")
+        .await
+        .unwrap();
+    for (name, sql) in [
+        ("direct", "SELECT id,text,'a' AS kind FROM items"),
+        ("cached", "SELECT * FROM cached"),
+    ] {
+        let path = root.path().join(format!("{name}.parquet"));
+        let result = job
+            .export(sql, &path, &settings(ExportProfile::Ranged))
+            .await
+            .unwrap();
+        assert_eq!(result.rows, 2);
+        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+            std::fs::File::open(path).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            reader.schema().field_with_name("text").unwrap().data_type(),
+            &arrow::datatypes::DataType::Utf8
+        );
+        let batches = reader
+            .build()
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        let mut json = arrow::json::ArrayWriter::new(Vec::new());
+        for batch in batches {
+            json.write(&batch).unwrap();
+        }
+        json.finish().unwrap();
+        let rows: serde_json::Value = serde_json::from_slice(&json.into_inner()).unwrap();
+        assert_eq!(
+            rows,
+            serde_json::json!([{"id":1,"text":"first","kind":"a"},{"id":2,"text":"second","kind":"a"}])
+        );
+    }
+}
