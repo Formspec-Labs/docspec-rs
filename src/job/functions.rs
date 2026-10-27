@@ -1,0 +1,580 @@
+//! Generic, bounded URL and JSON primitives; callers retain application policy.
+// Rust guideline compliant 2026-02-21
+use crate::budget::Budget;
+use arrow::{
+    array::{
+        Array, ArrayRef, BooleanArray, FixedSizeListArray, LargeListArray, LargeStringArray,
+        ListArray, StringArray, StringBuilder, StringViewArray, StructArray,
+    },
+    datatypes::{DataType, Field},
+    json::writer::{EncoderOptions, make_encoder},
+};
+use datafusion::{
+    common::{DataFusionError, Result},
+    logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
+        Volatility,
+    },
+    prelude::SessionContext,
+};
+use percent_encoding::percent_decode_str;
+use std::{
+    any::Any,
+    fmt,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Kind {
+    Resolve,
+    Normalize,
+    Decode,
+    UrlFilename,
+    DispositionFilename,
+    JsonArray,
+}
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Resolve => "url_resolve",
+            Self::Normalize => "uri_normalize_encoding",
+            Self::Decode => "percent_decode_utf8",
+            Self::UrlFilename => "url_filename",
+            Self::DispositionFilename => "disposition_filename",
+            Self::JsonArray => "json_array",
+        }
+    }
+}
+
+struct GenericFunction {
+    kind: Kind,
+    signature: Signature,
+    budget: Budget,
+}
+impl fmt::Debug for GenericFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenericFunction")
+            .field("kind", &self.kind)
+            .field("max_bytes", &self.budget.limits.max_batch_bytes)
+            .finish()
+    }
+}
+impl PartialEq for GenericFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.budget.limits.max_batch_bytes == other.budget.limits.max_batch_bytes
+    }
+}
+impl Eq for GenericFunction {}
+impl Hash for GenericFunction {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+        self.budget.limits.max_batch_bytes.hash(state);
+    }
+}
+
+pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::Result<()> {
+    datafusion_functions_json::register_all(context)?;
+    for kind in [
+        Kind::Resolve,
+        Kind::Normalize,
+        Kind::Decode,
+        Kind::UrlFilename,
+        Kind::DispositionFilename,
+        Kind::JsonArray,
+    ] {
+        let signature = if kind == Kind::JsonArray {
+            Signature::one_of(
+                vec![TypeSignature::Exact(vec![]), TypeSignature::VariadicAny],
+                Volatility::Immutable,
+            )
+        } else {
+            Signature::uniform(
+                if kind == Kind::Resolve { 2 } else { 1 },
+                vec![DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View],
+                Volatility::Immutable,
+            )
+        };
+        context.register_udf(ScalarUDF::from(GenericFunction {
+            kind,
+            signature,
+            budget: budget.clone(),
+        }));
+    }
+    Ok(())
+}
+
+fn capacity() -> DataFusionError {
+    DataFusionError::ResourcesExhausted("function output exceeds its byte allowance".into())
+}
+fn admit(budget: &Budget, bytes: usize) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    budget.reserve(bytes).map_err(|_| capacity())
+}
+fn json_type(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::Null
+        | DataType::Boolean
+        | DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64
+        | DataType::Utf8
+        | DataType::LargeUtf8
+        | DataType::Utf8View => true,
+        DataType::List(f) | DataType::LargeList(f) | DataType::FixedSizeList(f, _) => {
+            json_type(f.data_type())
+        }
+        DataType::Struct(fields) => fields.iter().all(|f| json_type(f.data_type())),
+        _ => false,
+    }
+}
+fn text(array: &dyn Array, index: usize) -> Result<Option<&str>> {
+    if array.is_null(index) {
+        return Ok(None);
+    }
+    if let Some(a) = array.as_any().downcast_ref::<StringArray>() {
+        return Ok(Some(a.value(index)));
+    }
+    if let Some(a) = array.as_any().downcast_ref::<LargeStringArray>() {
+        return Ok(Some(a.value(index)));
+    }
+    if let Some(a) = array.as_any().downcast_ref::<StringViewArray>() {
+        return Ok(Some(a.value(index)));
+    }
+    Err(DataFusionError::Execution(
+        "string function received a non-string array".into(),
+    ))
+}
+// Count standard JSON escaping before invoking Arrow's actual serializer. This
+// is admission accounting, not a second serializer or identity implementation.
+fn quoted_bytes(value: &str) -> usize {
+    value.bytes().fold(2usize, |n, b| {
+        n.saturating_add(match b {
+            b'"' | b'\\' | 8 | 9 | 10 | 12 | 13 => 2,
+            0..=31 => 6,
+            _ => 1,
+        })
+    })
+}
+fn json_bytes(array: &dyn Array, index: usize) -> Result<usize> {
+    if array.is_null(index) {
+        return Ok(4);
+    }
+    match array.data_type() {
+        DataType::Null => Ok(4),
+        DataType::Boolean => Ok(
+            if array
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .unwrap()
+                .value(index)
+            {
+                4
+            } else {
+                5
+            },
+        ),
+        // Every supported signed/unsigned integer fits 21 JSON bytes, including a sign.
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64 => Ok(21),
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {
+            Ok(quoted_bytes(text(array, index)?.unwrap()))
+        }
+        DataType::Struct(_) => {
+            let a = array.as_any().downcast_ref::<StructArray>().unwrap();
+            a.columns()
+                .iter()
+                .zip(a.fields())
+                .try_fold(2usize, |bytes, (column, field)| {
+                    Ok(bytes
+                        .saturating_add(quoted_bytes(field.name()))
+                        .saturating_add(2)
+                        .saturating_add(json_bytes(column.as_ref(), index)?))
+                })
+        }
+        DataType::List(_) => json_list_bytes(
+            array
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .unwrap()
+                .value(index),
+        ),
+        DataType::LargeList(_) => json_list_bytes(
+            array
+                .as_any()
+                .downcast_ref::<LargeListArray>()
+                .unwrap()
+                .value(index),
+        ),
+        DataType::FixedSizeList(_, _) => json_list_bytes(
+            array
+                .as_any()
+                .downcast_ref::<FixedSizeListArray>()
+                .unwrap()
+                .value(index),
+        ),
+        _ => Err(DataFusionError::Plan(
+            "unsupported JSON argument type".into(),
+        )),
+    }
+}
+fn json_list_bytes(array: ArrayRef) -> Result<usize> {
+    (0..array.len()).try_fold(2usize, |n, index| {
+        Ok(n.saturating_add(1)
+            .saturating_add(json_bytes(array.as_ref(), index)?))
+    })
+}
+
+impl ScalarUDFImpl for GenericFunction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        self.kind.name()
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, types: &[DataType]) -> Result<DataType> {
+        if self.kind == Kind::JsonArray && !types.iter().all(json_type) {
+            return Err(DataFusionError::Plan(
+                "unsupported JSON argument type".into(),
+            ));
+        }
+        Ok(DataType::Utf8)
+    }
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        let scalar_bytes = args.args.iter().fold(0usize, |n, arg| {
+            n.saturating_add(match arg {
+                ColumnarValue::Scalar(v) => v.size().saturating_mul(2),
+                ColumnarValue::Array(_) => 0,
+            })
+        });
+        let _scalar_admission = admit(
+            &self.budget,
+            scalar_bytes.saturating_add(args.args.len().saturating_mul(512)),
+        )?;
+        // Scalars remain one element. Broadcasting them before admission could
+        // allocate number_rows copies of a large value outside the byte bound.
+        let inputs = args
+            .args
+            .iter()
+            .map(|arg| match arg {
+                ColumnarValue::Array(a) => Ok((a.clone(), false)),
+                ColumnarValue::Scalar(v) => Ok((v.to_array_of_size(1)?, true)),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if self.kind == Kind::JsonArray {
+            self.json(&inputs, args.number_rows)
+        } else {
+            self.strings(&inputs, args.number_rows)
+        }
+    }
+}
+impl GenericFunction {
+    fn json(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
+        let limit = self.budget.limits.max_batch_bytes;
+        let mut total = 0usize;
+        let mut largest = 0usize;
+        for index in 0..rows {
+            let size =
+                inputs.iter().try_fold(2usize, |n, (array, scalar)| {
+                    Ok::<_, DataFusionError>(n.saturating_add(1).saturating_add(json_bytes(
+                        array.as_ref(),
+                        if *scalar { 0 } else { index },
+                    )?))
+                })?;
+            total = total
+                .checked_add(size)
+                .filter(|n| *n <= limit)
+                .ok_or_else(capacity)?;
+            largest = largest.max(size);
+        }
+        let fields = inputs
+            .iter()
+            .map(|(a, _)| Arc::new(Field::new("argument", a.data_type().clone(), true)))
+            .collect::<Vec<_>>();
+        let metadata = fields
+            .iter()
+            .fold(0usize, |n, f| n.saturating_add(f.size().saturating_mul(4)));
+        let _admission = admit(
+            &self.budget,
+            total
+                .saturating_add(largest)
+                .saturating_add((rows + 1).saturating_mul(4))
+                .saturating_add(metadata),
+        )?;
+        let options = EncoderOptions::default().with_explicit_nulls(true);
+        let mut encoders = inputs
+            .iter()
+            .zip(&fields)
+            .map(|((array, _), field)| make_encoder(field, array.as_ref(), &options))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut builder = StringBuilder::with_capacity(rows, total);
+        let mut encoded = Vec::with_capacity(largest);
+        for index in 0..rows {
+            encoded.clear();
+            encoded.push(b'[');
+            for (ordinal, ((array, scalar), encoder)) in
+                inputs.iter().zip(&mut encoders).enumerate()
+            {
+                if ordinal > 0 {
+                    encoded.push(b',');
+                }
+                let row = if *scalar { 0 } else { index };
+                if array.is_null(row) {
+                    encoded.extend_from_slice(b"null");
+                } else {
+                    encoder.encode(row, &mut encoded);
+                }
+            }
+            encoded.push(b']');
+            builder.append_value(std::str::from_utf8(&encoded).map_err(|_| {
+                DataFusionError::Execution("JSON encoder returned invalid UTF-8".into())
+            })?);
+        }
+        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+    }
+    fn strings(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
+        let get = |arg: usize, index: usize| {
+            text(
+                inputs[arg].0.as_ref(),
+                if inputs[arg].1 { 0 } else { index },
+            )
+        };
+        // URI encoding can triple UTF-8 bytes. Header parsing retains at most
+        // two names; its temporary decoding and token storage fit four inputs.
+        let mut allowance = 0usize;
+        for index in 0..rows {
+            let input = get(0, index)?.map_or(0, str::len);
+            let base = if self.kind == Kind::Resolve {
+                get(1, index)?.map_or(0, str::len)
+            } else {
+                0
+            };
+            let factor = if self.kind == Kind::DispositionFilename {
+                4
+            } else {
+                3
+            };
+            allowance = allowance.saturating_add(
+                input
+                    .saturating_add(base)
+                    .saturating_mul(factor)
+                    .saturating_add(64),
+            );
+        }
+        let _admission = admit(
+            &self.budget,
+            allowance
+                .saturating_mul(2)
+                .saturating_add(rows.saturating_mul(40))
+                .saturating_add(512),
+        )?;
+        let mut values = Vec::with_capacity(rows);
+        let mut bytes = 0usize;
+        for index in 0..rows {
+            let value = match get(0, index)? {
+                None => None,
+                Some(value) => match self.kind {
+                    Kind::Resolve => resolve(value, get(1, index)?),
+                    Kind::Normalize => Some(normalize(value)),
+                    Kind::Decode => Some(decode(value)),
+                    Kind::UrlFilename => url::Url::parse(value).ok().and_then(|u| {
+                        u.path_segments()
+                            .and_then(|mut segments| segments.next_back())
+                            .filter(|s| !s.is_empty())
+                            .map(decode)
+                    }),
+                    Kind::DispositionFilename => disposition(value),
+                    Kind::JsonArray => unreachable!(),
+                },
+            };
+            bytes = bytes
+                .checked_add(value.as_ref().map_or(0, String::len))
+                .filter(|n| *n <= self.budget.limits.max_batch_bytes)
+                .ok_or_else(capacity)?;
+            values.push(value);
+        }
+        let mut builder = StringBuilder::with_capacity(rows, bytes);
+        for value in values {
+            builder.append_option(value);
+        }
+        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+    }
+}
+fn resolve(reference: &str, base: Option<&str>) -> Option<String> {
+    let base = match base {
+        Some(value) => Some(url::Url::parse(value).ok()?),
+        None => None,
+    };
+    url::Url::options()
+        .base_url(base.as_ref())
+        .parse(reference)
+        .ok()
+        .map(String::from)
+}
+fn decode(value: &str) -> String {
+    percent_decode_str(value)
+        .decode_utf8()
+        .map_or_else(|_| value.to_owned(), |v| v.into_owned())
+}
+fn unreserved(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"-._~".contains(&byte)
+}
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+fn normalize(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let bytes = value.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%'
+            && index + 2 < bytes.len()
+            && let Some(decoded) = hex(bytes[index + 1])
+                .zip(hex(bytes[index + 2]))
+                .map(|(a, b)| a * 16 + b)
+        {
+            if unreserved(decoded) {
+                out.push(decoded as char);
+            } else {
+                out.push('%');
+                out.push(HEX[(decoded >> 4) as usize] as char);
+                out.push(HEX[(decoded & 15) as usize] as char);
+            }
+            index += 3;
+            continue;
+        }
+        if unreserved(byte) || b":/?#[]@!$&'()*+,;=".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 15) as usize] as char);
+        }
+        index += 1;
+    }
+    out
+}
+fn extended(value: &str) -> Option<String> {
+    let mut parts = value.splitn(3, '\'');
+    let charset = parts.next()?;
+    parts.next()?;
+    let encoded = parts.next()?;
+    let bytes = encoded.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() || hex(bytes[i + 1]).is_none() || hex(bytes[i + 2]).is_none() {
+                return None;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    let decoded = percent_decode_str(encoded).collect::<Vec<_>>();
+    if charset.eq_ignore_ascii_case("utf-8") {
+        String::from_utf8(decoded).ok()
+    } else if charset.eq_ignore_ascii_case("iso-8859-1") {
+        Some(decoded.into_iter().map(char::from).collect())
+    } else {
+        None
+    }
+}
+fn disposition(value: &str) -> Option<String> {
+    let mut i = value.find(';')? + 1;
+    let bytes = value.as_bytes();
+    let mut plain = None;
+    let mut encoded = None;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b';') {
+            i += 1;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i] != b'=' && bytes[i] != b';' {
+            i += 1;
+        }
+        if i == bytes.len() || bytes[i] != b'=' {
+            return None;
+        }
+        let name = value[start..i].trim();
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let mut raw = Vec::new();
+        if i < bytes.len() && bytes[i] == b'"' {
+            i += 1;
+            let mut closed = false;
+            while i < bytes.len() {
+                let byte = bytes[i];
+                i += 1;
+                if byte == b'"' {
+                    closed = true;
+                    break;
+                }
+                if byte == b'\\' {
+                    if i == bytes.len() {
+                        return None;
+                    }
+                    raw.push(bytes[i]);
+                    i += 1;
+                } else {
+                    raw.push(byte);
+                }
+            }
+            if !closed {
+                return None;
+            }
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] != b';' {
+                return None;
+            }
+        } else {
+            let start = i;
+            while i < bytes.len() && bytes[i] != b';' {
+                i += 1;
+            }
+            raw.extend_from_slice(value[start..i].trim().as_bytes());
+        }
+        let parsed = String::from_utf8(raw).ok()?;
+        if name.eq_ignore_ascii_case("filename") {
+            if plain.is_some() {
+                return None;
+            }
+            plain = Some(parsed);
+        } else if name.eq_ignore_ascii_case("filename*") {
+            if encoded.is_some() {
+                return None;
+            }
+            encoded = Some(parsed);
+        }
+    }
+    encoded
+        .as_deref()
+        .and_then(extended)
+        .or(plain)
+        .filter(|s| !s.is_empty())
+}

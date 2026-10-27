@@ -33,3 +33,22 @@ before input I/O, and removed only after that successor succeeds. Unknown,
 forward, duplicate and repeated releases refuse. Existing frames and views keep
 their dependencies alive; memory and scratch are freed at the final owner's
 release. Declare dependent views too when their inputs have reached last use.
+
+Jobs also register `url_resolve(reference, base)`,
+`uri_normalize_encoding(value)`, `percent_decode_utf8(value)`,
+`url_filename(value)`, `disposition_filename(value)`, `json_array(...)` and
+the maintained `datafusion-functions-json` getters. Invalid UTF-8 escapes remain
+unchanged; decoding preserves literal `+`. Download names prefer a valid
+`filename*` over `filename`; duplicate filename parameters refuse. These
+primitives impose no host, scheme or application identity policy.
+
+`json_array` uses Arrow's JSON encoder with explicit nulls and compact output.
+It accepts strings, booleans, integers and nested lists or structs containing
+those types. Other types refuse, including floating point values whose spelling
+would not establish Python identity equivalence. Output expansion is admitted
+before allocation. Work is linear in the input and resulting bytes.
+
+URL resolution uses locked `url` 2.5.8. The pinned 819-case upstream resolver
+corpus has exactly 36 known upstream `file:` URL deviations, retained by name
+in `tests/fixtures/url/expected_failures.txt`; all other cases match. No URL
+setter behavior is claimed. See `tests/fixtures/url/NOTICE.md` for source and license.

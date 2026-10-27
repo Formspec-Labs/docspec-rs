@@ -1,6 +1,7 @@
 //! SQL jobs share one bounded execution context; callers supply all domain rules.
 // Rust guideline compliant 2026-02-21
 mod export;
+mod functions;
 mod json_lines;
 mod materialized;
 mod query_result;
@@ -67,8 +68,10 @@ impl Job {
     pub fn new(limits: Limits, scratch: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&scratch)?;
         let budget = Budget::in_workspace(limits, &scratch)?;
+        let mut context = budget.context();
+        functions::register(&mut context, &budget)?;
         Ok(Self {
-            context: budget.context(),
+            context,
             budget,
             scratch,
         })
