@@ -145,3 +145,47 @@ pub(crate) fn portable_batch(
         .collect::<Result<Vec<ArrayRef>>>()?;
     Ok(RecordBatch::try_new(schema, columns)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::{array::{Int64Array, ListArray, StringArray, StringViewArray, UInt32Array}, datatypes::{Field, Int64Type}};
+    use crate::budget::Limits;
+
+    fn budget() -> Budget {
+        Budget::new(Limits { memory_bytes: 32 << 20, max_batch_bytes: 4096,
+            batch_rows: 16, scratch_bytes: 16 << 20, ..Limits::default() }).unwrap()
+    }
+    fn batch(array: ArrayRef) -> RecordBatch {
+        RecordBatch::try_new(Arc::new(Schema::new(vec![Field::new("value", array.data_type().clone(), true)])),vec![array]).unwrap()
+    }
+    #[test]
+    fn small_string_slice_compacts_unused_backing_bytes() {
+        let values = StringArray::from(vec!["x".repeat(1 << 18), "kept".into(), "z".repeat(1 << 18)]);
+        let source = batch(Arc::new(values.slice(1,1)));
+        assert!(source.get_array_memory_size() > budget().limits.max_batch_bytes);
+        let output = portable_batch(source.clone(), portable_schema(source.schema().as_ref()), &budget()).unwrap();
+        assert_eq!(output.column(0).as_any().downcast_ref::<StringArray>().unwrap().value(0), "kept");
+        assert!(output.get_array_memory_size() < 4096);
+    }
+    #[test]
+    fn small_list_slice_compacts_unreferenced_child_values() {
+        let values = ListArray::from_iter_primitive::<Int64Type, _, _>([
+            Some(vec![Some(7);1 << 15]),Some(vec![Some(9)]),Some(vec![Some(8);1 << 15])]);
+        let source = batch(Arc::new(values.slice(1,1)));
+        let output = portable_batch(source.clone(), portable_schema(source.schema().as_ref()), &budget()).unwrap();
+        let list = output.column(0).as_any().downcast_ref::<ListArray>().unwrap();
+        assert_eq!(list.values().as_any().downcast_ref::<Int64Array>().unwrap().values(), &[9]);
+        assert!(output.get_array_memory_size() < 4096);
+    }
+    #[test]
+    fn logical_view_expansion_and_large_values_still_refuse() {
+        let one = StringViewArray::from(vec!["v".repeat(1024)]);
+        let repeated = arrow::compute::take(&one, &UInt32Array::from(vec![0;16]), None).unwrap();
+        for array in [repeated, Arc::new(StringArray::from(vec!["x".repeat(8192)])) as ArrayRef] {
+            let source=batch(array);
+            let error=portable_batch(source.clone(),portable_schema(source.schema().as_ref()),&budget()).unwrap_err();
+            assert_eq!(error.code(),"capacity");
+        }
+    }
+}
