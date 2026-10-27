@@ -1047,7 +1047,8 @@ async fn canceled_single_file_put_keeps_admission_until_transport_finishes() {
     let allowance = 2 * bytes.len() + 8192;
     let budget = Budget::new(Limits {
         compute_threads: 1,
-        memory_bytes: allowance,
+        // Budget assigns half of the configured bytes to transfer admission.
+        memory_bytes: 2 * allowance,
         ..Default::default()
     })
     .unwrap();
