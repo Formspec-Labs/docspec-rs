@@ -51,16 +51,38 @@ pub(crate) fn portable_schema(schema: &Schema) -> SchemaRef {
     ))
 }
 
-fn portable_bytes(array: &dyn Array) -> Result<usize> {
+fn portable_bytes(array: &dyn Array, view_storage: bool) -> Result<usize> {
     // Count logical view values, including repeated references to one buffer.
     let overhead = array.len().div_ceil(8).saturating_add(256);
     if let Some(a) = array.as_any().downcast_ref::<StringViewArray>() {
+        if view_storage {
+            return Ok(a
+                .len()
+                .saturating_mul(16)
+                .saturating_add(
+                    a.data_buffers()
+                        .len()
+                        .saturating_mul(std::mem::size_of::<arrow::buffer::Buffer>()),
+                )
+                .saturating_add(overhead));
+        }
         return Ok(a
             .total_bytes_len()
             .saturating_add((a.len() + 1).saturating_mul(4))
             .saturating_add(overhead));
     }
     if let Some(a) = array.as_any().downcast_ref::<BinaryViewArray>() {
+        if view_storage {
+            return Ok(a
+                .len()
+                .saturating_mul(16)
+                .saturating_add(
+                    a.data_buffers()
+                        .len()
+                        .saturating_mul(std::mem::size_of::<arrow::buffer::Buffer>()),
+                )
+                .saturating_add(overhead));
+        }
         return Ok(a
             .total_bytes_len()
             .saturating_add((a.len() + 1).saturating_mul(4))
@@ -68,7 +90,7 @@ fn portable_bytes(array: &dyn Array) -> Result<usize> {
     }
     if let Some(a) = array.as_any().downcast_ref::<StructArray>() {
         return a.columns().iter().try_fold(overhead, |bytes, child| {
-            Ok(bytes.saturating_add(portable_bytes(child.as_ref())?))
+            Ok(bytes.saturating_add(portable_bytes(child.as_ref(), view_storage)?))
         });
     }
     if let Some(a) = array.as_any().downcast_ref::<ListArray>() {
@@ -76,7 +98,7 @@ fn portable_bytes(array: &dyn Array) -> Result<usize> {
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
         return Ok(
-            portable_bytes(a.values().slice(start, end - start).as_ref())?
+            portable_bytes(a.values().slice(start, end - start).as_ref(), view_storage)?
                 .saturating_add((a.len() + 1).saturating_mul(4))
                 .saturating_add(overhead),
         );
@@ -86,21 +108,23 @@ fn portable_bytes(array: &dyn Array) -> Result<usize> {
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
         return Ok(
-            portable_bytes(a.values().slice(start, end - start).as_ref())?
+            portable_bytes(a.values().slice(start, end - start).as_ref(), view_storage)?
                 .saturating_add((a.len() + 1).saturating_mul(8))
                 .saturating_add(overhead),
         );
     }
     if let Some(a) = array.as_any().downcast_ref::<FixedSizeListArray>() {
-        return Ok(portable_bytes(a.values().as_ref())?.saturating_add(overhead));
+        return Ok(portable_bytes(a.values().as_ref(), view_storage)?.saturating_add(overhead));
     }
     if let Some(a) = array.as_any().downcast_ref::<MapArray>() {
         let offsets = a.value_offsets();
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
-        return Ok(portable_bytes(&a.entries().slice(start, end - start))?
-            .saturating_add((a.len() + 1).saturating_mul(4))
-            .saturating_add(overhead));
+        return Ok(
+            portable_bytes(&a.entries().slice(start, end - start), view_storage)?
+                .saturating_add((a.len() + 1).saturating_mul(4))
+                .saturating_add(overhead),
+        );
     }
     if let DataType::Dictionary(key, _) = array.data_type() {
         let data = array.to_data();
@@ -108,7 +132,7 @@ fn portable_bytes(array: &dyn Array) -> Result<usize> {
         let width = key
             .primitive_width()
             .ok_or_else(|| Error::refusal("invalid_export", "dictionary key is not fixed width"))?;
-        return Ok(portable_bytes(values.as_ref())?
+        return Ok(portable_bytes(values.as_ref(), view_storage)?
             .saturating_add(array.len().saturating_mul(width))
             .saturating_add(overhead));
     }
@@ -137,14 +161,31 @@ pub(crate) fn portable_batch(
         ));
     }
     let mut bytes = 0usize;
-    let mut changed = false;
+    let mut conversion_bytes = 0usize;
+    let over_limit = batch.get_array_memory_size() > budget.limits.max_batch_bytes;
     let mut compact_columns = Vec::with_capacity(batch.num_columns());
     for (column, field) in batch.columns().iter().zip(schema.fields()) {
-        let logical = portable_bytes(column.as_ref())?;
-        let needs_compaction = column.get_array_memory_size() > logical.saturating_mul(2);
+        let logical = portable_bytes(column.as_ref(), false)?;
+        let needs_cast = column.data_type() != field.data_type();
+        let direct_view = matches!(
+            column.data_type(),
+            DataType::Utf8View | DataType::BinaryView
+        );
+        // Top-level views cast directly. Nested casts must first trim child
+        // ranges, so unused repeated views cannot expand during the cast.
+        let needs_compaction = !direct_view
+            && (needs_cast
+                || over_limit
+                || column.get_array_memory_size() > logical.saturating_mul(2));
+        if needs_cast || needs_compaction {
+            conversion_bytes = conversion_bytes.saturating_add(logical.saturating_mul(2));
+        }
+        if needs_compaction {
+            conversion_bytes = conversion_bytes
+                .saturating_add(portable_bytes(column.as_ref(), true)?.saturating_mul(2));
+        }
         compact_columns.push(needs_compaction);
         bytes = bytes.saturating_add(logical);
-        changed |= column.data_type() != field.data_type();
         if !portable_data_type(column.data_type()).equals_datatype(field.data_type()) {
             return Err(Error::refusal(
                 "invalid_export",
@@ -158,9 +199,10 @@ pub(crate) fn portable_batch(
             "portable batch exceeds configured byte allowance",
         ));
     }
-    let _conversion = if changed || compact_columns.iter().any(|value| *value) {
-        // Admit both logical compaction and the portable cast before copying.
-        Some(budget.reserve(bytes.saturating_mul(4))?)
+    let _conversion = if conversion_bytes > 0 {
+        // Include the intermediate view representation and portable cast,
+        // rather than assuming views have the same byte width as UTF-8.
+        Some(budget.reserve(conversion_bytes)?)
     } else {
         None
     };
@@ -297,39 +339,85 @@ mod tests {
     }
     #[test]
     fn moderate_backing_slack_compacts_when_total_exceeds_the_batch_limit() {
-        let columns = (0..2).map(|_| {
-            let values = StringArray::from(vec!["p".repeat(900), "k".repeat(1500)]);
-            Arc::new(values.slice(1,1)) as ArrayRef
-        }).collect::<Vec<_>>();
-        let schema=Arc::new(Schema::new(vec![Field::new("a",DataType::Utf8,true),Field::new("b",DataType::Utf8,true)]));
-        let input=RecordBatch::try_new(schema.clone(),columns).unwrap();
-        assert!(input.get_array_memory_size()>4096);
-        let output=portable_batch(input,schema,&budget()).unwrap();
-        assert!(output.get_array_memory_size()<4096);
-        assert_eq!(output.column(0).as_any().downcast_ref::<StringArray>().unwrap().value(0).len(),1500);
+        let columns = (0..2)
+            .map(|_| {
+                let values = StringArray::from(vec!["p".repeat(900), "k".repeat(1500)]);
+                Arc::new(values.slice(1, 1)) as ArrayRef
+            })
+            .collect::<Vec<_>>();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Utf8, true),
+            Field::new("b", DataType::Utf8, true),
+        ]));
+        let input = RecordBatch::try_new(schema.clone(), columns).unwrap();
+        assert!(input.get_array_memory_size() > 4096);
+        let output = portable_batch(input, schema, &budget()).unwrap();
+        assert!(output.get_array_memory_size() < 4096);
+        assert_eq!(
+            output
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .value(0)
+                .len(),
+            1500
+        );
     }
     #[test]
     fn short_views_cast_directly_with_constrained_remaining_admission() {
-        let budget=budget();
-        let _other_work=budget.reserve(budget.limits.memory_bytes/2-6144).unwrap();
-        let values=[Some(""),None].into_iter().cycle().take(500).collect::<StringViewArray>();
-        let input=batch(Arc::new(values));
-        let output=portable_batch(input.clone(),portable_schema(input.schema().as_ref()),&budget).unwrap();
-        assert_eq!(output.num_rows(),500);
-        assert_eq!(output.column(0).null_count(),250);
+        let budget = budget();
+        let _other_work = budget
+            .reserve(budget.limits.memory_bytes / 2 - 6144)
+            .unwrap();
+        let values = [Some(""), None]
+            .into_iter()
+            .cycle()
+            .take(500)
+            .collect::<StringViewArray>();
+        let input = batch(Arc::new(values));
+        let output = portable_batch(
+            input.clone(),
+            portable_schema(input.schema().as_ref()),
+            &budget,
+        )
+        .unwrap();
+        assert_eq!(output.num_rows(), 500);
+        assert_eq!(output.column(0).null_count(), 250);
     }
     #[test]
     fn nested_view_cast_trims_unreferenced_repeated_values_first() {
-        let one=StringViewArray::from(vec!["v".repeat(512 << 10)]);
-        let repeated=arrow::compute::take(&one,&UInt32Array::from(vec![0;5]),None).unwrap();
-        let values=ListArray::new(Arc::new(Field::new("item",DataType::Utf8View,true)),
-            arrow::buffer::OffsetBuffer::new(vec![0,1,5].into()),repeated,None);
-        let input=batch(Arc::new(values.slice(0,1)));
-        let mut limits=budget().limits.clone();limits.max_batch_bytes=2 << 20;
-        let output=portable_batch(input.clone(),portable_schema(input.schema().as_ref()),&Budget::new(limits).unwrap()).unwrap();
-        let list=output.column(0).as_any().downcast_ref::<ListArray>().unwrap();
-        assert_eq!(list.values().len(),1);
-        assert_eq!(list.values().as_any().downcast_ref::<StringArray>().unwrap().value(0).len(),512 << 10);
+        let one = StringViewArray::from(vec!["v".repeat(512 << 10)]);
+        let repeated = arrow::compute::take(&one, &UInt32Array::from(vec![0; 5]), None).unwrap();
+        let values = ListArray::new(
+            Arc::new(Field::new("item", DataType::Utf8View, true)),
+            arrow::buffer::OffsetBuffer::new(vec![0, 1, 5].into()),
+            repeated,
+            None,
+        );
+        let input = batch(Arc::new(values.slice(0, 1)));
+        let mut limits = budget().limits.clone();
+        limits.max_batch_bytes = 2 << 20;
+        let output = portable_batch(
+            input.clone(),
+            portable_schema(input.schema().as_ref()),
+            &Budget::new(limits).unwrap(),
+        )
+        .unwrap();
+        let list = output
+            .column(0)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+        assert_eq!(list.values().len(), 1);
+        assert_eq!(
+            list.values()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .value(0)
+                .len(),
+            512 << 10
+        );
     }
-
 }
