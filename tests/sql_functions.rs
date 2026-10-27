@@ -219,3 +219,14 @@ async fn canonical_json_matches_python_sorted_compact_vectors() {
     let error = spec.run(small).await.unwrap_err().to_string();
     assert!(error.contains("function output"), "{error}");
 }
+
+#[tokio::test]
+async fn canonical_cumulative_output_exhaustion_is_a_capacity_refusal() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 400;
+    ceiling.max_batch_bytes = 1024;
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":"SELECT sum(length(json_canonical(concat('1e',cast(value % 2 AS VARCHAR))))) AS n FROM generate_series(1,400)"}]})).unwrap();
+    let error = spec.run(ceiling).await.unwrap_err().to_string();
+    assert!(error.contains("function output"), "{error}");
+}
