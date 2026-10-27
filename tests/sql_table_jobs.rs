@@ -62,6 +62,63 @@ async fn table_job_creates_appends_and_repeated_work_is_a_noop() {
     assert_eq!(super::sql_tables::count(&before, "true").await, 2);
     assert!(!root.path().join("lifecycle").exists());
 }
+
+#[tokio::test]
+async fn table_append_matches_native_names_when_incoming_order_differs() {
+    let root = tempfile::tempdir().unwrap();
+    let mut value = spec(root.path());
+    let schema = Schema::builder()
+        .with_fields(vec![
+            Arc::new(NestedField::required(
+                1,
+                "id",
+                Type::Primitive(PrimitiveType::Long),
+            )),
+            Arc::new(NestedField::optional(
+                2,
+                "first_text",
+                Type::Primitive(PrimitiveType::String),
+            )),
+            Arc::new(NestedField::optional(
+                3,
+                "second_text",
+                Type::Primitive(PrimitiveType::String),
+            )),
+            Arc::new(NestedField::optional(
+                4,
+                "day",
+                Type::Primitive(PrimitiveType::Date),
+            )),
+        ])
+        .with_identifier_field_ids([1])
+        .build()
+        .unwrap();
+    value["table_operations"][1]["schema"] = serde_json::to_value(schema).unwrap();
+    value["steps"][0]["sql"] = json!(
+        "SELECT 'second value' AS second_text,cast('2026-10-27' AS DATE) AS day,cast(1 AS BIGINT) AS id,'first value' AS first_text"
+    );
+    let result = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(value)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["table_operations"][2]["files"][0]["rows"], 1);
+    let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    let table = catalog
+        .load_table(&TableIdent::new(
+            NamespaceIdent::new("archive".into()),
+            "captures".into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(super::sql_tables::count(&table,
+        "id=1 AND first_text='first value' AND second_text='second value' AND day=cast('2026-10-27' AS DATE)").await,1);
+}
 #[tokio::test]
 async fn table_job_refuses_invalid_bindings_before_opening_inputs() {
     let root = tempfile::tempdir().unwrap();

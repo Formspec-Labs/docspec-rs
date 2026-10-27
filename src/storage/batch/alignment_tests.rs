@@ -3,6 +3,85 @@
 use super::*;
 
 #[test]
+fn native_alignment_reorders_columns_without_copying_view_buffers() {
+    use arrow::array::{Date32Array, StringViewArray};
+    let first = Arc::new(StringViewArray::from(vec![
+        "first string in its own buffer",
+    ]));
+    let second = Arc::new(StringViewArray::from(vec![
+        "second string with distinct values",
+    ]));
+    let day = Arc::new(Date32Array::from(vec![20753]));
+    let source = RecordBatch::try_from_iter([
+        ("second", second.clone() as ArrayRef),
+        ("day", day.clone() as ArrayRef),
+        ("first", first.clone() as ArrayRef),
+    ])
+    .unwrap();
+    let target = Schema::new(vec![
+        Field::new("first", DataType::Utf8, false)
+            .with_metadata([("PARQUET:field_id".into(), "17".into())].into()),
+        Field::new("second", DataType::Utf8, false),
+        Field::new("day", DataType::Date32, false),
+    ]);
+    let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+    let (aligned, _) = align_native_batch(source, &target, &budget).unwrap();
+    assert_eq!(
+        aligned
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+        vec!["first", "second", "day"]
+    );
+    assert_eq!(
+        aligned.schema().field(0).metadata()["PARQUET:field_id"],
+        "17"
+    );
+    for (index, original) in [first as ArrayRef, second as ArrayRef, day as ArrayRef]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(aligned.column(index).to_data(), original.to_data());
+        assert_eq!(
+            aligned.column(index).to_data().buffers()[0].as_ptr(),
+            original.to_data().buffers()[0].as_ptr()
+        );
+    }
+}
+
+#[test]
+fn native_alignment_refuses_incomplete_or_ambiguous_column_names() {
+    let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+    let target = Schema::new(vec![
+        Field::new("a", DataType::Utf8, true),
+        Field::new("b", DataType::Utf8, true),
+    ]);
+    for names in [vec!["a"], vec!["a", "foreign"], vec!["a", "a"]] {
+        let source = RecordBatch::try_new(
+            Arc::new(Schema::new(
+                names
+                    .iter()
+                    .map(|name| Field::new(*name, DataType::Utf8, true))
+                    .collect::<Vec<_>>(),
+            )),
+            names
+                .iter()
+                .map(|_| Arc::new(StringArray::from(vec!["value"])) as ArrayRef)
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(
+            align_native_batch(source, &target, &budget)
+                .unwrap_err()
+                .code(),
+            "schema_mismatch"
+        );
+    }
+}
+
+#[test]
 fn native_alignment_preserves_view_storage_and_nested_field_identity() {
     use arrow::array::{Array, BinaryViewArray, ListArray, StringViewArray};
     use arrow::datatypes::{DataType, Field, Schema};
