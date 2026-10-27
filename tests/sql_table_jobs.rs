@@ -326,3 +326,31 @@ async fn native_selector_refuses_each_mismatched_identity_before_output() {
         assert!(failure.completed.outputs.is_empty());
     }
 }
+
+#[tokio::test]
+async fn native_selector_admits_observed_metadata_under_a_larger_size_ceiling() {
+    let root = tempfile::tempdir().unwrap();
+    let created = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(spec(root.path()))
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let read = selected_job(root.path(), selected_input(&created["table_operations"][2]));
+    let small = Limits {
+        memory_bytes: 32 << 20,
+        max_metadata_bytes: 32 << 20,
+        ..limits()
+    };
+    let result = serde_json::from_value::<JobSpec>(read)
+        .unwrap()
+        .run(small)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap()["queries"][0]["data"],
+        json!([{"id":2}])
+    );
+}
