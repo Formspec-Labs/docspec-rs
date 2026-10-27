@@ -22,6 +22,13 @@ pub enum JobInput {
         files: Vec<JsonLinesFile>,
         schema: Schema,
     },
+    NativeTable {
+        name: String,
+        metadata_location: String,
+        table_uuid: uuid::Uuid,
+        snapshot: Option<i64>,
+        schema_id: i32,
+    },
     Iceberg {
         name: String,
         pin: TablePin,
@@ -32,7 +39,8 @@ impl JobInput {
         match self {
             Self::Parquet { name, .. }
             | Self::JsonLines { name, .. }
-            | Self::Iceberg { name, .. } => name,
+            | Self::Iceberg { name, .. }
+            | Self::NativeTable { name, .. } => name,
         }
     }
 }
@@ -326,6 +334,24 @@ impl JobSpec {
                     files,
                     schema,
                 } => job.register_json_lines(name, files.clone(), Arc::new(schema.clone()))?,
+                JobInput::NativeTable {
+                    name,
+                    metadata_location,
+                    table_uuid,
+                    snapshot,
+                    schema_id,
+                } => {
+                    job.register_native_snapshot(
+                        name,
+                        &crate::storage::NativeTableSnapshot {
+                            metadata_location: metadata_location.clone(),
+                            table_uuid: *table_uuid,
+                            snapshot: *snapshot,
+                            schema_id: *schema_id,
+                        },
+                    )
+                    .await?
+                }
                 JobInput::Iceberg { name, pin } => job.register_iceberg(name, pin).await?,
             }
         }

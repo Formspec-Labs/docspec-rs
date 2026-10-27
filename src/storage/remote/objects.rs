@@ -948,6 +948,48 @@ impl RemoteObjects {
         if response.meta.size != expected.bytes || response.range != (0..expected.bytes) {
             return Err(mismatch());
         }
+        Self::fill_metadata(response, bytes).await?;
+        Ok(true)
+    }
+
+    // One capped GET supplies both observed object size and bytes. The caller
+    // holds the cap plus transport admission before response payload allocation.
+    pub(in crate::storage) async fn read_metadata_capped_admitted(
+        &self,
+        path: &str,
+        limit: usize,
+    ) -> Result<bytes::Bytes> {
+        let key = self.scope.key(path)?;
+        let path = object_store::path::Path::parse(key).map_err(|_| scope_error())?;
+        let end = u64::try_from(limit)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(mismatch)?;
+        let response = self
+            .query_store
+            .get_opts(
+                &path,
+                object_store::GetOptions {
+                    range: Some(object_store::GetRange::Bounded(0..end)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|_| read_error())?;
+        if response.meta.size > limit as u64 {
+            return Err(Error::refusal(
+                "metadata_capacity",
+                "native metadata exceeds the configured byte limit",
+            ));
+        }
+        if response.range != (0..response.meta.size) {
+            return Err(mismatch());
+        }
+        let mut bytes = vec![0; usize::try_from(response.meta.size).map_err(|_| mismatch())?];
+        Self::fill_metadata(response, &mut bytes).await?;
+        Ok(bytes.into())
+    }
+    async fn fill_metadata(response: object_store::GetResult, bytes: &mut [u8]) -> Result<()> {
         let mut total = 0usize;
         let mut stream = response.into_stream();
         while let Some(chunk) = stream.try_next().await.map_err(|_| read_error())? {
@@ -961,7 +1003,7 @@ impl RemoteObjects {
         if total != bytes.len() {
             return Err(mismatch());
         }
-        Ok(true)
+        Ok(())
     }
 
     async fn identity_by_key(

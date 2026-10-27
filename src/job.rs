@@ -6,6 +6,7 @@ mod export;
 mod functions;
 mod json_lines;
 mod materialized;
+mod native;
 mod query_result;
 mod spec;
 mod table_operations;
@@ -168,6 +169,8 @@ impl Job {
     /// # Errors
     /// Refuses changed metadata, an absent pinned snapshot, or provider failures.
     pub async fn register_iceberg(&self, name: &str, pin: &crate::model::TablePin) -> Result<()> {
+        let memory =
+            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
         #[cfg(feature = "remote")]
         let table = if let Some(remote) = &self.remote {
             remote.objects.open_pin(pin, &self.budget).await?
@@ -176,13 +179,50 @@ impl Job {
         };
         #[cfg(not(feature = "remote"))]
         let table = crate::storage::open_pin(pin, &self.budget).await?;
-        self.register_native_table(name, table).await
+        self.register_admitted_native_table(name, table, memory)
+            .await
+    }
+
+    /// Registers exact immutable native metadata without consulting a catalog.
+    ///
+    /// Null snapshot means an empty table. Metadata and its conservative byte
+    /// admission remain owned by every resulting frame, plan and stream.
+    ///
+    /// # Errors
+    /// Refuses unavailable or mismatched metadata, capacity and provider errors.
+    pub async fn register_native_snapshot(
+        &self,
+        name: &str,
+        selection: &crate::storage::NativeTableSnapshot,
+    ) -> Result<()> {
+        let memory =
+            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
+        let table = crate::storage::open_snapshot(
+            selection,
+            #[cfg(feature = "remote")]
+            self.remote.as_ref().map(|x| &x.objects),
+            &self.budget,
+        )
+        .await?;
+        self.register_admitted_native_table(name, table, memory)
+            .await
     }
 
     pub(super) async fn register_native_table(
         &self,
         name: &str,
         table: iceberg::table::Table,
+    ) -> Result<()> {
+        let memory =
+            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
+        self.register_admitted_native_table(name, table, memory)
+            .await
+    }
+    async fn register_admitted_native_table(
+        &self,
+        name: &str,
+        table: iceberg::table::Table,
+        memory: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<()> {
         use iceberg_datafusion::table::IcebergStaticTableProvider;
         let provider = match table.metadata().current_snapshot_id() {
@@ -191,8 +231,13 @@ impl Job {
             }
             None => IcebergStaticTableProvider::try_new_from_table(table).await?,
         };
-        self.context
-            .register_table(name, std::sync::Arc::new(provider))?;
+        self.context.register_table(
+            name,
+            std::sync::Arc::new(native::AdmittedTable {
+                provider: std::sync::Arc::new(provider),
+                memory,
+            }),
+        )?;
         Ok(())
     }
 

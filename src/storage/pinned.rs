@@ -52,7 +52,7 @@ pub(crate) async fn open_pin_remote(
     open_with_reader(
         pin,
         objects.file_io(),
-        MetadataReader::Remote(objects.clone()),
+        MetadataReader::Remote(objects.clone(), pin.metadata.path.clone()),
         budget,
     )
     .await
@@ -85,7 +85,77 @@ pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) 
 enum MetadataReader {
     Native(iceberg::io::InputFile),
     #[cfg(feature = "remote")]
-    Remote(super::remote::RemoteObjects),
+    Remote(super::remote::RemoteObjects, String),
+}
+
+/// Exact immutable native metadata selected by a completed table operation.
+///
+/// A missing snapshot selects an empty table, never the latest snapshot. This
+/// selects metadata only; callers retain its native dependencies and ownership.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeTableSnapshot {
+    pub metadata_location: String,
+    pub table_uuid: uuid::Uuid,
+    pub snapshot: Option<i64>,
+    pub schema_id: i32,
+}
+
+/// Opens selected metadata through explicit native I/O without a catalog lookup.
+///
+/// The caller accounts for retained metadata and keeps its immutable dependencies
+/// readable. Temporary read/decode admission survives cancellation of this call.
+///
+/// # Errors
+/// Refuses oversized, changed or invalid metadata and mismatched selection fields.
+pub async fn open_snapshot_with_io(
+    selection: &NativeTableSnapshot,
+    file_io: FileIO,
+    budget: &Budget,
+) -> Result<Table> {
+    let input = file_io.new_input(&selection.metadata_location)?;
+    open_snapshot_reader(selection, file_io, MetadataReader::Native(input), budget).await
+}
+
+pub(crate) async fn open_snapshot(
+    selection: &NativeTableSnapshot,
+    #[cfg(feature = "remote")] remote: Option<&super::remote::RemoteObjects>,
+    budget: &Budget,
+) -> Result<Table> {
+    #[cfg(feature = "remote")]
+    if let Some(objects) = remote {
+        objects.validate_path(&selection.metadata_location)?;
+        return open_snapshot_reader(
+            selection,
+            objects.file_io(),
+            MetadataReader::Remote(objects.clone(), selection.metadata_location.clone()),
+            budget,
+        )
+        .await;
+    }
+    if super::object_io::is_remote_uri(&selection.metadata_location) {
+        return Err(super::object_io::unregistered_remote_uri());
+    }
+    open_snapshot_with_io(selection, FileIO::new_with_fs(), budget).await
+}
+
+async fn open_snapshot_reader(
+    selection: &NativeTableSnapshot,
+    file_io: FileIO,
+    reader: MetadataReader,
+    budget: &Budget,
+) -> Result<Table> {
+    let metadata = read_metadata(None, reader, budget).await?;
+    if metadata.uuid() != selection.table_uuid
+        || metadata.current_snapshot_id() != selection.snapshot
+        || metadata.current_schema_id() != selection.schema_id
+    {
+        return Err(Error::refusal(
+            "pin_mismatch",
+            "native UUID, snapshot or schema differs from selection",
+        ));
+    }
+    build_table(metadata, &selection.metadata_location, "selected", file_io)
 }
 
 async fn open_with_reader(
@@ -94,60 +164,7 @@ async fn open_with_reader(
     reader: MetadataReader,
     budget: &Budget,
 ) -> Result<Table> {
-    let limit = budget.limits.max_metadata_bytes;
-    let size = usize::try_from(pin.metadata.bytes).map_err(|_| capacity())?;
-    if size > limit {
-        return Err(capacity());
-    }
-    let transport = match &reader {
-        MetadataReader::Native(_) => 0,
-        #[cfg(feature = "remote")]
-        MetadataReader::Remote(_) => super::remote::objects::READ_ADMISSION,
-    };
-    let serialized = budget.reserve(size.checked_add(transport).ok_or_else(capacity)?)?;
-    let runtime = Runtime::try_current()?;
-    let handle = tokio::runtime::Handle::current();
-    let object = pin.metadata.clone();
-    let worker_budget = budget.clone();
-    let metadata = budget
-        .blocking_admitted(move || {
-            let _serialized = serialized;
-            // Native filesystem FileIO blocks internally. One admitted worker keeps
-            // this off runtime threads and also bounds concurrent remote opens.
-            let bytes: bytes::Bytes = handle.block_on(async {
-                match reader {
-                    MetadataReader::Native(input) => {
-                        if input.metadata().await?.size != object.bytes {
-                            return Err(corrupt());
-                        }
-                        let bytes = input.reader().await?.read(0..object.bytes).await?;
-                        if bytes.len() != size || input.metadata().await?.size != object.bytes {
-                            return Err(corrupt());
-                        }
-                        Ok(bytes)
-                    }
-                    #[cfg(feature = "remote")]
-                    MetadataReader::Remote(objects) => {
-                        let mut bytes = vec![0; size];
-                        objects.read_metadata_admitted(&object, &mut bytes).await?;
-                        Ok(bytes.into())
-                    }
-                }
-            })?;
-            if blake3::hash(&bytes).to_hex().as_str() != object.digest {
-                return Err(corrupt());
-            }
-            // Native decoded structs can differ from JSON size; this is shared
-            // admission, not an exact allocator/RSS measurement. No decoded Vec copy.
-            let decoded_size = if bytes.starts_with(&[0x1f, 0x8b]) {
-                limit.checked_add(1).ok_or_else(capacity)?
-            } else {
-                size
-            };
-            let _decoded = worker_budget.reserve(decoded_size)?;
-            decode::<TableMetadata>(&bytes, limit)
-        })
-        .await?;
+    let metadata = read_metadata(Some(pin.metadata.clone()), reader, budget).await?;
     if metadata.current_snapshot_id() != pin.snapshot
         || metadata.current_schema_id() != pin.schema_id
     {
@@ -156,14 +173,88 @@ async fn open_with_reader(
             "snapshot or schema differs from release pin",
         ));
     }
+    build_table(metadata, &pin.metadata.path, &pin.table, file_io)
+}
+fn build_table(metadata: TableMetadata, path: &str, name: &str, file_io: FileIO) -> Result<Table> {
     Ok(Table::builder()
         .metadata(metadata)
-        .metadata_location(&pin.metadata.path)
-        .identifier(TableIdent::from_strs(["release", &pin.table])?)
+        .metadata_location(path)
+        .identifier(TableIdent::from_strs(["release", name])?)
         .file_io(file_io)
-        .runtime(runtime)
+        .runtime(Runtime::try_current()?)
         .readonly(true)
         .build()?)
+}
+async fn read_metadata(
+    expected: Option<ObjectRef>,
+    reader: MetadataReader,
+    budget: &Budget,
+) -> Result<TableMetadata> {
+    let limit = budget.limits.max_metadata_bytes;
+    let size = expected
+        .as_ref()
+        .map(|x| usize::try_from(x.bytes).map_err(|_| capacity()))
+        .transpose()?
+        .unwrap_or(limit);
+    if size > limit {
+        return Err(capacity());
+    }
+    let transport = match &reader {
+        MetadataReader::Native(_) => 0,
+        #[cfg(feature = "remote")]
+        MetadataReader::Remote(_, _) => super::remote::objects::READ_ADMISSION,
+    };
+    let serialized = budget.reserve(size.checked_add(transport).ok_or_else(capacity)?)?;
+    let handle = tokio::runtime::Handle::current();
+    let worker_budget = budget.clone();
+    budget
+        .blocking_admitted(move || {
+            let _serialized = serialized;
+            let bytes: bytes::Bytes = handle.block_on(async {
+                match reader {
+                    MetadataReader::Native(input) => {
+                        let observed = input.metadata().await?.size;
+                        if observed > limit as u64 {
+                            return Err(capacity());
+                        }
+                        if expected.as_ref().is_some_and(|x| x.bytes != observed) {
+                            return Err(corrupt());
+                        }
+                        let bytes = input.reader().await?.read(0..observed).await?;
+                        if bytes.len() as u64 != observed
+                            || input.metadata().await?.size != observed
+                        {
+                            return Err(corrupt());
+                        }
+                        Ok(bytes)
+                    }
+                    #[cfg(feature = "remote")]
+                    MetadataReader::Remote(objects, path) => {
+                        if let Some(object) = &expected {
+                            let mut bytes = vec![0; size];
+                            objects.read_metadata_admitted(object, &mut bytes).await?;
+                            Ok(bytes.into())
+                        } else {
+                            objects.read_metadata_capped_admitted(&path, limit).await
+                        }
+                    }
+                }
+            })?;
+            if expected
+                .as_ref()
+                .is_some_and(|object| blake3::hash(&bytes).to_hex().as_str() != object.digest)
+            {
+                return Err(corrupt());
+            }
+            let decoded_size = if bytes.starts_with(&[0x1f, 0x8b]) {
+                limit.checked_add(1).ok_or_else(capacity)?
+            } else {
+                bytes.len()
+            };
+            let _decoded = worker_budget.reserve(decoded_size)?;
+            decode::<TableMetadata>(&bytes, limit)
+        })
+        .await
 }
 
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], limit: usize) -> Result<T> {
@@ -502,6 +593,66 @@ mod tests {
             );
             assert_eq!(native.identifier().to_string(), "release.test");
         }
+    }
+
+    #[tokio::test]
+    async fn selected_metadata_reuses_injected_io_and_strict_bounded_decoder() {
+        let metadata = metadata();
+        let json = serde_json::to_vec(&metadata).unwrap();
+        let io = FileIO::new_with_memory();
+        for bytes in [json.clone(), gzip(&json)] {
+            let pin = store(&io, "memory:///selected", &bytes, &metadata).await;
+            let selection = NativeTableSnapshot {
+                metadata_location: pin.metadata.path.clone(),
+                table_uuid: metadata.uuid(),
+                snapshot: None,
+                schema_id: metadata.current_schema_id(),
+            };
+            let table = open_snapshot_with_io(&selection, io.clone(), &budget(json.len()))
+                .await
+                .unwrap();
+            assert_eq!(table.metadata(), &metadata);
+            assert!(
+                table
+                    .file_io()
+                    .new_input(&pin.metadata.path)
+                    .unwrap()
+                    .exists()
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                open_snapshot_with_io(&selection, io.clone(), &budget(json.len() - 1))
+                    .await
+                    .unwrap_err()
+                    .code(),
+                "metadata_capacity"
+            );
+        }
+        let mut corrupt = gzip(&json);
+        corrupt.pop();
+        store(&io, "memory:///selected", &corrupt, &metadata).await;
+        let selection = NativeTableSnapshot {
+            metadata_location: "memory:///selected".into(),
+            table_uuid: metadata.uuid(),
+            snapshot: None,
+            schema_id: metadata.current_schema_id(),
+        };
+        assert!(
+            open_snapshot_with_io(&selection, io.clone(), &budget(json.len()))
+                .await
+                .is_err()
+        );
+        let mut trailing = gzip(&json);
+        trailing.extend_from_slice(b"trailing");
+        store(&io, "memory:///selected", &trailing, &metadata).await;
+        assert_eq!(
+            open_snapshot_with_io(&selection, io, &budget(json.len()))
+                .await
+                .unwrap_err()
+                .code(),
+            "invalid_metadata"
+        );
     }
 
     #[tokio::test]
