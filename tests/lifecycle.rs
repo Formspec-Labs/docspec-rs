@@ -1142,21 +1142,43 @@ async fn ordinary_cli_commits_reusable_phases_before_final_selection() {
     std::fs::write(&request, serde_json::to_vec(&spec).unwrap()).unwrap();
     std::fs::write(&profile, serde_json::to_vec(&limits()).unwrap()).unwrap();
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_docspec"))
-        .arg("--workspace").arg(&workspace).arg("--limits").arg(&profile)
-        .arg("run").arg(&request).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--limits")
+        .arg(&profile)
+        .arg("run")
+        .arg(&request)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let catalog = storage::local_catalog(&workspace).await.unwrap();
     let budget = Budget::new(limits()).unwrap();
     let mut phases = std::collections::BTreeSet::new();
     let mut revisions = std::collections::BTreeSet::new();
     for namespace in catalog.list_namespaces(None).await.unwrap() {
         for identifier in catalog.list_tables(&namespace).await.unwrap() {
-            if identifier.name() != "lifecycle" { continue; }
+            if identifier.name() != "lifecycle" {
+                continue;
+            }
             let table = catalog.load_table(&identifier).await.unwrap();
             let mut stream = Box::pin(storage::read_batches(&table, &budget).await.unwrap());
             while let Some(batch) = stream.try_next().await.unwrap() {
-                let keys = batch.column_by_name("key").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-                let numbers = batch.column_by_name("revision").unwrap().as_any().downcast_ref::<Int64Array>().unwrap();
+                let keys = batch
+                    .column_by_name("key")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                let numbers = batch
+                    .column_by_name("revision")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
                 for index in 0..batch.num_rows() {
                     if keys.value(index).starts_with("phase/") {
                         phases.insert(keys.value(index).to_owned());
@@ -1166,6 +1188,12 @@ async fn ordinary_cli_commits_reusable_phases_before_final_selection() {
             }
         }
     }
-    assert!(phases.len() > 1, "fixture must retain multiple reusable phases");
-    assert!(revisions.len() > 1, "completed phases were deferred into final selection");
+    assert!(
+        phases.len() > 1,
+        "fixture must retain multiple reusable phases"
+    );
+    assert!(
+        revisions.len() > 1,
+        "completed phases were deferred into final selection"
+    );
 }

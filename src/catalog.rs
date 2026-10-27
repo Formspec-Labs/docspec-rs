@@ -62,8 +62,6 @@ pub struct Lifecycle {
     cache: Arc<Mutex<LifecycleCache>>,
     #[cfg(all(not(test), not(feature = "test-util")))]
     view_cache: Arc<Mutex<HashMap<TableIdent, View>>>,
-    #[cfg(all(not(test), not(feature = "test-util")))]
-    deferred_commit: Arc<Mutex<HashMap<TableIdent, DeferredCommit>>>,
     known_tables: Arc<Mutex<HashSet<TableIdent>>>,
     #[cfg(test)]
     pub(crate) lose_commit_response: Arc<std::sync::atomic::AtomicBool>,
@@ -73,15 +71,6 @@ pub struct Lifecycle {
 struct LifecycleCache {
     entries: BTreeMap<String, Arc<SnapshotRows>>,
     permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
-}
-
-#[cfg(all(not(test), not(feature = "test-util")))]
-#[derive(Debug)]
-struct DeferredCommit {
-    base_view: View,
-    base_rows: Arc<SnapshotRows>,
-    changes: BTreeMap<String, serde_json::Value>,
-    rows: Arc<SnapshotRows>,
 }
 
 #[derive(Debug)]
@@ -197,8 +186,6 @@ impl Lifecycle {
             cache: Arc::new(Mutex::new(LifecycleCache::default())),
             #[cfg(all(not(test), not(feature = "test-util")))]
             view_cache: Arc::new(Mutex::new(HashMap::new())),
-            #[cfg(all(not(test), not(feature = "test-util")))]
-            deferred_commit: Arc::new(Mutex::new(HashMap::new())),
             known_tables: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             lose_commit_response: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -213,15 +200,6 @@ impl Lifecycle {
     #[cfg(all(not(test), not(feature = "test-util")))]
     pub(crate) fn cached_view(&self, dataset: &Id) -> Option<View> {
         let ident = lifecycle_ident(dataset);
-        if let Some(view) = self
-            .deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&ident)
-            .map(|d| d.base_view.clone())
-        {
-            return Some(view);
-        }
         self.view_cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -238,104 +216,12 @@ impl Lifecycle {
         guard.insert(view.logical_identifier.clone(), view);
     }
 
-    #[cfg(all(not(test), not(feature = "test-util")))]
-    pub(crate) async fn begin_deferred(&self, dataset: &Id) -> Result<()> {
-        let view = self.open(dataset).await?;
-        let rows = self.rows(&view).await?;
-        self.deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                view.logical_identifier.clone(),
-                DeferredCommit {
-                    base_view: view,
-                    base_rows: rows.clone(),
-                    changes: BTreeMap::new(),
-                    rows,
-                },
-            );
-        Ok(())
-    }
-
-    #[cfg(all(not(test), not(feature = "test-util")))]
-    pub(crate) async fn commit_flushing_deferred(
-        &self,
-        view: &View,
-        final_changes: Vec<(String, serde_json::Value)>,
-    ) -> Result<View> {
-        let deferred = self
-            .deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&view.logical_identifier);
-        if let Some(mut deferred) = deferred {
-            if final_changes.is_empty() {
-                return Err(Error::refusal(
-                    "empty_commit",
-                    "a lifecycle commit must change state",
-                ));
-            }
-            let unique: BTreeSet<_> = final_changes.iter().map(|(k, _)| k).collect();
-            if unique.len() != final_changes.len() {
-                return Err(Error::refusal(
-                    "duplicate_key",
-                    "each lifecycle key may change only once per commit",
-                ));
-            }
-            for (k, v) in final_changes {
-                deferred.changes.insert(k, v);
-            }
-            {
-                self.cache.lock().map_err(cache_poisoned)?.entries.insert(
-                    deferred.base_view.logical_identifier.to_string(),
-                    deferred.base_rows,
-                );
-            }
-            let merged: Vec<_> = deferred.changes.into_iter().collect();
-            return self.commit(&deferred.base_view, merged).await;
-        }
-        self.commit(view, final_changes).await
-    }
-
-    #[cfg(all(not(test), not(feature = "test-util")))]
-    pub(crate) async fn flush_deferred(&self, dataset: &Id) -> Result<()> {
-        let ident = lifecycle_ident(dataset);
-        let deferred = self
-            .deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&ident);
-        if let Some(deferred) = deferred {
-            {
-                self.cache.lock().map_err(cache_poisoned)?.entries.insert(
-                    deferred.base_view.logical_identifier.to_string(),
-                    deferred.base_rows,
-                );
-            }
-            if !deferred.changes.is_empty() {
-                let merged: Vec<_> = deferred.changes.into_iter().collect();
-                self.commit(&deferred.base_view, merged).await?;
-            }
-        }
-        Ok(())
-    }
-
     /// Opens or creates a dataset's lifecycle authority.
     ///
     /// # Errors
     /// Returns catalog or schema errors; callers serialize first-time creation.
     pub async fn open(&self, dataset: &Id) -> Result<View> {
         let ident = lifecycle_ident(dataset);
-        #[cfg(all(not(test), not(feature = "test-util")))]
-        if let Some(view) = self
-            .deferred_commit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&ident)
-            .map(|d| d.base_view.clone())
-        {
-            return Ok(view);
-        }
         #[cfg(all(not(test), not(feature = "test-util")))]
         if let Some(cached) = self
             .view_cache
@@ -536,16 +422,6 @@ impl Lifecycle {
         enforce_history_budget: bool,
     ) -> futures::future::BoxFuture<'a, Result<Arc<SnapshotRows>>> {
         Box::pin(async move {
-            #[cfg(all(not(test), not(feature = "test-util")))]
-            if let Some(rows) = self
-                .deferred_commit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&view.logical_identifier)
-                .map(|d| d.rows.clone())
-            {
-                return Ok(rows);
-            }
             let cache_key = view.logical_identifier.to_string();
             let metadata = view.table.metadata_location_result()?.to_owned();
             if let Some(hit) = self
@@ -762,35 +638,6 @@ impl Lifecycle {
             self.budget.limits.max_metadata_bytes,
         )?;
         check_cache_bytes(cache_bytes, self.budget.limits.max_metadata_bytes)?;
-        #[cfg(all(not(test), not(feature = "test-util")))]
-        {
-            let mut guard = self
-                .deferred_commit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if let Some(deferred) = guard.get_mut(&view.logical_identifier) {
-                for (k, v) in changes {
-                    deferred.changes.insert(k, v);
-                }
-                let meta = deferred
-                    .base_view
-                    .table
-                    .metadata_location_result()?
-                    .to_owned();
-                let entry = Arc::new(SnapshotRows {
-                    metadata: meta,
-                    values: next_values,
-                    cache_bytes,
-                    history_rows,
-                    history_bytes,
-                    reserved_future_bytes,
-                    _reservation: Mutex::new(reservation.clone()),
-                });
-                deferred.rows = entry.clone();
-                self.publish_cache_entry(cache_key, entry, reservation, rotated)?;
-                return Ok(deferred.base_view.clone());
-            }
-        }
         let files = storage::write_catalog_batches(
             &view.table,
             futures::stream::iter(vec![Ok(batch)]),

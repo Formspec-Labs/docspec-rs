@@ -108,8 +108,6 @@ impl Engine {
         }
         let request = fingerprint(spec)?;
         let result = self.prepare_and_select(spec, stop).await;
-        #[cfg(all(not(test), not(feature = "test-util")))]
-        let _ = self.inner.lifecycle.flush_deferred(spec.dataset()).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -314,25 +312,6 @@ impl Engine {
                         digest: input.digest,
                     }
                 };
-                #[cfg(all(not(test), not(feature = "test-util")))]
-                if remote
-                    && matches!(spec, OperationRequest::Build(build) if build.base.is_none())
-                    && (spec.dataset().as_str().starts_with("catalog-")
-                        || spec.dataset().as_str().starts_with("raw-")
-                        || spec.dataset().as_str().starts_with("obs-")
-                        || spec.dataset().as_str().starts_with("source-observations-"))
-                {
-                    let local_ref = ObjectRef {
-                        owner: expected.owner.clone(),
-                        path: input.path.clone(),
-                        bytes: expected.bytes,
-                        digest: expected.digest.clone(),
-                    };
-                    if storage::verify_object(&local_ref).is_ok() {
-                        outputs.push(expected);
-                        continue;
-                    }
-                }
                 outputs.push(
                     self.inner
                         .objects
@@ -507,15 +486,6 @@ impl Engine {
                 AdmissionOutcome::Completed(result) => return Ok(result),
                 AdmissionOutcome::Admitted(operation) => operation,
             };
-            #[cfg(all(not(test), not(feature = "test-util")))]
-            if stop.is_none()
-                && matches!(
-                    spec,
-                    OperationRequest::Build(_) | OperationRequest::Update(_)
-                )
-            {
-                lifecycle.begin_deferred(spec.dataset()).await?;
-            }
 
             // Locators can change on a material-identical retry. Preserve the admitted
             // request as execution provenance while using caller locators for missing copies.
