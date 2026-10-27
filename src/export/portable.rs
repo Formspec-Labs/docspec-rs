@@ -295,4 +295,41 @@ mod tests {
             assert_eq!(error.code(), "capacity");
         }
     }
+    #[test]
+    fn moderate_backing_slack_compacts_when_total_exceeds_the_batch_limit() {
+        let columns = (0..2).map(|_| {
+            let values = StringArray::from(vec!["p".repeat(900), "k".repeat(1500)]);
+            Arc::new(values.slice(1,1)) as ArrayRef
+        }).collect::<Vec<_>>();
+        let schema=Arc::new(Schema::new(vec![Field::new("a",DataType::Utf8,true),Field::new("b",DataType::Utf8,true)]));
+        let input=RecordBatch::try_new(schema.clone(),columns).unwrap();
+        assert!(input.get_array_memory_size()>4096);
+        let output=portable_batch(input,schema,&budget()).unwrap();
+        assert!(output.get_array_memory_size()<4096);
+        assert_eq!(output.column(0).as_any().downcast_ref::<StringArray>().unwrap().value(0).len(),1500);
+    }
+    #[test]
+    fn short_views_cast_directly_with_constrained_remaining_admission() {
+        let budget=budget();
+        let _other_work=budget.reserve(budget.limits.memory_bytes/2-6144).unwrap();
+        let values=[Some(""),None].into_iter().cycle().take(500).collect::<StringViewArray>();
+        let input=batch(Arc::new(values));
+        let output=portable_batch(input.clone(),portable_schema(input.schema().as_ref()),&budget).unwrap();
+        assert_eq!(output.num_rows(),500);
+        assert_eq!(output.column(0).null_count(),250);
+    }
+    #[test]
+    fn nested_view_cast_trims_unreferenced_repeated_values_first() {
+        let one=StringViewArray::from(vec!["v".repeat(512 << 10)]);
+        let repeated=arrow::compute::take(&one,&UInt32Array::from(vec![0;5]),None).unwrap();
+        let values=ListArray::new(Arc::new(Field::new("item",DataType::Utf8View,true)),
+            arrow::buffer::OffsetBuffer::new(vec![0,1,5].into()),repeated,None);
+        let input=batch(Arc::new(values.slice(0,1)));
+        let mut limits=budget().limits.clone();limits.max_batch_bytes=2 << 20;
+        let output=portable_batch(input.clone(),portable_schema(input.schema().as_ref()),&Budget::new(limits).unwrap()).unwrap();
+        let list=output.column(0).as_any().downcast_ref::<ListArray>().unwrap();
+        assert_eq!(list.values().len(),1);
+        assert_eq!(list.values().as_any().downcast_ref::<StringArray>().unwrap().value(0).len(),512 << 10);
+    }
+
 }
