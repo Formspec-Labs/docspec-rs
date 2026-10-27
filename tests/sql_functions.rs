@@ -23,6 +23,49 @@ async fn scalar(sql: &str) -> Value {
 }
 
 #[tokio::test]
+async fn http_dates_are_nullable_utc_values_without_application_retry_policy() {
+    let values = scalar(
+        "SELECT id,cast(http_date(value) AS BIGINT) AS micros FROM (VALUES
+        (1,'Sun, 06 Nov 1994 08:49:37 GMT'),
+        (2,'Sunday, 06-Nov-94 08:49:37 GMT'),
+        (3,'Sun Nov  6 08:49:37 1994'),
+        (4,'Wed, 21 Oct 2026 07:28:00 GMT'),
+        (5,cast(NULL AS VARCHAR)),(6,'not a date'),(7,'Thu, 06 Nov 1994 08:49:37 GMT'),
+        (8,'Wed, 31 Feb 2026 00:00:00 GMT'),(9,'Wed, 31 Dec 1969 23:59:59 GMT'),
+        (10,'Thu, 01 Jan 1970 00:00:00 GMT')) AS v(id,value) ORDER BY id",
+    )
+    .await;
+    assert_eq!(
+        values,
+        json!([
+        {"id":1,"micros":784111777000000i64},{"id":2,"micros":784111777000000i64},
+        {"id":3,"micros":784111777000000i64},{"id":4,"micros":1792567680000000i64},
+        {"id":5,"micros":null},{"id":6,"micros":null},{"id":7,"micros":null},
+        {"id":8,"micros":null},{"id":9,"micros":null},{"id":10,"micros":0}])
+    );
+    for kind in ["Utf8", "LargeUtf8", "Utf8View"] {
+        assert_eq!(scalar(&format!("SELECT cast(http_date(arrow_cast('Sun, 06 Nov 1994 08:49:37 GMT','{kind}')) AS BIGINT) AS micros")).await,
+            json!([{"micros":784111777000000i64}]));
+    }
+    assert_eq!(
+        scalar("SELECT arrow_typeof(http_date(cast(NULL AS VARCHAR))) AS kind").await,
+        json!([{"kind":"Timestamp(Microsecond, Some(\"UTC\"))"}])
+    );
+}
+
+#[tokio::test]
+async fn http_date_output_respects_the_shared_batch_allowance() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 400;
+    ceiling.max_batch_bytes = 1024;
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],
+        "queries":[{"name":"values","sql":"SELECT count(http_date(CASE WHEN value%2=0 THEN 'Thu, 01 Jan 1970 00:00:00 GMT' ELSE 'invalid' END)) AS n FROM generate_series(1,400)"}]})).unwrap();
+    let error = spec.run(ceiling).await.unwrap_err().to_string();
+    assert!(error.contains("function output"), "{error}");
+}
+
+#[tokio::test]
 async fn compact_json_matches_authored_python_vectors() {
     let vectors: Vec<Value> =
         serde_json::from_str(include_str!("fixtures/json-array.json")).unwrap();
