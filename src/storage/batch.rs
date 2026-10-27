@@ -5,6 +5,9 @@ use crate::{Error, Result};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
 
+#[cfg(test)]
+mod alignment_tests;
+
 pub(crate) fn coerce_data_type(
     data_type: &arrow::datatypes::DataType,
 ) -> arrow::datatypes::DataType {
