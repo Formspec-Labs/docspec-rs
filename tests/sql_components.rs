@@ -106,3 +106,54 @@ async fn graph_invalid_endpoints_and_memory_expansion_refuse() {
     mixed["steps"][1]["sql"] = json!("SELECT 1");
     assert!(serde_json::from_value::<JobSpec>(mixed).is_err());
 }
+
+#[tokio::test]
+async fn graph_rehashes_beyond_initial_capacity_and_releases_failed_growth() {
+    use docspec::job::{ComponentsSettings, Job};
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.memory_bytes = 1 << 20;
+    ceiling.max_batch_bytes = 16384;
+    let job = Job::new(ceiling, root.path().join("scratch")).unwrap();
+    let large = ComponentsSettings {
+        sql: "SELECT cast(value AS VARCHAR)||repeat('x',1000) AS l,cast(value+1 AS VARCHAR)||repeat('x',1000) AS r FROM generate_series(0,1000)".into(),
+        left: "l".into(), right: "r".into(), node_limit: 2000,
+    };
+    let failure = job
+        .connected_components("groups", &large)
+        .await
+        .unwrap_err();
+    assert_eq!(failure.code(), "capacity", "{failure}");
+    let small = ComponentsSettings {
+        sql: "SELECT cast(value AS VARCHAR) AS l,cast(value+1 AS VARCHAR) AS r FROM generate_series(0,31)".into(),
+        left: "l".into(), right: "r".into(), node_limit: 33,
+    };
+    // Reuse the name and the same job budget after failed graph growth.
+    job.connected_components("groups", &small).await.unwrap();
+    let rows = job.sql("SELECT count(*) AS n,count(DISTINCT node) AS unique_nodes,min(component) AS first_label,max(component) AS last_label FROM groups").await.unwrap().collect().await.unwrap();
+    use arrow::util::display::array_value_to_string;
+    assert_eq!(
+        array_value_to_string(rows[0].column(0).as_ref(), 0).unwrap(),
+        "33"
+    );
+    assert_eq!(
+        array_value_to_string(rows[0].column(1).as_ref(), 0).unwrap(),
+        "33"
+    );
+    assert_eq!(
+        array_value_to_string(rows[0].column(2).as_ref(), 0).unwrap(),
+        "0"
+    );
+    assert_eq!(
+        array_value_to_string(rows[0].column(3).as_ref(), 0).unwrap(),
+        "0"
+    );
+    job.release("groups").unwrap();
+    drop(job);
+    assert_eq!(
+        std::fs::read_dir(root.path().join("scratch"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
