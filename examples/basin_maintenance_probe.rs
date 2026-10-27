@@ -1070,7 +1070,7 @@ mod qualification_tests {
     fn growth() -> Vec<Value> {
         (0..10).map(|day| json!({"namespace":"docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272",
             "table":"growth","table_uuid":"fixture-table","day":day,"rows_per_day":4,
-            "writer_profile":"engine-v1-uncapped","rows_equal":true,"data_files":day+1,"manifests":day+1,"data_bytes":(day+1)*315000,"binary_blake3":"fixture",
+            "writer_profile":"engine-v1-uncapped","rows_equal":true,"data_files":day+1,"manifests":day+1,"data_bytes":(day+1)*315000,"binary_blake3":"fixture","release_build":true,
             "maintenance_run":format!("basin-{day}"),"maintenance_evidence":{"source":"basin","completed":true,
             "run_id":format!("basin-{day}"),"table_uuid":"fixture-table"}})).collect()
     }
@@ -1082,7 +1082,7 @@ mod qualification_tests {
         assert_eq!(projection["target_files"], 3660);
         assert_eq!(projection["target_manifests"], 3660);
         let mut projected = json!({"namespace":ns,"table":"projected","projected":true,
-            "projection":projection,"rows_per_day":4,"rows":14640,"data_bytes":1152900000,"writer_profile":"engine-v1-uncapped","binary_blake3":"fixture","data_files":1,"manifests":1,"rows_equal":true,
+            "projection":projection,"rows_per_day":4,"rows":14640,"data_bytes":1152900000,"writer_profile":"engine-v1-uncapped","binary_blake3":"fixture","release_build":true,"data_files":1,"manifests":1,"rows_equal":true,
             "runner_os":"linux","runner_threads":4,"runner_memory_bytes":16_u64 << 30,"scan_ms":1000});
         reports.push(projected.clone());
         assert_eq!(
@@ -1097,6 +1097,9 @@ mod qualification_tests {
             decision_report(ns, &reports)?["capacity_decision"],
             "iceberg"
         );
+        reports.last_mut().unwrap()["release_build"] = json!(false);
+        assert_eq!(decision_report(ns, &reports)?["capacity_decision"], "incomplete");
+        reports.last_mut().unwrap()["release_build"] = json!(true);
         reports.last_mut().unwrap()["rows_per_day"] = json!(1);
         assert_eq!(
             decision_report(ns, &reports)?["capacity_decision"],
@@ -1641,10 +1644,10 @@ mod cap_qualification_tests {
                 };
                 let cost = if arm == 0 { 1 } else { 10 };
                 values.push(json!({"namespace":ns,"table":table,"table_uuid":table,"writer_profile":profile,
-                "binary_blake3":"fixture","cap_trial":true,"batches":[{"day":day,"commits":1,"work_list_rows":4,
+                "binary_blake3":"fixture","release_build":true,"cap_trial":true,"batches":[{"day":day,"commits":1,"work_list_rows":4,
                     "commit_ms":cost,"started_at_ns":100+day*2+arm,"committed_snapshot":1000+day}]}));
                 values.push(json!({"namespace":ns,"table":table,"table_uuid":table,"writer_profile":profile,
-                "binary_blake3":"fixture","cap_trial":true,"day":day,"rows_per_day":4,"rows":(day+1)*4,
+                "binary_blake3":"fixture","release_build":true,"cap_trial":true,"day":day,"rows_per_day":4,"rows":(day+1)*4,
                 "rows_equal":true,"scan_ms":cost,"scan_started_at_ns":200+day*2+arm,"snapshot":1000+day}));
             }
         }
@@ -1661,6 +1664,7 @@ mod cap_qualification_tests {
             "snapshot",
             "table_uuid",
             "binary_blake3",
+            "release_build",
         ] {
             let mut bad = reports.clone();
             bad[1][field] = json!(99999);
@@ -1689,7 +1693,7 @@ mod observation_evidence_tests {
     #[test]
     fn compactor_attribution_requires_same_generation_and_complete_successful_writes() -> Result<()>
     {
-        let identity = json!({"namespace":"ns","table":"growth","table_uuid":"uuid","writer_profile":"engine-v1-uncapped","binary_blake3":"pin"});
+        let identity = json!({"namespace":"ns","table":"growth","table_uuid":"uuid","writer_profile":"engine-v1-uncapped","binary_blake3":"pin","release_build":true});
         let mut previous = identity.clone();
         previous["rows_per_day"] = json!(4);
         previous["rows_equal"] = json!(true);
@@ -1705,6 +1709,7 @@ mod observation_evidence_tests {
             "table_uuid",
             "writer_profile",
             "binary_blake3",
+            "release_build",
             "rows_per_day",
             "rows_equal",
         ] {
@@ -1721,6 +1726,7 @@ mod observation_evidence_tests {
             "table_uuid",
             "writer_profile",
             "binary_blake3",
+            "release_build",
         ] {
             let mut bad = record.clone();
             bad[field] = json!("wrong");
@@ -1745,5 +1751,15 @@ mod observation_evidence_tests {
         assert!(writer_evidence(Some(&previous), &[noop], &identity, 1, 4).is_err());
         assert!(writer_evidence(Some(&previous), &[], &identity, -1, 4).is_err());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod build_profile_tests {
+    use super::*;
+    #[test]
+    fn debug_build_cannot_start_a_remote_measurement() {
+        assert!(validate_build_profile(true).is_err());
+        assert!(validate_build_profile(false).is_ok());
     }
 }
