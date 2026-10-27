@@ -148,10 +148,16 @@ pub(super) fn encode(value: &str, allowance: usize) -> datafusion::common::Resul
             &mut output,
             PythonFloat,
         ))
-        .map_err(|_| {
-            datafusion::common::DataFusionError::Execution(
-                "invalid canonical JSON input or output".into(),
-            )
+        .map_err(|error| {
+            if error.io_error_kind() == Some(io::ErrorKind::OutOfMemory) {
+                datafusion::common::DataFusionError::ResourcesExhausted(
+                    "function output exceeds its byte allowance".into(),
+                )
+            } else {
+                datafusion::common::DataFusionError::Execution(
+                    "invalid canonical JSON input or output".into(),
+                )
+            }
         })?;
     String::from_utf8(output.bytes).map_err(|_| {
         datafusion::common::DataFusionError::Execution("invalid canonical JSON UTF-8".into())
