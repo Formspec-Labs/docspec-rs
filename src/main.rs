@@ -120,6 +120,9 @@ struct ReleaseOutputArgs {
 enum Command {
     /// Run a declarative multi-input SQL job without a lifecycle workspace.
     Job(SpecArg),
+    /// Upload one known local file with a create-only single PUT.
+    #[cfg(feature = "remote")]
+    CreateFile(SpecArg),
     /// Wait after a durable handoff so the qualification harness can kill this process.
     #[cfg(feature = "test-util")]
     #[command(hide = true)]
@@ -547,8 +550,36 @@ async fn async_main() -> anyhow::Result<()> {
         )
         .into());
     }
+    #[cfg(feature = "remote")]
+    let explicit_limits = cli.limits.is_some();
     let limits: Limits = cli.limits.map(read_json).transpose()?.unwrap_or_default();
     match cli.command {
+        #[cfg(feature = "remote")]
+        Command::CreateFile(SpecArg { spec }) => {
+            let path = cli.remote.ok_or_else(|| {
+                docspec::Error::refusal("remote_config", "create-file requires --remote")
+            })?;
+            if !explicit_limits {
+                return Err(docspec::Error::refusal(
+                    "invalid_budget",
+                    "create-file requires --limits",
+                )
+                .into());
+            }
+            let config = read_remote_config(path)?;
+            let objects = storage::remote::remote_objects(
+                &config.owned_prefix,
+                config.properties,
+                config.secret_env,
+            )?;
+            let spec: storage::remote::objects::FileUpload = read_json(spec)?;
+            let result = objects
+                .create_file(&spec, &docspec::budget::Budget::new(limits)?)
+                .await?;
+            print_json(
+                &serde_json::json!({"result":result,"destination":spec.destination,"sha256":spec.sha256,"md5":spec.md5,"size":spec.size}),
+            )?;
+        }
         Command::Job(SpecArg { spec }) => {
             let spec = read_json::<docspec::job::JobSpec>(spec)?;
             #[cfg(feature = "remote")]

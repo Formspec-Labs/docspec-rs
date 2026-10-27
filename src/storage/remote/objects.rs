@@ -27,11 +27,33 @@ const UPLOAD_ADMISSION: usize = 4 * CHUNK + (4 << 20);
 #[derive(Clone)]
 pub struct RemoteObjects {
     operator: Operator,
+    single_put: Operator,
     file_io: FileIO,
     query_store: Arc<dyn ObjectStore>,
     scope: Scope,
     temporary: bool,
     placement: String,
+}
+
+/// A local file and its known identities, ready for one create-only transfer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileUpload {
+    pub source: PathBuf,
+    pub destination: String,
+    pub sha256: String,
+    pub md5: String,
+    pub size: u64,
+    pub content_type: String,
+    pub cache_control: String,
+}
+
+/// Transport outcome only; an existing destination is not a readback assertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CreateFileResult {
+    Created,
+    AlreadyExists,
 }
 
 /// Exact-key temporary deletion authority for a quiescent namespace generation.
@@ -326,35 +348,43 @@ impl RemoteObjects {
                 .filter(|value| !value.is_empty())
                 .ok_or_else(config)
         };
-        let mut builder = S3::default()
-            .bucket(&scope.bucket)
-            .endpoint(required("s3.endpoint")?)
-            .region(required("s3.region")?)
-            .access_key_id(required("s3.access-key-id")?)
-            .secret_access_key(required("s3.secret-access-key")?)
-            .disable_ec2_metadata()
-            .disable_config_load();
-        if properties.contains_key("client.region") {
-            // Native FileIO lets this override s3.region. Avoid two regions.
-            return Err(config());
-        }
-        if let Some(token) = properties.get("s3.session-token") {
-            builder = builder.session_token(token);
-        }
-        match properties.get("s3.path-style-access").map(String::as_str) {
-            None | Some("false") => builder = builder.enable_virtual_host_style(),
-            Some("true") => {}
-            _ => return Err(config()),
-        }
-        // No RetryLayer: a timed-out close can already have committed remotely.
-        let operator = Operator::new(builder)
-            .map_err(|_| config())?
-            .finish()
-            .layer(
-                TimeoutLayer::new()
-                    .with_timeout(super::REQUEST_TIMEOUT)
-                    .with_io_timeout(super::REQUEST_TIMEOUT),
-            );
+        let make_builder = || -> Result<S3> {
+            let mut builder = S3::default()
+                .bucket(&scope.bucket)
+                .endpoint(required("s3.endpoint")?)
+                .region(required("s3.region")?)
+                .access_key_id(required("s3.access-key-id")?)
+                .secret_access_key(required("s3.secret-access-key")?)
+                .disable_ec2_metadata()
+                .disable_config_load();
+            if properties.contains_key("client.region") {
+                // Native FileIO lets this override s3.region. Avoid two regions.
+                return Err(config());
+            }
+            if let Some(token) = properties.get("s3.session-token") {
+                builder = builder.session_token(token);
+            }
+            match properties.get("s3.path-style-access").map(String::as_str) {
+                None | Some("false") => builder = builder.enable_virtual_host_style(),
+                Some("true") => {}
+                _ => return Err(config()),
+            }
+            Ok(builder)
+        };
+        // Keep multipart users on their existing operator: native S3 refuses
+        // MD5 multipart. Whole-buffer creates use a separate native checksum.
+        let finish = |builder: S3| -> Result<Operator> {
+            Ok(Operator::new(builder)
+                .map_err(|_| config())?
+                .finish()
+                .layer(
+                    TimeoutLayer::new()
+                        .with_timeout(super::REQUEST_TIMEOUT)
+                        .with_io_timeout(super::REQUEST_TIMEOUT),
+                ))
+        };
+        let operator = finish(make_builder()?)?;
+        let single_put = finish(make_builder()?.checksum_algorithm("md5"))?;
         let file_io = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
             customized_credential_load: None,
         }))
@@ -425,6 +455,7 @@ impl RemoteObjects {
             .is_some_and(|token| !token.is_empty());
         let instance = Self {
             operator,
+            single_put,
             file_io,
             query_store,
             scope,
@@ -540,12 +571,93 @@ impl RemoteObjects {
 
     // Both callers validate their scope once before entering this shared core.
     async fn create_bytes_by_key(&self, key: &str, bytes: Vec<u8>) -> Result<()> {
-        self.operator
+        self.single_put
             .write_with(key, bytes)
             .if_not_exists(true)
             .await
             .map_err(write_error)?;
         Ok(())
+    }
+
+    /// Creates one known file with native Content-MD5 and no readback.
+    ///
+    /// The entire file and transfer allowance are reserved before opening or
+    /// allocating. The worker retains admission through completion after caller
+    /// cancellation. File identities are checked during one local read; OpenDAL
+    /// computes the transport checksum. No multipart or automatic retry occurs.
+    /// A 412 reports `AlreadyExists`, without claiming the stored bytes match.
+    /// Keep the runtime driving I/O until canceled workers finish.
+    ///
+    /// # Errors
+    /// Refuses scope/capacity, changed local bytes and unconfirmed writes.
+    pub async fn create_file(
+        &self,
+        expected: &FileUpload,
+        budget: &Budget,
+    ) -> Result<CreateFileResult> {
+        use sha2::Digest;
+        let key = self.scope.key(&expected.destination)?;
+        let size = usize::try_from(expected.size)
+            .map_err(|_| Error::refusal("capacity", "file transfer size is not addressable"))?;
+        let allowance = size
+            .checked_mul(2)
+            .and_then(|n| n.checked_add(8192))
+            .ok_or_else(|| Error::refusal("capacity", "file transfer allowance overflow"))?;
+        let memory = budget.reserve(allowance)?;
+        let expected = expected.clone();
+        let objects = self.clone();
+        let handle = tokio::runtime::Handle::current();
+        budget
+            .blocking_admitted(move || {
+                let _memory = memory;
+                let mut file = File::open(&expected.source)?;
+                if file.metadata()?.len() != expected.size {
+                    return Err(source_changed());
+                }
+                let mut bytes = vec![0; size];
+                let mut total = 0usize;
+                let mut sha = sha2::Sha256::new();
+                let mut md5 = md5::Md5::new();
+                while total < size {
+                    let end = total.saturating_add(65536).min(size);
+                    let count = file.read(&mut bytes[total..end])?;
+                    if count == 0 {
+                        return Err(source_changed());
+                    }
+                    sha.update(&bytes[total..total + count]);
+                    md5.update(&bytes[total..total + count]);
+                    total += count;
+                }
+                if file.read(&mut [0; 1])? != 0
+                    || format!("{:x}", sha.finalize()) != expected.sha256
+                    || format!("{:x}", md5.finalize()) != expected.md5
+                {
+                    return Err(source_changed());
+                }
+                let result = handle.block_on(async {
+                    objects
+                        .single_put
+                        .write_with(&key, bytes)
+                        .if_not_exists(true)
+                        .content_type(&expected.content_type)
+                        .cache_control(&expected.cache_control)
+                        .await
+                });
+                match result {
+                    Ok(_) => Ok(CreateFileResult::Created),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            opendal::ErrorKind::AlreadyExists
+                                | opendal::ErrorKind::ConditionNotMatch
+                        ) =>
+                    {
+                        Ok(CreateFileResult::AlreadyExists)
+                    }
+                    Err(error) => Err(write_error(error)),
+                }
+            })
+            .await
     }
 
     /// Streams a retained local file into a create-only remote object.

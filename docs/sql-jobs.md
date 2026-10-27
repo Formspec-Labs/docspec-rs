@@ -34,6 +34,16 @@ HEAD for this immutable metadata. Local or directly injected FileIO checks
 observed file size before and after reading in every build. These observations
 do not replace the caller's immutable-storage and retention obligations.
 
+`docspec --limits LIMITS.json --remote OBJECTS.json create-file --spec FILE.json`
+uses only the configured object connection. `FileUpload` supplies a local source,
+destination, SHA-256, MD5, size, content type and cache control. The engine reserves
+the complete transfer allowance before opening the file, checks both hashes in
+one local read, and sends one conditional PUT with native Content-MD5. It performs
+no HEAD, GET, multipart transfer or automatic retry. A 412 returns `already_exists`
+without claiming readback verification; successful creation returns `created`.
+Cancellation retains admission until the worker finishes. Whole-file memory is
+linear in file size and may refuse a file that does not fit the explicit budget.
+
 A step may declare `release_after: ["finished_name", ...]`. Names are checked
 before input I/O, and removed only after that successor succeeds. Unknown,
 forward, duplicate and repeated releases refuse. Existing frames and views keep
