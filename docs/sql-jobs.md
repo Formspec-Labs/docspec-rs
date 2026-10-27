@@ -5,7 +5,7 @@ Run `docspec --limits LIMITS.json job --spec JOB.json`, or deserialize
 The CLI requires explicit host limits and opens no lifecycle workspace.
 
 A job declares `scratch`, `inputs`, `steps`, `outputs` and optional `queries`.
-Inputs are named Parquet paths, exact Iceberg pins, or gzip JSON-lines files
+Inputs are named Parquet paths, exact Iceberg pins, or plain/gzip JSON-lines files
 with an explicit Arrow schema. Every JSON field must be nullable. The reader
 adds `__source_key`, one-based `__source_line` and the unchanged `__raw_line`.
 

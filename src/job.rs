@@ -118,7 +118,7 @@ impl Job {
         Ok(())
     }
 
-    /// Registers gzip JSON lines with an explicit nullable schema and raw evidence.
+    /// Registers plain or gzip JSON lines with nullable fields and raw evidence.
     ///
     /// # Errors
     /// Refuses required fields, reserved evidence names, or invalid registration.

@@ -1,4 +1,4 @@
-//! Generic gzip JSON-lines input; source keys and schemas belong to the caller.
+//! Plain or gzip JSON-lines input; source keys and schemas belong to the caller.
 // Rust guideline compliant 2026-02-21
 use arrow::{
     array::{ArrayRef, Int64Array, StringArray},
@@ -21,7 +21,7 @@ use flate2::read::MultiGzDecoder;
 use futures::{StreamExt, TryStreamExt, stream};
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read, Seek},
     path::PathBuf,
     sync::Arc,
 };
@@ -171,7 +171,7 @@ struct Reader {
     file: JsonLinesFile,
     input: SchemaRef,
     schema: SchemaRef,
-    reader: Option<BufReader<MultiGzDecoder<File>>>,
+    reader: Option<BufReader<Box<dyn Read + Send>>>,
     line: i64,
     max_line: usize,
     batch_rows: usize,
@@ -192,9 +192,22 @@ impl Reader {
             .ok_or_else(|| self.error(self.line + 1, "schema and evidence allowance overflow"))?;
         self.reservation.try_resize(fixed)?;
         if self.reader.is_none() {
-            self.reader = Some(BufReader::new(MultiGzDecoder::new(
-                File::open(&self.file.path).map_err(|_| self.error(1, "source open failed"))?,
-            )));
+            let mut file =
+                File::open(&self.file.path).map_err(|_| self.error(1, "source open failed"))?;
+            let mut magic = [0; 2];
+            match file.read_exact(&mut magic) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {}
+                Err(_) => return Err(self.error(1, "source read failed")),
+            }
+            file.rewind()
+                .map_err(|_| self.error(1, "source rewind failed"))?;
+            let source: Box<dyn Read + Send> = if magic == [0x1f, 0x8b] {
+                Box::new(MultiGzDecoder::new(file))
+            } else {
+                Box::new(file)
+            };
+            self.reader = Some(BufReader::new(source));
         }
         let first = self.line + 1;
         let mut raw = Vec::new();
@@ -209,7 +222,7 @@ impl Reader {
                     .fill_buf()
                     .map_err(|_| {
                         DataFusionError::Execution(format!(
-                            "{} line {}: gzip read failed",
+                            "{} line {}: source read failed",
                             self.file.key,
                             first + offsets.len() as i64 - 1
                         ))
