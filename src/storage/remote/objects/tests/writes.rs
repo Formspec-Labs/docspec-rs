@@ -200,6 +200,7 @@ async fn source_admission_transfers_once_and_qualifies_exact_remote_bytes() {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Behavior {
+    AcceptPut,
     AbortMultipart,
     LosePutResponse,
     LoseCompleteResponse,
@@ -215,6 +216,7 @@ pub(crate) struct WriteReport {
     pub(crate) requests: Vec<(String, Option<String>)>,
     pub(crate) paths: Vec<String>,
     pub(crate) published: Option<Vec<u8>>,
+    content_md5: Vec<Option<String>>,
     parts: BTreeMap<u64, Vec<u8>>,
 }
 
@@ -270,6 +272,7 @@ impl WriteFixture {
                 report
                     .requests
                     .push((request.method.clone(), request.range.clone()));
+                report.content_md5.push(request.content_md5.clone());
                 let (path, query) = request
                     .target
                     .split_once('?')
@@ -345,7 +348,8 @@ impl WriteFixture {
                         }
                         assert!(matches!(
                             behavior,
-                            Behavior::LosePutResponse
+                            Behavior::AcceptPut
+                                | Behavior::LosePutResponse
                                 | Behavior::HoldPutResponse
                                 | Behavior::HoldPutThenDelete
                                 | Behavior::RejectPut
@@ -364,10 +368,14 @@ impl WriteFixture {
                         report.published = Some(request.body);
                         if matches!(
                             behavior,
-                            Behavior::HoldPutResponse | Behavior::HoldPutThenDelete
+                            Behavior::AcceptPut
+                                | Behavior::HoldPutResponse
+                                | Behavior::HoldPutThenDelete
                         ) {
-                            let _ = started.take().unwrap().send(());
-                            wait_release.recv_timeout(DEADLINE).unwrap();
+                            if !matches!(behavior, Behavior::AcceptPut) {
+                                let _ = started.take().unwrap().send(());
+                                wait_release.recv_timeout(DEADLINE).unwrap();
+                            }
                             respond(&mut socket, "200 OK", "ETag: \"fixture-object\"\r\n", b"");
                         }
                         // LosePutResponse closes after storing bytes without a response.
@@ -456,12 +464,13 @@ impl Drop for WriteFixture {
 }
 
 // Request parsing is bounded and transient. Signed headers are discarded; only
-// the boolean create-only property and explicit range survive header parsing.
+// create-only, range and nonsecret Content-MD5 survive header parsing.
 struct Request {
     method: String,
     target: String,
     range: Option<String>,
     create_only: bool,
+    content_md5: Option<String>,
     body: Vec<u8>,
 }
 
@@ -486,6 +495,7 @@ impl Request {
         };
         let range = value("range").map(str::to_owned);
         let create_only = value("if-none-match") == Some("*");
+        let content_md5 = value("content-md5").map(str::to_owned);
         let length = value("content-length")
             .map(|value| value.parse::<usize>().unwrap())
             .unwrap_or(0);
@@ -497,6 +507,7 @@ impl Request {
             target,
             range,
             create_only,
+            content_md5,
             body,
         }
     }
@@ -937,3 +948,90 @@ impl iceberg::Catalog for CandidateCatalog {
         self.inner.update_table(c).await
     }
 }
+
+fn upload_spec(path: &std::path::Path, bytes: &[u8]) -> super::super::FileUpload {
+    use sha2::Digest;
+    super::super::FileUpload {
+        source: path.to_owned(),
+        destination: object(bytes).path,
+        sha256: format!("{:x}", sha2::Sha256::digest(bytes)),
+        md5: format!("{:x}", md5::Md5::digest(bytes)),
+        size: bytes.len() as u64,
+        content_type: "application/octet-stream".into(),
+        cache_control: "public,max-age=31536000,immutable".into(),
+    }
+}
+#[tokio::test]
+async fn known_release_file_uses_one_conditional_md5_put_without_readback() {
+    use base64::Engine as _;
+    use sha2::Digest;
+    let bytes = vec![37; CHUNK + 17];
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), &bytes).unwrap();
+    let spec = upload_spec(source.path(), &bytes);
+    let fixture = WriteFixture::new(Behavior::AcceptPut);
+    let budget = Budget::new(Limits {
+        memory_bytes: 128 << 20,
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        fixture.objects().create_file(&spec, &budget).await.unwrap(),
+        super::super::CreateFileResult::Created
+    );
+    let report = fixture.finish();
+    assert_eq!(report.requests, vec![("PUT".into(), None)]);
+    assert_eq!(
+        report.content_md5,
+        vec![Some(
+            base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&bytes))
+        )]
+    );
+    assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+    assert!(report.parts.is_empty());
+}
+#[tokio::test]
+async fn existing_release_file_is_not_read_back_and_changed_source_never_writes() {
+    let bytes = b"release fixture";
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), bytes).unwrap();
+    let spec = upload_spec(source.path(), bytes);
+    let fixture = WriteFixture::new(Behavior::RejectPut);
+    let budget = Budget::new(Limits::default()).unwrap();
+    assert_eq!(
+        fixture.objects().create_file(&spec, &budget).await.unwrap(),
+        super::super::CreateFileResult::AlreadyExists
+    );
+    assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
+    let fixture = WriteFixture::new(Behavior::AcceptPut);
+    std::fs::write(source.path(), b"changed").unwrap();
+    assert_eq!(
+        fixture
+            .objects()
+            .create_file(&spec, &budget)
+            .await
+            .unwrap_err()
+            .code(),
+        "object_changed"
+    );
+    assert!(fixture.finish().requests.is_empty());
+    let mut huge = spec;
+    huge.source = source.path().with_extension("missing");
+    huge.size = 1 << 30;
+    assert_eq!(
+        RemoteObjects::from_resolved(&properties(), "s3://bucket/owned/").unwrap()
+            .create_file(
+                &huge,
+                &Budget::new(Limits {
+                    memory_bytes: 1 << 20,
+                    ..Default::default()
+                })
+                .unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "capacity"
+    );
+}
+

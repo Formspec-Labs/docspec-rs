@@ -86,6 +86,7 @@ name = "r2_candidate_probe"
 required-features = ["remote"]
 
 [dev-dependencies]
+base64 = "=0.22.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
