@@ -575,70 +575,8 @@ where
                             ),
                         ));
                     }
-                    // Literal expressions may be non-nullable even for optional native
-                    // fields. Preserve the native physical nullability, without copying values.
+                    let (batch, _alignment_memory) = batch::align_native_batch(batch, &expected_arrow, budget)?;
                     let expected = table.metadata().current_schema();
-                    let mut columns = batch.columns().to_vec();
-                    let fields = batch
-                        .schema()
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .map(|(index, field)| {
-                            let native = expected.field_by_name(field.name()).ok_or_else(|| {
-                                Error::refusal(
-                                    "schema_mismatch",
-                                    "writer field is absent from native schema",
-                                )
-                            })?;
-                            let mut field = field.as_ref().clone().with_nullable(!native.required);
-                            let target = expected_arrow.field_with_name(field.name())?.data_type();
-                            // Iceberg stores zoned timestamps as UTC. Arrow can label that
-                            // same instant with "UTC", "+00:00", or another zone; normalize
-                            // only zone metadata, retaining the exact unit and epoch values.
-                            let compatible_cast = match (field.data_type(), target) {
-                                (
-                                    arrow::datatypes::DataType::Timestamp(unit, Some(_)),
-                                    arrow::datatypes::DataType::Timestamp(target_unit, Some(_)),
-                                ) => unit == target_unit && field.data_type() != target,
-                                (
-                                    arrow::datatypes::DataType::Int8
-                                    | arrow::datatypes::DataType::Int16
-                                    | arrow::datatypes::DataType::UInt8
-                                    | arrow::datatypes::DataType::UInt16,
-                                    arrow::datatypes::DataType::Int32,
-                                )
-                                | (
-                                    arrow::datatypes::DataType::UInt32,
-                                    arrow::datatypes::DataType::Int64,
-                                )
-                                | (
-                                    arrow::datatypes::DataType::Binary,
-                                    arrow::datatypes::DataType::LargeBinary,
-                                )
-                                | (
-                                    arrow::datatypes::DataType::LargeBinary,
-                                    arrow::datatypes::DataType::Binary,
-                                )
-                                | (
-                                    arrow::datatypes::DataType::Utf8,
-                                    arrow::datatypes::DataType::LargeUtf8,
-                                )
-                                | (
-                                    arrow::datatypes::DataType::LargeUtf8,
-                                    arrow::datatypes::DataType::Utf8,
-                                ) => true,
-                                _ => false,
-                            };
-                            if compatible_cast {
-                                columns[index] = arrow::compute::cast(&columns[index], target)?;
-                                field = field.with_data_type(target.clone());
-                            }
-                            Ok(field)
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    let batch =
-                        RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)?;
                     let rows = batch.num_rows() as u64;
                     let slices = partition_batch(expected, &partition_spec, batch)?;
                     for (partition_key, sub_batch) in slices {

@@ -364,3 +364,144 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
     }
     Ok(out)
 }
+
+fn compatible_native_type(
+    source: &arrow::datatypes::DataType,
+    target: &arrow::datatypes::DataType,
+) -> bool {
+    use arrow::datatypes::DataType;
+    if source == target {
+        return true;
+    }
+    match (source, target) {
+        (DataType::List(a), DataType::List(b))
+        | (DataType::LargeList(a), DataType::LargeList(b)) => {
+            compatible_native_type(a.data_type(), b.data_type())
+        }
+        (DataType::FixedSizeList(a, n), DataType::FixedSizeList(b, m)) if n == m => {
+            compatible_native_type(a.data_type(), b.data_type())
+        }
+        (DataType::Struct(source), DataType::Struct(target)) => {
+            let fields = source
+                .iter()
+                .map(|field| (field.name(), field.data_type()))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            fields.len() == source.len()
+                && source.len() == target.len()
+                && target.iter().all(|field| {
+                    fields
+                        .get(field.name())
+                        .is_some_and(|source| compatible_native_type(source, field.data_type()))
+                })
+        }
+        // Preserve the existing lossless scalar whitelist. Broad Arrow cast
+        // admission would also permit truncation and positional struct fallback.
+        (DataType::Timestamp(unit, Some(_)), DataType::Timestamp(target, Some(_))) => {
+            unit == target
+        }
+        (
+            DataType::Int8 | DataType::Int16 | DataType::UInt8 | DataType::UInt16,
+            DataType::Int32,
+        )
+        | (DataType::UInt32, DataType::Int64)
+        | (DataType::Binary, DataType::LargeBinary)
+        | (DataType::LargeBinary, DataType::Binary)
+        | (DataType::Utf8, DataType::LargeUtf8)
+        | (DataType::LargeUtf8, DataType::Utf8) => true,
+        _ => false,
+    }
+}
+
+/// Aligns native field metadata through maintained casts, preserving actual values.
+pub(crate) fn align_native_batch(
+    batch: RecordBatch,
+    expected: &arrow::datatypes::Schema,
+    budget: &crate::budget::Budget,
+) -> Result<(RecordBatch, Option<tokio::sync::OwnedSemaphorePermit>)> {
+    use arrow::datatypes::{DataType, Schema};
+    let source = batch.schema();
+    let fields = source
+        .fields()
+        .iter()
+        .map(|field| {
+            let target = expected.field_with_name(field.name()).map_err(|_| {
+                Error::refusal(
+                    "schema_mismatch",
+                    "writer field is absent from native schema",
+                )
+            })?;
+            if !compatible_native_type(field.data_type(), target.data_type()) {
+                return Err(Error::refusal(
+                    "schema_mismatch",
+                    "writer field has an incompatible native type",
+                ));
+            }
+            Ok(target.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let conversion = source
+        .fields()
+        .iter()
+        .zip(&fields)
+        .any(|(a, b)| a.data_type() != b.data_type());
+    let nested = conversion
+        && source.fields().iter().any(|field| {
+            matches!(
+                field.data_type(),
+                DataType::List(_)
+                    | DataType::LargeList(_)
+                    | DataType::FixedSizeList(_, _)
+                    | DataType::Struct(_)
+            )
+        });
+    // The whitelist widens values at most fourfold. Cover the old logical
+    // slice, compacted children, casts and aligned buffer rounding before any
+    // copy; writer-owned retained buffers have their separate lifetime admission.
+    let memory = if conversion {
+        Some(
+            budget.reserve(
+                effective_batch_bytes(&batch)
+                    .checked_mul(8)
+                    .and_then(|n| n.checked_add(512))
+                    .ok_or_else(|| {
+                        Error::refusal("capacity", "native alignment allocation overflow")
+                    })?,
+            )?,
+        )
+    } else {
+        None
+    };
+    let batch = if nested {
+        compact_batch_slice(&batch, 0, batch.num_rows())?
+    } else {
+        batch
+    };
+    let options = arrow::compute::CastOptions {
+        safe: false,
+        ..Default::default()
+    };
+    let columns = batch
+        .columns()
+        .iter()
+        .zip(&fields)
+        .map(|(array, target)| {
+            if array.data_type() == target.data_type() {
+                Ok(array.clone())
+            } else {
+                Ok(arrow::compute::cast_with_options(
+                    array,
+                    target.data_type(),
+                    &options,
+                )?)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)?;
+    if batch.get_array_memory_size() > budget.limits.max_batch_bytes {
+        return Err(Error::refusal(
+            "capacity",
+            "aligned native batch exceeds configured byte allowance",
+        ));
+    }
+    Ok((batch, memory))
+}
