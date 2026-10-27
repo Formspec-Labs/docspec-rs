@@ -63,3 +63,18 @@ URL resolution uses locked `url` 2.5.8. The pinned 819-case upstream resolver
 corpus has exactly 36 known upstream `file:` URL deviations, retained by name
 in `tests/fixtures/url/expected_failures.txt`; all other cases match. No URL
 setter behavior is claimed. See `tests/fixtures/url/NOTICE.md` for source and license.
+
+`job::tables::append_with_retry` runs caller-supplied work preparation and the
+native writer against a loaded table. After a catalog conflict it reloads and
+prepares again, with at most three retries. A work identity covers selected rows
+and the writer definition. Completed files are reused only while that identity,
+table UUID, schema ID and partition-spec ID match. Empty work writes and commits
+nothing; unrelated errors propagate. File layout and table creation properties
+remain caller choices, using `storage::write_batches_with_layout` and native
+`Catalog::create_table` rather than a second creation implementation.
+
+`job::tables::purge_if_current` checks the selected UUID and metadata location
+against the catalog, then makes one purge attempt. The REST adapter never blindly
+retries purge. After any uncertain result, the caller must reload authority and
+recheck it before another attempt. This check does not provide atomic server-side
+purge conditions: callers must exclude concurrent replacement during maintenance.

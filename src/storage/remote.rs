@@ -341,7 +341,9 @@ impl Catalog for RemoteCatalog {
     }
     async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
         let physical = self.scope.physical_table(t)?;
-        retry_catalog_op(|| self.inner.purge_table(&physical)).await
+        // A lost purge response may be followed by table replacement. Retry
+        // only after the caller reloads and rechecks UUID and metadata.
+        self.inner.purge_table(&physical).await
     }
     async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
         let physical = self.scope.physical_table(t)?;
@@ -368,8 +370,6 @@ impl Catalog for RemoteCatalog {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn debug_redacts_dummy_secrets_without_network_requests() {
     #[tokio::test]
     async fn purge_failure_is_one_request_until_authority_is_checked_again() {
         use axum::{
@@ -411,6 +411,8 @@ mod tests {
         server.abort();
     }
 
+    #[tokio::test]
+    async fn debug_redacts_dummy_secrets_without_network_requests() {
         let secret = "dummy-secret-must-not-appear";
         let catalog = remote_catalog(
             HashMap::from([

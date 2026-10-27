@@ -622,19 +622,13 @@ async fn run(args: Args) -> Result<()> {
                 result = observe(&args, &table, &operator, &bucket, &binary).await?;
             }
             Action::Purge => {
-                let current = catalog.load_table(&ident).await?;
-                ensure!(
-                    current.metadata().uuid() == table.metadata().uuid()
-                        && current.metadata_location() == table.metadata_location(),
-                    "table changed before purge"
-                );
                 let prefix = table
                     .metadata()
                     .location()
                     .strip_prefix(&format!("s3://{bucket}/"))
                     .context("scratch scope")?
                     .to_owned();
-                catalog.purge_table(&ident).await?;
+                docspec::job::tables::purge_if_current(catalog.as_ref(), &table).await?;
                 let remaining = operator
                     .list_with(&format!("{prefix}/"))
                     .recursive(true)
@@ -1507,41 +1501,54 @@ async fn ingest_day(
     day: i32,
     args: &Args,
 ) -> Result<Value> {
-    let mut written: Option<Vec<DataFile>> = None;
-    let mut write_ms = 0;
+    use docspec::job::tables::{AppendWork, append_with_retry};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let write_ms = Arc::new(AtomicU64::new(0));
+    let writer_ms = write_ms.clone();
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos() as u64;
-    for retry in 0..=3 {
-        let table = catalog.load_table(ident).await?;
-        if day_count(&table, day, args.rows_per_day, args).await? != 0 {
-            return Ok(
-                json!({"day":day,"work_list_rows":0,"commits":0,"files":[],"write_ms":write_ms,"commit_ms":0,"started_at_ns":started}),
-            );
-        }
-        if written.is_none() {
-            let start = Instant::now();
-            written = Some(files(&table, day, args.rows_per_day, args.table == "capped").await?);
-            write_ms = start.elapsed().as_millis() as u64;
-        }
-        let start = Instant::now();
-        if let Ok(committed) = append(
-            catalog,
-            &table,
-            written.as_ref().context("written files missing")?.clone(),
-        )
-        .await
-        {
-            let commit_ms = start.elapsed().as_millis() as u64;
-            let inventory = written.as_ref().context("written files missing")?.iter().map(|f|
-                json!({"path":f.file_path(),"bytes":f.file_size_in_bytes(),"rows":f.record_count()})).collect::<Vec<_>>();
-            return Ok(
-                json!({"day":day,"work_list_rows":args.rows_per_day,"commits":1,"files":inventory,
-                "write_ms":write_ms,"commit_ms":commit_ms,"retries":retry,"started_at_ns":started,"committed_snapshot":committed.metadata().current_snapshot_id()}),
-            );
-        }
+    let outcome = append_with_retry(
+        catalog,
+        ident,
+        |table| async move {
+            let present = day_count(&table, day, args.rows_per_day, args)
+                .await
+                .map_err(|error| docspec::Error::refusal("probe_work", error.to_string()))?;
+            Ok(if present != 0 {
+                AppendWork::Empty
+            } else {
+                AppendWork::Rows {
+                    identity: format!("{day}/{}/{}", args.rows_per_day, args.table),
+                    rows: (),
+                }
+            })
+        },
+        move |table, ()| {
+            let writer_ms = writer_ms.clone();
+            async move {
+                let start = Instant::now();
+                let written = files(&table, day, args.rows_per_day, args.table == "capped")
+                    .await
+                    .map_err(|error| docspec::Error::refusal("probe_writer", error.to_string()))?;
+                writer_ms.store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
+                Ok(written)
+            }
+        },
+    )
+    .await?;
+    let write_ms = write_ms.load(Ordering::SeqCst);
+    if outcome.files.is_empty() {
+        return Ok(
+            json!({"day":day,"work_list_rows":0,"commits":0,"files":[],"write_ms":write_ms,"commit_ms":0,"started_at_ns":started}),
+        );
     }
-    anyhow::bail!("append did not settle within three retries")
+    let inventory = outcome.files.iter().map(|file|json!({"path":file.file_path(),"bytes":file.file_size_in_bytes(),"rows":file.record_count()})).collect::<Vec<_>>();
+    Ok(
+        json!({"day":day,"work_list_rows":args.rows_per_day,"commits":1,"files":inventory,
+        "write_ms":write_ms,"commit_ms":outcome.commit_duration.as_millis() as u64,"retries":outcome.retries,
+        "started_at_ns":started,"committed_snapshot":outcome.table.metadata().current_snapshot_id()}),
+    )
 }
 
 #[cfg(test)]

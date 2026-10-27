@@ -7,6 +7,7 @@ mod json_lines;
 mod materialized;
 mod query_result;
 mod spec;
+pub mod tables;
 
 use crate::{
     Result,
