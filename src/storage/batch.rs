@@ -447,23 +447,24 @@ pub(crate) fn align_native_batch(
         .iter()
         .zip(&fields)
         .any(|(a, b)| a.data_type() != b.data_type());
-    let nested = conversion
-        && source.fields().iter().any(|field| {
-            matches!(
+    let nested = source.fields().iter().zip(&fields).any(|(field, target)| {
+        field.data_type() != target.data_type()
+            && matches!(
                 field.data_type(),
                 DataType::List(_)
                     | DataType::LargeList(_)
                     | DataType::FixedSizeList(_, _)
                     | DataType::Struct(_)
             )
-        });
-    // The whitelist widens values at most fourfold. Cover the old logical
+    });
+    // The whitelist widens values at most fourfold. Cover retained input,
     // slice, compacted children, casts and aligned buffer rounding before any
     // copy; writer-owned retained buffers have their separate lifetime admission.
     let memory = if conversion {
         Some(
             budget.reserve(
-                effective_batch_bytes(&batch)
+                batch
+                    .get_array_memory_size()
                     .checked_mul(8)
                     .and_then(|n| n.checked_add(512))
                     .ok_or_else(|| {
