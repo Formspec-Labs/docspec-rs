@@ -446,16 +446,38 @@ pub(crate) fn align_native_batch(
 ) -> Result<(RecordBatch, Option<tokio::sync::OwnedSemaphorePermit>)> {
     use arrow::datatypes::{DataType, Schema};
     let source = batch.schema();
+    let positions = source
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (field.name(), index))
+        .collect::<std::collections::HashMap<_, _>>();
+    if positions.len() != source.fields().len()
+        || positions.len() != expected.fields().len()
+        || expected
+            .fields()
+            .iter()
+            .any(|field| !positions.contains_key(field.name()))
+    {
+        return Err(Error::refusal(
+            "schema_mismatch",
+            "writer and native schema need the same unique field names",
+        ));
+    }
+    // The maintained Parquet writer consumes arrays in native schema order.
+    // Projecting the existing arrays is O(columns), with no payload copy.
+    let order = expected
+        .fields()
+        .iter()
+        .map(|field| positions[field.name()])
+        .collect::<Vec<_>>();
+    let batch = batch.project(&order)?;
+    let source = batch.schema();
     let fields = source
         .fields()
         .iter()
-        .map(|field| {
-            let target = expected.field_with_name(field.name()).map_err(|_| {
-                Error::refusal(
-                    "schema_mismatch",
-                    "writer field is absent from native schema",
-                )
-            })?;
+        .zip(expected.fields())
+        .map(|(field, target)| {
             let aligned =
                 aligned_native_type(field.data_type(), target.data_type()).ok_or_else(|| {
                     Error::refusal(
@@ -468,7 +490,7 @@ pub(crate) fn align_native_batch(
                         ),
                     )
                 })?;
-            Ok(target.clone().with_data_type(aligned))
+            Ok(target.as_ref().clone().with_data_type(aligned))
         })
         .collect::<Result<Vec<_>>>()?;
     let conversion = source
