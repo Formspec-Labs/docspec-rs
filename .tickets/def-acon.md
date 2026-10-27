@@ -21,3 +21,7 @@ Native writer uses maintained recursive Arrow casts and existing compaction for 
 **2026-10-27T19:17:34Z**
 
 Nested value fixtures3passed and storage group100passed after review resource fix. CODE sole concern reproduced393b0e7 (10MB list charged13968B), fixed actual retained-byte admission; ARCH APPROVE. Native fields, strict nulls/type/name checks, compacted slices, sameBudget and maintained Arrow casts. All-target/all-feature Clippy passed before the small admission correction. D3 full adapter verification follows shared snapshot.
+
+**2026-10-27T20:10:07Z**
+
+Corrected full cargo gate at a566e1f:400library/397integration/15restore/2worker/11probe pass,17ignored; fmt and all-target/all-feature Clippy pass. First full run exposed16regressions: views restored without flattening, stale HEAD fixtures strengthened to singleGET. CODE and ARCH APPROVE cx_native_views_*; no live or full-model/RSS claim.
