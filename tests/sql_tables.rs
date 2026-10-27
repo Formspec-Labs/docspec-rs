@@ -92,7 +92,7 @@ async fn files(table: &Table, budget: &Budget, ids: Vec<i64>) -> docspec::Result
     )
     .await
 }
-async fn count(table: &Table, predicate: &str) -> i64 {
+pub(super) async fn count(table: &Table, predicate: &str) -> i64 {
     if table.metadata().current_snapshot().is_none() {
         return 0;
     }
