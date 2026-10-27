@@ -231,3 +231,98 @@ async fn injected_catalog_uses_the_same_job_and_rejects_competing_local_authorit
         2
     );
 }
+
+fn selected_input(operation: &Value) -> Value {
+    json!({"kind":"native_table","name":"selected", "metadata_location":operation["metadata_location"],
+        "table_uuid":operation["table_uuid"],"snapshot":operation.get("snapshot").cloned().unwrap_or(Value::Null),
+        "schema_id":operation["schema_id"]})
+}
+fn selected_job(root: &std::path::Path, input: Value) -> Value {
+    json!({"scratch":root.join("read-scratch"),"inputs":[input],"steps":[],"outputs":[],
+        "queries":[{"name":"values","sql":"SELECT id FROM selected WHERE id>=2 ORDER BY id"}]})
+}
+#[tokio::test]
+async fn native_selector_reads_exact_c7_snapshot_without_catalog_lookup() {
+    let root = tempfile::tempdir().unwrap();
+    let mut source = spec(root.path());
+    let result = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(source.clone())
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let read = selected_job(root.path(), selected_input(&result["table_operations"][2]));
+    source["steps"][0]["sql"] = json!("SELECT cast(3 AS BIGINT) AS id");
+    source["table_operations"] = json!([source["table_operations"][2].clone()]);
+    source["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'later-3' AS identity FROM pending LIMIT 1");
+    serde_json::from_value::<JobSpec>(source)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    let result = serde_json::from_value::<JobSpec>(read)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap()["queries"][0]["data"],
+        json!([{"id":2}])
+    );
+}
+#[tokio::test]
+async fn native_selector_null_snapshot_is_exactly_empty() {
+    let root = tempfile::tempdir().unwrap();
+    let mut source = spec(root.path());
+    source["table_operations"].as_array_mut().unwrap().pop();
+    let result = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(source)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let read = selected_job(root.path(), selected_input(&result["table_operations"][1]));
+    let result = serde_json::from_value::<JobSpec>(read)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap()["queries"][0]["data"],
+        json!([])
+    );
+}
+#[tokio::test]
+async fn native_selector_refuses_each_mismatched_identity_before_output() {
+    let root = tempfile::tempdir().unwrap();
+    let result = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(spec(root.path()))
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let input = selected_input(&result["table_operations"][2]);
+    for (key, value) in [
+        ("table_uuid", json!("00000000-0000-0000-0000-000000000000")),
+        ("snapshot", json!(0)),
+        ("schema_id", json!(42)),
+        ("snapshot", Value::Null),
+    ] {
+        let mut altered = input.clone();
+        altered[key] = value;
+        let failure = serde_json::from_value::<JobSpec>(selected_job(root.path(), altered))
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap_err();
+        assert_eq!(failure.error.code(), "pin_mismatch", "{key}");
+        assert!(failure.completed.outputs.is_empty());
+    }
+}
