@@ -67,6 +67,9 @@ mod native_tests {
         let result = race(catalog.clone(), table, &args).await?;
         assert_eq!(result["server_snapshot_conflict"], true);
         assert_eq!(result["retries"], 1);
+        let before_repeat = catalog.load_table(&ident).await?;
+        assert!(race(catalog.clone(),before_repeat.clone(),&args).await.is_err());
+        assert_eq!(catalog.load_table(&ident).await?.metadata_location(),before_repeat.metadata_location());
         let table = catalog.load_table(&ident).await?;
         let ctx = context(&args)?;
         ctx.register_table(
@@ -98,5 +101,46 @@ mod native_tests {
             "{plan}"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod qualification_tests {
+    use super::*;
+    fn growth() -> Vec<Value> {
+        (0..10).map(|day| json!({"namespace":"docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272",
+            "table":"uncapped","table_uuid":"fixture-table","day":day,"rows_per_day":4,
+            "writer_profile":"engine-v1-uncapped","rows_equal":true,"data_files":day+1,"manifests":day+1,
+            "maintenance_run":format!("basin-{day}"),"maintenance_evidence":{"source":"basin","completed":true,
+            "run_id":format!("basin-{day}"),"table_uuid":"fixture-table"}})).collect()
+    }
+    #[test]
+    fn projected_workload_must_cover_the_measured_growth_targets() -> Result<()> {
+        let ns = "docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272";
+        let mut reports = growth();
+        let projection = projection_for(ns,&reports)?;
+        assert_eq!(projection["target_files"],3660);
+        assert_eq!(projection["target_manifests"],3660);
+        let mut projected = json!({"namespace":ns,"table":"projected","projected":true,
+            "projection":projection,"data_files":1,"manifests":1,"rows_equal":true,
+            "runner_os":"linux","runner_threads":4,"runner_memory_bytes":16_u64 << 30,"scan_ms":1000});
+        reports.push(projected.clone());
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"incomplete");
+        projected["data_files"] = json!(3660);
+        projected["manifests"] = json!(3660);
+        reports.pop(); reports.push(projected);
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"iceberg");
+        reports.last_mut().unwrap()["scan_ms"] = json!(60000);
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"dated_parquet");
+        reports[0]["namespace"] = json!("different");
+        assert!(projection_for(ns,&reports).is_err());
+        Ok(())
+    }
+    #[test]
+    fn compaction_codec_comes_from_a_file_the_writer_did_not_create() {
+        let current = std::collections::BTreeSet::from(["old.parquet".into(),"compacted.parquet".into()]);
+        let writers = std::collections::BTreeSet::from(["old.parquet".into()]);
+        assert_eq!(compacted_file(&current,&writers).as_deref(),Some("compacted.parquet"));
+        assert!(compacted_file(&writers,&writers).is_none());
     }
 }
