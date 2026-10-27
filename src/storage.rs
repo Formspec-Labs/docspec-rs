@@ -21,7 +21,6 @@ pub(crate) use partitioning::{
     validate_partition_tuple,
 };
 mod pinned;
-pub(crate) use pinned::open_snapshot;
 #[cfg(test)]
 pub(crate) use pinned::pin;
 #[doc(inline)]
@@ -30,6 +29,7 @@ pub(crate) use pinned::{
     check_inventory, check_inventory_files, decode as decode_native_metadata, pin_bound,
     pin_bound_with_files,
 };
+pub(crate) use pinned::{open_pin_admitted, open_snapshot};
 #[cfg(feature = "remote")]
 pub mod remote;
 pub(crate) mod removal;

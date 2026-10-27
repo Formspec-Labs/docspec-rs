@@ -480,14 +480,6 @@ impl RemoteObjects {
         Ok(())
     }
 
-    pub(crate) async fn open_pin(
-        &self,
-        pin: &crate::model::TablePin,
-        budget: &Budget,
-    ) -> Result<iceberg::table::Table> {
-        super::super::pinned::open_pin_remote(pin, self, budget).await
-    }
-
     pub(in crate::storage) fn flat_reader(
         &self,
         object: &ObjectRef,
@@ -953,11 +945,13 @@ impl RemoteObjects {
     }
 
     // One capped GET supplies both observed object size and bytes. The caller
-    // holds the cap plus transport admission before response payload allocation.
+    // holds transport admission; observed bytes are admitted before payload allocation.
     pub(in crate::storage) async fn read_metadata_capped_admitted(
         &self,
         path: &str,
         limit: usize,
+        budget: &Budget,
+        memory: &mut tokio::sync::OwnedSemaphorePermit,
     ) -> Result<bytes::Bytes> {
         let key = self.scope.key(path)?;
         let path = object_store::path::Path::parse(key).map_err(|_| scope_error())?;
@@ -985,6 +979,7 @@ impl RemoteObjects {
         if response.range != (0..response.meta.size) {
             return Err(mismatch());
         }
+        memory.merge(budget.reserve(usize::try_from(response.meta.size).map_err(|_| mismatch())?)?);
         let mut bytes = vec![0; usize::try_from(response.meta.size).map_err(|_| mismatch())?];
         Self::fill_metadata(response, &mut bytes).await?;
         Ok(bytes.into())

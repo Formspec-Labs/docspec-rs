@@ -169,23 +169,20 @@ impl Job {
     /// # Errors
     /// Refuses changed metadata, an absent pinned snapshot, or provider failures.
     pub async fn register_iceberg(&self, name: &str, pin: &crate::model::TablePin) -> Result<()> {
-        let memory =
-            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
-        #[cfg(feature = "remote")]
-        let table = if let Some(remote) = &self.remote {
-            remote.objects.open_pin(pin, &self.budget).await?
-        } else {
-            crate::storage::open_pin(pin, &self.budget).await?
-        };
-        #[cfg(not(feature = "remote"))]
-        let table = crate::storage::open_pin(pin, &self.budget).await?;
-        self.register_admitted_native_table(name, table, memory)
+        let (table, memory) = crate::storage::open_pin_admitted(
+            pin,
+            #[cfg(feature = "remote")]
+            self.remote.as_ref().map(|x| &x.objects),
+            &self.budget,
+        )
+        .await?;
+        self.register_admitted_native_table(name, table, std::sync::Arc::new(memory))
             .await
     }
 
     /// Registers exact immutable native metadata without consulting a catalog.
     ///
-    /// Null snapshot means an empty table. Metadata and its conservative byte
+    /// Null snapshot means an empty table. Metadata and its decoded-byte
     /// admission remain owned by every resulting frame, plan and stream.
     ///
     /// # Errors
@@ -195,16 +192,14 @@ impl Job {
         name: &str,
         selection: &crate::storage::NativeTableSnapshot,
     ) -> Result<()> {
-        let memory =
-            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
-        let table = crate::storage::open_snapshot(
+        let (table, memory) = crate::storage::open_snapshot(
             selection,
             #[cfg(feature = "remote")]
             self.remote.as_ref().map(|x| &x.objects),
             &self.budget,
         )
         .await?;
-        self.register_admitted_native_table(name, table, memory)
+        self.register_admitted_native_table(name, table, std::sync::Arc::new(memory))
             .await
     }
 
@@ -213,8 +208,15 @@ impl Job {
         name: &str,
         table: iceberg::table::Table,
     ) -> Result<()> {
-        let memory =
-            std::sync::Arc::new(self.budget.reserve(self.budget.limits.max_metadata_bytes)?);
+        let counting_table = table.clone();
+        let budget = self.budget.clone();
+        let memory = std::sync::Arc::new(
+            self.budget
+                .blocking_admitted(move || {
+                    native::metadata_admission(counting_table.metadata(), &budget)
+                })
+                .await?,
+        );
         self.register_admitted_native_table(name, table, memory)
             .await
     }

@@ -24,38 +24,48 @@ use std::{
 /// # Errors
 /// Refuses oversized or changed metadata, invalid native metadata, and exhausted capacity.
 pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
+    Ok(open_pin_admitted(
+        pin,
+        #[cfg(feature = "remote")]
+        None,
+        budget,
+    )
+    .await?
+    .0)
+}
+
+pub(crate) async fn open_pin_admitted(
+    pin: &TablePin,
+    #[cfg(feature = "remote")] remote: Option<&super::remote::RemoteObjects>,
+    budget: &Budget,
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
     #[cfg(feature = "remote")]
-    if let Some(objects) = super::remote::RemoteObjects::for_uri(&pin.metadata.path) {
-        return open_pin_remote(pin, &objects, budget).await;
+    let ambient = super::remote::RemoteObjects::for_uri(&pin.metadata.path);
+    #[cfg(feature = "remote")]
+    if let Some(objects) = remote.or(ambient.as_ref()) {
+        objects.validate_path(&pin.metadata.path)?;
+        for object in &pin.objects {
+            objects.validate_path(&object.path)?;
+        }
+        return open_with_reader_admitted(
+            pin,
+            objects.file_io(),
+            MetadataReader::Remote(objects.clone(), pin.metadata.path.clone()),
+            budget,
+        )
+        .await;
     }
     if super::object_io::is_remote_uri(&pin.metadata.path)
         || pin
             .objects
             .iter()
-            .any(|object| super::object_io::is_remote_uri(&object.path))
+            .any(|x| super::object_io::is_remote_uri(&x.path))
     {
         return Err(super::object_io::unregistered_remote_uri());
     }
-    open_pin_with_io(pin, FileIO::new_with_fs(), budget).await
-}
-
-#[cfg(feature = "remote")]
-pub(crate) async fn open_pin_remote(
-    pin: &TablePin,
-    objects: &super::remote::RemoteObjects,
-    budget: &Budget,
-) -> Result<Table> {
-    objects.validate_path(&pin.metadata.path)?;
-    for object in &pin.objects {
-        objects.validate_path(&object.path)?;
-    }
-    open_with_reader(
-        pin,
-        objects.file_io(),
-        MetadataReader::Remote(objects.clone(), pin.metadata.path.clone()),
-        budget,
-    )
-    .await
+    let io = FileIO::new_with_fs();
+    let input = io.new_input(&pin.metadata.path)?;
+    open_with_reader_admitted(pin, io, MetadataReader::Native(input), budget).await
 }
 
 /// Opens exact pinned metadata through the supplied native object I/O.
@@ -79,7 +89,11 @@ pub(crate) async fn open_pin_remote(
 /// metadata, invalid JSON/gzip/native metadata, and snapshot/schema mismatch.
 pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) -> Result<Table> {
     let input = file_io.new_input(&pin.metadata.path)?;
-    open_with_reader(pin, file_io, MetadataReader::Native(input), budget).await
+    Ok(
+        open_with_reader_admitted(pin, file_io, MetadataReader::Native(input), budget)
+            .await?
+            .0,
+    )
 }
 
 enum MetadataReader {
@@ -114,14 +128,18 @@ pub async fn open_snapshot_with_io(
     budget: &Budget,
 ) -> Result<Table> {
     let input = file_io.new_input(&selection.metadata_location)?;
-    open_snapshot_reader(selection, file_io, MetadataReader::Native(input), budget).await
+    Ok(
+        open_snapshot_reader(selection, file_io, MetadataReader::Native(input), budget)
+            .await?
+            .0,
+    )
 }
 
 pub(crate) async fn open_snapshot(
     selection: &NativeTableSnapshot,
     #[cfg(feature = "remote")] remote: Option<&super::remote::RemoteObjects>,
     budget: &Budget,
-) -> Result<Table> {
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
     #[cfg(feature = "remote")]
     if let Some(objects) = remote {
         objects.validate_path(&selection.metadata_location)?;
@@ -136,7 +154,9 @@ pub(crate) async fn open_snapshot(
     if super::object_io::is_remote_uri(&selection.metadata_location) {
         return Err(super::object_io::unregistered_remote_uri());
     }
-    open_snapshot_with_io(selection, FileIO::new_with_fs(), budget).await
+    let io = FileIO::new_with_fs();
+    let input = io.new_input(&selection.metadata_location)?;
+    open_snapshot_reader(selection, io, MetadataReader::Native(input), budget).await
 }
 
 async fn open_snapshot_reader(
@@ -144,8 +164,8 @@ async fn open_snapshot_reader(
     file_io: FileIO,
     reader: MetadataReader,
     budget: &Budget,
-) -> Result<Table> {
-    let metadata = read_metadata(None, reader, budget).await?;
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
+    let (metadata, memory) = read_metadata(None, reader, budget).await?;
     if metadata.uuid() != selection.table_uuid
         || metadata.current_snapshot_id() != selection.snapshot
         || metadata.current_schema_id() != selection.schema_id
@@ -155,16 +175,19 @@ async fn open_snapshot_reader(
             "native UUID, snapshot or schema differs from selection",
         ));
     }
-    build_table(metadata, &selection.metadata_location, "selected", file_io)
+    Ok((
+        build_table(metadata, &selection.metadata_location, "selected", file_io)?,
+        memory,
+    ))
 }
 
-async fn open_with_reader(
+async fn open_with_reader_admitted(
     pin: &TablePin,
     file_io: FileIO,
     reader: MetadataReader,
     budget: &Budget,
-) -> Result<Table> {
-    let metadata = read_metadata(Some(pin.metadata.clone()), reader, budget).await?;
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
+    let (metadata, memory) = read_metadata(Some(pin.metadata.clone()), reader, budget).await?;
     if metadata.current_snapshot_id() != pin.snapshot
         || metadata.current_schema_id() != pin.schema_id
     {
@@ -173,7 +196,10 @@ async fn open_with_reader(
             "snapshot or schema differs from release pin",
         ));
     }
-    build_table(metadata, &pin.metadata.path, &pin.table, file_io)
+    Ok((
+        build_table(metadata, &pin.metadata.path, &pin.table, file_io)?,
+        memory,
+    ))
 }
 fn build_table(metadata: TableMetadata, path: &str, name: &str, file_io: FileIO) -> Result<Table> {
     Ok(Table::builder()
@@ -189,7 +215,7 @@ async fn read_metadata(
     expected: Option<ObjectRef>,
     reader: MetadataReader,
     budget: &Budget,
-) -> Result<TableMetadata> {
+) -> Result<(TableMetadata, tokio::sync::OwnedSemaphorePermit)> {
     let limit = budget.limits.max_metadata_bytes;
     let size = expected
         .as_ref()
@@ -204,12 +230,15 @@ async fn read_metadata(
         #[cfg(feature = "remote")]
         MetadataReader::Remote(_, _) => super::remote::objects::READ_ADMISSION,
     };
-    let serialized = budget.reserve(size.checked_add(transport).ok_or_else(capacity)?)?;
+    let initial = match &reader {
+        _ if expected.is_none() => 0,
+        _ => size,
+    };
+    let mut serialized = budget.reserve(initial.checked_add(transport).ok_or_else(capacity)?)?;
     let handle = tokio::runtime::Handle::current();
     let worker_budget = budget.clone();
     budget
         .blocking_admitted(move || {
-            let _serialized = serialized;
             let bytes: bytes::Bytes = handle.block_on(async {
                 match reader {
                     MetadataReader::Native(input) => {
@@ -219,6 +248,9 @@ async fn read_metadata(
                         }
                         if expected.as_ref().is_some_and(|x| x.bytes != observed) {
                             return Err(corrupt());
+                        }
+                        if expected.is_none() {
+                            serialized.merge(worker_budget.reserve(observed as usize)?);
                         }
                         let bytes = input.reader().await?.read(0..observed).await?;
                         if bytes.len() as u64 != observed
@@ -235,7 +267,14 @@ async fn read_metadata(
                             objects.read_metadata_admitted(object, &mut bytes).await?;
                             Ok(bytes.into())
                         } else {
-                            objects.read_metadata_capped_admitted(&path, limit).await
+                            objects
+                                .read_metadata_capped_admitted(
+                                    &path,
+                                    limit,
+                                    &worker_budget,
+                                    &mut serialized,
+                                )
+                                .await
                         }
                     }
                 }
@@ -251,8 +290,10 @@ async fn read_metadata(
             } else {
                 bytes.len()
             };
-            let _decoded = worker_budget.reserve(decoded_size)?;
-            decode::<TableMetadata>(&bytes, limit)
+            let decoded = worker_budget.reserve(decoded_size)?;
+            let metadata = decode::<TableMetadata>(&bytes, limit)?;
+            drop(serialized);
+            Ok((metadata, decoded))
         })
         .await
 }
