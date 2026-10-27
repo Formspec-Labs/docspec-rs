@@ -92,3 +92,8 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 all = "warn"
+
+[[example]]
+name = "basin_maintenance_probe"
+required-features = ["remote"]
+test = true
