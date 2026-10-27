@@ -319,7 +319,8 @@ impl GenericFunction {
             total
                 .saturating_add(largest)
                 .saturating_add((rows + 1).saturating_mul(4))
-                .saturating_add(metadata),
+                .saturating_add(metadata)
+                .saturating_add(512),
         )?;
         let options = EncoderOptions::default().with_explicit_nulls(true);
         let mut encoders = inputs
