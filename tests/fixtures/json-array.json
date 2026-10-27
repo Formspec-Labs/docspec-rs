@@ -1,0 +1,18 @@
+[
+  {
+    "expression": "json_array()",
+    "expected": "[]"
+  },
+  {
+    "expression": "json_array('é','a/b','quote\"','back\\slash',cast(NULL AS VARCHAR),true,cast(-12 AS BIGINT))",
+    "expected": "[\"é\",\"a/b\",\"quote\\\"\",\"back\\\\slash\",null,true,-12]"
+  },
+  {
+    "expression": "json_array(make_array('x',cast(NULL AS VARCHAR)),named_struct('a',cast(NULL AS VARCHAR),'b','é'))",
+    "expected": "[[\"x\",null],{\"a\":null,\"b\":\"é\"}]"
+  },
+  {
+    "expression": "json_array('line\nbreak','\tcontrol','\\u2028')",
+    "expected": "[\"line\\nbreak\",\"\\tcontrol\",\"\\\\u2028\"]"
+  }
+]

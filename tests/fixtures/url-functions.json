@@ -1,0 +1,116 @@
+[
+  {
+    "function": "url_resolve",
+    "value": "../x",
+    "base": "https://example.test/a/b",
+    "expected": "https://example.test/x"
+  },
+  {
+    "function": "url_resolve",
+    "value": "%2e%2e/x",
+    "base": "https://example.test/a/b",
+    "expected": "https://example.test/x"
+  },
+  {
+    "function": "url_resolve",
+    "value": "x",
+    "base": "invalid base",
+    "expected": null
+  },
+  {
+    "function": "url_resolve",
+    "value": "https://example.test/x",
+    "base": null,
+    "expected": "https://example.test/x"
+  },
+  {
+    "function": "uri_normalize_encoding",
+    "value": "https://EXAMPLE.test/a%2fb/%7e?q=%41",
+    "base": null,
+    "expected": "https://EXAMPLE.test/a%2Fb/~?q=A"
+  },
+  {
+    "function": "uri_normalize_encoding",
+    "value": "é a%20b",
+    "base": null,
+    "expected": "%C3%A9%20a%20b"
+  },
+  {
+    "function": "percent_decode_utf8",
+    "value": "a+b%20c",
+    "base": null,
+    "expected": "a+b c"
+  },
+  {
+    "function": "percent_decode_utf8",
+    "value": "a%2520b",
+    "base": null,
+    "expected": "a%20b"
+  },
+  {
+    "function": "percent_decode_utf8",
+    "value": "%FF%41",
+    "base": null,
+    "expected": "%FF%41"
+  },
+  {
+    "function": "percent_decode_utf8",
+    "value": "%zz",
+    "base": null,
+    "expected": "%zz"
+  },
+  {
+    "function": "url_filename",
+    "value": "https://example.test/a+b.pdf",
+    "base": null,
+    "expected": "a+b.pdf"
+  },
+  {
+    "function": "url_filename",
+    "value": "https://example.test/%FF.pdf",
+    "base": null,
+    "expected": "%FF.pdf"
+  },
+  {
+    "function": "url_filename",
+    "value": "https://example.test/",
+    "base": null,
+    "expected": null
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename=\"a;b.pdf\"",
+    "base": null,
+    "expected": "a;b.pdf"
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename=\"a\\\"b.pdf\"",
+    "base": null,
+    "expected": "a\"b.pdf"
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename=ascii.pdf; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf",
+    "base": null,
+    "expected": "résumé.pdf"
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename*=ISO-8859-1''caf%E9.pdf",
+    "base": null,
+    "expected": "café.pdf"
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename=ok.pdf; filename*=UTF-8''%FF",
+    "base": null,
+    "expected": "ok.pdf"
+  },
+  {
+    "function": "disposition_filename",
+    "value": "attachment; filename=a; FILENAME=b",
+    "base": null,
+    "expected": null
+  }
+]
