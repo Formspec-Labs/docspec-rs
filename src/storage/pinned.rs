@@ -697,6 +697,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selected_gzip_metadata_uses_observed_decoded_admission() {
+        let metadata = metadata();
+        let json = serde_json::to_vec(&metadata).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("metadata.json.gz");
+        std::fs::write(&path, gzip(&json)).unwrap();
+        let selection = NativeTableSnapshot {
+            metadata_location: path.to_string_lossy().into_owned(),
+            table_uuid: metadata.uuid(),
+            snapshot: None,
+            schema_id: metadata.current_schema_id(),
+        };
+        let small = Limits {
+            memory_bytes: 8 << 20,
+            max_metadata_bytes: 32 << 20,
+            max_batch_bytes: 1 << 20,
+            ..Limits::default()
+        };
+        let job = crate::job::Job::new(small, root.path().join("scratch")).unwrap();
+        job.register_native_snapshot("first", &selection)
+            .await
+            .unwrap();
+        job.register_native_snapshot("second", &selection)
+            .await
+            .unwrap();
+        assert_eq!(
+            job.sql("SELECT count(*) FROM first")
+                .await
+                .unwrap()
+                .count()
+                .await
+                .unwrap(),
+            1
+        );
+        job.release("first").unwrap();
+        job.release("second").unwrap();
+    }
+
+    #[tokio::test]
     async fn stored_and_decoded_caps_apply_before_returning_a_table() {
         let metadata = metadata();
         let json = serde_json::to_vec(&metadata).unwrap();
