@@ -5,6 +5,7 @@ mod components;
 mod export;
 mod functions;
 mod json_lines;
+mod json_many;
 mod materialized;
 mod native;
 mod query_result;

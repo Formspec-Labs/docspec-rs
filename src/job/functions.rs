@@ -81,6 +81,7 @@ impl Hash for GenericFunction {
 
 pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::Result<()> {
     datafusion_functions_json::register_all(context)?;
+    super::json_many::register(context, budget);
     for kind in [
         Kind::Resolve,
         Kind::Normalize,
@@ -112,7 +113,7 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
     Ok(())
 }
 
-fn capacity() -> DataFusionError {
+pub(super) fn capacity() -> DataFusionError {
     DataFusionError::ResourcesExhausted("function output exceeds its byte allowance".into())
 }
 fn admit(budget: &Budget, bytes: usize) -> Result<tokio::sync::OwnedSemaphorePermit> {

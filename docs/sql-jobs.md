@@ -9,6 +9,13 @@ Inputs are named Parquet paths, exact Iceberg pins, or plain/gzip JSON-lines fil
 with an explicit Arrow schema. Every JSON field must be nullable. The reader
 adds `__source_key`, one-based `__source_line` and the unchanged `__raw_line`.
 
+A `native_table` input selects `name`, immutable `metadata_location`,
+`table_uuid`, `snapshot` and `schema_id` from a completed table operation.
+All selection fields must match that metadata; a null snapshot means exactly an
+empty table. It performs no current-head lookup or lifecycle inventory. Stored
+and decoded metadata bytes are bounded, and decoded admission stays with every
+provider, plan and stream. The caller retains the selected immutable objects.
+
 Steps run in order. A step's `materialize` flag selects a retained result,
 reserved in memory or stored in managed scratch; otherwise it is a view.
 SQL must use immutable functions. Each output declares its SQL, local path and
@@ -78,6 +85,21 @@ Invalid, nonfinite or excessively nested input refuses. Parsing is admitted
 before allocation, one tree at a time; output bytes are bounded. Object ordering
 costs `O(Σ K log K)` for each object's `K` keys. Selection of records and hashing
 the resulting bytes remain caller policy.
+
+`json_get_many(raw, literal_paths_json)` extracts prefix-disjoint raw JSON
+fragments in one Jiter traversal per input row. The second argument is a literal
+JSON array of paths whose components are string keys or zero-based integer
+indices; duplicates keep their positions. Negative or null components give null
+slots. Proper ancestor/descendant selections refuse; `[]` selects nothing and
+`[[]]` selects the root. Each result is a valid list of nullable JSON strings,
+with the same lexical bytes, first-duplicate-key and lazy malformed-tail behavior
+as independent `json_get_json` calls. Paths compile into the immutable expression
+once; no input-sized value tree or per-row definition parser is built. Parser
+workspace and actual output growth are admitted before allocation, and output
+expansion refuses rather than truncates. Work is linear in scanned input, path
+state and copied output; duplicate selections can multiply output bytes.
+Common-expression reuse depends on the native plan: inspect it before assuming
+reuse across branches, and retain narrowed relations rather than raw bundles.
 
 `http_date(text)` returns a nullable UTC microsecond timestamp using the maintained
 `httpdate` parser. It accepts the three HTTP date forms in the supported
