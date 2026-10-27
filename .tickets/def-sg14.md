@@ -1,6 +1,6 @@
 ---
 id: def-sg14
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-10-27T19:24:09Z
