@@ -208,15 +208,47 @@ impl Job {
         name: &str,
         table: iceberg::table::Table,
     ) -> Result<()> {
-        let counting_table = table.clone();
-        let budget = self.budget.clone();
-        let memory = std::sync::Arc::new(
-            self.budget
-                .blocking_admitted(move || {
-                    native::metadata_admission(counting_table.metadata(), &budget)
-                })
-                .await?,
-        );
+        // Catalog selection returns parsed metadata without a byte admission.
+        // Re-admit that immutable selection once through the bounded reader;
+        // upstream Serialize would clone unknown-sized metadata before counting.
+        let selection = crate::storage::NativeTableSnapshot {
+            metadata_location: table
+                .metadata_location()
+                .ok_or_else(|| {
+                    crate::Error::refusal(
+                        "invalid_spec",
+                        "selected table has no immutable metadata location",
+                    )
+                })?
+                .to_owned(),
+            table_uuid: table.metadata().uuid(),
+            snapshot: table.metadata().current_snapshot_id(),
+            schema_id: table.metadata().current_schema_id(),
+        };
+        #[cfg(feature = "remote")]
+        let (table, memory) = if self.remote.is_some() {
+            crate::storage::open_snapshot(
+                &selection,
+                self.remote.as_ref().map(|x| &x.objects),
+                &self.budget,
+            )
+            .await?
+        } else {
+            crate::storage::open_snapshot_with_io_admitted(
+                &selection,
+                table.file_io().clone(),
+                &self.budget,
+            )
+            .await?
+        };
+        #[cfg(not(feature = "remote"))]
+        let (table, memory) = crate::storage::open_snapshot_with_io_admitted(
+            &selection,
+            table.file_io().clone(),
+            &self.budget,
+        )
+        .await?;
+        let memory = std::sync::Arc::new(memory);
         self.register_admitted_native_table(name, table, memory)
             .await
     }

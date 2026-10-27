@@ -116,54 +116,6 @@ impl ExecutionPlan for AdmittedPlan {
     }
 }
 
-// A catalog already owns parsed metadata. Count serialization without another
-// metadata GET or a retained JSON copy; decoded-byte admission is not RSS.
-pub(super) fn metadata_admission(
-    value: &impl serde::Serialize,
-    budget: &crate::budget::Budget,
-) -> crate::Result<OwnedSemaphorePermit> {
-    struct Count<'a> {
-        budget: &'a crate::budget::Budget,
-        memory: OwnedSemaphorePermit,
-        failure: Option<crate::Error>,
-    }
-    impl std::io::Write for Count<'_> {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            let needed = self.memory.num_permits().checked_add(bytes.len());
-            let result = if needed.is_none_or(|n| n > self.budget.limits.max_metadata_bytes) {
-                Err(crate::Error::refusal(
-                    "metadata_capacity",
-                    "native metadata exceeds the configured byte limit",
-                ))
-            } else {
-                self.budget.reserve(bytes.len())
-            };
-            match result {
-                Ok(memory) => {
-                    self.memory.merge(memory);
-                    Ok(bytes.len())
-                }
-                Err(error) => {
-                    self.failure = Some(error);
-                    Err(std::io::Error::other("metadata admission refused"))
-                }
-            }
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut writer = Count {
-        budget,
-        memory: budget.reserve(0)?,
-        failure: None,
-    };
-    match serde_json::to_writer(&mut writer, value) {
-        Ok(()) => Ok(writer.memory),
-        Err(error) => Err(writer.failure.unwrap_or_else(|| error.into())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

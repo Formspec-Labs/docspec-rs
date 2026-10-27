@@ -29,7 +29,7 @@ pub(crate) use pinned::{
     check_inventory, check_inventory_files, decode as decode_native_metadata, pin_bound,
     pin_bound_with_files,
 };
-pub(crate) use pinned::{open_pin_admitted, open_snapshot};
+pub(crate) use pinned::{open_pin_admitted, open_snapshot, open_snapshot_with_io_admitted};
 #[cfg(feature = "remote")]
 pub mod remote;
 pub(crate) mod removal;

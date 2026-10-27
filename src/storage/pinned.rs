@@ -127,12 +127,17 @@ pub async fn open_snapshot_with_io(
     file_io: FileIO,
     budget: &Budget,
 ) -> Result<Table> {
+    Ok(open_snapshot_with_io_admitted(selection, file_io, budget)
+        .await?
+        .0)
+}
+pub(crate) async fn open_snapshot_with_io_admitted(
+    selection: &NativeTableSnapshot,
+    file_io: FileIO,
+    budget: &Budget,
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
     let input = file_io.new_input(&selection.metadata_location)?;
-    Ok(
-        open_snapshot_reader(selection, file_io, MetadataReader::Native(input), budget)
-            .await?
-            .0,
-    )
+    open_snapshot_reader(selection, file_io, MetadataReader::Native(input), budget).await
 }
 
 pub(crate) async fn open_snapshot(
@@ -285,13 +290,11 @@ async fn read_metadata(
             {
                 return Err(corrupt());
             }
-            let decoded_size = if bytes.starts_with(&[0x1f, 0x8b]) {
-                limit.checked_add(1).ok_or_else(capacity)?
-            } else {
-                bytes.len()
-            };
-            let decoded = worker_budget.reserve(decoded_size)?;
-            let metadata = decode::<TableMetadata>(&bytes, limit)?;
+            let (metadata, decoded) =
+                decode_inner::<TableMetadata>(&bytes, limit, Some(&worker_budget))?;
+            let decoded = decoded.ok_or_else(|| {
+                Error::refusal("invalid_metadata", "missing decoded-byte admission")
+            })?;
             drop(serialized);
             Ok((metadata, decoded))
         })
@@ -299,28 +302,96 @@ async fn read_metadata(
 }
 
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], limit: usize) -> Result<T> {
+    Ok(decode_inner(bytes, limit, None)?.0)
+}
+fn decode_inner<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    limit: usize,
+    budget: Option<&Budget>,
+) -> Result<(T, Option<tokio::sync::OwnedSemaphorePermit>)> {
+    let memory = budget
+        .map(|b| {
+            b.reserve(if bytes.starts_with(&[0x1f, 0x8b]) {
+                0
+            } else {
+                bytes.len()
+            })
+        })
+        .transpose()?;
     if !bytes.starts_with(&[0x1f, 0x8b]) {
-        return Ok(serde_json::from_slice(bytes)?);
+        return Ok((serde_json::from_slice(bytes)?, memory));
     }
-    let allowance = u64::try_from(limit)
-        .ok()
-        .and_then(|n| n.checked_add(1))
-        .ok_or_else(capacity)?;
-    let decoder = flate2::bufread::GzDecoder::new(bytes);
-    let mut reader = decoder.take(allowance);
-    // from_reader checks EOF after the JSON value, driving CRC/trailer checking.
+    let ceiling = limit.checked_add(1).ok_or_else(capacity)?;
+    // One64KiB decoded buffer plus the inflater's bounded working state.
+    let _buffer = budget.map(|b| b.reserve(128 << 10)).transpose()?;
+    let tracked = DecodedRead {
+        decoder: flate2::bufread::GzDecoder::new(bytes),
+        budget,
+        memory,
+        count: 0,
+        ceiling,
+        failure: None,
+        exceeded: false,
+    };
+    let mut reader = std::io::BufReader::with_capacity(64 << 10, tracked);
+    // EOF drives CRC/trailer verification. Keep exact decoded bytes admitted;
+    // a final one-byte probe distinguishes EOF at the limit from oversize input.
     let parsed = serde_json::from_reader(&mut reader);
-    if reader.limit() == 0 {
+    let tracked = reader.into_inner();
+    if let Some(error) = tracked.failure {
+        return Err(error);
+    }
+    if tracked.exceeded {
         return Err(capacity());
     }
     let metadata = parsed?;
-    if !reader.into_inner().get_ref().is_empty() {
+    if !tracked.decoder.get_ref().is_empty() {
         return Err(Error::refusal(
             "invalid_metadata",
             "gzip metadata has trailing bytes",
         ));
     }
-    Ok(metadata)
+    Ok((metadata, tracked.memory))
+}
+struct DecodedRead<'a, 'b> {
+    decoder: flate2::bufread::GzDecoder<&'a [u8]>,
+    budget: Option<&'b Budget>,
+    memory: Option<tokio::sync::OwnedSemaphorePermit>,
+    count: usize,
+    ceiling: usize,
+    failure: Option<Error>,
+    exceeded: bool,
+}
+impl Read for DecodedRead<'_, '_> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        let allowance = bytes.len().min(self.ceiling.saturating_sub(self.count));
+        if allowance == 0 {
+            self.exceeded = true;
+            return Err(std::io::Error::other("metadata allowance exceeded"));
+        }
+        if let (Some(budget), Some(memory)) = (self.budget, &mut self.memory) {
+            match budget.reserve(allowance) {
+                Ok(extra) => memory.merge(extra),
+                Err(error) => {
+                    self.failure = Some(error);
+                    return Err(std::io::Error::other("metadata admission refused"));
+                }
+            }
+        }
+        let read = self.decoder.read(&mut bytes[..allowance])?;
+        if let Some(memory) = &mut self.memory {
+            drop(memory.split(allowance - read));
+        }
+        self.count += read;
+        if self.count == self.ceiling {
+            self.exceeded = true;
+            return Err(std::io::Error::other("metadata allowance exceeded"));
+        }
+        Ok(read)
+    }
 }
 
 fn capacity() -> Error {
