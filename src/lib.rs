@@ -10,6 +10,7 @@ pub mod error;
 pub mod evidence;
 pub mod export;
 pub mod http;
+pub mod job;
 pub mod model;
 mod progress;
 mod query;

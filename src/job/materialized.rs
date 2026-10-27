@@ -1,0 +1,222 @@
+//! Retained Arrow batches own their pool reservation; a refused grow spills once.
+// Rust guideline compliant 2026-02-21
+use crate::{Error, Result, budget::Budget};
+use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use datafusion::{
+    catalog::{Session, TableProvider, streaming::StreamingTable},
+    common::{Statistics, stats::Precision},
+    execution::{
+        TaskContext,
+        disk_manager::RefCountedTempFile,
+        memory_pool::{MemoryConsumer, MemoryReservation},
+    },
+    logical_expr::{Expr, TableType},
+    physical_plan::{
+        ExecutionPlan, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
+        streaming::PartitionStream,
+    },
+    prelude::{ParquetReadOptions, SessionContext},
+};
+use futures::{StreamExt, TryStreamExt, stream};
+use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
+use std::{any::Any, path::Path, sync::Arc};
+
+/// Physical storage selected for a reusable SQL step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepStorage {
+    Memory,
+    Scratch,
+}
+
+#[derive(Debug)]
+struct Batches {
+    schema: SchemaRef,
+    retained: Arc<StepData>,
+}
+
+#[derive(Debug)]
+enum StepData {
+    Memory {
+        batches: Vec<RecordBatch>,
+        _reservation: MemoryReservation,
+    },
+    Scratch {
+        frame: Box<datafusion::dataframe::DataFrame>,
+        _file: RefCountedTempFile,
+    },
+}
+impl PartitionStream for Batches {
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+    fn execute(&self, _context: Arc<TaskContext>) -> SendableRecordBatchStream {
+        // Keep the reservation in the stream, including after the final yield.
+        let retained = self.retained.clone();
+        match retained.as_ref() {
+            StepData::Memory { batches, .. } => {
+                let count = batches.len();
+                let batches = stream::iter(0..count).map(move |index| {
+                    let StepData::Memory { batches, .. } = retained.as_ref() else {
+                        unreachable!()
+                    };
+                    Ok(batches[index].clone())
+                });
+                Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), batches))
+            }
+            StepData::Scratch { frame, .. } => {
+                let frame = frame.as_ref().clone();
+                let batches = stream::once(async move { frame.execute_stream().await })
+                    .try_flatten()
+                    .map(move |batch| {
+                        let _keep_alive = &retained;
+                        batch
+                    });
+                Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), batches))
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ReservedTable {
+    table: StreamingTable,
+    rows: usize,
+    bytes: usize,
+}
+#[async_trait::async_trait]
+impl TableProvider for ReservedTable {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn schema(&self) -> SchemaRef {
+        self.table.schema()
+    }
+    fn table_type(&self) -> TableType {
+        TableType::Temporary
+    }
+    fn statistics(&self) -> Option<Statistics> {
+        Some(
+            Statistics::new_unknown(&self.schema())
+                .with_num_rows(Precision::Exact(self.rows))
+                .with_total_byte_size(Precision::Exact(self.bytes)),
+        )
+    }
+    async fn scan(
+        &self,
+        session: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        self.table.scan(session, projection, filters, limit).await
+    }
+}
+
+pub(super) async fn materialize(
+    context: &SessionContext,
+    budget: &Budget,
+    _scratch: &Path,
+    name: &str,
+    sql: &str,
+) -> Result<StepStorage> {
+    if context.table_exist(name)? {
+        return Err(Error::refusal("invalid_spec", "named step already exists"));
+    }
+    let frame = context.sql(sql).await?;
+    let schema = Arc::new(frame.schema().as_arrow().clone());
+    let mut stream = frame.execute_stream().await?;
+    let reservation =
+        MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
+    let mut batches = Vec::new();
+    let mut rows = 0;
+    let mut bytes = 0;
+    let mut file = None;
+    let mut writer_memory = None;
+    let mut writer: Option<ArrowWriter<std::fs::File>> = None;
+    while let Some(batch) = stream.try_next().await? {
+        rows += batch.num_rows();
+        let size = batch.get_array_memory_size();
+        if size > budget.limits.max_batch_bytes {
+            return Err(Error::refusal(
+                "capacity",
+                "named step batch exceeds configured byte allowance",
+            ));
+        }
+        bytes += size;
+        if writer.is_none() && reservation.try_grow(size).is_err() {
+            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes)?);
+            let temporary = budget
+                .runtime_env()
+                .disk_manager
+                .create_tmp_file("SQL named step")?;
+            let props = WriterProperties::builder()
+                .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+                .build();
+            let mut spill =
+                ArrowWriter::try_new(temporary.inner().reopen()?, schema.clone(), Some(props))?;
+            for previous in batches.drain(..) {
+                spill.write(&previous)?;
+                if spill.memory_size() > budget.limits.max_batch_bytes {
+                    return Err(Error::refusal(
+                        "capacity",
+                        "named step writer exceeds configured byte allowance",
+                    ));
+                }
+            }
+            reservation.free();
+            file = Some(temporary);
+            writer = Some(spill);
+        }
+        if let Some(writer) = &mut writer {
+            writer.write(&batch)?;
+            if writer.memory_size() > budget.limits.max_batch_bytes {
+                return Err(Error::refusal(
+                    "capacity",
+                    "named step writer exceeds configured byte allowance",
+                ));
+            }
+            file.as_mut()
+                .expect("spill owns temporary file")
+                .update_disk_usage()?;
+        } else {
+            batches.push(batch);
+        }
+    }
+    let (storage, retained) = if let Some(writer) = writer {
+        writer.close()?;
+        drop(writer_memory);
+        let mut file = file.expect("spill owns temporary file");
+        file.update_disk_usage()?;
+        // A frame from the job's own catalog would retain this table and form
+        // a cycle. A fresh context shares its runtime, not its catalog.
+        let frame = budget
+            .context()
+            .read_parquet(
+                file.path().to_string_lossy().as_ref(),
+                ParquetReadOptions::default().file_extension(""),
+            )
+            .await?;
+        (
+            StepStorage::Scratch,
+            StepData::Scratch {
+                frame: Box::new(frame),
+                _file: file,
+            },
+        )
+    } else {
+        (
+            StepStorage::Memory,
+            StepData::Memory {
+                batches,
+                _reservation: reservation,
+            },
+        )
+    };
+    let partition = Arc::new(Batches {
+        schema: schema.clone(),
+        retained: Arc::new(retained),
+    });
+    let table = StreamingTable::try_new(schema, vec![partition])?;
+    context.register_table(name, Arc::new(ReservedTable { table, rows, bytes }))?;
+    Ok(storage)
+}
