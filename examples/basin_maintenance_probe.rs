@@ -187,3 +187,26 @@ mod layout_tests {
         assert!(!report.to_string().contains("never-report-this-value"));
     }
 }
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+    #[tokio::test]
+    async fn explicit_small_row_groups_cannot_undercharge_writer_metadata() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let catalog = docspec::storage::local_catalog(root.path()).await?;
+        let ns = NamespaceIdent::new("m1_metadata".into());
+        catalog.create_namespace(&ns,HashMap::new()).await?;
+        let table = create_table(catalog.as_ref(),&TableIdent::new(ns,"uncapped".into()),
+            &root.path().join("table").to_string_lossy(),200).await?;
+        let budget = docspec::budget::Budget::new(docspec::budget::Limits {
+            compute_threads:1,memory_bytes:1 << 30,scratch_bytes:1 << 20,
+            batch_rows:65536,max_batch_bytes:64 << 20,max_metadata_bytes:32 << 10,
+        })?;
+        let input = futures::stream::iter([Ok(batch(&table,0,0,200)?)]);
+        let error = docspec::storage::write_batches_with_layout(&table,input,&budget,
+            docspec::storage::WriteLayout {file_bytes:128 << 20,row_group_rows:1,row_group_bytes:32 << 20}).await.unwrap_err();
+        assert_eq!(error.code(),"metadata_capacity");
+        Ok(())
+    }
+}
