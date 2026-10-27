@@ -214,3 +214,36 @@ fn explicit_remote_sql_job_starts_without_a_lifecycle_workspace_or_catalog_query
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["queries"][0]["data"], json!([{"n":1}]));
 }
+
+#[cfg(feature = "remote")]
+#[test]
+fn create_file_refuses_changed_source_without_catalog_configuration_or_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    std::fs::write(&source, b"changed").unwrap();
+    let spec = root.path().join("upload.json");
+    std::fs::write(&spec, serde_json::to_vec(&json!({"source":source,"destination":"s3://bucket/owned/release.parquet","sha256":"0".repeat(64),"md5":"0".repeat(32),"size":7,"content_type":"application/vnd.apache.parquet","cache_control":"public,max-age=31536000,immutable"})).unwrap()).unwrap();
+    let remote = root.path().join("remote.json");
+    std::fs::write(&remote, serde_json::to_vec(&json!({"owned_prefix":"s3://bucket/owned/","properties":{"s3.endpoint":"http://127.0.0.1:9","s3.region":"auto","s3.access-key-id":"dummy","s3.secret-access-key":"dummy","s3.path-style-access":"true"}})).unwrap()).unwrap();
+    let ceiling = root.path().join("limits.json");
+    std::fs::write(&ceiling, serde_json::to_vec(&Limits::default()).unwrap()).unwrap();
+    let workspace = root.path().join("unused-workspace");
+    let output = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--remote")
+        .arg(remote)
+        .arg("--limits")
+        .arg(ceiling)
+        .args(["create-file", "--spec"])
+        .arg(spec)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("object_changed"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!workspace.exists());
+}

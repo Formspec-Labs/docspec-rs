@@ -1004,7 +1004,7 @@ async fn existing_release_file_is_not_read_back_and_changed_source_never_writes(
     );
     assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
     let fixture = WriteFixture::new(Behavior::AcceptPut);
-    std::fs::write(source.path(), b"changed").unwrap();
+    std::fs::write(source.path(), b"release fixturE").unwrap();
     assert_eq!(
         fixture
             .objects()
@@ -1019,7 +1019,8 @@ async fn existing_release_file_is_not_read_back_and_changed_source_never_writes(
     huge.source = source.path().with_extension("missing");
     huge.size = 1 << 30;
     assert_eq!(
-        RemoteObjects::from_resolved(&properties(), "s3://bucket/owned/").unwrap()
+        RemoteObjects::from_resolved(&properties(), "s3://bucket/owned/")
+            .unwrap()
             .create_file(
                 &huge,
                 &Budget::new(Limits {
@@ -1035,3 +1036,43 @@ async fn existing_release_file_is_not_read_back_and_changed_source_never_writes(
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn canceled_single_file_put_keeps_admission_until_transport_finishes() {
+    let bytes = vec![19; 512];
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), &bytes).unwrap();
+    let spec = upload_spec(source.path(), &bytes);
+    let mut fixture = WriteFixture::new(Behavior::HoldPutResponse);
+    let objects = fixture.objects();
+    let allowance = 2 * bytes.len() + 8192;
+    let budget = Budget::new(Limits {
+        compute_threads: 1,
+        memory_bytes: allowance,
+        ..Default::default()
+    })
+    .unwrap();
+    let worker_budget = budget.clone();
+    let caller = tokio::spawn(async move { objects.create_file(&spec, &worker_budget).await });
+    tokio::time::timeout(DEADLINE, fixture.started.take().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    assert_eq!(budget.reserve(1).unwrap_err().code(), "capacity");
+    fixture.release.take().unwrap().send(()).unwrap();
+    let reclaimed = tokio::time::timeout(DEADLINE, async {
+        loop {
+            if let Ok(permit) = budget.reserve(allowance) {
+                break permit;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(reclaimed);
+    let report = fixture.finish();
+    assert_eq!(report.requests, vec![("PUT".into(), None)]);
+    assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+}
