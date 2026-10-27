@@ -42,7 +42,6 @@ async fn setup(root: &std::path::Path) -> (Arc<dyn Catalog>, Table, Arc<Budget>)
         max_batch_bytes: 2 << 20,
         max_metadata_bytes: 2 << 20,
         scratch_bytes: 8 << 20,
-        ..Limits::default()
     })
     .unwrap();
     (catalog, table, Arc::new(budget))
@@ -341,4 +340,49 @@ async fn purge_refuses_changed_metadata_or_replaced_uuid_before_deleting() {
         .await
         .unwrap();
     assert!(!catalog.table_exists(table.identifier()).await.unwrap());
+}
+
+#[tokio::test]
+async fn replacement_uuid_never_reuses_the_previous_tables_files() {
+    let root = tempfile::tempdir().unwrap();
+    let (catalog, table, budget) = setup(root.path()).await;
+    let writes = Arc::new(AtomicUsize::new(0));
+    let calls = writes.clone();
+    let cat = catalog.clone();
+    let pool = budget.clone();
+    let replacement = root.path().join("replacement");
+    let result = append_with_retry(
+        catalog.as_ref(),
+        table.identifier(),
+        |_| async {
+            Ok(AppendWork::Rows {
+                identity: "same-work".into(),
+                rows: vec![1],
+            })
+        },
+        move |table, ids| {
+            let calls = calls.clone();
+            let cat = cat.clone();
+            let pool = pool.clone();
+            let replacement = replacement.clone();
+            async move {
+                let ours = files(&table, &pool, ids).await?;
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    cat.drop_table(table.identifier()).await?;
+                    create(cat.as_ref(), table.identifier(), &replacement).await;
+                }
+                Ok(ours)
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(writes.load(Ordering::SeqCst), 2);
+    assert_ne!(result.table.metadata().uuid(), table.metadata().uuid());
+    assert_eq!(count(&result.table, "true").await, 1);
+    let prefix = root.path().join("replacement");
+    assert!(result.files.iter().all(|file| {
+        file.file_path()
+            .starts_with(prefix.to_string_lossy().as_ref())
+    }));
 }
