@@ -33,6 +33,7 @@ enum Kind {
     UrlFilename,
     DispositionFilename,
     JsonArray,
+    JsonCanonical,
 }
 impl Kind {
     fn name(self) -> &'static str {
@@ -43,6 +44,7 @@ impl Kind {
             Self::UrlFilename => "url_filename",
             Self::DispositionFilename => "disposition_filename",
             Self::JsonArray => "json_array",
+            Self::JsonCanonical => "json_canonical",
         }
     }
 }
@@ -83,6 +85,7 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
         Kind::UrlFilename,
         Kind::DispositionFilename,
         Kind::JsonArray,
+        Kind::JsonCanonical,
     ] {
         let signature = if kind == Kind::JsonArray {
             Signature::one_of(
@@ -283,12 +286,61 @@ impl ScalarUDFImpl for GenericFunction {
             .collect::<Result<Vec<_>>>()?;
         if self.kind == Kind::JsonArray {
             self.json(&inputs, args.number_rows)
+        } else if self.kind == Kind::JsonCanonical {
+            self.canonical(&inputs, args.number_rows)
         } else {
             self.strings(&inputs, args.number_rows)
         }
     }
 }
 impl GenericFunction {
+    fn canonical(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
+        let get = |index| text(inputs[0].0.as_ref(), if inputs[0].1 { 0 } else { index });
+        let mut largest = 0usize;
+        let mut output = 0usize;
+        for index in 0..rows {
+            if let Some(value) = get(index)? {
+                largest = largest.max(value.len());
+                output = output.saturating_add(value.len().saturating_mul(8).saturating_add(32));
+            }
+        }
+        // One parsed tree at a time, including Vec growth and sorted object
+        // references. Retained output capacities coexist with the Arrow builder.
+        let _admission = admit(
+            &self.budget,
+            largest
+                .saturating_mul(128)
+                .saturating_add(output.saturating_mul(2))
+                .saturating_add(rows.saturating_mul(64))
+                .saturating_add(512),
+        )?;
+        let mut values = Vec::with_capacity(rows);
+        let mut total = 0usize;
+        for index in 0..rows {
+            let encoded = get(index)?
+                .map(|value| {
+                    super::canonical::encode(
+                        value,
+                        value
+                            .len()
+                            .saturating_mul(8)
+                            .saturating_add(32)
+                            .min(self.budget.limits.max_batch_bytes.saturating_sub(total)),
+                    )
+                })
+                .transpose()?;
+            total = total.saturating_add(encoded.as_ref().map_or(0, String::len));
+            if total > self.budget.limits.max_batch_bytes {
+                return Err(capacity());
+            }
+            values.push(encoded);
+        }
+        let mut builder = StringBuilder::with_capacity(rows, total);
+        for value in values {
+            builder.append_option(value);
+        }
+        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+    }
     fn json(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
         let limit = self.budget.limits.max_batch_bytes;
         let mut total = 0usize;
@@ -402,7 +454,7 @@ impl GenericFunction {
                             .map(decode)
                     }),
                     Kind::DispositionFilename => disposition(value),
-                    Kind::JsonArray => unreachable!(),
+                    Kind::JsonArray | Kind::JsonCanonical => unreachable!(),
                 },
             };
             bytes = bytes

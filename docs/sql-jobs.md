@@ -53,6 +53,16 @@ unchanged; decoding preserves literal `+`. Download names prefer a valid
 `filename*` over `filename`; duplicate filename parameters refuse. These
 primitives impose no host, scheme or application identity policy.
 
+`json_canonical(text)` parses JSON and emits recursively UTF-8-byte-sorted
+object keys in compact JSON. Duplicate keys take the last value, matching
+Python's JSON reader. Jiter preserves arbitrary integers and parses finite
+binary64 floats; Serde handles JSON escaping and structure, with Python's
+float spelling thresholds and exponent padding. No Python runtime is linked.
+Invalid, nonfinite or excessively nested input refuses. Parsing is admitted
+before allocation, one tree at a time; output bytes are bounded. Object ordering
+costs `O(Σ K log K)` for each object's `K` keys. Selection of records and hashing
+the resulting bytes remain caller policy.
+
 `json_array` uses Arrow's JSON encoder with explicit nulls and compact output.
 It accepts strings, booleans, integers and nested lists or structs containing
 those types. Other types refuse, including floating point values whose spelling
