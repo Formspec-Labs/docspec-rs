@@ -310,12 +310,20 @@ async fn released_names_keep_existing_frames_and_free_scratch_at_last_use() {
     let root = tempfile::tempdir().unwrap();
     let scratch = root.path().join("scratch");
     let job = Job::new(limits(), scratch.clone()).unwrap();
-    assert_eq!(job.materialize("held", "SELECT value,repeat('x',1024) AS text FROM generate_series(1,24000)").await.unwrap(), StepStorage::Scratch);
+    assert_eq!(
+        job.materialize(
+            "held",
+            "SELECT value,repeat('x',1024) AS text FROM generate_series(1,24000)"
+        )
+        .await
+        .unwrap(),
+        StepStorage::Scratch
+    );
     let planned = job.sql("SELECT * FROM held").await.unwrap();
     job.release("held").unwrap();
     assert!(job.sql("SELECT * FROM held").await.is_err());
     assert!(!scratch_files(&scratch).is_empty());
-    assert_eq!(planned.count().await.unwrap(),24000);
+    assert_eq!(planned.count().await.unwrap(), 24000);
     assert!(scratch_files(&scratch).is_empty());
     assert!(job.release("held").is_err());
 }

@@ -49,6 +49,17 @@ impl Job {
         self.context.register_table(name, frame.into_view())?;
         Ok(())
     }
+    /// Removes a finished name while existing plans retain their dependencies.
+    ///
+    /// # Errors
+    /// Refuses unknown names or native catalog failures.
+    pub fn release(&self, name: &str) -> Result<()> {
+        self.context
+            .deregister_table(name)?
+            .ok_or_else(|| crate::Error::refusal("invalid_spec", "released step does not exist"))?;
+        Ok(())
+    }
+
     /// Creates a job with a caller-owned scratch directory and explicit limits.
     ///
     /// # Errors

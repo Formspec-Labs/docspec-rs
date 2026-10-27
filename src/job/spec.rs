@@ -42,6 +42,8 @@ pub struct SqlStep {
     pub sql: String,
     #[serde(default)]
     pub materialize: bool,
+    #[serde(default)]
+    pub release_after: Vec<String>,
 }
 
 /// One ordered output, separate from the relations it reads.
@@ -174,6 +176,23 @@ impl JobSpec {
                 ));
             }
         }
+        let mut available: BTreeSet<String> = self
+            .inputs
+            .iter()
+            .map(|input| input.name().to_lowercase())
+            .collect();
+        for step in &self.steps {
+            available.insert(step.name.to_lowercase());
+            for name in &step.release_after {
+                if name.eq_ignore_ascii_case(&step.name) || !available.remove(&name.to_lowercase())
+                {
+                    return Err(Error::refusal(
+                        "invalid_spec",
+                        "release names must exist once before their successor",
+                    ));
+                }
+            }
+        }
         let job = Job::new(limits, self.scratch.clone())?;
         for input in &self.inputs {
             match input {
@@ -193,6 +212,9 @@ impl JobSpec {
                 job.register_view(&step.name, &step.sql).await?;
                 StepStorage::View
             };
+            for name in &step.release_after {
+                job.release(name)?;
+            }
             result.steps.push(StepResult {
                 name: step.name.clone(),
                 storage,

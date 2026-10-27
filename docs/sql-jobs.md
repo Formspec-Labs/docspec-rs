@@ -27,3 +27,9 @@ correct the failed work, and retry with only unfinished output declarations,
 using the same pinned inputs and unchanged definitions for reused files.
 Existing outputs are never overwritten. Remote CLI configuration is not yet
 bound to this command; `--remote` refuses explicitly until the C5 adapter lands.
+
+A step may declare `release_after: ["finished_name", ...]`. Names are checked
+before input I/O, and removed only after that successor succeeds. Unknown,
+forward, duplicate and repeated releases refuse. Existing frames and views keep
+their dependencies alive; memory and scratch are freed at the final owner's
+release. Declare dependent views too when their inputs have reached last use.

@@ -143,19 +143,30 @@ async fn sql_metadata_result_has_a_byte_bound() {
 
 #[tokio::test]
 async fn named_step_release_is_validated_before_io_and_happens_after_success() {
-    let root=tempfile::tempdir().unwrap();
-    for releases in [json!(["unknown"]),json!(["later"]),json!(["input","input"])] {
-        let scratch=root.path().join("absent");
-        let spec:JobSpec=serde_json::from_value(json!({"scratch":scratch,
+    let root = tempfile::tempdir().unwrap();
+    for releases in [
+        json!(["unknown"]),
+        json!(["later"]),
+        json!(["input", "input"]),
+    ] {
+        let scratch = root.path().join("absent");
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":scratch,
             "inputs":[{"kind":"parquet","name":"input","path":"missing.parquet"}],
             "steps":[{"name":"first","sql":"SELECT * FROM input","release_after":releases},
-                     {"name":"later","sql":"SELECT * FROM first"}],"outputs":[]})).unwrap();
-        assert_eq!(spec.run(Limits::default()).await.unwrap_err().error.code(),"invalid_spec");
+                     {"name":"later","sql":"SELECT * FROM first"}],"outputs":[]}))
+        .unwrap();
+        assert_eq!(
+            spec.run(Limits::default()).await.unwrap_err().error.code(),
+            "invalid_spec"
+        );
         assert!(!scratch.exists());
     }
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("success"),"inputs":[],
         "steps":[{"name":"first","sql":"SELECT 7 AS value","materialize":true},
                  {"name":"second","sql":"SELECT * FROM first","materialize":true,"release_after":["first"]}],
         "outputs":[],"queries":[{"name":"kept","sql":"SELECT * FROM second"}]})).unwrap();
-    assert_eq!(spec.run(Limits::default()).await.unwrap().queries[0].data,json!([{"value":7}]));
+    assert_eq!(
+        spec.run(Limits::default()).await.unwrap().queries[0].data,
+        json!([{"value":7}])
+    );
 }
