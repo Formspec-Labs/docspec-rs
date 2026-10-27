@@ -27,52 +27,7 @@ pub(super) fn is_body_edge(edge: &ConnectedEdgeSpec) -> bool {
         || edge.column.eq_ignore_ascii_case("body_key")
 }
 
-/// Union-find (disjoint-set) forest with path halving and union by rank.
-struct DisjointSet {
-    parent: Vec<usize>,
-    rank: Vec<u8>,
-}
-
-impl DisjointSet {
-    fn new(n: usize) -> Self {
-        Self {
-            parent: (0..n).collect(),
-            rank: vec![0; n],
-        }
-    }
-
-    fn push(&mut self) -> usize {
-        let idx = self.parent.len();
-        self.parent.push(idx);
-        self.rank.push(0);
-        idx
-    }
-
-    fn find(&mut self, mut x: usize) -> usize {
-        while self.parent[x] != x {
-            let p = self.parent[x];
-            self.parent[x] = self.parent[p];
-            x = p;
-        }
-        x
-    }
-
-    fn union(&mut self, a: usize, b: usize) {
-        let ra = self.find(a);
-        let rb = self.find(b);
-        if ra == rb {
-            return;
-        }
-        if self.rank[ra] < self.rank[rb] {
-            self.parent[ra] = rb;
-        } else if self.rank[ra] > self.rank[rb] {
-            self.parent[rb] = ra;
-        } else {
-            self.parent[rb] = ra;
-            self.rank[ra] = self.rank[ra].saturating_add(1);
-        }
-    }
-}
+use crate::disjoint_set::DisjointSet;
 
 /// Lightweight streaming topology over `(row_key, edges..., __docspec_file, __docspec_row)`.
 ///

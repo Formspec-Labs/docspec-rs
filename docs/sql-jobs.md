@@ -34,6 +34,17 @@ forward, duplicate and repeated releases refuse. Existing frames and views keep
 their dependencies alive; memory and scratch are freed at the final owner's
 release. Declare dependent views too when their inputs have reached last use.
 
+A component step declares `name`, `components` and optional `release_after`:
+`{"name":"groups","components":{"sql":"SELECT left_key,right_key FROM edges",
+"left":"left_key","right":"right_key","node_limit":2000000}}`.
+It materializes `node` and `component`, both strings. The label is the smallest
+node by UTF-8 bytes in the undirected connected component. Empty strings,
+duplicate edges and self edges are valid; null or non-string endpoints refuse.
+SQL-view options cannot be mixed into this step shape. Node limits are explicit;
+container growth, retained key bytes and output batches share the job allowance.
+Expected work is linear in endpoint bytes plus union-find operations
+`O(E α(N))`, with `O(N)` node state. It never retains the edge population.
+
 Jobs also register `url_resolve(reference, base)`,
 `uri_normalize_encoding(value)`, `percent_decode_utf8(value)`,
 `url_filename(value)`, `disposition_filename(value)`, `json_array(...)` and

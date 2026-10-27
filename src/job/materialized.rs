@@ -19,7 +19,7 @@ use datafusion::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
-use std::{any::Any, path::Path, sync::Arc};
+use std::{any::Any, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -117,7 +117,6 @@ impl TableProvider for ReservedTable {
 pub(super) async fn materialize(
     context: &SessionContext,
     budget: &Budget,
-    _scratch: &Path,
     name: &str,
     sql: &str,
 ) -> Result<StepStorage> {
@@ -127,7 +126,17 @@ pub(super) async fn materialize(
     let frame = context.sql(sql).await?;
     crate::query::validate_immutable_functions(frame.logical_plan())?;
     let schema = crate::export::portable_schema(frame.schema().as_arrow());
-    let mut stream = frame.execute_stream().await?;
+    let stream = frame.execute_stream().await?;
+    retain(context, budget, name, schema, stream).await
+}
+
+pub(super) async fn retain(
+    context: &SessionContext,
+    budget: &Budget,
+    name: &str,
+    schema: SchemaRef,
+    mut stream: SendableRecordBatchStream,
+) -> Result<StepStorage> {
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
     let mut batches = Vec::new();

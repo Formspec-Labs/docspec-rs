@@ -133,7 +133,7 @@ fn json_type(data_type: &DataType) -> bool {
         _ => false,
     }
 }
-fn text(array: &dyn Array, index: usize) -> Result<Option<&str>> {
+pub(super) fn text(array: &dyn Array, index: usize) -> Result<Option<&str>> {
     if array.is_null(index) {
         return Ok(None);
     }

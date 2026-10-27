@@ -1,6 +1,6 @@
 //! Declarative job execution uses the embedded SQL service directly.
 // Rust guideline compliant 2026-02-21
-use super::{ExportSettings, ExportedFile, Job, JsonLinesFile, StepStorage};
+use super::{ComponentsSettings, ExportSettings, ExportedFile, Job, JsonLinesFile, StepStorage};
 use crate::{Error, Result, budget::Limits, model::TablePin};
 use arrow::datatypes::Schema;
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,38 @@ pub struct SqlStep {
     pub release_after: Vec<String>,
 }
 
+/// One materialized component result, with the same named-step lifetime rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentsStep {
+    pub name: String,
+    pub components: ComponentsSettings,
+    #[serde(default)]
+    pub release_after: Vec<String>,
+}
+
+/// Distinct step shapes prevent mixing SQL-view and graph options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum JobStep {
+    Sql(SqlStep),
+    Components(ComponentsStep),
+}
+impl JobStep {
+    fn name(&self) -> &str {
+        match self {
+            Self::Sql(step) => &step.name,
+            Self::Components(step) => &step.name,
+        }
+    }
+    fn release_after(&self) -> &[String] {
+        match self {
+            Self::Sql(step) => &step.release_after,
+            Self::Components(step) => &step.release_after,
+        }
+    }
+}
+
 /// One ordered output, separate from the relations it reads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +94,7 @@ pub struct JobOutput {
 pub struct JobSpec {
     pub scratch: PathBuf,
     pub inputs: Vec<JobInput>,
-    pub steps: Vec<SqlStep>,
+    pub steps: Vec<JobStep>,
     pub outputs: Vec<JobOutput>,
     #[serde(default)]
     pub queries: Vec<SqlQuery>,
@@ -147,7 +179,7 @@ impl JobSpec {
             .inputs
             .iter()
             .map(JobInput::name)
-            .chain(self.steps.iter().map(|step| step.name.as_str()))
+            .chain(self.steps.iter().map(JobStep::name))
         {
             if name.is_empty() || !names.insert(name.to_lowercase()) {
                 return Err(Error::refusal(
@@ -182,9 +214,9 @@ impl JobSpec {
             .map(|input| input.name().to_lowercase())
             .collect();
         for step in &self.steps {
-            available.insert(step.name.to_lowercase());
-            for name in &step.release_after {
-                if name.eq_ignore_ascii_case(&step.name) || !available.remove(&name.to_lowercase())
+            available.insert(step.name().to_lowercase());
+            for name in step.release_after() {
+                if name.eq_ignore_ascii_case(step.name()) || !available.remove(&name.to_lowercase())
                 {
                     return Err(Error::refusal(
                         "invalid_spec",
@@ -206,17 +238,24 @@ impl JobSpec {
             }
         }
         for step in &self.steps {
-            let storage = if step.materialize {
-                job.materialize(&step.name, &step.sql).await?
-            } else {
-                job.register_view(&step.name, &step.sql).await?;
-                StepStorage::View
+            let storage = match step {
+                JobStep::Sql(step) if step.materialize => {
+                    job.materialize(&step.name, &step.sql).await?
+                }
+                JobStep::Sql(step) => {
+                    job.register_view(&step.name, &step.sql).await?;
+                    StepStorage::View
+                }
+                JobStep::Components(step) => {
+                    job.connected_components(&step.name, &step.components)
+                        .await?
+                }
             };
-            for name in &step.release_after {
+            for name in step.release_after() {
                 job.release(name)?;
             }
             result.steps.push(StepResult {
-                name: step.name.clone(),
+                name: step.name().to_owned(),
                 storage,
             });
         }

@@ -5,6 +5,7 @@
 
 pub mod budget;
 pub mod catalog;
+mod disjoint_set;
 pub mod engine;
 pub mod error;
 pub mod evidence;

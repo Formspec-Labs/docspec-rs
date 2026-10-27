@@ -1,5 +1,6 @@
 //! SQL jobs share one bounded execution context; callers supply all domain rules.
 // Rust guideline compliant 2026-02-21
+mod components;
 mod export;
 mod functions;
 mod json_lines;
@@ -18,20 +19,20 @@ use datafusion::{
 };
 use std::path::{Path, PathBuf};
 
+pub use components::ComponentsSettings;
 pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
 pub use query_result::QueryResult;
 pub use spec::{
-    JobFailure, JobInput, JobOutput, JobResult, JobSpec, OutputResult, SqlQuery, SqlStep,
-    StepResult,
+    ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
+    SqlQuery, SqlStep, StepResult,
 };
 
 /// An embedded SQL job. Output frames retain their source and memory ownership.
 pub struct Job {
     context: SessionContext,
     budget: Budget,
-    scratch: PathBuf,
 }
 
 impl Job {
@@ -70,11 +71,7 @@ impl Job {
         let budget = Budget::in_workspace(limits, &scratch)?;
         let mut context = budget.context();
         functions::register(&mut context, &budget)?;
-        Ok(Self {
-            context,
-            budget,
-            scratch,
-        })
+        Ok(Self { context, budget })
     }
 
     /// Registers a Parquet file or directory with native projection and statistics.
@@ -122,7 +119,19 @@ impl Job {
     /// # Errors
     /// Refuses an existing name, exhausted capacity, failed input or invalid SQL.
     pub async fn materialize(&self, name: &str, sql: &str) -> Result<StepStorage> {
-        materialized::materialize(&self.context, &self.budget, &self.scratch, name, sql).await
+        materialized::materialize(&self.context, &self.budget, name, sql).await
+    }
+
+    /// Groups an undirected string edge relation into deterministic components.
+    ///
+    /// # Errors
+    /// Refuses invalid endpoints, existing names, node or byte exhaustion.
+    pub async fn connected_components(
+        &self,
+        name: &str,
+        settings: &ComponentsSettings,
+    ) -> Result<StepStorage> {
+        components::compute(self, name, settings).await
     }
 
     /// Registers an exact immutable Iceberg pin using the maintained static provider.
