@@ -1,12 +1,13 @@
-//! Generic, bounded URL and JSON primitives; callers retain application policy.
+//! Generic, bounded scalar primitives; callers retain application policy.
 // Rust guideline compliant 2026-02-21
 use crate::budget::Budget;
 use arrow::{
     array::{
         Array, ArrayRef, BooleanArray, FixedSizeListArray, LargeListArray, LargeStringArray,
         ListArray, StringArray, StringBuilder, StringViewArray, StructArray,
+        TimestampMicrosecondBuilder,
     },
-    datatypes::{DataType, Field},
+    datatypes::{DataType, Field, TimeUnit},
     json::writer::{EncoderOptions, make_encoder},
 };
 use datafusion::{
@@ -34,6 +35,7 @@ enum Kind {
     DispositionFilename,
     JsonArray,
     JsonCanonical,
+    HttpDate,
 }
 impl Kind {
     fn name(self) -> &'static str {
@@ -45,6 +47,7 @@ impl Kind {
             Self::DispositionFilename => "disposition_filename",
             Self::JsonArray => "json_array",
             Self::JsonCanonical => "json_canonical",
+            Self::HttpDate => "http_date",
         }
     }
 }
@@ -86,6 +89,7 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
         Kind::DispositionFilename,
         Kind::JsonArray,
         Kind::JsonCanonical,
+        Kind::HttpDate,
     ] {
         let signature = if kind == Kind::JsonArray {
             Signature::one_of(
@@ -261,7 +265,11 @@ impl ScalarUDFImpl for GenericFunction {
                 "unsupported JSON argument type".into(),
             ));
         }
-        Ok(DataType::Utf8)
+        Ok(if self.kind == Kind::HttpDate {
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        } else {
+            DataType::Utf8
+        })
     }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         let scalar_bytes = args.args.iter().fold(0usize, |n, arg| {
@@ -288,12 +296,32 @@ impl ScalarUDFImpl for GenericFunction {
             self.json(&inputs, args.number_rows)
         } else if self.kind == Kind::JsonCanonical {
             self.canonical(&inputs, args.number_rows)
+        } else if self.kind == Kind::HttpDate {
+            self.http_date(&inputs, args.number_rows)
         } else {
             self.strings(&inputs, args.number_rows)
         }
     }
 }
 impl GenericFunction {
+    fn http_date(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
+        if rows.saturating_mul(9) > self.budget.limits.max_batch_bytes {
+            return Err(capacity());
+        }
+        let _admission = admit(&self.budget, rows.saturating_mul(16).saturating_add(512))?;
+        let mut builder = TimestampMicrosecondBuilder::with_capacity(rows);
+        for index in 0..rows {
+            let value = text(inputs[0].0.as_ref(), if inputs[0].1 { 0 } else { index })?
+                .and_then(|value| httpdate::parse_http_date(value).ok())
+                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|duration| i64::try_from(duration.as_micros()).ok());
+            builder.append_option(value);
+        }
+        Ok(ColumnarValue::Array(Arc::new(
+            builder.finish().with_timezone("UTC"),
+        )))
+    }
+
     fn canonical(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
         let get = |index| text(inputs[0].0.as_ref(), if inputs[0].1 { 0 } else { index });
         let mut largest = 0usize;
@@ -454,7 +482,7 @@ impl GenericFunction {
                             .map(decode)
                     }),
                     Kind::DispositionFilename => disposition(value),
-                    Kind::JsonArray | Kind::JsonCanonical => unreachable!(),
+                    Kind::JsonArray | Kind::JsonCanonical | Kind::HttpDate => unreachable!(),
                 },
             };
             bytes = bytes

@@ -79,6 +79,12 @@ before allocation, one tree at a time; output bytes are bounded. Object ordering
 costs `O(Σ K log K)` for each object's `K` keys. Selection of records and hashing
 the resulting bytes remain caller policy.
 
+`http_date(text)` returns a nullable UTC microsecond timestamp using the maintained
+`httpdate` parser. It accepts the three HTTP date forms in the supported
+1970–9999 range; invalid or unsupported values return null. Obsolete two-digit
+years use a fixed 1970–2069 pivot, with no current-clock dependency. Fixed-width
+output is admitted before allocation. Header meaning and retry policy remain SQL.
+
 `json_array` uses Arrow's JSON encoder with explicit nulls and compact output.
 It accepts strings, booleans, integers and nested lists or structs containing
 those types. Other types refuse, including floating point values whose spelling

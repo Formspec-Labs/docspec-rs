@@ -2073,6 +2073,7 @@ dependencies = [
  "fs2",
  "futures",
  "hashbrown 0.17.1",
+ "httpdate",
  "iceberg",
  "iceberg-catalog-rest",
  "iceberg-catalog-sql",
