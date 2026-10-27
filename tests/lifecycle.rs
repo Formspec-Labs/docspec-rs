@@ -1153,7 +1153,7 @@ async fn ordinary_cli_commits_reusable_phases_before_final_selection() {
         for identifier in catalog.list_tables(&namespace).await.unwrap() {
             if identifier.name() != "lifecycle" { continue; }
             let table = catalog.load_table(&identifier).await.unwrap();
-            let mut stream = storage::read_batches(&table, &budget).await.unwrap();
+            let mut stream = Box::pin(storage::read_batches(&table, &budget).await.unwrap());
             while let Some(batch) = stream.try_next().await.unwrap() {
                 let keys = batch.column_by_name("key").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
                 let numbers = batch.column_by_name("revision").unwrap().as_any().downcast_ref::<Int64Array>().unwrap();
