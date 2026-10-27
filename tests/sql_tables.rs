@@ -10,7 +10,7 @@ use docspec::{
     job::tables::{AppendWork, append_with_retry, purge_if_current},
 };
 use iceberg::{
-    Catalog, NamespaceIdent, TableCreation, TableIdent,
+    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
     spec::{DataFile, FormatVersion, NestedField, PrimitiveType, Schema, Type},
     table::Table,
 };
@@ -45,6 +45,112 @@ async fn setup(root: &std::path::Path) -> (Arc<dyn Catalog>, Table, Arc<Budget>)
     })
     .unwrap();
     (catalog, table, Arc::new(budget))
+}
+
+#[derive(Debug)]
+struct AuthorityCatalog {
+    inner: Arc<dyn Catalog>,
+    changed: Option<Table>,
+    loads: AtomicUsize,
+    updates: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl Catalog for AuthorityCatalog {
+    async fn load_table(&self, id: &TableIdent) -> iceberg::Result<Table> {
+        let n = self.loads.fetch_add(1, Ordering::SeqCst);
+        if n > 0
+            && let Some(table) = &self.changed
+        {
+            return Ok(table.clone());
+        }
+        self.inner.load_table(id).await
+    }
+    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        self.updates.fetch_add(1, Ordering::SeqCst);
+        self.inner.update_table(commit).await
+    }
+    async fn list_namespaces(
+        &self,
+        p: Option<&NamespaceIdent>,
+    ) -> iceberg::Result<Vec<NamespaceIdent>> {
+        self.inner.list_namespaces(p).await
+    }
+    async fn create_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<Namespace> {
+        self.inner.create_namespace(n, p).await
+    }
+    async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        self.inner.get_namespace(n).await
+    }
+    async fn namespace_exists(&self, n: &NamespaceIdent) -> iceberg::Result<bool> {
+        self.inner.namespace_exists(n).await
+    }
+    async fn update_namespace(
+        &self,
+        n: &NamespaceIdent,
+        p: HashMap<String, String>,
+    ) -> iceberg::Result<()> {
+        self.inner.update_namespace(n, p).await
+    }
+    async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
+        self.inner.drop_namespace(n).await
+    }
+    async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        self.inner.list_tables(n).await
+    }
+    async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
+        self.inner.create_table(n, c).await
+    }
+    async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.drop_table(t).await
+    }
+    async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.inner.purge_table(t).await
+    }
+    async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
+        self.inner.table_exists(t).await
+    }
+    async fn rename_table(&self, a: &TableIdent, b: &TableIdent) -> iceberg::Result<()> {
+        self.inner.rename_table(a, b).await
+    }
+    async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
+        self.inner.register_table(t, m).await
+    }
+}
+
+#[tokio::test]
+async fn append_checks_current_authority_before_update_in_every_build() {
+    for changed in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (inner, table, budget) = setup(root.path()).await;
+        let moved = Table::builder()
+            .metadata(table.metadata().clone())
+            .metadata_location(root.path().join("changed.metadata.json").to_string_lossy())
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .runtime(iceberg::Runtime::try_current().unwrap())
+            .build()
+            .unwrap();
+        let catalog = AuthorityCatalog {
+            inner,
+            changed: changed.then_some(moved),
+            loads: AtomicUsize::new(0),
+            updates: AtomicUsize::new(0),
+        };
+        let files = files(&table, &budget, vec![1]).await.unwrap();
+        let result = docspec::storage::append(&table, &catalog, files).await;
+        if changed {
+            assert!(result.unwrap_err().to_string().contains("stale_authority"));
+            assert_eq!(catalog.updates.load(Ordering::SeqCst), 0);
+        } else {
+            assert_eq!(count(&result.unwrap(), "true").await, 1);
+            assert_eq!(catalog.updates.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(catalog.loads.load(Ordering::SeqCst), 2);
+    }
 }
 async fn create(catalog: &dyn Catalog, ident: &TableIdent, path: &std::path::Path) -> Table {
     let schema = Schema::builder()
