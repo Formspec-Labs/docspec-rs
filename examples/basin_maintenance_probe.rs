@@ -109,8 +109,8 @@ mod qualification_tests {
     use super::*;
     fn growth() -> Vec<Value> {
         (0..10).map(|day| json!({"namespace":"docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272",
-            "table":"uncapped","table_uuid":"fixture-table","day":day,"rows_per_day":4,
-            "writer_profile":"engine-v1-uncapped","rows_equal":true,"data_files":day+1,"manifests":day+1,
+            "table":"growth","table_uuid":"fixture-table","day":day,"rows_per_day":4,
+            "writer_profile":"engine-v1-uncapped","rows_equal":true,"data_files":day+1,"manifests":day+1,"data_bytes":(day+1)*315000,"binary_blake3":"fixture",
             "maintenance_run":format!("basin-{day}"),"maintenance_evidence":{"source":"basin","completed":true,
             "run_id":format!("basin-{day}"),"table_uuid":"fixture-table"}})).collect()
     }
@@ -122,7 +122,7 @@ mod qualification_tests {
         assert_eq!(projection["target_files"],3660);
         assert_eq!(projection["target_manifests"],3660);
         let mut projected = json!({"namespace":ns,"table":"projected","projected":true,
-            "projection":projection,"data_files":1,"manifests":1,"rows_equal":true,
+            "projection":projection,"rows_per_day":4,"rows":14640,"data_bytes":1152900000,"writer_profile":"engine-v1-uncapped","binary_blake3":"fixture","data_files":1,"manifests":1,"rows_equal":true,
             "runner_os":"linux","runner_threads":4,"runner_memory_bytes":16_u64 << 30,"scan_ms":1000});
         reports.push(projected.clone());
         assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"incomplete");
@@ -130,6 +130,15 @@ mod qualification_tests {
         projected["manifests"] = json!(3660);
         reports.pop(); reports.push(projected);
         assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"iceberg");
+        reports.last_mut().unwrap()["rows_per_day"] = json!(1);
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"incomplete");
+        reports.last_mut().unwrap()["rows_per_day"] = json!(4);
+        reports.last_mut().unwrap()["rows"] = json!(4);
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"incomplete");
+        reports.last_mut().unwrap()["rows"] = json!(14640);
+        reports.last_mut().unwrap()["data_bytes"] = json!(1);
+        assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"incomplete");
+        reports.last_mut().unwrap()["data_bytes"] = json!(1152900000);
         reports.last_mut().unwrap()["scan_ms"] = json!(60000);
         assert_eq!(decision_report(ns,&reports)?["capacity_decision"],"dated_parquet");
         reports[0]["namespace"] = json!("different");
@@ -207,6 +216,43 @@ mod metadata_tests {
         let error = docspec::storage::write_batches_with_layout(&table,input,&budget,
             docspec::storage::WriteLayout {file_bytes:128 << 20,row_group_rows:1,row_group_bytes:32 << 20}).await.unwrap_err();
         assert_eq!(error.code(),"metadata_capacity");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod cap_qualification_tests {
+    use super::*;
+    fn trials() -> Vec<Value> {
+        let ns="docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272";
+        let mut values=Vec::new();
+        for day in 0..3 {for arm in 0..2 {
+            let table=if arm==0 {"capped"} else {"uncapped"};
+            let profile=if arm==0 {"engine-v1-capped"} else {"engine-v1-uncapped"};
+            let cost=if arm==0 {1} else {10};
+            values.push(json!({"namespace":ns,"table":table,"table_uuid":table,"writer_profile":profile,
+                "binary_blake3":"fixture","cap_trial":true,"batches":[{"day":day,"commits":1,"work_list_rows":4,
+                    "commit_ms":cost,"started_at_ns":100+day*2+arm,"committed_snapshot":1000+day}]}));
+            values.push(json!({"namespace":ns,"table":table,"table_uuid":table,"writer_profile":profile,
+                "binary_blake3":"fixture","cap_trial":true,"day":day,"rows_per_day":4,"rows":(day+1)*4,
+                "rows_equal":true,"scan_ms":cost,"scan_started_at_ns":200+day*2+arm,"snapshot":1000+day}));
+        }}
+        values
+    }
+    #[test]
+    fn cap_costs_require_equal_workload_snapshot_and_interleaved_scans() -> Result<()> {
+        let ns="docspec_m1_71969fc54a0f4f4eaa49d2dd9f4c2272";
+        let reports=trials();
+        assert_eq!(cap_decision(ns,&reports)?["decision"],"keep_caps");
+        for field in ["rows_per_day","rows","snapshot","table_uuid","binary_blake3"] {
+            let mut bad=reports.clone();bad[1][field]=json!(99999);
+            assert_eq!(cap_decision(ns,&bad)?["decision"],"incomplete","{field}");
+        }
+        let mut bad=reports;
+        for (index,row) in bad.iter_mut().enumerate().filter(|(_,r)|r["scan_ms"].is_number()) {
+            row["scan_started_at_ns"]=json!(if row["table"]=="capped" {index} else {100+index});
+        }
+        assert_eq!(cap_decision(ns,&bad)?["decision"],"incomplete");
         Ok(())
     }
 }
