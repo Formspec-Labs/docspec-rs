@@ -2,6 +2,36 @@
 // Rust guideline compliant 2026-02-21
 
 mod sequence;
+/// Shared function-stability check for reusable processing and exported results.
+pub(crate) fn immutable_function(expression: &datafusion::logical_expr::Expr) -> bool {
+    use datafusion::logical_expr::{Expr, Volatility};
+    match expression {
+        Expr::ScalarFunction(f) => f.func.signature().volatility == Volatility::Immutable,
+        Expr::AggregateFunction(f) => f.func.signature().volatility == Volatility::Immutable,
+        Expr::WindowFunction(f) => f.fun.signature().volatility == Volatility::Immutable,
+        _ => true,
+    }
+}
+
+pub(crate) fn validate_immutable_functions(
+    plan: &datafusion::logical_expr::LogicalPlan,
+) -> crate::Result<()> {
+    use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
+    plan.apply_with_subqueries(|node| {
+        node.apply_expressions(|expression| {
+            expression.apply(|part| {
+                if !immutable_function(part) {
+                    return Err(datafusion::common::DataFusionError::Plan(
+                        "reusable SQL requires immutable functions".into(),
+                    ));
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })
+        })?;
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
+}
 #[doc(inline)]
 pub(crate) use sequence::sequence;
 

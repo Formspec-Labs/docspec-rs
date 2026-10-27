@@ -123,6 +123,7 @@ pub(super) async fn materialize(
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = context.sql(sql).await?;
+    crate::query::validate_immutable_functions(frame.logical_plan())?;
     let schema = Arc::new(frame.schema().as_arrow().clone());
     let mut stream = frame.execute_stream().await?;
     let reservation =

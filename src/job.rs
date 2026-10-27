@@ -1,5 +1,6 @@
 //! SQL jobs share one bounded execution context; callers supply all domain rules.
 // Rust guideline compliant 2026-02-21
+mod export;
 mod json_lines;
 mod materialized;
 
@@ -14,6 +15,7 @@ use datafusion::{
 };
 use std::path::{Path, PathBuf};
 
+pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
 
@@ -74,7 +76,9 @@ impl Job {
     /// # Errors
     /// Returns SQL planning errors; execution errors propagate from the frame.
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
-        Ok(self.context.sql(sql).await?)
+        let frame = self.context.sql(sql).await?;
+        crate::query::validate_immutable_functions(frame.logical_plan())?;
+        Ok(frame)
     }
 
     /// Computes a named step once, reserving retained batches or spilling to disk.
@@ -101,5 +105,18 @@ impl Job {
         self.context
             .register_table(name, std::sync::Arc::new(provider))?;
         Ok(())
+    }
+
+    /// Exports an ordered SQL result using explicit reproducible Parquet settings.
+    ///
+    /// # Errors
+    /// Refuses invalid layout, capacity exhaustion, existing output or writer failure.
+    pub async fn export(
+        &self,
+        sql: &str,
+        path: &Path,
+        settings: &ExportSettings,
+    ) -> Result<ExportedFile> {
+        export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
 }

@@ -169,7 +169,7 @@ impl datafusion::sql::sqlparser::ast::Visitor for SqlQualification {
 pub(in crate::engine) fn validate_plan(plan: &datafusion::logical_expr::LogicalPlan) -> Result<()> {
     use datafusion::{
         common::tree_node::{TreeNode, TreeNodeRecursion},
-        logical_expr::{Expr, LogicalPlan, Volatility},
+        logical_expr::{Expr, LogicalPlan},
     };
     let mut refusal = None;
     plan.apply_with_subqueries(|node| {
@@ -185,8 +185,7 @@ pub(in crate::engine) fn validate_plan(plan: &datafusion::logical_expr::LogicalP
         }
         node.apply_expressions(|expression| {
             expression.apply(|part| {
-                let volatility = match part {
-                    Expr::ScalarFunction(f) => Some(f.func.signature().volatility),
+                match part {
                     Expr::AggregateFunction(f) => {
                         if f.func.order_sensitivity()
                             != datafusion::logical_expr::utils::AggregateOrderSensitivity::Insensitive
@@ -195,17 +194,15 @@ pub(in crate::engine) fn validate_plan(plan: &datafusion::logical_expr::LogicalP
                                 "order-sensitive aggregates require ordering qualification before their results can be reused",
                             );
                         }
-                        Some(f.func.signature().volatility)
                     }
                     Expr::WindowFunction(_) => {
                         refusal = Some(
                             "window functions require ordering qualification before their results can be reused",
                         );
-                        None
                     }
-                    _ => None,
-                };
-                if volatility.is_some_and(|v| v != Volatility::Immutable) {
+                    _ => {},
+                }
+                if !crate::query::immutable_function(part) {
                     refusal = Some(
                         "reusable processing requires immutable functions; clock and random functions are unsupported",
                     );

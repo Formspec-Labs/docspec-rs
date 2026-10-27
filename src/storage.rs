@@ -129,6 +129,15 @@ pub(crate) async fn local_catalog_at(root: &Path, file: &Path) -> Result<Arc<dyn
     Ok(Arc::new(catalog))
 }
 
+/// Conservative retained metadata per file or row group, shared by native writers.
+pub(crate) fn writer_metadata_unit<'a>(names: impl Iterator<Item = &'a str>) -> usize {
+    names.fold(2048_usize, |bytes, name| {
+        bytes
+            .saturating_add(2048)
+            .saturating_add(name.len().saturating_mul(4))
+    })
+}
+
 pub(crate) fn table_properties() -> HashMap<String, String> {
     HashMap::from([
         ("commit.retry.num-retries".into(), "0".into()),
@@ -456,16 +465,14 @@ where
         // open Parquet footer. Bound both before admitting another batch. Chunk-only
         // truncated statistics keep variable-size values and page indexes from
         // turning a small descriptor count into an unbounded metadata allocation.
-        let unit_metadata_bytes = table
-            .metadata()
-            .current_schema()
-            .field_id_to_name_map()
-            .values()
-            .fold(2048_usize, |bytes, name| {
-                bytes
-                    .saturating_add(2048)
-                    .saturating_add(name.len().saturating_mul(4))
-            });
+        let unit_metadata_bytes = writer_metadata_unit(
+            table
+                .metadata()
+                .current_schema()
+                .field_id_to_name_map()
+                .values()
+                .map(String::as_str),
+        );
         let mut metadata_bytes = 0usize;
         let mut retained_bytes = 0usize;
         let mut completed = Vec::new();

@@ -54,9 +54,11 @@ opendal = { version = "=0.57.0", optional = true, default-features = false, feat
 # Unify rustls-tls on reqwest 0.12 for iceberg-catalog-rest; S3 uses a separate reqwest version.
 reqwest-rest = { package = "reqwest", version = "=0.12.28", optional = true, default-features = false, features = ["rustls-tls"] }
 mimalloc = "0.1"
+md-5 = "=0.10.6"
 parquet = { version = "58", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "=0.10.9"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "signal"] }
 tracing = "0.1"
