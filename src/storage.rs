@@ -341,7 +341,7 @@ pub(crate) fn write_batches_sized<'a, S>(
 where
     S: Stream<Item = Result<RecordBatch>> + Send + 'a,
 {
-    write_batches_inner(table, batches, budget, target_file_bytes, true)
+    write_batches_inner(table, batches, budget, target_file_bytes, true, None)
 }
 
 // Lifecycle commits use the same bounded writer without data-progress noise.
@@ -353,7 +353,49 @@ pub(crate) fn write_catalog_batches<'a, S>(
 where
     S: Stream<Item = Result<RecordBatch>> + Send + 'a,
 {
-    write_batches_inner(table, batches, budget, budget.limits.max_batch_bytes, false)
+    write_batches_inner(
+        table,
+        batches,
+        budget,
+        budget.limits.max_batch_bytes,
+        false,
+        None,
+    )
+}
+
+/// Physical layout for a native table write, independent of its storage backend.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriteLayout {
+    /// Target encoded bytes before rolling to another file.
+    pub file_bytes: usize,
+    /// Maximum rows per row group and native write slice.
+    pub row_group_rows: usize,
+    /// Maximum encoded bytes per row group.
+    pub row_group_bytes: usize,
+}
+
+/// Writes through the admitted engine writer with an explicitly pinned layout.
+///
+/// # Errors
+/// Refuses zero/oversized layout bounds, capacity exhaustion, invalid schemas or I/O errors.
+pub fn write_batches_with_layout<'a, S>(
+    table: &'a Table,
+    batches: S,
+    budget: &'a Budget,
+    layout: WriteLayout,
+) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
+where
+    S: Stream<Item = Result<RecordBatch>> + Send + 'a,
+{
+    write_batches_inner(
+        table,
+        batches,
+        budget,
+        layout.file_bytes,
+        false,
+        Some(layout),
+    )
 }
 
 fn write_batches_inner<'a, S>(
@@ -362,32 +404,46 @@ fn write_batches_inner<'a, S>(
     budget: &'a Budget,
     target_file_bytes: usize,
     report_progress: bool,
+    layout: Option<WriteLayout>,
 ) -> futures::future::BoxFuture<'a, Result<Vec<DataFile>>>
 where
     S: Stream<Item = Result<RecordBatch>> + Send + 'a,
 {
     Box::pin(async move {
-        if target_file_bytes == 0 {
+        if target_file_bytes == 0
+            || layout.is_some_and(|l| {
+                l.row_group_rows == 0
+                    || l.row_group_rows > budget.limits.batch_rows
+                    || l.row_group_bytes == 0
+                    || l.row_group_bytes > budget.limits.max_batch_bytes / 2
+            })
+        {
             return Err(Error::refusal(
                 "invalid_compaction",
-                "output file size must be positive",
+                "file and row-group layout must fit configured batch bounds",
             ));
         }
         let is_remote = table.metadata().location().starts_with("s3://");
-        let target_file_bytes = if is_remote {
+        let target_file_bytes = if let Some(layout) = layout {
+            layout.file_bytes
+        } else if is_remote {
             target_file_bytes.min(2 << 20)
         } else {
             target_file_bytes
         };
-        let effective_batch_rows = if is_remote {
+        let effective_batch_rows = if let Some(layout) = layout {
+            layout.row_group_rows
+        } else if is_remote {
             budget.limits.batch_rows.clamp(1, 2048)
         } else {
             budget.limits.batch_rows
         };
-        let max_row_group_bytes = if is_remote {
+        let max_row_group_bytes = if let Some(layout) = layout {
+            layout.row_group_bytes
+        } else if is_remote {
             (budget.limits.max_batch_bytes / 2).clamp(1, 2 << 20)
         } else {
-            (budget.limits.max_batch_bytes / 2).max(1)
+            budget.limits.max_batch_bytes.max(1)
         };
         let partition_spec = table.metadata().default_partition_spec().clone();
         tables::validate_partition_spec(table.metadata().current_schema(), &partition_spec)?;
@@ -425,13 +481,12 @@ where
         let mut open_partitions: std::collections::HashSet<iceberg::spec::Struct> =
             std::collections::HashSet::new();
         let mut open_bytes = 0usize;
-        // Row groups track `batch_rows` so writer buffering stays inside the batch
-        // admission reserved above; the 1,048,576-row writer default would buffer a
-        // whole row group far beyond `max_batch_bytes`. One admitted batch is at
-        // most `max_batch_bytes` (64 MiB) of decoded values, so a row group stays
-        // under a ~128 MiB encoded target by admission; `set_max_row_group_bytes`
-        // stays unset because a byte cap could otherwise exceed the rolling file
-        // target and skew output file sizing. Level 3 is the recommended
+        // Row groups track the admitted row and byte bounds; the native default
+        // could otherwise buffer far beyond one batch. Local writes allow one
+        // complete admitted batch per group instead of forcing half-batch groups.
+        // Four batch allowances above cover the native buffers through close.
+        // Remote defaults retain their small caps until the maintenance experiment
+        // qualifies a change. Level 3 is the recommended
         // production Zstandard default: smaller output than the crate level-1
         // default at still-modest CPU on hourly ingestion cadences.
         let expected_arrow =
@@ -580,18 +635,17 @@ where
                     let rows = batch.num_rows() as u64;
                     let slices = partition_batch(expected, &partition_spec, batch)?;
                     for (partition_key, sub_batch) in slices {
-                        // A write can finish the preceding row group, create new groups, and
-                        // roll a file. This conservative total also covers descriptors retained
-                        // after the underlying file closes. It is admission, not an RSS estimate.
-                        let units = sub_batch
-                            .num_rows()
-                            .div_ceil(budget.limits.batch_rows)
-                            .saturating_add(1);
+                        // A group closes at the row or byte threshold. Sum both ceilings:
+                        // their two partial units cover the in-progress group and file
+                        // descriptor, including a group continued from the preceding slice.
+                        // This is conservative admission, not an RSS estimate.
+                        let slice_bytes = effective_batch_bytes(&sub_batch);
+                        let units = sub_batch.num_rows().div_ceil(effective_batch_rows)
+                            .saturating_add(slice_bytes.div_ceil(max_row_group_bytes));
                         let incoming = units.saturating_mul(unit_metadata_bytes);
                         // Periodically finish the maintained writer, releasing its accumulated
                         // footers. Keep only bounded file descriptors, so this admission grows
                         // with output files instead of every row group in the entire population.
-                        let slice_bytes = effective_batch_bytes(&sub_batch);
                         let fanout_pressure = partition_key.as_ref().is_some_and(|key| {
                             !open_partitions.is_empty()
                                 && (open_partitions.len() > 1 || !open_partitions.contains(key.data()))
@@ -648,7 +702,16 @@ where
                     }
                 }
             }
-            completed.extend(writer.close().await?);
+            let final_files = writer.close().await?;
+            for file in &final_files {
+                retained_bytes = retained_bytes.saturating_add(unit_metadata_bytes)
+                    .saturating_add(file.file_path().len().saturating_mul(4))
+                    .saturating_add(file.split_offsets().map_or(0,|offsets|offsets.len().saturating_mul(16)));
+            }
+            if retained_bytes > budget.limits.max_metadata_bytes {
+                return Err(Error::refusal("metadata_capacity","native writer file metadata exceeds the declared allowance"));
+            }
+            completed.extend(final_files);
             Ok(completed)
         }.await;
         if let Some(progress) = progress {
@@ -855,11 +918,11 @@ async fn current_snapshot_added_files_match(table: &Table, expected: &[DataFile]
             .all(|path| added_paths.contains(*path))
 }
 
-pub(crate) async fn append(
-    table: &Table,
-    catalog: &dyn Catalog,
-    files: Vec<DataFile>,
-) -> Result<Table> {
+/// Appends native files only while the supplied table authority remains current.
+///
+/// # Errors
+/// Refuses stale table UUIDs/snapshots, conflicting commits, and storage failures.
+pub async fn append(table: &Table, catalog: &dyn Catalog, files: Vec<DataFile>) -> Result<Table> {
     if files.is_empty() {
         return Ok(table.clone());
     }
