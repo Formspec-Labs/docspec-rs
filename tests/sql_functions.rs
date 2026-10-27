@@ -418,14 +418,27 @@ async fn json_many_matches_deep_paths_without_recursive_trie_walking() {
 
 #[tokio::test]
 async fn json_many_preserves_independent_skip_limits_across_requested_branches() {
-    let depth = 205;
-    let nested = r#"{"a":"#.repeat(depth) + "1" + &"}".repeat(depth);
-    let raw = format!(r#"{{"nested":{nested},"later":7}}"#);
-    let mut deep = vec![json!("nested")];
-    deep.extend(std::iter::repeat_n(json!("a"), depth));
-    let paths = serde_json::to_string(&vec![deep, vec![json!("later")]]).unwrap();
-    let sql = format!(
-        "SELECT json_get_many('{raw}','{paths}')[2] IS NOT DISTINCT FROM json_get_json('{raw}','later') AS agrees"
-    );
-    assert_eq!(scalar(&sql).await, json!([{"agrees":true}]));
+    for depth in [198, 199, 200, 201, 205] {
+        let nested = r#"{"a":"#.repeat(depth) + "1" + &"}".repeat(depth);
+        let raw = format!(r#"{{"nested":{nested},"later":7}}"#);
+        let mut deep = vec![json!("nested")];
+        deep.extend(std::iter::repeat_n(json!("a"), depth));
+        let paths = serde_json::to_string(&vec![deep, vec![json!("later")]]).unwrap();
+        let sql = format!(
+            "SELECT json_get_many('{raw}','{paths}')[1]='1' AS deep_ok,json_get_many('{raw}','{paths}')[2] IS NOT DISTINCT FROM json_get_json('{raw}','later') AS agrees"
+        );
+        assert_eq!(
+            scalar(&sql).await,
+            json!([{"deep_ok":true,"agrees":true}]),
+            "depth{depth}"
+        );
+        let sql = format!(
+            r#"SELECT json_get_many('{raw}','[["nested"],["later"]]')[1] IS NOT DISTINCT FROM json_get_json('{raw}','nested') AS nested_ok,json_get_many('{raw}','[["nested"],["later"]]')[2] IS NOT DISTINCT FROM json_get_json('{raw}','later') AS agrees"#
+        );
+        assert_eq!(
+            scalar(&sql).await,
+            json!([{"nested_ok":true,"agrees":true}]),
+            "depth{depth}"
+        );
+    }
 }
