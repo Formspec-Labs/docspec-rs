@@ -60,6 +60,7 @@ mod retention_inspection;
 mod scalar_bindings;
 mod scalar_dependency_reads;
 mod schema;
+mod sql_jobs;
 mod succession;
 mod update_pruning;
 mod update_relationship;
