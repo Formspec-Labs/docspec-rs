@@ -170,3 +170,47 @@ async fn named_step_release_is_validated_before_io_and_happens_after_success() {
         json!([{"value":7}])
     );
 }
+
+#[cfg(feature = "remote")]
+#[test]
+fn explicit_remote_sql_job_starts_without_a_lifecycle_workspace_or_catalog_query() {
+    let root = tempfile::tempdir().unwrap();
+    let spec = root.path().join("job.json");
+    std::fs::write(&spec,serde_json::to_vec(&json!({"scratch":root.path().join("scratch"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"one","sql":"SELECT 1 AS n"}]})).unwrap()).unwrap();
+    let remote = root.path().join("remote.json");
+    std::fs::write(&remote,serde_json::to_vec(&json!({"owned_prefix":"s3://bucket/owned/","properties":{"uri":"http://127.0.0.1:9","warehouse":"fixture","s3.endpoint":"http://127.0.0.1:9","s3.region":"auto","s3.access-key-id":"dummy","s3.secret-access-key":"dummy","s3.path-style-access":"true"}})).unwrap()).unwrap();
+    let ceiling = root.path().join("limits.json");
+    std::fs::write(
+        &ceiling,
+        serde_json::to_vec(&Limits {
+            compute_threads: 2,
+            memory_bytes: 32 << 20,
+            max_batch_bytes: 2 << 20,
+            max_metadata_bytes: 2 << 20,
+            scratch_bytes: 8 << 20,
+            ..Limits::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let workspace = root.path().join("unused-workspace");
+    let output = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--remote")
+        .arg(remote)
+        .arg("--limits")
+        .arg(ceiling)
+        .args(["job", "--spec"])
+        .arg(spec)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!workspace.exists());
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output["queries"][0]["data"], json!([{"n":1}]));
+}
