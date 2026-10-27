@@ -39,6 +39,7 @@ arrow-schema = { version = "=58.4.0", features = ["serde"] }
 async-trait = "0.1"
 axum = "0.8"
 blake3 = "1"
+bytes = "1"
 clap = { version = "4", features = ["derive"] }
 datafusion = "=53.1.0"
 datafusion-functions-json = "=0.53.1"
@@ -85,7 +86,6 @@ name = "r2_candidate_probe"
 required-features = ["remote"]
 
 [dev-dependencies]
-bytes = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 

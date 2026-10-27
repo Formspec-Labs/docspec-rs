@@ -25,8 +25,14 @@ On failure the library returns `JobFailure.completed`. The CLI prints that
 structured failure and exits unsuccessfully. Keep completed file identities,
 correct the failed work, and retry with only unfinished output declarations,
 using the same pinned inputs and unchanged definitions for reused files.
-Existing outputs are never overwritten. Remote CLI configuration is not yet
-bound to this command; `--remote` refuses explicitly until the C5 adapter lands.
+Existing outputs are never overwritten. `--remote CONFIG.json` supplies the
+native catalog and object connections to this same executor; embedded callers
+use `run_with_remote`. No Engine or lifecycle store is constructed. Configured
+remote pin metadata uses one bounded GET; its Content-Range carries the full
+object size, checked alongside the digest, snapshot and schema. It sends no
+HEAD for this immutable metadata. Local or directly injected FileIO checks
+observed file size before and after reading in every build. These observations
+do not replace the caller's immutable-storage and retention obligations.
 
 A step may declare `release_after: ["finished_name", ...]`. Names are checked
 before input I/O, and removed only after that successor succeeds. Unknown,

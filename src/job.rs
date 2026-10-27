@@ -37,6 +37,8 @@ pub use table_operations::{TableOperation, TableOperationResult};
 pub struct Job {
     context: SessionContext,
     budget: Budget,
+    #[cfg(feature = "remote")]
+    remote: Option<crate::storage::remote::RemoteStorage>,
 }
 
 impl Job {
@@ -75,7 +77,30 @@ impl Job {
         let budget = Budget::in_workspace(limits, &scratch)?;
         let mut context = budget.context();
         functions::register(&mut context, &budget)?;
-        Ok(Self { context, budget })
+        Ok(Self {
+            context,
+            budget,
+            #[cfg(feature = "remote")]
+            remote: None,
+        })
+    }
+
+    /// Creates the SQL service with explicit remote catalog and object I/O.
+    ///
+    /// # Errors
+    /// Refuses invalid host limits, scratch or object-store registration.
+    #[cfg(feature = "remote")]
+    pub fn with_remote(
+        limits: Limits,
+        scratch: PathBuf,
+        remote: crate::storage::remote::RemoteStorage,
+    ) -> Result<Self> {
+        let mut job = Self::new(limits, scratch)?;
+        remote
+            .objects
+            .register_query_store(job.budget.runtime_env())?;
+        job.remote = Some(remote);
+        Ok(job)
     }
 
     /// Registers a Parquet file or directory with native projection and statistics.
@@ -143,6 +168,13 @@ impl Job {
     /// # Errors
     /// Refuses changed metadata, an absent pinned snapshot, or provider failures.
     pub async fn register_iceberg(&self, name: &str, pin: &crate::model::TablePin) -> Result<()> {
+        #[cfg(feature = "remote")]
+        let table = if let Some(remote) = &self.remote {
+            remote.objects.open_pin(pin, &self.budget).await?
+        } else {
+            crate::storage::open_pin(pin, &self.budget).await?
+        };
+        #[cfg(not(feature = "remote"))]
         let table = crate::storage::open_pin(pin, &self.budget).await?;
         self.register_native_table(name, table).await
     }

@@ -550,7 +550,23 @@ async fn async_main() -> anyhow::Result<()> {
     let limits: Limits = cli.limits.map(read_json).transpose()?.unwrap_or_default();
     match cli.command {
         Command::Job(SpecArg { spec }) => {
-            match read_json::<docspec::job::JobSpec>(spec)?.run(limits).await {
+            let spec = read_json::<docspec::job::JobSpec>(spec)?;
+            #[cfg(feature = "remote")]
+            let result = if let Some(path) = &cli.remote {
+                let config = read_remote_config(path.clone())?;
+                let remote = storage::remote::remote_storage(
+                    &config.owned_prefix,
+                    config.properties,
+                    config.secret_env,
+                )
+                .await?;
+                spec.run_with_remote(limits, remote).await
+            } else {
+                spec.run(limits).await
+            };
+            #[cfg(not(feature = "remote"))]
+            let result = spec.run(limits).await;
+            match result {
                 Ok(result) => print_json(&result)?,
                 Err(failure) => {
                     print_json(&failure.report())?;
@@ -1251,7 +1267,6 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
         if matches!(
             &cli.command,
             Command::Hash { .. }
-                | Command::Job(_)
                 | Command::Verify { .. }
                 | Command::VerifyInputs { .. }
                 | Command::RestoreLocal { .. }

@@ -44,9 +44,9 @@ async fn pinned_metadata_is_one_get_without_head_for_plain_and_gzip() {
     for bytes in [plain, gzip] {
         let pin = pin(&bytes, &metadata);
         let fixture = ReadFixture::inventory(HashMap::from([(pin.metadata.path.clone(), bytes)]));
-        let _objects = fixture.objects();
+        let objects = fixture.objects();
         let budget = Budget::new(Limits::default()).unwrap();
-        let loaded = crate::storage::open_pin(&pin, &budget).await.unwrap();
+        let loaded = objects.open_pin(&pin, &budget).await.unwrap();
         assert_eq!(loaded.metadata().uuid(), metadata.uuid());
         assert_eq!(
             fixture.finish(),
@@ -68,9 +68,10 @@ async fn pinned_get_refuses_observed_suffix_truncation_and_digest_change() {
     changed[0] = b'[';
     for bytes in [suffix, plain[..3].to_vec(), changed] {
         let fixture = ReadFixture::inventory(HashMap::from([(pin.metadata.path.clone(), bytes)]));
-        let _objects = fixture.objects();
+        let objects = fixture.objects();
         assert!(
-            crate::storage::open_pin(&pin, &Budget::new(Limits::default()).unwrap())
+            objects
+                .open_pin(&pin, &Budget::new(Limits::default()).unwrap())
                 .await
                 .is_err()
         );

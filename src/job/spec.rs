@@ -164,6 +164,13 @@ impl JobFailure {
     }
 }
 
+#[derive(Default)]
+struct Connections {
+    catalog: Option<Arc<dyn iceberg::Catalog>>,
+    #[cfg(feature = "remote")]
+    remote: Option<crate::storage::remote::RemoteStorage>,
+}
+
 impl JobSpec {
     /// Executes every declared relation and export through one bounded SQL job.
     ///
@@ -171,7 +178,7 @@ impl JobSpec {
     /// Refuses duplicate names/paths before I/O and propagates input, SQL,
     /// resource and export failures. Completed outputs remain create-only.
     pub async fn run(&self, limits: Limits) -> std::result::Result<JobResult, JobFailure> {
-        self.run_injected(limits, None).await
+        self.run_injected(limits, Connections::default()).await
     }
 
     /// Executes with an explicitly injected native catalog and no lifecycle store.
@@ -183,13 +190,40 @@ impl JobSpec {
         limits: Limits,
         catalog: Arc<dyn iceberg::Catalog>,
     ) -> std::result::Result<JobResult, JobFailure> {
-        self.run_injected(limits, Some(catalog)).await
+        self.run_injected(
+            limits,
+            Connections {
+                catalog: Some(catalog),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    /// Runs the same job with explicit remote catalog and object connections.
+    ///
+    /// # Errors
+    /// Refuses conflicting catalog selection and the same errors as `run`.
+    #[cfg(feature = "remote")]
+    pub async fn run_with_remote(
+        &self,
+        limits: Limits,
+        remote: crate::storage::remote::RemoteStorage,
+    ) -> std::result::Result<JobResult, JobFailure> {
+        self.run_injected(
+            limits,
+            Connections {
+                catalog: Some(remote.catalog.clone()),
+                remote: Some(remote),
+            },
+        )
+        .await
     }
 
     async fn run_injected(
         &self,
         limits: Limits,
-        catalog: Option<Arc<dyn iceberg::Catalog>>,
+        connections: Connections,
     ) -> std::result::Result<JobResult, JobFailure> {
         let mut completed = JobResult {
             table_operations: Vec::new(),
@@ -197,7 +231,7 @@ impl JobSpec {
             outputs: Vec::new(),
             queries: Vec::new(),
         };
-        match self.execute(limits, &mut completed, catalog).await {
+        match self.execute(limits, &mut completed, connections).await {
             Ok(()) => Ok(completed),
             Err(error) => Err(JobFailure { completed, error }),
         }
@@ -207,7 +241,7 @@ impl JobSpec {
         &self,
         limits: Limits,
         result: &mut JobResult,
-        catalog: Option<Arc<dyn iceberg::Catalog>>,
+        connections: Connections,
     ) -> Result<()> {
         let mut names = BTreeSet::new();
         for name in self
@@ -224,13 +258,16 @@ impl JobSpec {
             }
         }
         TableOperation::validate_all(&self.table_operations, names)?;
-        if catalog.is_some() && self.catalog_root.is_some() {
+        if connections.catalog.is_some() && self.catalog_root.is_some() {
             return Err(Error::refusal(
                 "invalid_spec",
                 "injected and local catalog authority cannot be combined",
             ));
         }
-        if !self.table_operations.is_empty() && catalog.is_none() && self.catalog_root.is_none() {
+        if !self.table_operations.is_empty()
+            && connections.catalog.is_none()
+            && self.catalog_root.is_none()
+        {
             return Err(Error::refusal(
                 "invalid_spec",
                 "table operations require an explicit catalog",
@@ -273,6 +310,13 @@ impl JobSpec {
                 }
             }
         }
+        #[cfg(feature = "remote")]
+        let job = if let Some(remote) = connections.remote {
+            Job::with_remote(limits, self.scratch.clone(), remote)?
+        } else {
+            Job::new(limits, self.scratch.clone())?
+        };
+        #[cfg(not(feature = "remote"))]
         let job = Job::new(limits, self.scratch.clone())?;
         for input in &self.inputs {
             match input {
@@ -308,7 +352,7 @@ impl JobSpec {
             });
         }
         let catalog = if !self.table_operations.is_empty() {
-            match catalog {
+            match connections.catalog {
                 Some(catalog) => Some(catalog),
                 None => Some(
                     crate::storage::local_catalog(

@@ -26,11 +26,7 @@ use std::{
 pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
     #[cfg(feature = "remote")]
     if let Some(objects) = super::remote::RemoteObjects::for_uri(&pin.metadata.path) {
-        objects.validate_path(&pin.metadata.path)?;
-        for object in &pin.objects {
-            objects.validate_path(&object.path)?;
-        }
-        return open_pin_with_io(pin, objects.file_io(), budget).await;
+        return open_pin_remote(pin, &objects, budget).await;
     }
     if super::object_io::is_remote_uri(&pin.metadata.path)
         || pin
@@ -41,6 +37,25 @@ pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
         return Err(super::object_io::unregistered_remote_uri());
     }
     open_pin_with_io(pin, FileIO::new_with_fs(), budget).await
+}
+
+#[cfg(feature = "remote")]
+pub(crate) async fn open_pin_remote(
+    pin: &TablePin,
+    objects: &super::remote::RemoteObjects,
+    budget: &Budget,
+) -> Result<Table> {
+    objects.validate_path(&pin.metadata.path)?;
+    for object in &pin.objects {
+        objects.validate_path(&object.path)?;
+    }
+    open_with_reader(
+        pin,
+        objects.file_io(),
+        MetadataReader::Remote(objects.clone()),
+        budget,
+    )
+    .await
 }
 
 /// Opens exact pinned metadata through the supplied native object I/O.
@@ -54,23 +69,44 @@ pub async fn open_pin(pin: &TablePin, budget: &Budget) -> Result<Table> {
 /// For asynchronous FileIO, keep the Tokio runtime alive and driving I/O;
 /// canceling this call does not abort an already started worker.
 ///
-/// Size checks before and after the range read detect observed changes. They are
-/// not an atomic object-version fence: immutability remains the owner's promise.
+/// Local or injected FileIO checks sizes before and after its range read.
+/// Configured remote reads check the full size in one GET's Content-Range.
+/// Neither is an atomic object-version fence: immutability remains the owner's promise.
 /// Gzip metadata must contain one complete member, without trailing bytes.
 ///
 /// # Errors
 /// Refuses capacity exhaustion, size/digest mismatch, oversized stored or decoded
 /// metadata, invalid JSON/gzip/native metadata, and snapshot/schema mismatch.
 pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) -> Result<Table> {
+    let input = file_io.new_input(&pin.metadata.path)?;
+    open_with_reader(pin, file_io, MetadataReader::Native(input), budget).await
+}
+
+enum MetadataReader {
+    Native(iceberg::io::InputFile),
+    #[cfg(feature = "remote")]
+    Remote(super::remote::RemoteObjects),
+}
+
+async fn open_with_reader(
+    pin: &TablePin,
+    file_io: FileIO,
+    reader: MetadataReader,
+    budget: &Budget,
+) -> Result<Table> {
     let limit = budget.limits.max_metadata_bytes;
     let size = usize::try_from(pin.metadata.bytes).map_err(|_| capacity())?;
     if size > limit {
         return Err(capacity());
     }
-    let serialized = budget.reserve(size)?;
+    let transport = match &reader {
+        MetadataReader::Native(_) => 0,
+        #[cfg(feature = "remote")]
+        MetadataReader::Remote(_) => super::remote::objects::READ_ADMISSION,
+    };
+    let serialized = budget.reserve(size.checked_add(transport).ok_or_else(capacity)?)?;
     let runtime = Runtime::try_current()?;
     let handle = tokio::runtime::Handle::current();
-    let input = file_io.new_input(&pin.metadata.path)?;
     let object = pin.metadata.clone();
     let worker_budget = budget.clone();
     let metadata = budget
@@ -78,21 +114,25 @@ pub async fn open_pin_with_io(pin: &TablePin, file_io: FileIO, budget: &Budget) 
             let _serialized = serialized;
             // Native filesystem FileIO blocks internally. One admitted worker keeps
             // this off runtime threads and also bounds concurrent remote opens.
-            let bytes = handle.block_on(async {
-                #[cfg(any(test, feature = "test-util"))]
-                if input.metadata().await?.size != object.bytes {
-                    return Err(corrupt());
+            let bytes: bytes::Bytes = handle.block_on(async {
+                match reader {
+                    MetadataReader::Native(input) => {
+                        if input.metadata().await?.size != object.bytes {
+                            return Err(corrupt());
+                        }
+                        let bytes = input.reader().await?.read(0..object.bytes).await?;
+                        if bytes.len() != size || input.metadata().await?.size != object.bytes {
+                            return Err(corrupt());
+                        }
+                        Ok(bytes)
+                    }
+                    #[cfg(feature = "remote")]
+                    MetadataReader::Remote(objects) => {
+                        let mut bytes = vec![0; size];
+                        objects.read_metadata_admitted(&object, &mut bytes).await?;
+                        Ok(bytes.into())
+                    }
                 }
-                let bytes = input.reader().await?.read(0..object.bytes).await?;
-                #[cfg(any(test, feature = "test-util"))]
-                if bytes.len() != size || input.metadata().await?.size != object.bytes {
-                    return Err(corrupt());
-                }
-                #[cfg(all(not(test), not(feature = "test-util")))]
-                if bytes.len() != size {
-                    return Err(corrupt());
-                }
-                Ok(bytes)
             })?;
             if blake3::hash(&bytes).to_hex().as_str() != object.digest {
                 return Err(corrupt());

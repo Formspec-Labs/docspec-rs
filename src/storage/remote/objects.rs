@@ -437,7 +437,7 @@ impl RemoteObjects {
         Ok(instance)
     }
 
-    pub(in crate::storage) fn register_query_store(
+    pub(crate) fn register_query_store(
         &self,
         runtime: &datafusion::execution::runtime_env::RuntimeEnv,
     ) -> Result<()> {
@@ -447,6 +447,14 @@ impl RemoteObjects {
         ))?;
         runtime.register_object_store(url.as_ref(), self.query_store.clone());
         Ok(())
+    }
+
+    pub(crate) async fn open_pin(
+        &self,
+        pin: &crate::model::TablePin,
+        budget: &Budget,
+    ) -> Result<iceberg::table::Table> {
+        super::super::pinned::open_pin_remote(pin, self, budget).await
     }
 
     pub(in crate::storage) fn flat_reader(
@@ -809,41 +817,35 @@ impl RemoteObjects {
         bytes: &mut [u8],
     ) -> Result<bool> {
         let key = self.scope.key(&expected.path)?;
-        let metadata = match self.operator.stat(&key).await {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == opendal::ErrorKind::NotFound => return Ok(false),
+        if bytes.len() as u64 != expected.bytes {
+            return Err(mismatch());
+        }
+        let path = object_store::path::Path::parse(key).map_err(|_| scope_error())?;
+        let options = object_store::GetOptions {
+            range: (expected.bytes != 0)
+                .then_some(object_store::GetRange::Bounded(0..expected.bytes)),
+            ..Default::default()
+        };
+        let response = match self.query_store.get_opts(&path, options).await {
+            Ok(response) => response,
+            Err(object_store::Error::NotFound { .. }) => return Ok(false),
             Err(_) => return Err(read_error()),
         };
-        if !metadata.is_file() || metadata.content_length() != expected.bytes {
+        // Content-Range carries the entire object's size on this same GET.
+        // Check it before consuming any body or allocating a replacement buffer.
+        if response.meta.size != expected.bytes || response.range != (0..expected.bytes) {
             return Err(mismatch());
         }
         let mut total = 0usize;
-        if !bytes.is_empty() {
-            let reader = self.operator.reader(&key).await.map_err(|_| read_error())?;
-            let mut stream = reader
-                .into_stream(0..expected.bytes)
-                .await
-                .map_err(|_| read_error())?;
-            while let Some(buffer) = stream.try_next().await.map_err(|_| read_error())? {
-                for slice in buffer {
-                    let end = total.checked_add(slice.len()).ok_or_else(mismatch)?;
-                    let target = bytes.get_mut(total..end).ok_or_else(mismatch)?;
-                    target.copy_from_slice(&slice);
-                    total = end;
-                }
-            }
+        let mut stream = response.into_stream();
+        while let Some(chunk) = stream.try_next().await.map_err(|_| read_error())? {
+            let end = total.checked_add(chunk.len()).ok_or_else(mismatch)?;
+            bytes
+                .get_mut(total..end)
+                .ok_or_else(mismatch)?
+                .copy_from_slice(&chunk);
+            total = end;
         }
-        #[cfg(any(test, feature = "test-util"))]
-        {
-            let metadata = self.operator.stat(&key).await.map_err(|_| read_error())?;
-            if total != bytes.len()
-                || !metadata.is_file()
-                || metadata.content_length() != expected.bytes
-            {
-                return Err(mismatch());
-            }
-        }
-        #[cfg(all(not(test), not(feature = "test-util")))]
         if total != bytes.len() {
             return Err(mismatch());
         }
