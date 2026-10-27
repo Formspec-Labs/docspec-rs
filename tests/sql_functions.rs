@@ -186,3 +186,36 @@ async fn non_scalar_url_expansion_admits_retained_capacity_before_parsing() {
     let error = spec.run(small).await.unwrap_err().to_string();
     assert!(error.contains("function output"), "{error}");
 }
+
+#[tokio::test]
+async fn canonical_json_matches_python_sorted_compact_vectors() {
+    let vectors: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/json-canonical.json")).unwrap();
+    for vector in vectors {
+        let literal = vector["input"].as_str().unwrap().replace('\'', "''");
+        let actual = scalar(&format!("SELECT json_canonical('{literal}') AS value")).await;
+        assert_eq!(
+            actual[0]["value"], vector["expected"],
+            "{}",
+            vector["input"]
+        );
+    }
+    assert_eq!(
+        scalar("SELECT json_canonical(cast(NULL AS VARCHAR)) AS value").await[0]["value"],
+        Value::Null
+    );
+    let root = tempfile::tempdir().unwrap();
+    for sql in [
+        "SELECT json_canonical('{bad') AS value",
+        "SELECT json_canonical('[1e999]') AS value",
+        "SELECT json_canonical('[NaN]') AS value",
+    ] {
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":sql}]})).unwrap();
+        assert!(spec.run(limits()).await.is_err(), "{sql}");
+    }
+    let mut small = limits();
+    small.memory_bytes = 1 << 20;
+    let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":"SELECT json_canonical(concat('[',repeat('0,',10000),'0]')) AS value"}]})).unwrap();
+    let error = spec.run(small).await.unwrap_err().to_string();
+    assert!(error.contains("function output"), "{error}");
+}
