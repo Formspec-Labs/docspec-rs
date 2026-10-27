@@ -285,6 +285,7 @@ async fn json_many_matches_independent_raw_getters_and_preserves_positions() {
         Some(r#"{"a":{"b":1},"broken":!"#),
         Some(r#"{"broken":!,"a":{"b":1}}"#),
         Some(r#"{"a":{"b":1}}trailing"#),
+        Some(r#"{"a":{"\u0062":"café","c":"ü"},"arr":[null],"null":null}"#),
         Some("null"),
         Some("[]"),
         Some("invalid"),
@@ -318,6 +319,14 @@ async fn json_many_matches_independent_raw_getters_and_preserves_positions() {
         scalar(r#"SELECT json_get_many('{"n": 1e+02}','[["n"]]')[1]='1e+02' AS lexical"#).await,
         json!([{"lexical":true}])
     );
+    assert_eq!(
+        scalar("SELECT cardinality(json_get_many('invalid','[]')) AS n").await,
+        json!([{"n":0}])
+    );
+    assert_eq!(
+        scalar("SELECT json_get_many('1 trailing','[[],[]]')[2]='1' AS exact").await,
+        json!([{"exact":true}])
+    );
     for kind in ["Utf8", "LargeUtf8", "Utf8View"] {
         assert_eq!(scalar(&format!(r#"SELECT json_get_many(arrow_cast('{{"a":1}}','{kind}'),'[["a"],[-1],[null]]')[1]='1' AS value"#)).await,json!([{"value":true}]));
     }
@@ -346,4 +355,63 @@ async fn json_many_refuses_bad_or_overlapping_definitions_and_oversized_output()
         .unwrap_err()
         .to_string();
     assert!(error.contains("function output"), "{error}");
+}
+
+#[tokio::test]
+async fn json_many_projects_small_fragments_from_the_largest_required_input() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("large.parquet");
+    let prefix = r#"{"selected":{"value":1},"unused":""#;
+    let suffix = "\"}";
+    let required = 187_661_340usize;
+    let raw = prefix.to_owned() + &"x".repeat(required - prefix.len() - suffix.len()) + suffix;
+    assert_eq!(raw.len(), required);
+    super::scalar::input(&path, &[(Some(1), Some(raw))]);
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),
+        "inputs":[{"kind":"parquet","name":"source","path":path}],
+        "steps":[{"name":"small","sql":r#"SELECT json_get_many(text,'[["selected"],["missing"]]') AS bundle FROM source"#,"materialize":true}],"outputs":[],
+        "queries":[{"name":"value","sql":"SELECT json_get_int(bundle[1],'value') AS value,bundle[2] IS NULL AS missing FROM small"}]})).unwrap();
+    let result = spec
+        .run(Limits {
+            memory_bytes: 2 << 30,
+            ..limits()
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.queries[0].data, json!([{"value":1,"missing":true}]));
+}
+
+#[tokio::test]
+async fn json_many_keeps_literal_definitions_separate_and_reuses_one_projection() {
+    let root = tempfile::tempdir().unwrap();
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],
+        "steps":[{"name":"source","sql":r#"SELECT concat('{"a":',cast(value AS VARCHAR),',"b":2}') AS raw FROM generate_series(1,3)"#}],"outputs":[],
+        "queries":[{"name":"values","sql":r#"SELECT json_get_int(json_get_many(raw,'[["a"]]')[1]) AS a,json_get_int(json_get_many(raw,'[["b"]]')[1]) AS b FROM source ORDER BY a"#},
+        {"name":"plan","sql":r#"EXPLAIN SELECT json_get_many(raw,'[["a"],["b"]]')[1] AS a,json_get_many(raw,'[["a"],["b"]]')[2] AS b FROM source"#}]})).unwrap();
+    let result = spec.run(limits()).await.unwrap();
+    assert_eq!(
+        result.queries[0].data,
+        json!([{"a":1,"b":2},{"a":2,"b":2},{"a":3,"b":2}])
+    );
+    let plans = result.queries[1].data.as_array().unwrap();
+    let physical = plans
+        .iter()
+        .find(|p| p["plan_type"] == "physical_plan")
+        .unwrap()["plan"]
+        .as_str()
+        .unwrap();
+    assert_eq!(physical.matches("json_get_many(").count(), 1, "{physical}");
+}
+#[tokio::test]
+async fn json_many_matches_deep_paths_without_recursive_trie_walking() {
+    let depth = 400;
+    let raw = r#"{"a":"#.repeat(depth) + "1" + &"}".repeat(depth);
+    let paths = serde_json::to_string(&vec![vec!["a"; depth]]).unwrap();
+    let independent = std::iter::repeat_n("'a'", depth)
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT json_get_many('{raw}','{paths}')[1] IS NOT DISTINCT FROM json_get_json('{raw}',{independent}) AS agrees"
+    );
+    assert_eq!(scalar(&sql).await, json!([{"agrees":true}]));
 }
