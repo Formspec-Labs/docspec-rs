@@ -1,64 +1,153 @@
 //! Generic SQL primitives have no archive identifiers or URL policy.
 // Rust guideline compliant 2026-02-21
-use arrow::datatypes::{DataType,Field,Schema};
-use docspec::{budget::Limits,job::JobSpec};
-use flate2::{Compression,write::GzEncoder};
-use serde_json::{json,Value};
+use arrow::datatypes::{DataType, Field, Schema};
+use docspec::{budget::Limits, job::JobSpec};
+use flate2::{Compression, write::GzEncoder};
+use serde_json::{Value, json};
 use std::io::Write;
 
-fn limits() -> Limits { Limits {compute_threads:2,memory_bytes:32 << 20,max_batch_bytes:4 << 20,batch_rows:32,scratch_bytes:32 << 20,..Limits::default()} }
-async fn scalar(sql:&str) -> Value {
-    let root=tempfile::tempdir().unwrap();
+fn limits() -> Limits {
+    Limits {
+        compute_threads: 2,
+        memory_bytes: 32 << 20,
+        max_batch_bytes: 4 << 20,
+        batch_rows: 32,
+        scratch_bytes: 32 << 20,
+        ..Limits::default()
+    }
+}
+async fn scalar(sql: &str) -> Value {
+    let root = tempfile::tempdir().unwrap();
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":sql}]})).unwrap();
     spec.run(limits()).await.unwrap().queries.remove(0).data
 }
 
 #[tokio::test]
 async fn compact_json_matches_authored_python_vectors() {
-    let vectors:Vec<Value>=serde_json::from_str(include_str!("fixtures/json-array.json")).unwrap();
+    let vectors: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/json-array.json")).unwrap();
     for vector in vectors {
-        let values=scalar(&format!("SELECT {} AS value",vector["expression"].as_str().unwrap())).await;
-        assert_eq!(values[0]["value"],vector["expected"],"{}",vector["expression"]);
+        let values = scalar(&format!(
+            "SELECT {} AS value",
+            vector["expression"].as_str().unwrap()
+        ))
+        .await;
+        assert_eq!(
+            values[0]["value"], vector["expected"],
+            "{}",
+            vector["expression"]
+        );
     }
-    assert_eq!(scalar("SELECT json_get_str('{\"a\":\"raw fallback\"}','a') AS value").await[0]["value"],"raw fallback");
+    assert_eq!(
+        scalar("SELECT json_get_str('{\"a\":\"raw fallback\"}','a') AS value").await[0]["value"],
+        "raw fallback"
+    );
 }
 
 #[tokio::test]
 async fn string_and_filename_primitives_follow_their_golden_vectors() {
-    let root=tempfile::tempdir().unwrap();
-    let vectors:Vec<Value>=serde_json::from_str(include_str!("fixtures/url-functions.json")).unwrap();
-    let path=root.path().join("vectors.gz");
-    let mut out=GzEncoder::new(std::fs::File::create(&path).unwrap(),Compression::fast());
-    for (id,row) in vectors.iter().enumerate() {let mut row=row.clone();row["id"]=json!(id);writeln!(out,"{row}").unwrap();}out.finish().unwrap();
-    let schema=Schema::new(vec![Field::new("id",DataType::Int64,true),Field::new("function",DataType::Utf8,true),Field::new("value",DataType::Utf8,true),Field::new("base",DataType::Utf8,true)]);
+    let root = tempfile::tempdir().unwrap();
+    let vectors: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/url-functions.json")).unwrap();
+    let path = root.path().join("vectors.gz");
+    let mut out = GzEncoder::new(std::fs::File::create(&path).unwrap(), Compression::fast());
+    for (id, row) in vectors.iter().enumerate() {
+        let mut row = row.clone();
+        row["id"] = json!(id);
+        writeln!(out, "{row}").unwrap();
+    }
+    out.finish().unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("function", DataType::Utf8, true),
+        Field::new("value", DataType::Utf8, true),
+        Field::new("base", DataType::Utf8, true),
+    ]);
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"vectors","files":[{"key":"golden","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":[{"name":"values","sql":"SELECT id,CASE function WHEN 'url_resolve' THEN url_resolve(value,base) WHEN 'uri_normalize_encoding' THEN uri_normalize_encoding(value) WHEN 'percent_decode_utf8' THEN percent_decode_utf8(value) WHEN 'url_filename' THEN url_filename(value) WHEN 'disposition_filename' THEN disposition_filename(value) END AS value FROM vectors ORDER BY id"}]})).unwrap();
-    let result=spec.run(limits()).await.unwrap();
-    for row in result.queries[0].data.as_array().unwrap() {let id=row["id"].as_u64().unwrap() as usize;assert_eq!(row["value"],vectors[id]["expected"],"{}",vectors[id]);}
+    let result = spec.run(limits()).await.unwrap();
+    for row in result.queries[0].data.as_array().unwrap() {
+        let id = row["id"].as_u64().unwrap() as usize;
+        assert_eq!(row["value"], vectors[id]["expected"], "{}", vectors[id]);
+    }
 }
 
 #[tokio::test]
 async fn pinned_whatwg_resolver_corpus_has_no_unrecorded_deviation() {
-    let root=tempfile::tempdir().unwrap();
-    let corpus:Vec<Value>=serde_json::from_str(include_str!("fixtures/url/urltestdata.json")).unwrap();
-    let cases=corpus.into_iter().filter(Value::is_object).collect::<Vec<_>>();
-    let path=root.path().join("corpus.gz");let mut out=GzEncoder::new(std::fs::File::create(&path).unwrap(),Compression::fast());
-    for (id,case) in cases.iter().enumerate(){writeln!(out,"{}",json!({"id":id,"input":case["input"],"base":case["base"]})).unwrap();}out.finish().unwrap();
-    let schema=Schema::new(vec![Field::new("id",DataType::Int64,true),Field::new("input",DataType::Utf8,true),Field::new("base",DataType::Utf8,true)]);
-    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"cases","files":[{"key":"WHATWG corpus","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":[{"name":"resolved","sql":"SELECT id,url_resolve(input,base) AS value FROM cases ORDER BY id"}]})).unwrap();
-    let rows=spec.run(limits()).await.unwrap().queries.remove(0).data;
-    assert_eq!(rows.as_array().unwrap().len(),cases.len());
-    let known=include_str!("fixtures/url/expected_failures.txt").lines().collect::<Vec<_>>();let mut deviations=Vec::new();
-    for row in rows.as_array().unwrap(){let case=&cases[row["id"].as_u64().unwrap() as usize];let expected=case.get("href").unwrap_or(&Value::Null);
-        if &row["value"]!=expected {let mut name=format!("<{}>",case["input"].as_str().unwrap().escape_default());if let Some(base)=case["base"].as_str(){name.push_str(&format!(" against <{}>",base.escape_default()));}
-            assert!(known.contains(&name.as_str()),"unrecorded resolver deviation {name}: expected{expected},actual{}",row["value"]);deviations.push(name);}}
-    eprintln!("resolver corpus:{} cases; known upstream file-URL deviations:{} {:?}",cases.len(),deviations.len(),deviations);
+    let root = tempfile::tempdir().unwrap();
+    let corpus: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/url/urltestdata.json")).unwrap();
+    let cases = corpus
+        .into_iter()
+        .filter(Value::is_object)
+        .collect::<Vec<_>>();
+    let path = root.path().join("corpus.gz");
+    let mut out = GzEncoder::new(std::fs::File::create(&path).unwrap(), Compression::fast());
+    for (id, case) in cases.iter().enumerate() {
+        writeln!(
+            out,
+            "{}",
+            json!({"id":id,"input":case["input"],"base":case["base"]})
+        )
+        .unwrap();
+    }
+    out.finish().unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("input", DataType::Utf8, true),
+        Field::new("base", DataType::Utf8, true),
+    ]);
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"cases","files":[{"key":"WHATWG corpus","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":[{"name":"resolved","sql":"SELECT id,url_resolve(input,base) AS value FROM cases"}]})).unwrap();
+    let rows = spec.run(limits()).await.unwrap().queries.remove(0).data;
+    assert_eq!(rows.as_array().unwrap().len(), cases.len());
+    let ids = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_u64().unwrap())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(ids.len(), cases.len());
+    let known = include_str!("fixtures/url/expected_failures.txt")
+        .lines()
+        .collect::<Vec<_>>();
+    let mut deviations = Vec::new();
+    for row in rows.as_array().unwrap() {
+        let case = &cases[row["id"].as_u64().unwrap() as usize];
+        let expected = case.get("href").unwrap_or(&Value::Null);
+        if &row["value"] != expected {
+            let mut name = format!("<{}>", case["input"].as_str().unwrap().escape_default());
+            if let Some(base) = case["base"].as_str() {
+                name.push_str(&format!(" against <{}>", base.escape_default()));
+            }
+            assert!(
+                known.contains(&name.as_str()),
+                "unrecorded resolver deviation {name}: expected{expected},actual{}",
+                row["value"]
+            );
+            deviations.push(name);
+        }
+    }
+    eprintln!(
+        "resolver corpus:{} cases; known upstream file-URL deviations:{} {:?}",
+        cases.len(),
+        deviations.len(),
+        deviations
+    );
 }
 
 #[tokio::test]
 async fn json_output_expansion_and_unsupported_values_refuse() {
-    let root=tempfile::tempdir().unwrap();let mut small=limits();small.max_batch_bytes=16384;
-    for sql in ["SELECT json_array(repeat('x',32768)) AS value", "SELECT json_array(cast('NaN' AS DOUBLE)) AS value"] {
+    let root = tempfile::tempdir().unwrap();
+    let mut small = limits();
+    small.max_batch_bytes = 16384;
+    for sql in [
+        "SELECT json_array(repeat('x',32768)) AS value",
+        "SELECT json_array(cast('NaN' AS DOUBLE)) AS value",
+    ] {
         let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":sql}]})).unwrap();
-        let error=spec.run(small.clone()).await.unwrap_err().to_string();assert!(error.contains("function output")||error.contains("unsupported JSON"),"{error}");
+        let error = spec.run(small.clone()).await.unwrap_err().to_string();
+        assert!(
+            error.contains("function output") || error.contains("unsupported JSON"),
+            "{error}"
+        );
     }
 }
