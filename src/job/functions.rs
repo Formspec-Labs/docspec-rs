@@ -353,8 +353,9 @@ impl GenericFunction {
                 if inputs[arg].1 { 0 } else { index },
             )
         };
-        // URI encoding can triple UTF-8 bytes. Header parsing retains at most
-        // two names; its temporary decoding and token storage fit four inputs.
+        // Reserve retained capacities as well as encoded lengths. Resolution
+        // can hold an expanded base and a geometrically grown relative result
+        // together. The final Arrow builder is present alongside those values.
         let mut allowance = 0usize;
         for index in 0..rows {
             let input = get(0, index)?.map_or(0, str::len);
@@ -363,11 +364,7 @@ impl GenericFunction {
             } else {
                 0
             };
-            let factor = if self.kind == Kind::DispositionFilename {
-                4
-            } else {
-                3
-            };
+            let factor = if self.kind == Kind::Resolve { 8 } else { 4 };
             allowance = allowance.saturating_add(
                 input
                     .saturating_add(base)
@@ -444,7 +441,7 @@ fn hex(byte: u8) -> Option<u8> {
 fn normalize(value: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let bytes = value.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out = String::with_capacity(bytes.len().saturating_mul(3));
     let mut index = 0;
     while index < bytes.len() {
         let byte = bytes[index];
