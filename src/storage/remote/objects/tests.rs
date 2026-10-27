@@ -428,7 +428,11 @@ impl ReadFixture {
                     } else {
                         sizes[0]
                     };
-                    write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes 0-{}/{}\r\nConnection: close\r\n\r\n", size.saturating_sub(1), range_size).unwrap();
+                    if range.is_some() {
+                        write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes 0-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n", size.saturating_sub(1), range_size).unwrap();
+                    } else {
+                        write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n").unwrap();
+                    }
                     socket.write_all(bytes).unwrap();
                 }
             }
@@ -516,7 +520,7 @@ async fn metadata_reader_hashes_one_get_and_availability_reads_only_metadata() {
             .iter()
             .filter(|(method, _)| method == "HEAD")
             .count(),
-        3
+        1
     );
 }
 
@@ -529,7 +533,9 @@ async fn metadata_reader_refuses_changed_bytes_lengths_and_scope() {
     for (payload, sizes) in [
         (changed, [expected.bytes; 2]),
         (payload[..3].to_vec(), [expected.bytes; 2]),
-        (payload.clone(), [expected.bytes, expected.bytes + 1]),
+        // The GET must expose a changed complete size; no later HEAD is used
+        // to observe a mutation occurring after this immutable response.
+        (payload.clone(), [expected.bytes + 1; 2]),
     ] {
         let fixture = ReadFixture::new(payload, sizes);
         let objects = crate::storage::Objects::Remote(fixture.objects());
@@ -577,7 +583,7 @@ async fn metadata_reader_refuses_changed_bytes_lengths_and_scope() {
 }
 
 #[tokio::test]
-async fn empty_metadata_and_changed_availability_use_no_payload_read() {
+async fn empty_metadata_get_and_changed_availability_read_no_payload_bytes() {
     let expected = object(b"");
     let fixture = ReadFixture::new(Vec::new(), [0; 2]);
     let objects = crate::storage::Objects::Remote(fixture.objects());
@@ -607,9 +613,15 @@ async fn empty_metadata_and_changed_availability_use_no_payload_read() {
             .iter()
             .filter(|(method, _)| method == "HEAD")
             .count(),
-        3
+        1
     );
-    assert!(requests.iter().all(|(method, _)| method != "GET"));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _)| method == "GET")
+            .count(),
+        1
+    );
 }
 
 #[test]

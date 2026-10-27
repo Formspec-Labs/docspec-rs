@@ -148,3 +148,29 @@ fn cli_retains_completed_native_authority_when_a_later_purge_refuses() {
     );
     assert_eq!(completed[2]["files"][0]["rows"], 2);
 }
+
+#[tokio::test]
+async fn injected_catalog_uses_the_same_job_and_rejects_competing_local_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let catalog = docspec::storage::local_catalog(&root.path().join("injected"))
+        .await
+        .unwrap();
+    let mut value = spec(root.path());
+    let conflict = serde_json::from_value::<JobSpec>(value.clone())
+        .unwrap()
+        .run_with_catalog(limits(), catalog.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(conflict.error.code(), "invalid_spec");
+    assert!(!root.path().join("scratch").exists());
+    value.as_object_mut().unwrap().remove("catalog_root");
+    let result = serde_json::from_value::<JobSpec>(value)
+        .unwrap()
+        .run_with_catalog(limits(), catalog)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap()["table_operations"][2]["files"][0]["rows"],
+        2
+    );
+}
