@@ -203,36 +203,42 @@ fn json_bytes(array: &dyn Array, index: usize) -> Result<usize> {
                         .saturating_add(json_bytes(column.as_ref(), index)?))
                 })
         }
-        DataType::List(_) => json_list_bytes(
-            array
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .unwrap()
-                .value(index),
-        ),
-        DataType::LargeList(_) => json_list_bytes(
-            array
-                .as_any()
-                .downcast_ref::<LargeListArray>()
-                .unwrap()
-                .value(index),
-        ),
-        DataType::FixedSizeList(_, _) => json_list_bytes(
-            array
-                .as_any()
-                .downcast_ref::<FixedSizeListArray>()
-                .unwrap()
-                .value(index),
-        ),
+        DataType::List(_) => {
+            let list = array.as_any().downcast_ref::<ListArray>().unwrap();
+            let offsets = list.value_offsets();
+            json_list_bytes(
+                list.values().as_ref(),
+                offsets[index] as usize,
+                offsets[index + 1] as usize,
+            )
+        }
+        DataType::LargeList(_) => {
+            let list = array.as_any().downcast_ref::<LargeListArray>().unwrap();
+            let offsets = list.value_offsets();
+            json_list_bytes(
+                list.values().as_ref(),
+                offsets[index] as usize,
+                offsets[index + 1] as usize,
+            )
+        }
+        DataType::FixedSizeList(_, _) => {
+            let list = array.as_any().downcast_ref::<FixedSizeListArray>().unwrap();
+            let start = list.value_offset(index) as usize;
+            json_list_bytes(
+                list.values().as_ref(),
+                start,
+                start + list.value_length() as usize,
+            )
+        }
         _ => Err(DataFusionError::Plan(
             "unsupported JSON argument type".into(),
         )),
     }
 }
-fn json_list_bytes(array: ArrayRef) -> Result<usize> {
-    (0..array.len()).try_fold(2usize, |n, index| {
+fn json_list_bytes(array: &dyn Array, start: usize, end: usize) -> Result<usize> {
+    (start..end).try_fold(2usize, |n, index| {
         Ok(n.saturating_add(1)
-            .saturating_add(json_bytes(array.as_ref(), index)?))
+            .saturating_add(json_bytes(array, index)?))
     })
 }
 
