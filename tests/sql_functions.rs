@@ -273,3 +273,77 @@ async fn canonical_cumulative_output_exhaustion_is_a_capacity_refusal() {
     let error = spec.run(ceiling).await.unwrap_err().to_string();
     assert!(error.contains("function output"), "{error}");
 }
+
+#[tokio::test]
+async fn json_many_matches_independent_raw_getters_and_preserves_positions() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("rows.jsonl");
+    let raw = [
+        Some(r#"{"a":{"b": 1e+02, "c":"\u00e9"},"arr":[{"x":1},2],"null":null}"#),
+        Some(r#"{"a":{"b":1},"a":{"b":2},"arr":false}"#),
+        Some(r#"{"a":7,"a":{"b":2}}"#),
+        Some(r#"{"a":{"b":1},"broken":!"#),
+        Some(r#"{"broken":!,"a":{"b":1}}"#),
+        Some(r#"{"a":{"b":1}}trailing"#),
+        Some("null"),
+        Some("[]"),
+        Some("invalid"),
+        None,
+    ];
+    let lines = raw
+        .iter()
+        .enumerate()
+        .map(|(id, raw)| json!({"id":id,"raw":raw}).to_string() + "\n")
+        .collect::<String>();
+    std::fs::write(&path, lines).unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("raw", DataType::Utf8, true),
+    ]);
+    let sql = r#"SELECT id,actual IS NOT DISTINCT FROM expected AS agrees,array_length(actual) AS n FROM
+        (SELECT id,json_get_many(raw,'[["a","b"],["a","c"],["arr",0],["null"],["missing"],["a","b"]]') AS actual,
+        make_array(json_get_json(raw,'a','b'),json_get_json(raw,'a','c'),json_get_json(raw,'arr',0),
+        json_get_json(raw,'null'),json_get_json(raw,'missing'),json_get_json(raw,'a','b')) AS expected FROM rows) ORDER BY id"#;
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"rows","files":[{"key":"authored","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":[{"name":"v","sql":sql}]})).unwrap();
+    let rows = spec.run(limits()).await.unwrap().queries.remove(0).data;
+    assert_eq!(rows.as_array().unwrap().len(), raw.len());
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["agrees"] == true && r["n"] == 6),
+        "{rows}"
+    );
+    assert_eq!(
+        scalar(r#"SELECT json_get_many('{"n": 1e+02}','[["n"]]')[1]='1e+02' AS lexical"#).await,
+        json!([{"lexical":true}])
+    );
+    for kind in ["Utf8", "LargeUtf8", "Utf8View"] {
+        assert_eq!(scalar(&format!(r#"SELECT json_get_many(arrow_cast('{{"a":1}}','{kind}'),'[["a"],[-1],[null]]')[1]='1' AS value"#)).await,json!([{"value":true}]));
+    }
+}
+#[tokio::test]
+async fn json_many_refuses_bad_or_overlapping_definitions_and_oversized_output() {
+    let root = tempfile::tempdir().unwrap();
+    for paths in ["null", "{}", "[1]", "[[true]]", r#"[["a"],["a","b"]]"#] {
+        let sql = format!(
+            "SELECT json_get_many('{{}}','{}') AS value",
+            paths.replace('\'', "''")
+        );
+        let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"v","sql":sql}]})).unwrap();
+        let error = spec.run(limits()).await.unwrap_err().to_string();
+        assert!(error.contains("JSON paths"), "{error}");
+    }
+    let sql = r#"SELECT count(json_get_many(concat('{"a":"',repeat('x',64),'","id":',cast(value AS VARCHAR),'}'),'[["a"],["a"],["a"]]')) AS n FROM generate_series(1,128)"#;
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"v","sql":sql}]})).unwrap();
+    let error = spec
+        .run(Limits {
+            max_batch_bytes: 1024,
+            batch_rows: 128,
+            ..limits()
+        })
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("function output"), "{error}");
+}
