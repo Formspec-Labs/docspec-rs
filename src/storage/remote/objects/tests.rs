@@ -11,6 +11,7 @@ use std::{
 };
 
 mod flat;
+mod job_reads;
 mod pinning;
 pub(crate) mod writes;
 
