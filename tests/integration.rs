@@ -70,3 +70,4 @@ mod updates;
 
 mod sql_components;
 mod sql_functions;
+mod sql_tables;
