@@ -40,6 +40,7 @@ async fn setup(root: &std::path::Path) -> (Arc<dyn Catalog>, Table, Arc<Budget>)
         memory_bytes: 32 << 20,
         batch_rows: 64,
         max_batch_bytes: 2 << 20,
+        max_metadata_bytes: 2 << 20,
         scratch_bytes: 8 << 20,
         ..Limits::default()
     })

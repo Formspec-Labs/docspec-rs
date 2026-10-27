@@ -370,6 +370,47 @@ mod tests {
 
     #[tokio::test]
     async fn debug_redacts_dummy_secrets_without_network_requests() {
+    #[tokio::test]
+    async fn purge_failure_is_one_request_until_authority_is_checked_again() {
+        use axum::{
+            Json, Router,
+            http::{Method, StatusCode},
+            response::IntoResponse,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let deletes = Arc::new(AtomicUsize::new(0));
+        let counter = deletes.clone();
+        let router = Router::new().fallback(move |method: Method| {
+            let counter = counter.clone();
+            async move {
+                if method == Method::DELETE {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":{"message":"authored transient purge failure","type":"ServiceUnavailableException","code":503}}))).into_response()
+                } else {
+                    Json(serde_json::json!({"defaults":{},"overrides":{}})).into_response()
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let catalog = remote_catalog(
+            HashMap::from([
+                ("uri".into(), format!("http://{address}")),
+                ("warehouse".into(), "local-fixture".into()),
+            ]),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        let ident = TableIdent::new(NamespaceIdent::new("fixture".into()), "events".into());
+        assert!(catalog.purge_table(&ident).await.is_err());
+        assert_eq!(deletes.load(Ordering::SeqCst), 1);
+        server.abort();
+    }
+
         let secret = "dummy-secret-must-not-appear";
         let catalog = remote_catalog(
             HashMap::from([
