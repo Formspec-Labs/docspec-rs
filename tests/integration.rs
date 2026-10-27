@@ -68,4 +68,5 @@ mod update_pruning;
 mod update_relationship;
 mod updates;
 
+mod sql_components;
 mod sql_functions;
