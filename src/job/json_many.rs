@@ -241,10 +241,21 @@ impl ScalarUDFImpl for Projection {
         project(&args.args[0], paths, &self.budget)
     }
 }
+// Locked Jiter0.13 known_skip permits200 nonempty container levels. These
+// relative heights preserve each independent getter's preceding-subtree skips;
+// boundary differential fixtures must move with a future parser upgrade.
+const SKIP_DEPTH: usize = 200;
 #[derive(Clone, Copy)]
-enum Frame {
-    Object(usize),
-    Array(usize, usize),
+enum Container {
+    Object,
+    Array(usize),
+}
+struct Frame {
+    node: Option<usize>,
+    start: usize,
+    kind: Container,
+    height: usize,
+    blocked: bool,
 }
 fn take_child(child: Option<usize>, visited: &mut [bool]) -> Option<usize> {
     child.filter(|&id| {
@@ -256,82 +267,174 @@ fn take_child(child: Option<usize>, visited: &mut [bool]) -> Option<usize> {
         }
     })
 }
+fn record(
+    node: Option<usize>,
+    start: usize,
+    end: usize,
+    height: usize,
+    paths: &Paths,
+    out: &mut [Option<(usize, usize)>],
+) {
+    if height <= SKIP_DEPTH
+        && let Some(node) = node
+    {
+        for &slot in &paths.nodes[node].slots {
+            out[slot] = Some((start, end));
+        }
+    }
+}
+fn push(
+    stack: &mut Vec<Frame>,
+    frame: Frame,
+    budget: &Budget,
+    memory: &mut OwnedSemaphorePermit,
+) -> Result<()> {
+    if stack.len() == stack.capacity() {
+        let capacity = stack
+            .capacity()
+            .max(1)
+            .checked_mul(2)
+            .ok_or_else(capacity)?;
+        let extra = capacity
+            .checked_sub(stack.capacity())
+            .and_then(|n| n.checked_mul(64))
+            .ok_or_else(super::functions::capacity)?;
+        memory.merge(
+            budget
+                .reserve(extra)
+                .map_err(|_| super::functions::capacity())?,
+        );
+        stack
+            .try_reserve_exact(capacity - stack.len())
+            .map_err(|_| super::functions::capacity())?;
+    }
+    stack.push(frame);
+    Ok(())
+}
 fn spans(
     raw: &str,
     paths: &Paths,
     visited: &mut [bool],
     out: &mut [Option<(usize, usize)>],
     stack: &mut Vec<Frame>,
-) {
+    budget: &Budget,
+    memory: &mut OwnedSemaphorePermit,
+) -> Result<()> {
     if paths.nodes[0].slots.is_empty()
         && paths.nodes[0].keys.is_empty()
         && paths.nodes[0].indices.is_empty()
     {
-        return;
+        return Ok(());
     }
     let mut parser = Jiter::new(raw.as_bytes());
-    // A failed later sibling leaves already completed selections intact, just
-    // like the maintained independent getter. No whole-input finish is added.
-    let _parsed = (|| -> jiter::JiterResult<()> {
-        let mut pending = Some((Some(0), parser.peek()?));
-        loop {
-            if let Some((node, peek)) = pending.take() {
-                if let Some(node) = node {
-                    let selected = &paths.nodes[node];
-                    if !selected.slots.is_empty() {
-                        let start = parser.current_index();
-                        parser.known_skip(peek)?;
-                        for &slot in &selected.slots {
-                            out[slot] = Some((start, parser.current_index()));
-                        }
-                    } else if peek == Peek::Object {
-                        if let Some(key) = parser.known_object()? {
-                            let child = take_child(selected.keys.get(key).copied(), visited);
-                            stack.push(Frame::Object(node));
-                            pending = Some((child, parser.peek()?));
-                            continue;
-                        }
-                    } else if peek == Peek::Array {
-                        if let Some(peek) = parser.known_array()? {
-                            let child = take_child(selected.indices.get(&0).copied(), visited);
-                            stack.push(Frame::Array(node, 0));
-                            pending = Some((child, peek));
-                            continue;
-                        }
-                    } else {
-                        parser.known_skip(peek)?;
-                    }
-                } else {
-                    parser.known_skip(peek)?;
+    // Parse failures preserve completed selections. Capacity errors propagate.
+    macro_rules! parsed {
+        ($value:expr) => {
+            match $value {
+                Ok(value) => value,
+                Err(_) => return Ok(()),
+            }
+        };
+    }
+    let mut pending = Some((Some(0), parsed!(parser.peek())));
+    let mut completed = None;
+    loop {
+        if let Some((node, peek)) = pending.take() {
+            let start = parser.current_index();
+            if peek == Peek::Object {
+                if let Some(key) = parsed!(parser.known_object()) {
+                    let child = take_child(
+                        node.and_then(|n| paths.nodes[n].keys.get(key).copied()),
+                        visited,
+                    );
+                    push(
+                        stack,
+                        Frame {
+                            node,
+                            start,
+                            kind: Container::Object,
+                            height: 1,
+                            blocked: false,
+                        },
+                        budget,
+                        memory,
+                    )?;
+                    pending = Some((child, parsed!(parser.peek())));
+                    continue;
+                }
+            } else if peek == Peek::Array {
+                if let Some(peek) = parsed!(parser.known_array()) {
+                    let child = take_child(
+                        node.and_then(|n| paths.nodes[n].indices.get(&0).copied()),
+                        visited,
+                    );
+                    push(
+                        stack,
+                        Frame {
+                            node,
+                            start,
+                            kind: Container::Array(0),
+                            height: 1,
+                            blocked: false,
+                        },
+                        budget,
+                        memory,
+                    )?;
+                    pending = Some((child, peek));
+                    continue;
+                }
+            } else {
+                parsed!(parser.known_skip(peek));
+            }
+            record(node, start, parser.current_index(), 0, paths, out);
+            completed = Some(0);
+        }
+        if let Some(height) = completed.take()
+            && let Some(parent) = stack.last_mut()
+        {
+            parent.height = parent.height.max((height + 1).min(SKIP_DEPTH + 1));
+            parent.blocked |= height > SKIP_DEPTH;
+        }
+        let Some(frame) = stack.last_mut() else {
+            return Ok(());
+        };
+        let node = if frame.blocked { None } else { frame.node };
+        match &mut frame.kind {
+            Container::Object => {
+                if let Some(key) = parsed!(parser.next_key()) {
+                    let child = take_child(
+                        node.and_then(|n| paths.nodes[n].keys.get(key).copied()),
+                        visited,
+                    );
+                    pending = Some((child, parsed!(parser.peek())));
+                    continue;
                 }
             }
-            loop {
-                match stack.last_mut() {
-                    Some(Frame::Object(node)) => {
-                        if let Some(key) = parser.next_key()? {
-                            let child =
-                                take_child(paths.nodes[*node].keys.get(key).copied(), visited);
-                            pending = Some((child, parser.peek()?));
-                            break;
-                        }
-                        stack.pop();
-                    }
-                    Some(Frame::Array(node, index)) => {
-                        if let Some(peek) = parser.array_step()? {
-                            *index += 1;
-                            let child =
-                                take_child(paths.nodes[*node].indices.get(index).copied(), visited);
-                            pending = Some((child, peek));
-                            break;
-                        }
-                        stack.pop();
-                    }
-                    None => return Ok(()),
+            Container::Array(index) => {
+                if let Some(peek) = parsed!(parser.array_step()) {
+                    *index += 1;
+                    let child = take_child(
+                        node.and_then(|n| paths.nodes[n].indices.get(index).copied()),
+                        visited,
+                    );
+                    pending = Some((child, peek));
+                    continue;
                 }
             }
         }
-    })();
+        let frame = stack.pop().expect("inspected nonempty stack");
+        record(
+            frame.node,
+            frame.start,
+            parser.current_index(),
+            frame.height,
+            paths,
+            out,
+        );
+        completed = Some(frame.height);
+    }
 }
+
 fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<ColumnarValue> {
     let scalar = matches!(input, ColumnarValue::Scalar(_));
     let rows = match input {
@@ -370,7 +473,7 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
         .and_then(|n| n.checked_add(paths.slots.saturating_mul(32)))
         .and_then(|n| n.checked_add(largest.saturating_mul(2)))
         .ok_or_else(capacity)?;
-    let _workspace = budget.reserve(state).map_err(|_| capacity())?;
+    let mut workspace = budget.reserve(state).map_err(|_| capacity())?;
     let mut visited = vec![false; paths.nodes.len()];
     let mut output = vec![None; paths.slots];
     let mut stack = Vec::with_capacity(paths.nodes.len());
@@ -382,7 +485,15 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
         stack.clear();
         let raw = get(row)?;
         if let Some(raw) = raw {
-            spans(raw, paths, &mut visited, &mut output, &mut stack);
+            spans(
+                raw,
+                paths,
+                &mut visited,
+                &mut output,
+                &mut stack,
+                budget,
+                &mut workspace,
+            )?;
         }
         let added = output
             .iter()
@@ -414,5 +525,44 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
         Ok(ColumnarValue::Scalar(ScalarValue::List(result)))
     } else {
         Ok(ColumnarValue::Array(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn deep_unselected_frames_refuse_capacity_and_release_it_for_reuse() {
+        let budget = Budget::new(crate::budget::Limits {
+            memory_bytes: 128 << 10,
+            max_metadata_bytes: 32 << 10,
+            max_batch_bytes: 4 << 10,
+            compute_threads: 1,
+            ..crate::budget::Limits::default()
+        })
+        .unwrap();
+        let paths = Paths::compile(r#"[["later"]]"#, &budget).unwrap();
+        let nested = r#"{"a":"#.repeat(1000) + "1" + &"}".repeat(1000);
+        let raw = format!(r#"{{"nested":{nested},"later":7}}"#);
+        let error = project(
+            &ColumnarValue::Scalar(ScalarValue::Utf8(Some(raw))),
+            &paths,
+            &budget,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, DataFusionError::ResourcesExhausted(_)),
+            "{error}"
+        );
+        let result = project(
+            &ColumnarValue::Scalar(ScalarValue::Utf8(Some(r#"{"later":7}"#.into()))),
+            &paths,
+            &budget,
+        )
+        .unwrap();
+        let ColumnarValue::Scalar(ScalarValue::List(values)) = result else {
+            panic!("expected scalar list");
+        };
+        assert_eq!(text(values.values().as_ref(), 0).unwrap(), Some("7"));
     }
 }
