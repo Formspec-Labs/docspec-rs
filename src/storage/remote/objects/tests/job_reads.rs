@@ -79,3 +79,34 @@ async fn pinned_get_refuses_observed_suffix_truncation_and_digest_change() {
         assert_eq!(requests[0].0, "GET");
     }
 }
+
+#[tokio::test]
+async fn explicit_remote_job_reuses_its_connection_without_lifecycle() {
+    let metadata = metadata();
+    let bytes = serde_json::to_vec(&metadata).unwrap();
+    let pin = pin(&bytes, &metadata);
+    let fixture = ReadFixture::inventory(HashMap::from([(pin.metadata.path.clone(), bytes)]));
+    let root = tempfile::tempdir().unwrap();
+    let catalog = crate::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    let remote = crate::storage::remote::RemoteStorage {
+        catalog,
+        objects: fixture.objects(),
+        maintenance_generation: None,
+    };
+    let spec:crate::job::JobSpec=serde_json::from_value(serde_json::json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"iceberg","name":"pinned","pin":pin}],"steps":[],"outputs":[],"queries":[{"name":"count","sql":"SELECT count(*) AS n FROM pinned"}]})).unwrap();
+    let result = spec
+        .run_with_remote(Limits::default(), remote)
+        .await
+        .unwrap();
+    assert_eq!(result.queries[0].data, serde_json::json!([{"n":0}]));
+    assert!(!root.path().join("workspace").exists());
+    assert_eq!(
+        fixture.finish(),
+        vec![(
+            "GET".into(),
+            Some(format!("bytes=0-{}", pin.metadata.bytes - 1))
+        )]
+    );
+}
