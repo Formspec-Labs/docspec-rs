@@ -166,7 +166,7 @@ async fn interrupted_release_reuses_exact_uri_and_completed_readback_without_sec
 
 #[cfg(feature = "remote")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_release_absence_is_only_initial_head_not_permission_error() {
+async fn remote_release_absence_is_only_initial_get_not_permission_error() {
     use crate::storage::remote::objects::tests::writes::{Behavior, WriteFixture};
     for (behavior, absent) in [(Behavior::RejectPut, true), (Behavior::HeadDenied, false)] {
         let fixture = WriteFixture::for_path(behavior, "/bucket/owned/release.json".into());
@@ -195,8 +195,8 @@ async fn remote_release_absence_is_only_initial_head_not_permission_error() {
             assert_eq!(result.unwrap_err().code(), "remote_read");
         }
         let report = fixture.finish();
-        assert_eq!(report.methods("HEAD"), 1);
-        assert_eq!(report.methods("GET"), 0);
+        assert_eq!(report.methods("HEAD"), 0);
+        assert_eq!(report.methods("GET"), 1);
         assert_eq!(report.methods("PUT"), 0);
     }
 }

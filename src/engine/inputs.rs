@@ -759,7 +759,7 @@ mod tests {
                 .iter()
                 .filter(|(method, _)| method == "HEAD")
                 .count(),
-            2
+            0
         );
     }
 

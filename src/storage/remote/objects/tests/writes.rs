@@ -407,6 +407,24 @@ impl WriteFixture {
                         .unwrap();
                     }
                     "GET" => {
+                        if matches!(behavior, Behavior::HeadDenied) {
+                            respond(
+                                &mut socket,
+                                "403 Forbidden",
+                                "",
+                                b"<Error><Code>AccessDenied</Code></Error>",
+                            );
+                            continue;
+                        }
+                        if report.published.is_none() {
+                            respond(
+                                &mut socket,
+                                "404 Not Found",
+                                "",
+                                b"<Error><Code>NoSuchKey</Code></Error>",
+                            );
+                            continue;
+                        }
                         let bytes = report.published.as_ref().unwrap();
                         let headers = format!(
                             "Content-Range: bytes 0-{}/{}\r\n",

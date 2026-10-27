@@ -777,7 +777,7 @@ mod tests {
         );
         assert_eq!(
             fixture.observed_paths(),
-            ["HEAD", "GET", "HEAD"].map(|method| (method.into(), object.path.clone()))
+            [("GET".into(), object.path.clone())]
         );
 
         // The changes verifier uses the same configured single-read path, with
@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(release.dataset, dataset);
         assert_eq!(release.manifest, object);
         let requests = fixture.finish();
-        assert_eq!(requests.len(), 6);
+        assert_eq!(requests.len(), 2);
         assert_eq!(
             requests
                 .iter()
