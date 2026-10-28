@@ -21,17 +21,33 @@ fn spec(root: &std::path::Path) -> Value {
     spec_with_id(root, 1)
 }
 fn spec_with_id(root: &std::path::Path, field_id: i32) -> Value {
+    let mut fields = Vec::new();
+    // Creation assigns IDs by position. Give the second table a preceding
+    // field so its id column really has a different native field identity.
+    if field_id == 2 {
+        fields.push(Arc::new(NestedField::required(
+            1,
+            "prefix",
+            Type::Primitive(PrimitiveType::String),
+        )));
+    }
+    fields.push(Arc::new(NestedField::required(
+        field_id,
+        "id",
+        Type::Primitive(PrimitiveType::Long),
+    )));
     let schema = Schema::builder()
-        .with_fields(vec![Arc::new(NestedField::required(
-            field_id,
-            "id",
-            Type::Primitive(PrimitiveType::Long),
-        ))])
+        .with_fields(fields)
         .with_identifier_field_ids([field_id])
         .build()
         .unwrap();
+    let incoming = if field_id == 2 {
+        "SELECT 'fixture' AS prefix,cast(value AS BIGINT) AS id FROM generate_series(1,2)"
+    } else {
+        "SELECT cast(value AS BIGINT) AS id FROM generate_series(1,2)"
+    };
     json!({"scratch":root.join("scratch"),"catalog_root":root.join("catalog"),"inputs":[],
-        "steps":[{"name":"incoming","sql":"SELECT cast(value AS BIGINT) AS id FROM generate_series(1,2)"}],"outputs":[],
+        "steps":[{"name":"incoming","sql":incoming}],"outputs":[],
         "table_operations":[{"kind":"create_namespace","name":"namespace","namespace":["archive"],"properties":{}},
             {"kind":"create","name":"create","table":{"namespace":["archive"],"name":"captures"},"location":root.join("data"),"schema":schema,"format_version":2,"properties":{"gc.enabled":"true","commit.retry.num-retries":"0"}},
             {"kind":"append","name":"append","table":{"namespace":["archive"],"name":"captures"},"current_table":"existing","work_table":"pending","sql":"SELECT incoming.* FROM incoming LEFT ANTI JOIN existing ON incoming.id=existing.id","identity_sql":"SELECT 'immutable-rows-1-and-2-writer-v1' AS identity FROM pending LIMIT 1","layout":{"file_bytes":1048576,"row_group_rows":64,"row_group_bytes":1048576}}]})
@@ -57,6 +73,11 @@ async fn metadata_job(root: &std::path::Path) -> docspec::job::Job {
         )
         .await
         .unwrap();
+        let frame = job.sql(&format!("SELECT id FROM {name}")).await.unwrap();
+        assert_eq!(
+            frame.schema().field(0).metadata().get("PARQUET:field_id"),
+            Some(&id.to_string())
+        );
     }
     job
 }
@@ -154,6 +175,33 @@ async fn native_union_conflicting_metadata_does_not_fabricate_field_identity() {
             .contains_key("PARQUET:field_id")
     );
 }
+#[tokio::test]
+async fn native_try_cast_does_not_inherit_source_field_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    let sql = "SELECT try_cast(id AS DOUBLE) AS converted FROM first";
+    let frame = job.sql(sql).await.unwrap();
+    let declared = frame.schema().inner().clone();
+    assert!(declared.field(0).metadata().is_empty());
+    assert!(declared.field(0).is_nullable());
+    for batch in frame.collect().await.unwrap() {
+        assert_eq!(batch.schema(), declared);
+    }
+    let result = job
+        .sql(&format!("SELECT min(converted) FROM ({sql}) t"))
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    let values = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Float64Array>()
+        .unwrap();
+    assert_eq!(values.value(0), 1.0);
+}
+
 #[tokio::test]
 async fn table_job_creates_appends_and_repeated_work_is_a_noop() {
     let root = tempfile::tempdir().unwrap();
