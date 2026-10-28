@@ -23,6 +23,55 @@ fn limits() -> Limits {
 }
 
 #[tokio::test]
+async fn unnest_fanout_fits_materialization_without_application_chunking() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 32;
+    ceiling.max_batch_bytes = 65536;
+    let job = Job::new(ceiling.clone(), root.path().join("scratch")).unwrap();
+    job.materialize(
+        "fanout",
+        "SELECT unnest(range(0,256)) AS id,repeat('x',1024) AS value",
+    )
+    .await
+    .unwrap();
+    let batches = job
+        .sql("SELECT * FROM fanout")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert!(batches.len() > 1);
+    assert!(
+        batches
+            .iter()
+            .all(|batch| batch.get_array_memory_size() <= ceiling.max_batch_bytes)
+    );
+    let batch = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+    assert_eq!(
+        batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .values()
+            .as_ref(),
+        &(0..256).collect::<Vec<i64>>()
+    );
+    let values = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert!(
+        values
+            .iter()
+            .all(|value| value.is_some_and(|value| value == "x".repeat(1024)))
+    );
+}
+
+#[tokio::test]
 async fn wide_view_batches_fit_before_materialization_and_export() {
     use arrow::{
         array::{ArrayRef, StringViewArray},
