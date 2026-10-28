@@ -28,6 +28,11 @@ path = "tests/worker_initialization.rs"
 name = "restore"
 path = "tests/restore.rs"
 
+# Measures a single SQL workload in a fresh child process.
+[[test]]
+name = "sql_process_memory"
+path = "tests/sql_process_memory.rs"
+
 [features]
 test-util = []
 remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store"]
