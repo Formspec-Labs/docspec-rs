@@ -643,15 +643,15 @@ mod tests {
     use super::*;
     #[test]
     fn dynamic_path_compilation_fits_around_preceding_output_admission() {
-        use arrow::array::StringArray;
+        use arrow::array::{Array, ArrayRef, StringArray};
         let budget=Budget::new(crate::budget::Limits {
             memory_bytes:64<<10,max_batch_bytes:4<<10,max_metadata_bytes:32<<10,
             ..crate::budget::Limits::default()
         }).unwrap();
         let raw=format!(r#"{{"a":"{}"}}"#,"x".repeat(2048));
         let long_path=format!(r#"[["{}"]]"#,"z".repeat(80));
-        let input=Arc::new(StringArray::from(vec![Some(raw.as_str()),None]));
-        let definitions=Arc::new(StringArray::from(vec![r#"[["a"]]"#,long_path.as_str()]));
+        let input:ArrayRef=Arc::new(StringArray::from(vec![Some(raw.as_str()),None]));
+        let definitions:ArrayRef=Arc::new(StringArray::from(vec![r#"[["a"]]"#,long_path.as_str()]));
         let error=project(&ColumnarValue::Array(input.clone()),Definition::Rows(&ColumnarValue::Array(definitions.clone())),&budget).unwrap_err();
         assert!(error.to_string().contains("fit 1 preceding rows"),"{error}");
         for row in 0..2 {
