@@ -3,6 +3,26 @@
 use super::*;
 
 #[test]
+fn native_alignment_refusal_reports_separate_pool_usage() {
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        memory_bytes: 16 << 20,
+        ..Default::default()
+    })
+    .unwrap();
+    let _held = budget.reserve(4 << 20).unwrap();
+    let error = budget.reserve(5 << 20).unwrap_err();
+    assert_eq!(error.code(), "capacity");
+    let message = error.to_string();
+    assert!(message.contains("requested 5242880 bytes"), "{message}");
+    assert!(
+        message.contains("available 4194304 of 8388608"),
+        "{message}"
+    );
+    assert!(message.contains("native reserved 0"), "{message}");
+    assert!(message.contains("alignment_tests.rs"), "{message}");
+}
+
+#[test]
 fn timezone_alignment_charges_only_allocated_buffers() {
     use arrow::array::{RecordBatchReader, TimestampMicrosecondArray};
     let source =
