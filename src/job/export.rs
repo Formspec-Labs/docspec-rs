@@ -174,6 +174,10 @@ pub(super) async fn export(
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
         .set_created_by(settings.created_by.clone())
         .set_dictionary_enabled(false)
+        .set_max_row_group_bytes(
+            (settings.profile != ExportProfile::Lookup)
+                .then_some(budget.limits.max_batch_bytes / 4),
+        )
         .set_bloom_filter_enabled(false)
         .set_statistics_enabled(EnabledStatistics::Chunk)
         .set_max_row_group_row_count(Some(if settings.profile == ExportProfile::Lookup {
@@ -292,7 +296,7 @@ pub(super) async fn export(
         let groups = if settings.profile == ExportProfile::Lookup {
             1
         } else {
-            (rows as usize).div_ceil(settings.row_group_rows)
+            writer.flushed_row_groups().len().saturating_add(1)
         };
         if metadata_unit.saturating_mul(groups.saturating_add(1)) > metadata_limit {
             return Err(Error::refusal(

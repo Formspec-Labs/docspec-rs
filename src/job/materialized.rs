@@ -158,6 +158,9 @@ pub(super) async fn retain(
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
                 .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+                .set_max_row_group_bytes(Some(budget.limits.max_batch_bytes / 4))
+                .set_write_batch_size(budget.limits.batch_rows.min(32))
+                .set_dictionary_enabled(false)
                 .build();
             let mut spill = ArrowWriter::try_new(
                 budget.scratch_writer(&temporary)?,
@@ -195,8 +198,19 @@ pub(super) async fn retain(
         let file = file.expect("spill owns temporary file");
         // A frame from the job's own catalog would retain this table and form
         // a cycle. A fresh context shares its runtime, not its catalog.
-        let frame = budget
-            .context()
+        let reader = budget.context();
+        // This private table advertises the already normalized spill schema.
+        // Keep the native reader in that representation instead of changing
+        // Utf8 fields back to views underneath the streaming table.
+        reader
+            .state_ref()
+            .write()
+            .config_mut()
+            .options_mut()
+            .execution
+            .parquet
+            .schema_force_view_types = false;
+        let frame = reader
             .read_parquet(
                 file.path().to_string_lossy().as_ref(),
                 ParquetReadOptions::default().file_extension(""),
