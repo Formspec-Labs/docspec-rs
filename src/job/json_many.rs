@@ -520,9 +520,15 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
         }
         builder.append(true);
     }
-    let result = Arc::new(builder.finish());
+    let result = super::admitted::array(Arc::new(builder.finish()), memory)
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
     if scalar {
-        Ok(ColumnarValue::Scalar(ScalarValue::List(result)))
+        let list = result
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .expect("list output")
+            .clone();
+        Ok(ColumnarValue::Scalar(ScalarValue::List(Arc::new(list))))
     } else {
         Ok(ColumnarValue::Array(result))
     }

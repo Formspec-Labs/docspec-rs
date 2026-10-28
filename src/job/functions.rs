@@ -309,7 +309,7 @@ impl GenericFunction {
         if rows.saturating_mul(9) > self.budget.limits.max_batch_bytes {
             return Err(capacity());
         }
-        let _admission = admit(&self.budget, rows.saturating_mul(16).saturating_add(512))?;
+        let admission = admit(&self.budget, rows.saturating_mul(16).saturating_add(512))?;
         let mut builder = TimestampMicrosecondBuilder::with_capacity(rows);
         for index in 0..rows {
             let value = text(inputs[0].0.as_ref(), if inputs[0].1 { 0 } else { index })?
@@ -318,9 +318,7 @@ impl GenericFunction {
                 .and_then(|duration| i64::try_from(duration.as_micros()).ok());
             builder.append_option(value);
         }
-        Ok(ColumnarValue::Array(Arc::new(
-            builder.finish().with_timezone("UTC"),
-        )))
+        admitted_output(Arc::new(builder.finish().with_timezone("UTC")), admission)
     }
 
     fn canonical(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
@@ -335,7 +333,7 @@ impl GenericFunction {
         }
         // One parsed tree at a time, including Vec growth and sorted object
         // references. Retained output capacities coexist with the Arrow builder.
-        let _admission = admit(
+        let admission = admit(
             &self.budget,
             largest
                 .saturating_mul(128)
@@ -368,7 +366,7 @@ impl GenericFunction {
         for value in values {
             builder.append_option(value);
         }
-        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+        admitted_output(Arc::new(builder.finish()), admission)
     }
     fn json(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
         let limit = self.budget.limits.max_batch_bytes;
@@ -395,7 +393,7 @@ impl GenericFunction {
         let metadata = fields
             .iter()
             .fold(0usize, |n, f| n.saturating_add(f.size().saturating_mul(4)));
-        let _admission = admit(
+        let admission = admit(
             &self.budget,
             total
                 .saturating_add(largest)
@@ -432,7 +430,7 @@ impl GenericFunction {
                 DataFusionError::Execution("JSON encoder returned invalid UTF-8".into())
             })?);
         }
-        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+        admitted_output(Arc::new(builder.finish()), admission)
     }
     fn strings(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
         let get = |arg: usize, index: usize| {
@@ -460,7 +458,7 @@ impl GenericFunction {
                     .saturating_add(64),
             );
         }
-        let _admission = admit(
+        let admission = admit(
             &self.budget,
             allowance
                 .saturating_mul(2)
@@ -496,8 +494,16 @@ impl GenericFunction {
         for value in values {
             builder.append_option(value);
         }
-        Ok(ColumnarValue::Array(Arc::new(builder.finish())))
+        admitted_output(Arc::new(builder.finish()), admission)
     }
+}
+fn admitted_output(
+    array: ArrayRef,
+    memory: tokio::sync::OwnedSemaphorePermit,
+) -> Result<ColumnarValue> {
+    super::admitted::array(array, memory)
+        .map(ColumnarValue::Array)
+        .map_err(|e| DataFusionError::External(Box::new(e)))
 }
 fn resolve(reference: &str, base: Option<&str>) -> Option<String> {
     let base = match base {
