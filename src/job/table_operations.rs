@@ -194,10 +194,19 @@ impl TableOperation {
                         }
                         job.register_native_table(current_table, table).await?;
                         job.materialize(work_table, sql).await?;
-                        let frame = job.context.table(work_table).await?;
-                        if frame.clone().count().await? == 0 {
+                        let provider = job.context.table_provider(work_table).await?;
+                        let rows = match provider.statistics().map(|s| s.num_rows) {
+                            Some(datafusion::common::stats::Precision::Exact(rows)) => rows,
+                            _ => {
+                                return Err(invalid(
+                                    "materialized append work has no exact row count",
+                                ));
+                            }
+                        };
+                        if rows == 0 {
                             return Ok(AppendWork::Empty);
                         }
+                        let frame = job.context.table(work_table).await?;
                         let identity =
                             query_result::query(job, "append_identity", identity_sql).await?;
                         let rows = identity.data.as_array().ok_or_else(|| {
