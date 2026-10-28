@@ -630,3 +630,47 @@ async fn two_hundred_small_json_files_reuse_bounded_reader_slots() {
         );
     }
 }
+
+#[tokio::test]
+async fn sparse_json_fixed_width_elements_refuse_before_native_decode_allocation() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("sparse.jsonl");
+    std::fs::write(
+        &path,
+        format!("{{\"items\":[{}]}}\n", vec!["null"; 4096].join(",")),
+    )
+    .unwrap();
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    job.register_json_lines(
+        "input",
+        vec![JsonLinesFile {
+            key: "sparse".into(),
+            path,
+        }],
+        Arc::new(Schema::new(vec![Field::new(
+            "items",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::FixedSizeBinary(4096),
+                true,
+            ))),
+            true,
+        )])),
+    )
+    .unwrap();
+    let error = job
+        .sql("SELECT * FROM input")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.find_root(),
+            datafusion::common::DataFusionError::ResourcesExhausted(_)
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("JSON-lines decoder"), "{error}");
+}
