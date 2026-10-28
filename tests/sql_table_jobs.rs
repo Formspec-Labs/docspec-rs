@@ -18,21 +18,190 @@ fn limits() -> Limits {
     }
 }
 fn spec(root: &std::path::Path) -> Value {
-    let schema = Schema::builder()
-        .with_fields(vec![Arc::new(NestedField::required(
+    spec_with_id(root, 1)
+}
+fn spec_with_id(root: &std::path::Path, field_id: i32) -> Value {
+    let mut fields = Vec::new();
+    // Creation assigns IDs by position. Give the second table a preceding
+    // field so its id column really has a different native field identity.
+    if field_id == 2 {
+        fields.push(Arc::new(NestedField::required(
             1,
-            "id",
-            Type::Primitive(PrimitiveType::Long),
-        ))])
-        .with_identifier_field_ids([1])
+            "prefix",
+            Type::Primitive(PrimitiveType::String),
+        )));
+    }
+    fields.push(Arc::new(NestedField::required(
+        field_id,
+        "id",
+        Type::Primitive(PrimitiveType::Long),
+    )));
+    let schema = Schema::builder()
+        .with_fields(fields)
+        .with_identifier_field_ids([field_id])
         .build()
         .unwrap();
+    let incoming = if field_id == 2 {
+        "SELECT 'fixture' AS prefix,cast(value AS BIGINT) AS id FROM generate_series(1,2)"
+    } else {
+        "SELECT cast(value AS BIGINT) AS id FROM generate_series(1,2)"
+    };
     json!({"scratch":root.join("scratch"),"catalog_root":root.join("catalog"),"inputs":[],
-        "steps":[{"name":"incoming","sql":"SELECT cast(value AS BIGINT) AS id FROM generate_series(1,2)"}],"outputs":[],
+        "steps":[{"name":"incoming","sql":incoming}],"outputs":[],
         "table_operations":[{"kind":"create_namespace","name":"namespace","namespace":["archive"],"properties":{}},
             {"kind":"create","name":"create","table":{"namespace":["archive"],"name":"captures"},"location":root.join("data"),"schema":schema,"format_version":2,"properties":{"gc.enabled":"true","commit.retry.num-retries":"0"}},
             {"kind":"append","name":"append","table":{"namespace":["archive"],"name":"captures"},"current_table":"existing","work_table":"pending","sql":"SELECT incoming.* FROM incoming LEFT ANTI JOIN existing ON incoming.id=existing.id","identity_sql":"SELECT 'immutable-rows-1-and-2-writer-v1' AS identity FROM pending LIMIT 1","layout":{"file_bytes":1048576,"row_group_rows":64,"row_group_bytes":1048576}}]})
 }
+
+async fn metadata_job(root: &std::path::Path) -> docspec::job::Job {
+    let job = docspec::job::Job::new(limits(), root.join("union-scratch")).unwrap();
+    for (name, id) in [("first", 1), ("second", 2)] {
+        let result = serde_json::from_value::<JobSpec>(spec_with_id(&root.join(name), id))
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap();
+        let head = &result.table_operations[2];
+        job.register_native_snapshot(
+            name,
+            &docspec::storage::NativeTableSnapshot {
+                metadata_location: head.metadata_location.clone().unwrap(),
+                table_uuid: head.table_uuid.unwrap(),
+                snapshot: head.snapshot,
+                schema_id: head.schema_id.unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+        let frame = job.sql(&format!("SELECT id FROM {name}")).await.unwrap();
+        assert_eq!(
+            frame.schema().field(0).metadata().get("PARQUET:field_id"),
+            Some(&id.to_string())
+        );
+    }
+    job
+}
+
+async fn check_metadata_union(job: &docspec::job::Job, sql: &str, mut expected: Vec<Option<i64>>) {
+    use arrow::array::{Array, Int64Array};
+    // The aggregate checks the native planner's input-schema invariant. The
+    // plain stream must also carry its declared metadata on every batch.
+    let grouped = job
+        .sql(&format!("SELECT count(*) AS n,sum(id) AS s FROM ({sql}) u"))
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        grouped[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        expected.len() as i64
+    );
+    assert_eq!(
+        grouped[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        expected.iter().flatten().sum::<i64>()
+    );
+    let frame = job.sql(sql).await.unwrap();
+    let declared = frame.schema().as_arrow().clone();
+    let batches = frame.collect().await.unwrap();
+    let mut actual = Vec::new();
+    for batch in batches {
+        assert_eq!(batch.schema().as_ref(), &declared);
+        let values = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        actual.extend((0..values.len()).map(|i| (!values.is_null(i)).then(|| values.value(i))));
+    }
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn native_union_missing_metadata_keeps_the_declared_schema() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    for sql in [
+        "SELECT id FROM (SELECT id,id+100 AS unused FROM first UNION ALL SELECT cast(NULL AS BIGINT) AS id,cast(NULL AS BIGINT) AS unused) u",
+        "SELECT id FROM (SELECT cast(NULL AS BIGINT) AS id,cast(NULL AS BIGINT) AS unused UNION ALL SELECT id,id+100 FROM first) u",
+    ] {
+        check_metadata_union(&job, sql, vec![Some(1), Some(2), None]).await;
+    }
+}
+
+#[tokio::test]
+async fn native_union_conflicting_metadata_does_not_fabricate_field_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    check_metadata_union(
+        &job,
+        "SELECT id FROM (SELECT id,id+100 AS unused FROM first UNION ALL SELECT id,id+200 AS unused FROM second) u",
+        vec![Some(1), Some(2), Some(1), Some(2)],
+    )
+    .await;
+    let same = job
+        .sql("SELECT id FROM first UNION ALL SELECT id FROM first")
+        .await
+        .unwrap();
+    assert_eq!(
+        same.schema()
+            .field(0)
+            .metadata()
+            .get("PARQUET:field_id")
+            .map(String::as_str),
+        Some("1")
+    );
+    let different = job
+        .sql("SELECT id FROM first UNION ALL SELECT id FROM second")
+        .await
+        .unwrap();
+    assert!(
+        !different
+            .schema()
+            .field(0)
+            .metadata()
+            .contains_key("PARQUET:field_id")
+    );
+}
+#[tokio::test]
+async fn native_try_cast_does_not_inherit_source_field_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    let sql = "SELECT try_cast(id AS DOUBLE) AS converted FROM first";
+    let frame = job.sql(sql).await.unwrap();
+    let declared = frame.schema().inner().clone();
+    assert!(declared.field(0).metadata().is_empty());
+    assert!(declared.field(0).is_nullable());
+    for batch in frame.collect().await.unwrap() {
+        assert_eq!(batch.schema(), declared);
+    }
+    let result = job
+        .sql(&format!("SELECT min(converted) FROM ({sql}) t"))
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    let values = result[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Float64Array>()
+        .unwrap();
+    assert_eq!(values.value(0), 1.0);
+}
+
 #[tokio::test]
 async fn table_job_creates_appends_and_repeated_work_is_a_noop() {
     let root = tempfile::tempdir().unwrap();

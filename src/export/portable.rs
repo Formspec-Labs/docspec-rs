@@ -678,6 +678,8 @@ pub(crate) fn portable_batch(
 
 #[cfg(test)]
 mod tests {
+    mod containers;
+
     use super::*;
     use crate::budget::Limits;
     use arrow::{

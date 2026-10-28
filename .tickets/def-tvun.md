@@ -37,3 +37,7 @@ Native-pin slice/D2 replay exposed Binary versus FixedSizeBinary(32) and nested 
 **2026-10-28T08:07:03Z**
 
 b7576e6/4df787b contracts first; strict maintained Arrow conversion and declared-target byte sizing pass final 11 portable checks, all-target/all-feature Clippy, and exact retained D2 replay. Initial 69 SQL checks pass before minor no-op cleanup. Native model completes source_annotations and all later named steps, then fails first export on DataFusion physical/logical PARQUET:field_id metadata drift; no accepted model exports. Type investigation reached 45 minutes; prioritize the independent full D1 physical-footprint bottleneck, then return to the exact metadata failure.
+
+**2026-10-28T08:58:28Z**
+
+Metadata contract first: two real local native tables with field IDs 1 and 2, plus NULL branches, retain exact row multisets and declared batch schemas. Current focused lane fails both tests: aggregate physical/logical PARQUET metadata disagreement and fabricated union field identity. Upstream PR21127 fixes only empty metadata; the retained daily fixture has actual conflicting IDs (captures SHA16 versus readings SHA1), requiring metadata reconciliation without stripping input IDs or disabling validation.
