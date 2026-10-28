@@ -695,6 +695,20 @@ mod tests {
         assert_eq!(output[0].column(0).null_count(), 128);
         let oversized = batch(Arc::new(BinaryArray::from(vec![None::<&[u8]>])));
         let error = PortableBatches::new(
+    #[test]
+    fn native_struct_field_names_cannot_enable_value_coercion() {
+        let source = StructArray::from(vec![
+            (Arc::new(Field::new("a", DataType::Utf8, true)), Arc::new(StringArray::from(vec!["12"])) as ArrayRef),
+            (Arc::new(Field::new("b", DataType::Int64, true)), Arc::new(Int64Array::from(vec![17])) as ArrayRef),
+        ]);
+        let target = DataType::Struct(vec![Field::new("b", DataType::Utf8, true), Field::new("a", DataType::Int64, true)].into());
+        // Native Arrow matches struct fields by name, so a broad cast can
+        // change values even when positional types originally matched.
+        let native = arrow::compute::cast(&source, &target).unwrap();
+        assert_eq!(native.as_any().downcast_ref::<StructArray>().unwrap().column(1).as_any().downcast_ref::<Int64Array>().unwrap().value(0), 12);
+        assert!(portable_batch(batch(Arc::new(source)), declared(target), &budget()).is_err());
+    }
+
             oversized,
             declared(DataType::FixedSizeBinary(8192)),
             budget(),
