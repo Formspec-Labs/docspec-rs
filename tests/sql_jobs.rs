@@ -23,6 +23,80 @@ fn limits() -> Limits {
 }
 
 #[tokio::test]
+async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance() {
+    use docspec::{
+        job::{ExportProfile, ExportSettings},
+        model::SortColumn,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.memory_bytes = 4 << 20;
+    ceiling.max_metadata_bytes = 64 << 10;
+    ceiling.batch_rows = 8192;
+    ceiling.max_batch_bytes = 64 << 10;
+    let job = Job::new(ceiling, root.path().join("scratch")).unwrap();
+    job.register_view(
+        "source",
+        "SELECT unnest(range(0,8192)) AS id,repeat('x',512) AS value",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        job.materialize("spilled", "SELECT * FROM source")
+            .await
+            .unwrap(),
+        StepStorage::Scratch
+    );
+    let batches = job
+        .sql("SELECT count(*) AS n,sum(length(value)) AS bytes FROM spilled")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        8192
+    );
+    assert_eq!(
+        batches[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        8192 * 512
+    );
+    let settings = ExportSettings {
+        profile: ExportProfile::Whole,
+        row_group_rows: 8192,
+        order_by: vec![SortColumn::asc("id")],
+        columns: vec![],
+        dictionary_columns: Default::default(),
+        delta_columns: Default::default(),
+        key_column: None,
+        created_by: "byte fitted spill".into(),
+        footer_limit: 4096,
+    };
+    assert_eq!(
+        job.export(
+            "SELECT * FROM spilled",
+            &root.path().join("output.parquet"),
+            &settings
+        )
+        .await
+        .unwrap()
+        .rows,
+        8192
+    );
+}
+
+#[tokio::test]
 async fn unnest_fanout_fits_materialization_without_application_chunking() {
     let root = tempfile::tempdir().unwrap();
     let mut ceiling = limits();
