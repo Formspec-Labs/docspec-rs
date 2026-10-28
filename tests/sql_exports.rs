@@ -26,6 +26,32 @@ fn settings(profile: ExportProfile) -> ExportSettings {
 }
 
 #[tokio::test]
+async fn smallest_byte_allowances_refuse_before_writing_without_panicking() {
+    let root = tempfile::tempdir().unwrap();
+    for bytes in 1..=3 {
+        let job = Job::new(
+            Limits {
+                memory_bytes: 32 << 20,
+                max_batch_bytes: bytes,
+                ..Limits::default()
+            },
+            root.path().join(format!("scratch-{bytes}")),
+        )
+        .unwrap();
+        let mut settings = settings(ExportProfile::Whole);
+        settings.dictionary_columns.clear();
+        settings.delta_columns.clear();
+        let path = root.path().join(format!("output-{bytes}.parquet"));
+        let error = job
+            .export("SELECT 1 AS id", &path, &settings)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "capacity");
+        assert!(!path.exists());
+    }
+}
+
+#[tokio::test]
 async fn export_is_byte_equal_after_input_permutation_and_hashes_written_bytes() {
     use sha2::{Digest, Sha256};
     let root = tempfile::tempdir().unwrap();

@@ -23,6 +23,221 @@ fn limits() -> Limits {
 }
 
 #[tokio::test]
+async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.memory_bytes = 4 << 20;
+    ceiling.max_metadata_bytes = 64 << 10;
+    ceiling.batch_rows = 8192;
+    ceiling.max_batch_bytes = 64 << 10;
+    let job = Job::new(ceiling, root.path().join("scratch")).unwrap();
+    job.register_view(
+        "source",
+        "SELECT unnest(range(0,8192)) AS id,repeat('x',512) AS value",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        job.materialize("spilled", "SELECT * FROM source")
+            .await
+            .unwrap(),
+        StepStorage::Scratch
+    );
+    let batches = job
+        .sql("SELECT count(*) AS n,sum(length(value)) AS bytes FROM spilled")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        8192
+    );
+    assert_eq!(
+        batches[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0),
+        8192 * 512
+    );
+}
+
+#[tokio::test]
+async fn unnest_fanout_fits_materialization_without_application_chunking() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 32;
+    ceiling.max_batch_bytes = 65536;
+    let job = Job::new(ceiling.clone(), root.path().join("scratch")).unwrap();
+    job.materialize(
+        "fanout",
+        "SELECT unnest(range(0,256)) AS id,repeat('x',1024) AS value",
+    )
+    .await
+    .unwrap();
+    let batches = job
+        .sql("SELECT * FROM fanout")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert!(batches.len() > 1);
+    assert!(
+        batches
+            .iter()
+            .all(|batch| batch.get_array_memory_size() <= ceiling.max_batch_bytes)
+    );
+    let batch = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+    assert_eq!(
+        batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .values()
+            .as_ref(),
+        &(0..256).collect::<Vec<i64>>()
+    );
+    let values = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert!(
+        values
+            .iter()
+            .all(|value| value.is_some_and(|value| value == "x".repeat(1024)))
+    );
+}
+
+#[tokio::test]
+async fn wide_view_batches_fit_before_materialization_and_export() {
+    use arrow::{
+        array::{ArrayRef, StringViewArray},
+        record_batch::RecordBatch,
+    };
+    use docspec::{
+        job::{ExportProfile, ExportSettings},
+        model::SortColumn,
+    };
+    use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("wide.parquet");
+    let mut fields = vec![Field::new("id", DataType::Int64, false)];
+    let mut columns = vec![Arc::new(Int64Array::from_iter_values(0..32)) as ArrayRef];
+    for column in 0..22 {
+        fields.push(Field::new(format!("v{column}"), DataType::Utf8View, true));
+        columns.push(Arc::new(StringViewArray::from_iter((0..32).map(|row| {
+            (row % 5 != 0).then(|| format!("{column}:{row}:{}", "x".repeat(512)))
+        }))));
+    }
+    let source = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let mut writer = ArrowWriter::try_new(
+        std::fs::File::create(&input).unwrap(),
+        source.schema(),
+        None,
+    )
+    .unwrap();
+    writer.write(&source).unwrap();
+    writer.close().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 32;
+    ceiling.max_batch_bytes = 128 << 10;
+    let job = Job::new(ceiling.clone(), root.path().join("scratch")).unwrap();
+    job.register_parquet("wide", &input).await.unwrap();
+    job.materialize("fitted", "SELECT * FROM wide")
+        .await
+        .unwrap();
+    let batches = job
+        .sql("SELECT * FROM fitted")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert!(batches.len() > 1);
+    assert!(
+        batches
+            .iter()
+            .all(|b| b.get_array_memory_size() <= ceiling.max_batch_bytes)
+    );
+    let actual = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+    let expected = RecordBatch::try_new(
+        actual.schema(),
+        source
+            .columns()
+            .iter()
+            .zip(actual.schema().fields())
+            .map(|(column, field)| arrow::compute::cast(column, field.data_type()).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(actual, expected);
+    let settings = ExportSettings {
+        profile: ExportProfile::Whole,
+        row_group_rows: 32,
+        order_by: vec![SortColumn::asc("id")],
+        columns: vec![],
+        dictionary_columns: Default::default(),
+        delta_columns: Default::default(),
+        key_column: None,
+        created_by: "byte fitting fixture".into(),
+        footer_limit: 128 << 10,
+    };
+    let output = root.path().join("wide-output.parquet");
+    assert_eq!(
+        job.export("SELECT * FROM wide", &output, &settings)
+            .await
+            .unwrap()
+            .rows,
+        32
+    );
+    let read = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(output).unwrap())
+        .unwrap()
+        .build()
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        arrow::compute::concat_batches(&read[0].schema(), &read).unwrap(),
+        expected
+    );
+    let mut fragmented_limits = ceiling.clone();
+    fragmented_limits.batch_rows = 3;
+    let fragmented = Job::new(fragmented_limits, root.path().join("fragmented-scratch")).unwrap();
+    fragmented.register_parquet("wide", &input).await.unwrap();
+    let fragmented_output = root.path().join("fragmented-output.parquet");
+    fragmented
+        .export("SELECT * FROM wide", &fragmented_output, &settings)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(root.path().join("wide-output.parquet")).unwrap(),
+        std::fs::read(fragmented_output).unwrap()
+    );
+
+    let too_large = root.path().join("large.parquet");
+    super::scalar::input(&too_large, &[(Some(1), Some("x".repeat(256 << 10)))]);
+    job.register_parquet("large", &too_large).await.unwrap();
+    assert_eq!(
+        job.materialize("refused", "SELECT * FROM large")
+            .await
+            .unwrap_err()
+            .code(),
+        "capacity"
+    );
+}
+
+#[tokio::test]
 async fn joins_files_and_nullable_json_without_losing_raw_lines() {
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("input.parquet");

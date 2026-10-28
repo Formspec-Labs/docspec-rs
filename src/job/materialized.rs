@@ -129,8 +129,9 @@ pub(super) async fn retain(
     budget: &Budget,
     name: &str,
     schema: SchemaRef,
-    mut stream: SendableRecordBatchStream,
+    stream: SendableRecordBatchStream,
 ) -> Result<StepStorage> {
+    let mut stream = crate::export::portable_stream(stream, schema.clone(), budget);
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
     let mut batches = Vec::new();
@@ -140,7 +141,6 @@ pub(super) async fn retain(
     let mut writer_memory = None;
     let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
     while let Some(batch) = stream.try_next().await? {
-        let batch = crate::export::portable_batch(batch, schema.clone(), budget)?;
         rows += batch.num_rows();
         let size = batch.get_array_memory_size();
         if size > budget.limits.max_batch_bytes {
@@ -151,13 +151,16 @@ pub(super) async fn retain(
         }
         bytes += size;
         if writer.is_none() && reservation.try_grow(size).is_err() {
-            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes)?);
+            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes * 2)?);
             let temporary = budget
                 .runtime_env()
                 .disk_manager
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
                 .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+                .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
+                .set_write_batch_size(budget.limits.batch_rows.min(32))
+                .set_dictionary_enabled(false)
                 .build();
             let mut spill = ArrowWriter::try_new(
                 budget.scratch_writer(&temporary)?,
@@ -165,26 +168,28 @@ pub(super) async fn retain(
                 Some(props),
             )?;
             for previous in batches.drain(..) {
-                spill.write(&previous)?;
-                if spill.memory_size() > budget.limits.max_batch_bytes {
-                    return Err(Error::refusal(
-                        "capacity",
-                        "named step writer exceeds configured byte allowance",
-                    ));
-                }
+                super::encoding::write(
+                    &mut spill,
+                    &previous,
+                    budget,
+                    budget.limits.max_batch_bytes * 2,
+                    false,
+                    true,
+                )?;
             }
             reservation.free();
             file = Some(temporary);
             writer = Some(spill);
         }
         if let Some(writer) = &mut writer {
-            writer.write(&batch)?;
-            if writer.memory_size() > budget.limits.max_batch_bytes {
-                return Err(Error::refusal(
-                    "capacity",
-                    "named step writer exceeds configured byte allowance",
-                ));
-            }
+            super::encoding::write(
+                writer,
+                &batch,
+                budget,
+                budget.limits.max_batch_bytes * 2,
+                false,
+                true,
+            )?;
         } else {
             batches.push(batch);
         }
@@ -195,8 +200,19 @@ pub(super) async fn retain(
         let file = file.expect("spill owns temporary file");
         // A frame from the job's own catalog would retain this table and form
         // a cycle. A fresh context shares its runtime, not its catalog.
-        let frame = budget
-            .context()
+        let reader = budget.context();
+        // This private table advertises the already normalized spill schema.
+        // Keep the native reader in that representation instead of changing
+        // Utf8 fields back to views underneath the streaming table.
+        reader
+            .state_ref()
+            .write()
+            .config_mut()
+            .options_mut()
+            .execution
+            .parquet
+            .schema_force_view_types = false;
+        let frame = reader
             .read_parquet(
                 file.path().to_string_lossy().as_ref(),
                 ParquetReadOptions::default().file_extension(""),

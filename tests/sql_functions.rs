@@ -23,6 +23,106 @@ async fn scalar(sql: &str) -> Value {
 }
 
 #[tokio::test]
+async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 400;
+    ceiling.max_batch_bytes = 1024;
+    let queries = [
+        (
+            "many",
+            r#"SELECT count(json_get_many(concat('{"a":"',repeat('x',64),'","id":',cast(value AS VARCHAR),'}'),'[["a"],["a"],["a"]]')) AS n FROM generate_series(1,128)"#,
+            128,
+        ),
+        (
+            "dates",
+            "SELECT count(http_date(CASE WHEN value%2=0 THEN 'Thu, 01 Jan 1970 00:00:00 GMT' ELSE 'invalid' END)) AS n FROM generate_series(1,400)",
+            200,
+        ),
+        (
+            "canonical",
+            "SELECT sum(length(json_canonical(concat('1e',cast(value % 2 AS VARCHAR))))) AS n FROM generate_series(1,400)",
+            1400,
+        ),
+        (
+            "conditional",
+            "SELECT count(CASE WHEN value%2=0 THEN json_canonical(CASE WHEN value%2=0 THEN '{\"a\":1}' ELSE '{bad' END) END) AS n FROM generate_series(1,400)",
+            200,
+        ),
+        (
+            "variable",
+            "SELECT sum(length(json_array(repeat('x',cast(value%3+1 AS BIGINT)*100)))) AS n FROM generate_series(1,120)",
+            24480,
+        ),
+        (
+            "filter",
+            "SELECT count(*) AS n FROM generate_series(1,400) WHERE length(json_array(repeat('x',cast(value%3+1 AS BIGINT)*100)))>200",
+            267,
+        ),
+        (
+            "grouped",
+            "SELECT sum(n) AS n FROM (SELECT json_canonical(concat('1e',cast(value%2 AS VARCHAR))) AS k,count(*) AS n FROM generate_series(1,400) GROUP BY k)",
+            400,
+        ),
+        (
+            "sort",
+            "SELECT sum(value) AS n FROM (SELECT value FROM generate_series(1,120) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*4)) DESC LIMIT 3)",
+            357,
+        ),
+        (
+            "join_filter",
+            "SELECT count(*) AS n FROM generate_series(1,40) a JOIN generate_series(1,40) b ON a.value=b.value AND length(json_array(concat(cast(a.value AS VARCHAR),cast(b.value AS VARCHAR),repeat('x',64))))>0",
+            40,
+        ),
+        (
+            "window",
+            "SELECT max(n) AS n FROM (SELECT sum(length(json_array(concat(cast(value AS VARCHAR),repeat('x',64))))) OVER () AS n FROM generate_series(1,40))",
+            2791,
+        ),
+        (
+            "parallel_sort",
+            "SELECT sum(value) AS n FROM (SELECT value FROM (SELECT value FROM generate_series(1,60) UNION ALL SELECT value FROM generate_series(61,120)) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*4)) DESC LIMIT 3)",
+            357,
+        ),
+        (
+            "window_lag",
+            "SELECT sum(length(n)) AS n FROM (SELECT lag(json_array(concat(cast(value AS VARCHAR),repeat('x',64)))) OVER (ORDER BY value) AS n FROM generate_series(1,40))",
+            2721,
+        ),
+        (
+            "window_partition",
+            "SELECT max(n) AS n FROM (SELECT count(*) OVER (PARTITION BY json_array(cast(value%2 AS VARCHAR))) AS n FROM generate_series(1,400))",
+            200,
+        ),
+        (
+            "window_filter",
+            "SELECT max(n) AS n FROM (SELECT count(*) FILTER (WHERE length(json_array(concat(cast(value AS VARCHAR),repeat('x',64))))>0) OVER () AS n FROM generate_series(1,40))",
+            40,
+        ),
+    ];
+    for (name, sql, expected) in queries {
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join(name),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":name,"sql":sql}]})).unwrap();
+        assert_eq!(
+            spec.run(ceiling.clone())
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+                .queries[0]
+                .data,
+            json!([{"n":expected}]),
+            "{name}"
+        );
+    }
+    for sql in [
+        "SELECT json_array(repeat('x',2048)) AS value",
+        r#"SELECT json_get_many(concat('{"a":"',repeat('x',512),'"}'),'[["a"],["a"],["a"]]') AS value"#,
+    ] {
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("single"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"single","sql":sql}]})).unwrap();
+        let error = spec.run(ceiling.clone()).await.unwrap_err().to_string();
+        assert!(error.contains("function output"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn http_dates_are_nullable_utc_values_without_application_retry_policy() {
     let values = scalar(
         "SELECT id,cast(http_date(value) AS BIGINT) AS micros FROM (VALUES
@@ -61,8 +161,10 @@ async fn http_date_output_respects_the_shared_batch_allowance() {
     ceiling.max_batch_bytes = 1024;
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],
         "queries":[{"name":"values","sql":"SELECT count(http_date(CASE WHEN value%2=0 THEN 'Thu, 01 Jan 1970 00:00:00 GMT' ELSE 'invalid' END)) AS n FROM generate_series(1,400)"}]})).unwrap();
-    let error = spec.run(ceiling).await.unwrap_err().to_string();
-    assert!(error.contains("function output"), "{error}");
+    assert_eq!(
+        spec.run(ceiling).await.unwrap().queries[0].data,
+        json!([{"n":200}])
+    );
 }
 
 #[tokio::test]
@@ -264,14 +366,16 @@ async fn canonical_json_matches_python_sorted_compact_vectors() {
 }
 
 #[tokio::test]
-async fn canonical_cumulative_output_exhaustion_is_a_capacity_refusal() {
+async fn canonical_cumulative_output_is_fitted_before_admission() {
     let root = tempfile::tempdir().unwrap();
     let mut ceiling = limits();
     ceiling.batch_rows = 400;
     ceiling.max_batch_bytes = 1024;
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":"SELECT sum(length(json_canonical(concat('1e',cast(value % 2 AS VARCHAR))))) AS n FROM generate_series(1,400)"}]})).unwrap();
-    let error = spec.run(ceiling).await.unwrap_err().to_string();
-    assert!(error.contains("function output"), "{error}");
+    assert_eq!(
+        spec.run(ceiling).await.unwrap().queries[0].data,
+        json!([{"n":1400}])
+    );
 }
 
 #[tokio::test]
@@ -345,16 +449,15 @@ async fn json_many_refuses_bad_or_overlapping_definitions_and_oversized_output()
     }
     let sql = r#"SELECT count(json_get_many(concat('{"a":"',repeat('x',64),'","id":',cast(value AS VARCHAR),'}'),'[["a"],["a"],["a"]]')) AS n FROM generate_series(1,128)"#;
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"v","sql":sql}]})).unwrap();
-    let error = spec
+    let result = spec
         .run(Limits {
             max_batch_bytes: 1024,
             batch_rows: 128,
             ..limits()
         })
         .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("function output"), "{error}");
+        .unwrap();
+    assert_eq!(result.queries[0].data, json!([{"n":128}]));
 }
 
 #[tokio::test]

@@ -38,7 +38,7 @@ impl TableProvider for AdmittedTable {
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>> {
-        self.provider.supports_filters_pushdown(filters)
+        super::fitting::filter_support(self.provider.as_ref(), filters)
     }
     async fn scan(
         &self,

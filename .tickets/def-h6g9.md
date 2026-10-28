@@ -18,3 +18,7 @@ C6: raw immutable reproduction codex-coord/shared/raw-prior-repro-fdb9242c conta
 **2026-10-28T02:55:52Z**
 
 Narrow official audit8891171 peaked7105298432B under unchanged14GiB configured memory and refused64MiB function output in63.22s without panic; no new unaccounted narrow-path excess identified. Isolated native Parquet dictionary/view regression: >2GiB logical text, <2MiB stored/shared input, exact2048 narrowresults, peakRSS52822016B versus128MiB configured+64MiB fixed overhead. Wide24GB reproduction remains deferred by owner until firstE2release; this test does not qualify wide path.
+
+**2026-10-28T03:22:03Z**
+
+Final code gate passes with isolated process-memory test registered as explicit target. Current narrow audit remains within14GiB; no further narrow-path accounting defect reproduced. The historical wide job remains explicitly owner-deferred until first E2 release; do not close from the52.8MB narrow regression or partial official audit.

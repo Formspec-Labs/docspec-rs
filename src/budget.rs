@@ -122,11 +122,14 @@ impl Budget {
         // exact zero, then fold COUNT to an incorrect constant. Retain join cost
         // planning, but disable that aggregate rewrite until the upstream path
         // passes native_statistics_preserve_filtered_offset_counts unguarded.
-        let rules = PhysicalOptimizer::new()
+        let mut rules: Vec<
+            Arc<dyn datafusion::physical_optimizer::PhysicalOptimizerRule + Send + Sync>,
+        > = PhysicalOptimizer::new()
             .rules
             .into_iter()
             .filter(|rule| rule.name() != "aggregate_statistics")
             .collect();
+        rules.push(Arc::new(crate::job::fitting::FitFunctions));
         let config = SessionConfig::new()
             .with_batch_size(self.limits.batch_rows)
             .with_target_partitions(self.limits.compute_threads)
