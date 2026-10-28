@@ -26,7 +26,9 @@ use std::{
 use tokio::sync::OwnedSemaphorePermit;
 
 fn invalid() -> DataFusionError {
-    DataFusionError::Plan("JSON paths must be literal arrays of string/integer paths, with prefix-disjoint selections".into())
+    DataFusionError::Plan(
+        "JSON paths must be arrays of string/integer paths, with prefix-disjoint selections".into(),
+    )
 }
 fn item() -> Arc<Field> {
     Arc::new(
@@ -45,9 +47,9 @@ fn string(value: &ScalarValue) -> Result<&str> {
         _ => Err(invalid()),
     }
 }
-fn literal(expr: &Expr) -> Result<&str> {
+fn literal(expr: &Expr) -> Result<Option<&str>> {
     match expr {
-        Expr::Literal(value, _) => string(value),
+        Expr::Literal(value, _) => string(value).map(Some),
         Expr::Cast(c)
             if matches!(
                 c.data_type,
@@ -56,7 +58,7 @@ fn literal(expr: &Expr) -> Result<&str> {
         {
             literal(&c.expr)
         }
-        _ => Err(invalid()),
+        _ => Ok(None),
     }
 }
 #[derive(Default)]
@@ -74,7 +76,7 @@ struct Paths {
 }
 impl Paths {
     fn compile(value: &str, budget: &Budget) -> Result<Arc<Self>> {
-        // Literal definitions alone use a DOM; the potentially huge input never does.
+        // Only path definitions use a DOM; the potentially huge input never does.
         // This allowance covers trie/hash-table growth and decoded definition keys.
         let size = value
             .len()
@@ -215,7 +217,10 @@ impl ScalarUDFImpl for Projection {
         let [raw, definition] = args.as_slice() else {
             return Err(invalid());
         };
-        let paths = Paths::compile(literal(definition)?, &self.budget)?;
+        let Some(definition) = literal(definition)? else {
+            return Ok(ExprSimplifyResult::Original(args));
+        };
+        let paths = Paths::compile(definition, &self.budget)?;
         Ok(ExprSimplifyResult::Simplified(Expr::ScalarFunction(
             ScalarFunction {
                 func: Arc::new(ScalarUDF::from(Self::new(self.budget.clone(), Some(paths)))),
@@ -224,27 +229,17 @@ impl ScalarUDFImpl for Projection {
         )))
     }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
-        let owned;
-        let paths = if let Some(paths) = &self.paths {
-            paths
-        } else {
-            // Constant folding invokes an all-scalar function once. Ordinary
-            // column execution must use the literal-specialized plan above.
-            if args.args.len() != 2
-                || args
-                    .args
-                    .iter()
-                    .any(|v| matches!(v, ColumnarValue::Array(_)))
-            {
-                return Err(invalid());
+        match (&self.paths, args.args.as_slice()) {
+            (Some(paths), [input]) => project(input, Definition::Fixed(paths), &self.budget),
+            (None, [input, ColumnarValue::Scalar(value)]) => {
+                let paths = Paths::compile(string(value)?, &self.budget)?;
+                project(input, Definition::Fixed(&paths), &self.budget)
             }
-            let ColumnarValue::Scalar(definition) = &args.args[1] else {
-                return Err(invalid());
-            };
-            owned = Paths::compile(string(definition)?, &self.budget)?;
-            &owned
-        };
-        project(&args.args[0], paths, &self.budget)
+            (None, [input, definition]) => {
+                project(input, Definition::Rows(definition), &self.budget)
+            }
+            _ => Err(invalid()),
+        }
     }
 }
 // Locked Jiter0.13 known_skip permits200 nonempty container levels. These
@@ -441,13 +436,13 @@ fn spans(
     }
 }
 
-fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<ColumnarValue> {
-    let scalar = matches!(input, ColumnarValue::Scalar(_));
-    let rows = match input {
-        ColumnarValue::Scalar(_) => 1,
-        ColumnarValue::Array(array) => array.len(),
-    };
-    let get = |row| match input {
+enum Definition<'a> {
+    Fixed(&'a Arc<Paths>),
+    Rows(&'a ColumnarValue),
+}
+
+fn row_text(input: &ColumnarValue, row: usize) -> Result<Option<&str>> {
+    match input {
         ColumnarValue::Array(array) => text(array.as_ref(), row),
         ColumnarValue::Scalar(value) => match value {
             ScalarValue::Utf8(v) | ScalarValue::LargeUtf8(v) | ScalarValue::Utf8View(v) => {
@@ -456,67 +451,163 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
             ScalarValue::Null => Ok(None),
             _ => Err(invalid()),
         },
+    }
+}
+
+fn output_capacity(rows: usize, preceding: usize) -> DataFusionError {
+    if rows > 1 {
+        super::fitting::smaller(preceding)
+    } else {
+        capacity()
+    }
+}
+
+fn fit_memory(error: DataFusionError, rows: usize, preceding: usize) -> DataFusionError {
+    if matches!(error.find_root(), DataFusionError::ResourcesExhausted(_)) {
+        output_capacity(rows, preceding)
+    } else {
+        error
+    }
+}
+
+fn project(
+    input: &ColumnarValue,
+    definition: Definition<'_>,
+    budget: &Budget,
+) -> Result<ColumnarValue> {
+    let input_rows = match input {
+        ColumnarValue::Array(array) => Some(array.len()),
+        ColumnarValue::Scalar(_) => None,
     };
-    super::fitting::preflight(
-        rows,
-        budget.limits.max_batch_bytes,
-        (0..rows).map(|row| {
-            Ok(get(row)?
-                .map_or(0, str::len)
-                .saturating_mul(paths.copies)
-                .saturating_add(paths.slots.saturating_add(1).saturating_mul(5))
-                .saturating_add(256))
-        }),
-    )?;
-    let items = rows.checked_mul(paths.slots).ok_or_else(capacity)?;
-    let mut bytes = items
+    let definition_rows = match &definition {
+        Definition::Rows(ColumnarValue::Array(array)) => Some(array.len()),
+        _ => None,
+    };
+    if let (Some(a), Some(b)) = (input_rows, definition_rows)
+        && a != b
+    {
+        return Err(invalid());
+    }
+    let scalar = input_rows.is_none() && definition_rows.is_none();
+    let rows = input_rows.or(definition_rows).unwrap_or(1);
+    if let Definition::Fixed(paths) = &definition {
+        super::fitting::preflight(
+            rows,
+            budget.limits.max_batch_bytes,
+            (0..rows).map(|row| {
+                Ok(row_text(input, row)?
+                    .map_or(0, str::len)
+                    .saturating_mul(paths.copies)
+                    .saturating_add(paths.slots.saturating_add(1).saturating_mul(5))
+                    .saturating_add(256))
+            }),
+        )?;
+    }
+    // Fixed definitions keep their once-per-expression specialization. Dynamic
+    // definitions compile once per row and drop after copying that row's spans.
+    let fixed_slots = match &definition {
+        Definition::Fixed(paths) => Some(paths.slots),
+        Definition::Rows(_) => None,
+    };
+    let initial_items = rows
+        .checked_mul(fixed_slots.unwrap_or(0))
+        .ok_or_else(capacity)?;
+    let mut items = 0usize;
+    let mut bytes = initial_items
         .checked_mul(5)
         .and_then(|n| n.checked_add(rows.saturating_mul(5)))
         .and_then(|n| n.checked_add(8))
         .ok_or_else(capacity)?;
-    if bytes > budget.limits.max_batch_bytes || items > i32::MAX as usize {
-        if rows > 1 {
-            return Err(super::fitting::smaller(
-                budget.limits.max_batch_bytes.saturating_sub(8)
-                    / paths.slots.saturating_add(1).saturating_mul(5),
-            ));
-        }
-        return Err(capacity());
+    if bytes > budget.limits.max_batch_bytes || initial_items > i32::MAX as usize {
+        return Err(output_capacity(
+            rows,
+            budget.limits.max_batch_bytes.saturating_sub(8)
+                / fixed_slots.unwrap_or(0).saturating_add(1).saturating_mul(5),
+        ));
     }
     let mut memory = budget
         .reserve(bytes.saturating_mul(2).saturating_add(1024))
-        .map_err(|_| capacity())?;
+        .map_err(|_| output_capacity(rows, rows / 2))?;
     let largest = (0..rows).try_fold(0usize, |size, row| {
-        Ok::<_, DataFusionError>(size.max(get(row)?.map_or(0, str::len)))
+        Ok::<_, DataFusionError>(size.max(row_text(input, row)?.map_or(0, str::len)))
     })?;
-    let state = paths
-        .nodes
-        .len()
-        .checked_mul(64)
-        .and_then(|n| n.checked_add(paths.slots.saturating_mul(32)))
-        .and_then(|n| n.checked_add(largest.saturating_mul(2)))
-        .ok_or_else(capacity)?;
-    let mut workspace = budget.reserve(state).map_err(|_| capacity())?;
-    let mut visited = vec![false; paths.nodes.len()];
-    let mut output = vec![None; paths.slots];
-    let mut stack = Vec::with_capacity(paths.nodes.len());
-    let values = StringBuilder::with_capacity(items, 0);
+    let mut workspace = budget.reserve(0).map_err(|_| capacity())?;
+    let mut visited: Vec<bool> = Vec::new();
+    let mut output: Vec<Option<(usize, usize)>> = Vec::new();
+    let mut stack: Vec<Frame> = Vec::new();
+    let values = StringBuilder::with_capacity(initial_items, 0);
     let mut builder = ListBuilder::with_capacity(values, rows).with_field(item());
     for row in 0..rows {
+        let paths = match &definition {
+            Definition::Fixed(paths) => Arc::clone(paths),
+            Definition::Rows(values) => {
+                Paths::compile(row_text(values, row)?.ok_or_else(invalid)?, budget)
+                    .map_err(|error| fit_memory(error, rows, row))?
+            }
+        };
+        items = items.checked_add(paths.slots).ok_or_else(capacity)?;
+        if fixed_slots.is_none() {
+            let added = paths.slots.checked_mul(5).ok_or_else(capacity)?;
+            bytes = bytes.checked_add(added).ok_or_else(capacity)?;
+            if bytes > budget.limits.max_batch_bytes || items > i32::MAX as usize {
+                return Err(output_capacity(rows, row));
+            }
+            memory.merge(
+                budget
+                    .reserve(added.saturating_mul(2))
+                    .map_err(|_| output_capacity(rows, row))?,
+            );
+        }
+        let nodes = paths
+            .nodes
+            .len()
+            .max(stack.capacity())
+            .max(visited.capacity());
+        let slots = paths.slots.max(output.capacity());
+        let state = nodes
+            .checked_mul(64)
+            .and_then(|n| n.checked_add(slots.checked_mul(32)?))
+            .and_then(|n| n.checked_add(largest.checked_mul(2)?))
+            .ok_or_else(capacity)?;
+        if state > workspace.num_permits() {
+            workspace.merge(
+                budget
+                    .reserve(state - workspace.num_permits())
+                    .map_err(|_| output_capacity(rows, row))?,
+            );
+        }
+        if visited.capacity() < paths.nodes.len() {
+            visited
+                .try_reserve_exact(paths.nodes.len() - visited.len())
+                .map_err(|_| output_capacity(rows, row))?;
+        }
+        if output.capacity() < paths.slots {
+            output
+                .try_reserve_exact(paths.slots - output.len())
+                .map_err(|_| output_capacity(rows, row))?;
+        }
+        stack.clear();
+        if stack.capacity() < paths.nodes.len() {
+            stack
+                .try_reserve_exact(paths.nodes.len())
+                .map_err(|_| output_capacity(rows, row))?;
+        }
+        visited.resize(paths.nodes.len(), false);
+        output.resize(paths.slots, None);
         visited.fill(false);
         output.fill(None);
-        stack.clear();
-        let raw = get(row)?;
+        let raw = row_text(input, row)?;
         if let Some(raw) = raw {
             spans(
                 raw,
-                paths,
+                &paths,
                 &mut visited,
                 &mut output,
                 &mut stack,
                 budget,
                 &mut workspace,
-            )?;
+            )
+            .map_err(|error| fit_memory(error, rows, row))?;
         }
         let added = output
             .iter()
@@ -526,15 +617,12 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
             })?;
         bytes = bytes.checked_add(added).ok_or_else(capacity)?;
         if bytes > budget.limits.max_batch_bytes || bytes > i32::MAX as usize {
-            if rows > 1 {
-                return Err(super::fitting::smaller(row));
-            }
-            return Err(capacity());
+            return Err(output_capacity(rows, row));
         }
         memory.merge(
             budget
                 .reserve(added.saturating_mul(2))
-                .map_err(|_| capacity())?,
+                .map_err(|_| output_capacity(rows, row))?,
         );
         for span in &output {
             match (raw, span) {
@@ -564,6 +652,58 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
 mod tests {
     use super::*;
     #[test]
+    fn dynamic_path_compilation_fits_around_preceding_output_admission() {
+        use arrow::array::{Array, ArrayRef, StringArray};
+        let budget = Budget::new(crate::budget::Limits {
+            memory_bytes: 64 << 10,
+            max_batch_bytes: 4 << 10,
+            max_metadata_bytes: 32 << 10,
+            ..crate::budget::Limits::default()
+        })
+        .unwrap();
+        let raw = format!(r#"{{"a":"{}"}}"#, "x".repeat(2048));
+        let long_path = format!(r#"[["{}"]]"#, "z".repeat(80));
+        let input: ArrayRef = Arc::new(StringArray::from(vec![Some(raw.as_str()), None]));
+        let definitions: ArrayRef =
+            Arc::new(StringArray::from(vec![r#"[["a"]]"#, long_path.as_str()]));
+        let error = project(
+            &ColumnarValue::Array(input.clone()),
+            Definition::Rows(&ColumnarValue::Array(definitions.clone())),
+            &budget,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("fit 1 preceding rows"),
+            "{error}"
+        );
+        for row in 0..2 {
+            let output = project(
+                &ColumnarValue::Array(input.slice(row, 1)),
+                Definition::Rows(&ColumnarValue::Array(definitions.slice(row, 1))),
+                &budget,
+            )
+            .unwrap();
+            let ColumnarValue::Array(array) = output else {
+                panic!("array expected")
+            };
+            let array = array
+                .as_any()
+                .downcast_ref::<arrow::array::ListArray>()
+                .unwrap();
+            let values = array
+                .values()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            if row == 0 {
+                assert_eq!(values.value(0), format!("\"{}\"", "x".repeat(2048)));
+            } else {
+                assert!(values.is_null(0));
+            }
+        }
+    }
+    #[test]
     fn projected_children_keep_output_admission_after_parent_drop() {
         let budget = Budget::new(crate::budget::Limits {
             memory_bytes: 128 << 10,
@@ -579,7 +719,7 @@ mod tests {
                 r#"{"key":"value"}"#,
             ]))),
         ] {
-            let output = project(&input, &paths, &budget).unwrap();
+            let output = project(&input, Definition::Fixed(&paths), &budget).unwrap();
             let array = match output {
                 ColumnarValue::Array(array) => array,
                 ColumnarValue::Scalar(ScalarValue::List(array)) => array,
@@ -607,7 +747,7 @@ mod tests {
         let raw = format!(r#"{{"nested":{nested},"later":7}}"#);
         let error = project(
             &ColumnarValue::Scalar(ScalarValue::Utf8(Some(raw))),
-            &paths,
+            Definition::Fixed(&paths),
             &budget,
         )
         .unwrap_err();
@@ -617,7 +757,7 @@ mod tests {
         );
         let result = project(
             &ColumnarValue::Scalar(ScalarValue::Utf8(Some(r#"{"later":7}"#.into()))),
-            &paths,
+            Definition::Fixed(&paths),
             &budget,
         )
         .unwrap();
