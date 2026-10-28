@@ -135,12 +135,17 @@ impl Job {
         Ok(())
     }
 
-    /// Plans a SQL statement in the same context as every declared input and step.
+    /// Plans read-only relational SQL in the shared job context.
     ///
     /// # Errors
-    /// Returns SQL planning errors; execution errors propagate from the frame.
+    /// Refuses DDL, DML and session statements before effects, or invalid functions.
+    /// Returns planning errors; execution errors propagate from the frame.
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
-        let frame = self.context.sql(sql).await?;
+        let options = datafusion::execution::context::SQLOptions::new()
+            .with_allow_ddl(false)
+            .with_allow_dml(false)
+            .with_allow_statements(false);
+        let frame = self.context.sql_with_options(sql, options).await?;
         crate::query::validate_immutable_functions(frame.logical_plan())?;
         Ok(frame)
     }
@@ -150,7 +155,7 @@ impl Job {
     /// # Errors
     /// Refuses an existing name, exhausted capacity, failed input or invalid SQL.
     pub async fn materialize(&self, name: &str, sql: &str) -> Result<StepStorage> {
-        materialized::materialize(&self.context, &self.budget, name, sql).await
+        materialized::materialize(self, name, sql).await
     }
 
     /// Groups an undirected string edge relation into deterministic components.

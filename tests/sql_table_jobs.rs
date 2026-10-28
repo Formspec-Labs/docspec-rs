@@ -357,7 +357,6 @@ async fn native_selector_admits_observed_metadata_under_a_larger_size_ceiling() 
 
 #[tokio::test]
 async fn append_identity_refuses_side_effects_with_nonempty_work() {
-    use iceberg::Catalog;
     for command in ["copy", "ddl", "set"] {
         let root = tempfile::tempdir().unwrap();
         let value = spec(root.path());

@@ -114,20 +114,14 @@ impl TableProvider for ReservedTable {
     }
 }
 
-pub(super) async fn materialize(
-    context: &SessionContext,
-    budget: &Budget,
-    name: &str,
-    sql: &str,
-) -> Result<StepStorage> {
-    if context.table_exist(name)? {
+pub(super) async fn materialize(job: &super::Job, name: &str, sql: &str) -> Result<StepStorage> {
+    if job.context.table_exist(name)? {
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
-    let frame = context.sql(sql).await?;
-    crate::query::validate_immutable_functions(frame.logical_plan())?;
+    let frame = job.sql(sql).await?;
     let schema = crate::export::portable_schema(frame.schema().as_arrow());
     let stream = frame.execute_stream().await?;
-    retain(context, budget, name, schema, stream).await
+    retain(&job.context, &job.budget, name, schema, stream).await
 }
 
 pub(super) async fn retain(
