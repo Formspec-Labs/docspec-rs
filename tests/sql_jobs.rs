@@ -114,6 +114,19 @@ async fn wide_view_batches_fit_before_materialization_and_export() {
         arrow::compute::concat_batches(&read[0].schema(), &read).unwrap(),
         expected
     );
+    let mut fragmented_limits = ceiling.clone();
+    fragmented_limits.batch_rows = 3;
+    let fragmented = Job::new(fragmented_limits, root.path().join("fragmented-scratch")).unwrap();
+    fragmented.register_parquet("wide", &input).await.unwrap();
+    let fragmented_output = root.path().join("fragmented-output.parquet");
+    fragmented
+        .export("SELECT * FROM wide", &fragmented_output, &settings)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(root.path().join("wide-output.parquet")).unwrap(),
+        std::fs::read(fragmented_output).unwrap()
+    );
 
     let too_large = root.path().join("large.parquet");
     super::scalar::input(&too_large, &[(Some(1), Some("x".repeat(256 << 10)))]);
