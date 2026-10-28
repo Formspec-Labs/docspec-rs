@@ -302,6 +302,70 @@ mod sql_guard_tests {
     use crate::budget::Limits;
 
     #[tokio::test]
+    async fn correlated_filters_compare_mixed_string_representations() {
+        use arrow::{
+            array::StringArray,
+            datatypes::{DataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
+        use std::sync::Arc;
+        for outer in [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View] {
+            for inner in [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View] {
+                let root = tempfile::tempdir().unwrap();
+                let job = Job::new(Limits::default(), root.path().join("scratch")).unwrap();
+                for (name, kind, values) in [
+                    (
+                        "candidates",
+                        outer.clone(),
+                        vec![Some("same"), Some("left"), None],
+                    ),
+                    ("existing", inner.clone(), vec![Some("same"), None]),
+                    ("versions", inner.clone(), vec![Some("same"), None]),
+                ] {
+                    let values = arrow::compute::cast(&StringArray::from(values), &kind).unwrap();
+                    let schema = Arc::new(Schema::new(vec![Field::new("value", kind, true)]));
+                    let batch = RecordBatch::try_new(schema.clone(), vec![values]).unwrap();
+                    let table =
+                        datafusion::datasource::MemTable::try_new(schema, vec![vec![batch]])
+                            .unwrap();
+                    job.context.register_table(name, Arc::new(table)).unwrap();
+                }
+                job.register_view(
+                    "combined",
+                    "SELECT value FROM existing UNION ALL SELECT value FROM candidates",
+                )
+                .await
+                .unwrap();
+                job.register_view(
+                    "grouped",
+                    "SELECT max(value) AS value FROM combined GROUP BY substr(value,1,1)",
+                )
+                .await
+                .unwrap();
+                for sql in [
+                    "SELECT value FROM candidates c WHERE c.value IN ('same','left') AND NOT EXISTS (SELECT 1 FROM existing e WHERE e.value=c.value) ORDER BY value",
+                    "SELECT value FROM candidates c WHERE c.value IN ('same','left') AND NOT EXISTS (SELECT 1 FROM existing e JOIN versions v ON e.value=v.value WHERE e.value=c.value) ORDER BY value",
+                    "SELECT value FROM grouped c WHERE c.value IN ('same','left') AND NOT EXISTS (SELECT 1 FROM existing e JOIN versions v ON e.value=v.value WHERE e.value=c.value) ORDER BY value",
+                    "SELECT value FROM candidates c WHERE NOT EXISTS (SELECT 1 FROM existing e WHERE e.value IS NOT DISTINCT FROM c.value) ORDER BY value",
+                ] {
+                    let frame = job.sql(sql).await.unwrap();
+                    let batches = frame
+                        .collect()
+                        .await
+                        .unwrap_or_else(|error| panic!("{outer:?}/{inner:?}: {sql}: {error}"));
+                    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+                    let values =
+                        arrow::compute::cast(batches[0].column(0), &DataType::Utf8).unwrap();
+                    assert_eq!(
+                        values.as_any().downcast_ref::<StringArray>().unwrap(),
+                        &StringArray::from(vec!["left"])
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn null_url_arguments_preserve_the_other_string_representation() {
         use arrow::{
             array::{ArrayRef, StringArray},
