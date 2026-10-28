@@ -9,7 +9,7 @@ use datafusion::{
         DFSchemaRef, Result,
         config::ConfigOptions,
         internal_err,
-        tree_node::{Transformed, TreeNode},
+        tree_node::{Transformed, TreeNode, TreeNodeRewriter},
     },
     execution::{SessionState, TaskContext, context::QueryPlanner},
     logical_expr::{
@@ -32,42 +32,95 @@ pub(super) struct Planner;
 
 fn normalize(plan: LogicalPlan, wrap: bool) -> Result<LogicalPlan> {
     Ok(plan
-        .transform_up(|plan| {
-            if wrap && let LogicalPlan::Projection(projection) = &plan {
-                for expr in &projection.expr {
-                    if expr.exists(|expr| Ok(matches!(expr, Expr::TryCast(_))))? {
-                        // Native TryCastExpr::return_field retains input tags;
-                        // logical TRY_CAST declares a new field without them.
-                        return Ok(Transformed::yes(wrapped(plan)));
-                    }
-                }
-            }
-            let LogicalPlan::Union(union) = plan else {
-                return Ok(Transformed::no(plan));
-            };
-            let prior = union.schema.clone();
-            // Type coercion in 53.1 merges metadata; subsequent column pruning
-            // intersects it. Use the native logical constructor consistently.
-            let union = if union.inputs.len() > 1 {
-                Union::try_new(union.inputs)?
-            } else {
-                union
-            };
-            let needs_adapter = union
-                .inputs
-                .iter()
-                .any(|input| input.schema().as_arrow() != union.schema.as_arrow());
-            let changed = union.schema != prior;
-            let plan = LogicalPlan::Union(union);
-            if wrap && needs_adapter {
-                Ok(Transformed::yes(wrapped(plan)))
-            } else if changed {
-                Ok(Transformed::yes(plan))
-            } else {
-                Ok(Transformed::no(plan))
-            }
+        .rewrite_with_subqueries(&mut Reconcile {
+            wrap,
+            input_schemas: Vec::new(),
         })?
         .data)
+}
+
+struct Reconcile {
+    wrap: bool,
+    input_schemas: Vec<Vec<DFSchemaRef>>,
+}
+
+impl TreeNodeRewriter for Reconcile {
+    type Node = LogicalPlan;
+
+    fn f_down(&mut self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        self.input_schemas.push(
+            plan.inputs()
+                .iter()
+                .map(|input| input.schema().clone())
+                .collect(),
+        );
+        Ok(Transformed::no(plan))
+    }
+
+    fn f_up(&mut self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        let before = self
+            .input_schemas
+            .pop()
+            .expect("paired native plan traversal");
+        let changed_input = before
+            .iter()
+            .zip(plan.inputs())
+            .any(|(before, input)| before != input.schema());
+        let prior = plan.schema().clone();
+        // Native tree rewriting retains cached parent schemas. Reconstruct
+        // only ancestors whose child declaration actually changed.
+        let plan = if changed_input {
+            plan.recompute_schema()?
+        } else {
+            plan
+        };
+        let result = self.node(plan)?;
+        let changed_schema = result.data.schema() != &prior;
+        Ok(Transformed::new(
+            result.data,
+            result.transformed || changed_schema,
+            result.tnr,
+        ))
+    }
+}
+
+impl Reconcile {
+    fn node(&self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        let wrap = self.wrap;
+        if wrap && let LogicalPlan::Projection(projection) = &plan {
+            for expr in &projection.expr {
+                if expr.exists(|expr| Ok(matches!(expr, Expr::TryCast(_))))? {
+                    // Native TryCastExpr::return_field retains input tags;
+                    // logical TRY_CAST declares a new field without them.
+                    return Ok(Transformed::yes(wrapped(plan)));
+                }
+            }
+        }
+        let LogicalPlan::Union(union) = plan else {
+            return Ok(Transformed::no(plan));
+        };
+        let prior = union.schema.clone();
+        // Type coercion in 53.1 merges metadata; subsequent column pruning
+        // intersects it. Use the native logical constructor consistently.
+        let union = if union.inputs.len() > 1 {
+            Union::try_new(union.inputs)?
+        } else {
+            union
+        };
+        let needs_adapter = union
+            .inputs
+            .iter()
+            .any(|input| input.schema().as_arrow() != union.schema.as_arrow());
+        let changed = union.schema != prior;
+        let plan = LogicalPlan::Union(union);
+        if wrap && needs_adapter {
+            Ok(Transformed::yes(wrapped(plan)))
+        } else if changed {
+            Ok(Transformed::yes(plan))
+        } else {
+            Ok(Transformed::no(plan))
+        }
+    }
 }
 
 fn wrapped(plan: LogicalPlan) -> LogicalPlan {
