@@ -133,6 +133,12 @@ async fn resolve_batches_fresh_heads_without_catalog_mutation_or_empty_append() 
     }
     assert_eq!(first["table_operations"][3]["exists"], false);
     assert!(first["table_operations"][3].get("table_uuid").is_none());
+    let empty = &first["table_operations"][1];
+    let empty_input: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("empty-pin"),"inputs":[{"kind":"native_table","name":"empty","metadata_location":empty["metadata_location"],"table_uuid":empty["table_uuid"],"schema_id":empty["schema_id"],"snapshot":empty["snapshot"]}],"steps":[],"outputs":[],"queries":[{"name":"count","sql":"SELECT count(*) AS n FROM empty"}]})).unwrap();
+    assert_eq!(
+        empty_input.run(limits()).await.unwrap().queries[0].data,
+        json!([{"n":0}])
+    );
     setup["table_operations"] = json!([setup["table_operations"][2].clone()]);
     setup["steps"][0]["sql"] =
         json!("SELECT cast(value AS BIGINT) AS id FROM generate_series(1,3)");
@@ -186,7 +192,7 @@ async fn resolve_only_local_job_opens_catalog_read_only_and_never_creates_one() 
     lookup["catalog_root"] = json!(root.path().join("catalog"));
     let database = root.path().join("catalog/catalog.sqlite");
     let before = std::fs::read(&database).unwrap();
-    let result = serde_json::from_value::<JobSpec>(lookup)
+    let result = serde_json::from_value::<JobSpec>(lookup.clone())
         .unwrap()
         .run(limits())
         .await
@@ -196,6 +202,29 @@ async fn resolve_only_local_job_opens_catalog_read_only_and_never_creates_one() 
         true
     );
     assert_eq!(std::fs::read(database).unwrap(), before);
+    let job = root.path().join("resolve.json");
+    let ceiling = root.path().join("resolve-limits.json");
+    std::fs::write(&job, serde_json::to_vec(&lookup).unwrap()).unwrap();
+    std::fs::write(&ceiling, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let unused = root.path().join("unused-lifecycle");
+    let output = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&unused)
+        .arg("--limits")
+        .arg(ceiling)
+        .arg("job")
+        .arg("--spec")
+        .arg(job)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!unused.exists());
+    let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cli["table_operations"][0]["exists"], true);
 }
 
 #[tokio::test]
