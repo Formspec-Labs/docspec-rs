@@ -86,18 +86,21 @@ before allocation, one tree at a time; output bytes are bounded. Object ordering
 costs `O(Σ K log K)` for each object's `K` keys. Selection of records and hashing
 the resulting bytes remain caller policy.
 
-`json_get_many(raw, literal_paths_json)` extracts prefix-disjoint raw JSON
-fragments in one Jiter traversal per input row. The second argument is a literal
-JSON array of paths whose components are string keys or zero-based integer
-indices; duplicates keep their positions. Negative or null components give null
+`json_get_many(raw, paths_json)` extracts prefix-disjoint raw JSON fragments in
+one Jiter traversal per input row. The second argument is a JSON array of paths,
+supplied as a literal or a string column, whose components are string keys or
+zero-based integer indices; duplicates keep their positions. Negative or null components give null
 slots. Proper ancestor/descendant selections refuse; `[]` selects nothing and
 `[[]]` selects the root. Each result is a valid list of nullable JSON strings,
 with the same lexical bytes, first-duplicate-key and lazy malformed-tail behavior
 as independent `json_get_json` calls. Paths compile into the immutable expression
-once; no input-sized value tree or per-row definition parser is built. Parser
-workspace and actual output growth are admitted before allocation, and output
-expansion refuses rather than truncates. Work is linear in scanned input, path
-state and copied output; duplicate selections can multiply output bytes.
+once for literal definitions. Column definitions compile once per row and drop
+after that row; no growing definition cache or input-sized value tree is built.
+A null or invalid definition refuses. A null input produces null slots for its
+valid definition. Parser workspace and actual output growth are admitted before
+allocation. The executor fits multi-row output to its byte allowance; a single
+row that cannot fit refuses. Values are never truncated. Work is linear in
+scanned input, path state and copied output; duplicate selections can multiply output bytes.
 Common-expression reuse depends on the native plan: inspect it before assuming
 reuse across branches, and retain narrowed relations rather than raw bundles.
 
