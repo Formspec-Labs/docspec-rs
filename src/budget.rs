@@ -266,6 +266,65 @@ impl Drop for WorkspaceLock {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn distinct_using_keeps_explicit_selected_columns() {
+        let context = Budget::new(Limits::default()).unwrap().context();
+        let mut failures = Vec::new();
+        for (name, sql) in [
+            (
+                "later_alias",
+                "SELECT DISTINCT z.id FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) USING(id)",
+            ),
+            (
+                "earlier_alias",
+                "SELECT DISTINCT a.id FROM (VALUES (1),(2),(2),(3)) a(id) JOIN (VALUES (1),(2),(3)) z(id) USING(id)",
+            ),
+            (
+                "right_side",
+                "SELECT DISTINCT z.id FROM (VALUES (1),(2),(3)) a(id) JOIN (VALUES (1),(2),(2),(3)) z(id) USING(id)",
+            ),
+            (
+                "on_join",
+                "SELECT DISTINCT z.id FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) ON z.id=a.id",
+            ),
+            (
+                "mixed_columns",
+                "SELECT DISTINCT z.id,z.label FROM (VALUES (1,'x'),(2,'x'),(2,'x'),(3,'x')) z(id,label) JOIN (VALUES (1),(2),(3)) a(id) USING(id)",
+            ),
+            (
+                "aliased_column",
+                "SELECT DISTINCT z.id AS key FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) USING(id)",
+            ),
+            (
+                "nested",
+                "SELECT count(*) FROM (SELECT DISTINCT z.id FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) USING(id)) q",
+            ),
+        ] {
+            let batches = context.sql(sql).await.unwrap().collect().await;
+            match batches {
+                Ok(batches) => {
+                    let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+                    let correct = if name == "nested" {
+                        batches[0]
+                            .column(0)
+                            .as_any()
+                            .downcast_ref::<arrow::array::Int64Array>()
+                            .unwrap()
+                            .value(0)
+                            == 3
+                    } else {
+                        rows == 3
+                    };
+                    if !correct {
+                        failures.push(format!("{name}: {batches:?}"));
+                    }
+                }
+                Err(error) => failures.push(format!("{name}: {error}")),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     fn scratch_writes_refuse_before_effect_and_reuse_capacity_after_drop() {
         use std::io::Write;
