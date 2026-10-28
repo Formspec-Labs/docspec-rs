@@ -3,8 +3,8 @@
 use crate::{Error, Result, budget::Budget};
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryViewArray, FixedSizeListArray, LargeListArray, ListArray, MapArray,
-        StringViewArray, StructArray,
+        Array, ArrayRef, BinaryArray, BinaryViewArray, FixedSizeListArray, LargeBinaryArray,
+        LargeListArray, ListArray, MapArray, StringViewArray, StructArray,
     },
     compute::BatchCoalescer,
     datatypes::{DataType, Schema, SchemaRef},
@@ -31,11 +31,26 @@ pub(crate) fn batch_bytes(batch: &RecordBatch) -> Result<usize> {
     })
 }
 
+fn batch_bytes_as(batch: &RecordBatch, schema: &Schema) -> Result<usize> {
+    batch
+        .columns()
+        .iter()
+        .zip(schema.fields())
+        .try_fold(0usize, |bytes, (column, field)| {
+            Ok(bytes.saturating_add(portable_bytes_as(
+                column.as_ref(),
+                false,
+                field.data_type(),
+            )?))
+        })
+}
+
 impl PortableBatches {
     fn new(batch: RecordBatch, schema: SchemaRef, budget: Budget) -> Result<Self> {
-        let oversized =
-            batch_bytes(&batch)? > budget.limits.max_batch_bytes && batch.num_rows() > 1;
-        let base = batch_bytes(&RecordBatch::new_empty(batch.schema()))?;
+        validate_types(&batch, &schema)?;
+        let oversized = batch_bytes_as(&batch, &schema)? > budget.limits.max_batch_bytes
+            && batch.num_rows() > 1;
+        let base = batch_bytes_as(&RecordBatch::new_empty(batch.schema()), &schema)?;
         Ok(Self {
             batch,
             schema,
@@ -52,7 +67,7 @@ impl PortableBatches {
         if let Some(cost) = self.next_cost.take() {
             return Ok(cost);
         }
-        Ok(batch_bytes(&self.batch.slice(row, 1))?.saturating_sub(self.base))
+        Ok(batch_bytes_as(&self.batch.slice(row, 1), &self.schema)?.saturating_sub(self.base))
     }
 }
 
@@ -251,9 +266,110 @@ pub(crate) fn portable_schema(schema: &Schema) -> SchemaRef {
     ))
 }
 
+fn compatible(from: &DataType, to: &DataType) -> bool {
+    // Nullability is checked against values by Arrow's strict constructors.
+    // Struct labels must match: its cast otherwise reorders fields by name.
+    match (from, to) {
+        (DataType::Struct(a), DataType::Struct(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b)
+                    .all(|(a, b)| a.name() == b.name() && compatible(a.data_type(), b.data_type()))
+        }
+        (DataType::List(a), DataType::List(b))
+        | (DataType::LargeList(a), DataType::LargeList(b)) => {
+            compatible(a.data_type(), b.data_type())
+        }
+        (DataType::FixedSizeList(a, n), DataType::FixedSizeList(b, m)) => {
+            n == m && compatible(a.data_type(), b.data_type())
+        }
+        (DataType::Map(a, sorted_a), DataType::Map(b, sorted_b)) => {
+            sorted_a == sorted_b && compatible(a.data_type(), b.data_type())
+        }
+        (DataType::Dictionary(a, av), DataType::Dictionary(b, bv)) => a == b && compatible(av, bv),
+        (DataType::FixedSizeBinary(a), DataType::FixedSizeBinary(b)) => a == b,
+        (a, b) if binary_type(a) && binary_type(b) => true,
+        (a, b) => a.equals_datatype(b),
+    }
+}
+
+fn validate_types(batch: &RecordBatch, schema: &Schema) -> Result<()> {
+    if batch.num_columns() != schema.fields().len() {
+        return Err(Error::refusal(
+            "invalid_export",
+            "executed batch column count changed",
+        ));
+    }
+    for (column, field) in batch.columns().iter().zip(schema.fields()) {
+        if !compatible(&portable_data_type(column.data_type()), field.data_type()) {
+            return Err(Error::refusal(
+                "invalid_export",
+                format!(
+                    "executed batch type changed for {}: {:?}; expected {:?}",
+                    field.name(),
+                    column.data_type(),
+                    field.data_type()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn portable_bytes(array: &dyn Array, view_storage: bool) -> Result<usize> {
+    portable_bytes_as(array, view_storage, array.data_type())
+}
+
+fn binary_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Binary | DataType::LargeBinary | DataType::FixedSizeBinary(_)
+    )
+}
+
+fn binary_value_bytes(array: &dyn Array) -> Result<Option<usize>> {
+    if let Some(array) = array.as_any().downcast_ref::<BinaryArray>() {
+        let offsets = array.value_offsets();
+        return Ok(Some((offsets[array.len()] - offsets[0]) as usize));
+    }
+    if let Some(array) = array.as_any().downcast_ref::<LargeBinaryArray>() {
+        let offsets = array.value_offsets();
+        return Ok(Some((offsets[array.len()] - offsets[0]) as usize));
+    }
+    if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
+        return Ok(Some(array.total_bytes_len()));
+    }
+    if let DataType::FixedSizeBinary(width) = array.data_type() {
+        let width = usize::try_from(*width)
+            .map_err(|_| Error::refusal("invalid_export", "negative binary width"))?;
+        return Ok(Some(width.saturating_mul(array.len() - array.null_count())));
+    }
+    Ok(None)
+}
+
+fn portable_bytes_as(array: &dyn Array, view_storage: bool, target: &DataType) -> Result<usize> {
     // Count logical view values, including repeated references to one buffer.
     let overhead = array.len().div_ceil(8).saturating_add(256);
+    if !view_storage
+        && binary_type(target)
+        && let Some(values) = binary_value_bytes(array)?
+    {
+        // Fixed arrays allocate bytes beneath nulls; variable arrays need an
+        // offset per row. Fit the declared representation before its cast.
+        let bytes = if let DataType::FixedSizeBinary(width) = target {
+            let width = usize::try_from(*width)
+                .map_err(|_| Error::refusal("invalid_export", "negative binary width"))?;
+            array.len().saturating_mul(width)
+        } else {
+            let offset = if matches!(target, DataType::LargeBinary) {
+                8
+            } else {
+                4
+            };
+            values.saturating_add((array.len() + 1).saturating_mul(offset))
+        };
+        return Ok(bytes.saturating_add(overhead));
+    }
     if let Some(a) = array.as_any().downcast_ref::<StringViewArray>() {
         if view_storage {
             return Ok(a
@@ -288,51 +404,77 @@ fn portable_bytes(array: &dyn Array, view_storage: bool) -> Result<usize> {
             .saturating_add((a.len() + 1).saturating_mul(4))
             .saturating_add(overhead));
     }
-    if let Some(a) = array.as_any().downcast_ref::<StructArray>() {
-        return a.columns().iter().try_fold(overhead, |bytes, child| {
-            Ok(bytes.saturating_add(portable_bytes(child.as_ref(), view_storage)?))
-        });
+    if let (Some(a), DataType::Struct(fields)) =
+        (array.as_any().downcast_ref::<StructArray>(), target)
+    {
+        return a
+            .columns()
+            .iter()
+            .zip(fields)
+            .try_fold(overhead, |bytes, (child, field)| {
+                Ok(bytes.saturating_add(portable_bytes_as(
+                    child.as_ref(),
+                    view_storage,
+                    field.data_type(),
+                )?))
+            });
     }
-    if let Some(a) = array.as_any().downcast_ref::<ListArray>() {
+    if let (Some(a), DataType::List(field)) = (array.as_any().downcast_ref::<ListArray>(), target) {
         let offsets = a.value_offsets();
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
-        return Ok(
-            portable_bytes(a.values().slice(start, end - start).as_ref(), view_storage)?
-                .saturating_add((a.len() + 1).saturating_mul(4))
-                .saturating_add(overhead),
-        );
+        return Ok(portable_bytes_as(
+            a.values().slice(start, end - start).as_ref(),
+            view_storage,
+            field.data_type(),
+        )?
+        .saturating_add((a.len() + 1).saturating_mul(4))
+        .saturating_add(overhead));
     }
-    if let Some(a) = array.as_any().downcast_ref::<LargeListArray>() {
+    if let (Some(a), DataType::LargeList(field)) =
+        (array.as_any().downcast_ref::<LargeListArray>(), target)
+    {
         let offsets = a.value_offsets();
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
+        return Ok(portable_bytes_as(
+            a.values().slice(start, end - start).as_ref(),
+            view_storage,
+            field.data_type(),
+        )?
+        .saturating_add((a.len() + 1).saturating_mul(8))
+        .saturating_add(overhead));
+    }
+    if let (Some(a), DataType::FixedSizeList(field, _)) =
+        (array.as_any().downcast_ref::<FixedSizeListArray>(), target)
+    {
         return Ok(
-            portable_bytes(a.values().slice(start, end - start).as_ref(), view_storage)?
-                .saturating_add((a.len() + 1).saturating_mul(8))
+            portable_bytes_as(a.values().as_ref(), view_storage, field.data_type())?
                 .saturating_add(overhead),
         );
     }
-    if let Some(a) = array.as_any().downcast_ref::<FixedSizeListArray>() {
-        return Ok(portable_bytes(a.values().as_ref(), view_storage)?.saturating_add(overhead));
-    }
-    if let Some(a) = array.as_any().downcast_ref::<MapArray>() {
+    if let (Some(a), DataType::Map(field, _)) = (array.as_any().downcast_ref::<MapArray>(), target)
+    {
         let offsets = a.value_offsets();
         let start = offsets[0] as usize;
         let end = offsets[a.len()] as usize;
-        return Ok(
-            portable_bytes(&a.entries().slice(start, end - start), view_storage)?
-                .saturating_add((a.len() + 1).saturating_mul(4))
-                .saturating_add(overhead),
-        );
+        return Ok(portable_bytes_as(
+            &a.entries().slice(start, end - start),
+            view_storage,
+            field.data_type(),
+        )?
+        .saturating_add((a.len() + 1).saturating_mul(4))
+        .saturating_add(overhead));
     }
-    if let DataType::Dictionary(key, _) = array.data_type() {
+    if let (DataType::Dictionary(key, _), DataType::Dictionary(_, target)) =
+        (array.data_type(), target)
+    {
         let data = array.to_data();
         let values = arrow::array::make_array(data.child_data()[0].clone());
         let width = key
             .primitive_width()
             .ok_or_else(|| Error::refusal("invalid_export", "dictionary key is not fixed width"))?;
-        return Ok(portable_bytes(values.as_ref(), view_storage)?
+        return Ok(portable_bytes_as(values.as_ref(), view_storage, target)?
             .saturating_add(array.len().saturating_mul(width))
             .saturating_add(overhead));
     }
@@ -425,6 +567,7 @@ pub(crate) fn portable_batch(
     schema: SchemaRef,
     budget: &Budget,
 ) -> Result<RecordBatch> {
+    validate_types(&batch, &schema)?;
     // Native coalescing reserves row capacity. Trim uniquely owned buffers
     // before deciding that another admitted copy is needed; shared buffers
     // retain their ownership and are compacted below when necessary.
@@ -437,18 +580,12 @@ pub(crate) fn portable_batch(
         input_columns,
         &arrow::record_batch::RecordBatchOptions::new().with_row_count(Some(rows)),
     )?;
-    if batch.num_columns() != schema.fields().len() {
-        return Err(Error::refusal(
-            "invalid_export",
-            "executed batch column count changed",
-        ));
-    }
     let mut bytes = 0usize;
     let mut conversion_bytes = 0usize;
     let over_limit = batch.get_array_memory_size() > budget.limits.max_batch_bytes;
     let mut compact_columns = Vec::with_capacity(batch.num_columns());
     for (column, field) in batch.columns().iter().zip(schema.fields()) {
-        let logical = portable_bytes(column.as_ref(), false)?;
+        let logical = portable_bytes_as(column.as_ref(), false, field.data_type())?;
         let needs_cast = column.data_type() != field.data_type();
         let direct_view = matches!(
             column.data_type(),
@@ -464,6 +601,11 @@ pub(crate) fn portable_batch(
             conversion_bytes = conversion_bytes.saturating_add(logical.saturating_mul(2));
         }
         if needs_cast {
+            let intermediate = portable_data_type(column.data_type());
+            if &intermediate != column.data_type() && &intermediate != field.data_type() {
+                conversion_bytes = conversion_bytes
+                    .saturating_add(portable_bytes(column.as_ref(), false)?.saturating_mul(2));
+            }
             conversion_bytes = conversion_bytes
                 .saturating_add(dirty_view_bytes(column.as_ref()).saturating_mul(2));
         }
@@ -473,12 +615,6 @@ pub(crate) fn portable_batch(
         }
         compact_columns.push(needs_compaction);
         bytes = bytes.saturating_add(logical);
-        if !portable_data_type(column.data_type()).equals_datatype(field.data_type()) {
-            return Err(Error::refusal(
-                "invalid_export",
-                "executed batch type changed",
-            ));
-        }
     }
     if bytes > budget.limits.max_batch_bytes {
         return Err(Error::refusal(
@@ -504,11 +640,24 @@ pub(crate) fn portable_batch(
             } else {
                 column.clone()
             };
-            let mut column = if column.data_type() == field.data_type() {
-                column
-            } else {
-                arrow::compute::cast(&clean_null_views(column)?, field.data_type())?
-            };
+            let mut column = column;
+            if column.data_type() != field.data_type() {
+                column = clean_null_views(column)?;
+                let options = arrow::compute::CastOptions {
+                    safe: false,
+                    ..Default::default()
+                };
+                // Normalize views first: native Arrow casts variable binary to
+                // a fixed width, but has no direct BinaryView -> fixed cast.
+                for target in [
+                    portable_data_type(column.data_type()),
+                    field.data_type().clone(),
+                ] {
+                    if column.data_type() != &target {
+                        column = arrow::compute::cast_with_options(&column, &target, &options)?;
+                    }
+                }
+            }
             column.shrink_to_fit();
             Ok(column)
         })
@@ -648,6 +797,43 @@ mod tests {
     }
 
     #[test]
+    fn native_struct_field_names_cannot_enable_value_coercion() {
+        let source = StructArray::from(vec![
+            (
+                Arc::new(Field::new("a", DataType::Utf8, true)),
+                Arc::new(StringArray::from(vec!["12"])) as ArrayRef,
+            ),
+            (
+                Arc::new(Field::new("b", DataType::Int64, true)),
+                Arc::new(Int64Array::from(vec![17])) as ArrayRef,
+            ),
+        ]);
+        let target = DataType::Struct(
+            vec![
+                Field::new("b", DataType::Utf8, true),
+                Field::new("a", DataType::Int64, true),
+            ]
+            .into(),
+        );
+        // Native Arrow matches struct fields by name, so a broad cast can
+        // change values even when positional types originally matched.
+        let native = arrow::compute::cast(&source, &target).unwrap();
+        assert_eq!(
+            native
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .unwrap()
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            12
+        );
+        assert!(portable_batch(batch(Arc::new(source)), declared(target), &budget()).is_err());
+    }
+
+    #[test]
     fn binary_conversion_fits_target_bytes_before_admission() {
         use arrow::array::{BinaryArray, FixedSizeBinaryArray};
         let empty = batch(Arc::new(BinaryArray::from(vec![None::<&[u8]>; 128])));
@@ -695,20 +881,6 @@ mod tests {
         assert_eq!(output[0].column(0).null_count(), 128);
         let oversized = batch(Arc::new(BinaryArray::from(vec![None::<&[u8]>])));
         let error = PortableBatches::new(
-    #[test]
-    fn native_struct_field_names_cannot_enable_value_coercion() {
-        let source = StructArray::from(vec![
-            (Arc::new(Field::new("a", DataType::Utf8, true)), Arc::new(StringArray::from(vec!["12"])) as ArrayRef),
-            (Arc::new(Field::new("b", DataType::Int64, true)), Arc::new(Int64Array::from(vec![17])) as ArrayRef),
-        ]);
-        let target = DataType::Struct(vec![Field::new("b", DataType::Utf8, true), Field::new("a", DataType::Int64, true)].into());
-        // Native Arrow matches struct fields by name, so a broad cast can
-        // change values even when positional types originally matched.
-        let native = arrow::compute::cast(&source, &target).unwrap();
-        assert_eq!(native.as_any().downcast_ref::<StructArray>().unwrap().column(1).as_any().downcast_ref::<Int64Array>().unwrap().value(0), 12);
-        assert!(portable_batch(batch(Arc::new(source)), declared(target), &budget()).is_err());
-    }
-
             oversized,
             declared(DataType::FixedSizeBinary(8192)),
             budget(),
