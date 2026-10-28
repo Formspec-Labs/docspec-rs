@@ -142,6 +142,38 @@ async fn native_union_missing_metadata_keeps_the_declared_schema() {
 }
 
 #[tokio::test]
+async fn native_union_distinct_rebuilds_ancestor_and_subquery_schemas() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    for union in ["UNION", "UNION ALL"] {
+        for right in ["SELECT id FROM second", "SELECT cast(NULL AS BIGINT) AS id"] {
+            let sql = format!("SELECT id FROM first {union} {right}");
+            job.register_view("combined", &sql).await.unwrap();
+            let expected = if right.contains("second") && union == "UNION ALL" {
+                vec![Some(1), Some(2), Some(1), Some(2)]
+            } else if right.contains("second") {
+                vec![Some(1), Some(2)]
+            } else {
+                vec![Some(1), Some(2), None]
+            };
+            check_metadata_union(&job, &sql, expected.clone()).await;
+            check_metadata_union(&job, "SELECT id FROM combined WHERE NOT EXISTS (SELECT 1 FROM combined x WHERE x.id=combined.id AND x.id<0)", expected).await;
+            check_metadata_union(
+                &job,
+                "SELECT id FROM combined GROUP BY id",
+                if right.contains("second") {
+                    vec![Some(1), Some(2)]
+                } else {
+                    vec![Some(1), Some(2), None]
+                },
+            )
+            .await;
+            job.release("combined").unwrap();
+        }
+    }
+}
+
+#[tokio::test]
 async fn native_union_conflicting_metadata_does_not_fabricate_field_identity() {
     let root = tempfile::tempdir().unwrap();
     let job = metadata_job(root.path()).await;
