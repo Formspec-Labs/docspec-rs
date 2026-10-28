@@ -210,7 +210,17 @@ impl Budget {
     ///
     /// # Errors
     /// Refuses oversized allocations or exhausted shared capacity.
+    #[track_caller]
     pub fn reserve(&self, bytes: usize) -> Result<OwnedSemaphorePermit> {
+        let caller = std::panic::Location::caller();
+        tracing::debug!(
+            bytes,
+            available = self.bytes.available_permits(),
+            native_reserved = self.runtime.memory_pool.reserved(),
+            file = caller.file(),
+            line = caller.line(),
+            "shared admission request"
+        );
         let count = u32::try_from(bytes)
             .map_err(|_| Error::refusal("capacity", "allocation exceeds admission granularity"))?;
         self.bytes
@@ -219,7 +229,7 @@ impl Budget {
             .map_err(|_| {
                 Error::refusal(
                     "capacity",
-                    "shared memory budget exhausted; completed phases remain retained",
+                    format!("shared memory budget exhausted: requested {bytes} bytes, available {} of {}, native reserved {}; {}:{}; completed phases remain retained", self.bytes.available_permits(), self.limits.memory_bytes / 2, self.runtime.memory_pool.reserved(), caller.file(), caller.line()),
                 )
             })
     }
