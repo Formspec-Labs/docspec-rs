@@ -69,6 +69,7 @@ struct Paths {
     literal: String,
     nodes: Vec<Node>,
     slots: usize,
+    copies: usize,
     _memory: OwnedSemaphorePermit,
 }
 impl Paths {
@@ -90,6 +91,7 @@ impl Paths {
             literal: value.into(),
             nodes: vec![Node::default()],
             slots: definitions.len(),
+            copies: 0,
             _memory: memory,
         };
         for (slot, path) in definitions.iter().enumerate() {
@@ -142,6 +144,7 @@ impl Paths {
                 return Err(invalid());
             }
             result.nodes[node].slots.push(slot);
+            result.copies = result.copies.max(result.nodes[node].slots.len());
         }
         Ok(Arc::new(result))
     }
@@ -184,6 +187,13 @@ impl Projection {
 }
 pub(super) fn register(context: &mut SessionContext, budget: &Budget) {
     context.register_udf(ScalarUDF::from(Projection::new(budget.clone(), None)));
+}
+pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
+    function
+        .inner()
+        .as_any()
+        .downcast_ref::<Projection>()
+        .map(|function| function.budget.limits.max_batch_bytes)
 }
 impl ScalarUDFImpl for Projection {
     fn as_any(&self) -> &dyn Any {
@@ -447,6 +457,17 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
             _ => Err(invalid()),
         },
     };
+    super::fitting::preflight(
+        rows,
+        budget.limits.max_batch_bytes,
+        (0..rows).map(|row| {
+            Ok(get(row)?
+                .map_or(0, str::len)
+                .saturating_mul(paths.copies)
+                .saturating_add(paths.slots.saturating_add(1).saturating_mul(5))
+                .saturating_add(256))
+        }),
+    )?;
     let items = rows.checked_mul(paths.slots).ok_or_else(capacity)?;
     let mut bytes = items
         .checked_mul(5)
@@ -454,6 +475,12 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
         .and_then(|n| n.checked_add(8))
         .ok_or_else(capacity)?;
     if bytes > budget.limits.max_batch_bytes || items > i32::MAX as usize {
+        if rows > 1 {
+            return Err(super::fitting::smaller(
+                budget.limits.max_batch_bytes.saturating_sub(8)
+                    / paths.slots.saturating_add(1).saturating_mul(5),
+            ));
+        }
         return Err(capacity());
     }
     let mut memory = budget
@@ -499,6 +526,9 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
             })?;
         bytes = bytes.checked_add(added).ok_or_else(capacity)?;
         if bytes > budget.limits.max_batch_bytes || bytes > i32::MAX as usize {
+            if rows > 1 {
+                return Err(super::fitting::smaller(row));
+            }
             return Err(capacity());
         }
         memory.merge(

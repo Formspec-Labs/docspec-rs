@@ -4,6 +4,7 @@ mod admitted;
 mod canonical;
 mod components;
 mod export;
+pub(crate) mod fitting;
 mod functions;
 mod json_lines;
 mod json_many;
@@ -118,6 +119,10 @@ impl Job {
                 ParquetReadOptions::default(),
             )
             .await?;
+        let provider = self.context.table_provider(name).await?;
+        self.context.deregister_table(name)?;
+        self.context
+            .register_table(name, std::sync::Arc::new(fitting::FittedTable { provider }))?;
         Ok(())
     }
 

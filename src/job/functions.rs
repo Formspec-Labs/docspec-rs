@@ -37,6 +37,15 @@ enum Kind {
     JsonCanonical,
     HttpDate,
 }
+
+pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
+    function
+        .inner()
+        .as_any()
+        .downcast_ref::<GenericFunction>()
+        .map(|function| function.budget.limits.max_batch_bytes)
+        .or_else(|| super::json_many::byte_limit(function))
+}
 impl Kind {
     fn name(self) -> &'static str {
         match self {
@@ -333,6 +342,11 @@ impl ScalarUDFImpl for GenericFunction {
 impl GenericFunction {
     fn http_date(&self, inputs: &[(ArrayRef, bool)], rows: usize) -> Result<ColumnarValue> {
         if rows.saturating_mul(9) > self.budget.limits.max_batch_bytes {
+            if rows > 1 {
+                return Err(super::fitting::smaller(
+                    self.budget.limits.max_batch_bytes / 9,
+                ));
+            }
             return Err(capacity());
         }
         let admission = admit(&self.budget, rows.saturating_mul(16).saturating_add(512))?;
@@ -355,6 +369,10 @@ impl GenericFunction {
             if let Some(value) = get(index)? {
                 largest = largest.max(value.len());
                 output = output.saturating_add(value.len().saturating_mul(8).saturating_add(32));
+            }
+            output = output.saturating_add(5);
+            if rows > 1 && output > self.budget.limits.max_batch_bytes {
+                return Err(super::fitting::smaller(index));
             }
         }
         // One parsed tree at a time, including Vec growth and sorted object
@@ -381,9 +399,18 @@ impl GenericFunction {
                             .min(self.budget.limits.max_batch_bytes.saturating_sub(total)),
                     )
                 })
-                .transpose()?;
+                .transpose()
+                .map_err(|error| match error {
+                    DataFusionError::ResourcesExhausted(_) if rows > 1 => {
+                        super::fitting::smaller(index)
+                    }
+                    error => error,
+                })?;
             total = total.saturating_add(encoded.as_ref().map_or(0, String::len));
             if total > self.budget.limits.max_batch_bytes {
+                if rows > 1 {
+                    return Err(super::fitting::smaller(index));
+                }
                 return Err(capacity());
             }
             values.push(encoded);
@@ -406,10 +433,18 @@ impl GenericFunction {
                         if *scalar { 0 } else { index },
                     )?))
                 })?;
-            total = total
-                .checked_add(size)
-                .filter(|n| *n <= limit)
-                .ok_or_else(capacity)?;
+            total = total.checked_add(size).ok_or_else(capacity)?;
+            if total
+                .saturating_add((index + 1).saturating_mul(5))
+                .saturating_add(128)
+                > limit
+                && rows > 1
+            {
+                return Err(super::fitting::smaller(index));
+            }
+            if total > limit {
+                return Err(capacity());
+            }
             largest = largest.max(size);
         }
         let fields = inputs
@@ -483,6 +518,9 @@ impl GenericFunction {
                     .saturating_mul(factor)
                     .saturating_add(64),
             );
+            if rows > 1 && allowance > self.budget.limits.max_batch_bytes {
+                return Err(super::fitting::smaller(index));
+            }
         }
         let admission = admit(
             &self.budget,
@@ -512,8 +550,13 @@ impl GenericFunction {
             };
             bytes = bytes
                 .checked_add(value.as_ref().map_or(0, String::len))
-                .filter(|n| *n <= self.budget.limits.max_batch_bytes)
                 .ok_or_else(capacity)?;
+            if bytes > self.budget.limits.max_batch_bytes {
+                if rows > 1 {
+                    return Err(super::fitting::smaller(index));
+                }
+                return Err(capacity());
+            }
             values.push(value);
         }
         let mut builder = StringBuilder::with_capacity(rows, bytes);
