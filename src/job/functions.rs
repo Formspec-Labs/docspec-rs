@@ -112,7 +112,14 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
 pub(super) fn string_signature(arity: usize) -> Signature {
     // Uniform signatures force mixed string representations to one type. That
     // can expand repeated views past i32 offsets before our admission runs.
-    let strings = [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View];
+    // Include untyped nulls so they cannot select a coercing fallback signature
+    // for the other argument. text() already handles every null representation.
+    let strings = [
+        DataType::Utf8,
+        DataType::LargeUtf8,
+        DataType::Utf8View,
+        DataType::Null,
+    ];
     let variants = if arity == 1 {
         strings
             .iter()
@@ -161,7 +168,7 @@ fn json_type(data_type: &DataType) -> bool {
     }
 }
 pub(super) fn text(array: &dyn Array, index: usize) -> Result<Option<&str>> {
-    if array.is_null(index) {
+    if array.data_type() == &DataType::Null || array.is_null(index) {
         return Ok(None);
     }
     if let Some(a) = array.as_any().downcast_ref::<StringArray>() {
