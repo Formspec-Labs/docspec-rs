@@ -3,7 +3,7 @@
 use super::functions;
 pub(crate) mod windows;
 use arrow::{
-    array::ArrayRef,
+    array::{as_boolean_array, builder::BooleanBuilder},
     datatypes::{DataType, Schema},
     record_batch::RecordBatch,
 };
@@ -355,12 +355,13 @@ impl PhysicalExpr for FittedPredicate {
     fn evaluate(&self, input: &RecordBatch) -> Result<ColumnarValue> {
         let mut offset = 0;
         let mut target = input.num_rows().max(1);
-        let mut values: Vec<ArrayRef> = Vec::new();
+        let mut values = BooleanBuilder::with_capacity(input.num_rows());
         loop {
             let take = target.min(input.num_rows() - offset);
             match self.native.evaluate(&input.slice(offset, take)) {
                 Ok(value) => {
-                    values.push(value.into_array(take)?);
+                    let value = value.into_array(take)?;
+                    values.append_array(as_boolean_array(value.as_ref()));
                     offset += take;
                     if offset == input.num_rows() {
                         break;
@@ -375,8 +376,7 @@ impl PhysicalExpr for FittedPredicate {
                 }
             }
         }
-        let arrays = values.iter().map(|a| a.as_ref()).collect::<Vec<_>>();
-        Ok(ColumnarValue::Array(arrow::compute::concat(&arrays)?))
+        Ok(ColumnarValue::Array(Arc::new(values.finish())))
     }
 }
 fn fit_join_filter(filter: &JoinFilter) -> Result<Option<JoinFilter>> {
