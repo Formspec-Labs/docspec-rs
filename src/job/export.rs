@@ -176,7 +176,7 @@ pub(super) async fn export(
         .set_dictionary_enabled(false)
         .set_max_row_group_bytes(
             (settings.profile != ExportProfile::Lookup)
-                .then_some(budget.limits.max_batch_bytes / 4),
+                .then_some((budget.limits.max_batch_bytes / 4).max(1)),
         )
         .set_bloom_filter_enabled(false)
         .set_statistics_enabled(EnabledStatistics::Chunk)
@@ -293,23 +293,36 @@ pub(super) async fn export(
             previous_key = Some(keys.row(keys.num_rows() - 1).as_ref().to_vec());
         }
         rows += batch.num_rows() as u64;
-        let groups = if settings.profile == ExportProfile::Lookup {
-            1
-        } else {
-            writer.flushed_row_groups().len().saturating_add(1)
-        };
-        if metadata_unit.saturating_mul(groups.saturating_add(1)) > metadata_limit {
-            return Err(Error::refusal(
-                "metadata_capacity",
-                "export row groups exceed metadata allowance",
-            ));
-        }
-        writer.write(&batch.project(&output_indices)?)?;
-        if writer.memory_size() > budget.limits.max_batch_bytes {
-            return Err(Error::refusal(
-                "capacity",
-                "export encoder exceeds reserved memory",
-            ));
+        let projected = batch.project(&output_indices)?;
+        let mut offset = 0;
+        while offset < projected.num_rows() {
+            // Native byte sizing can flush several groups in one write. Each
+            // incoming row creates at most one additional group; include the
+            // existing group and schema before handing rows to the writer.
+            let groups =
+                writer.flushed_row_groups().len() + usize::from(writer.in_progress_rows() > 0);
+            let available = if settings.profile == ExportProfile::Lookup {
+                usize::from(metadata_unit.saturating_mul(2) <= metadata_limit)
+                    .saturating_mul(projected.num_rows())
+            } else {
+                (metadata_limit / metadata_unit).saturating_sub(groups + 1)
+            };
+            if available == 0 {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "export row groups exceed metadata allowance",
+                ));
+            }
+            let take = available.min(projected.num_rows() - offset);
+            super::encoding::write(
+                &mut writer,
+                &projected.slice(offset, take),
+                budget,
+                allowance,
+                true,
+                settings.profile != ExportProfile::Lookup,
+            )?;
+            offset += take;
         }
     }
     writer.finish()?;

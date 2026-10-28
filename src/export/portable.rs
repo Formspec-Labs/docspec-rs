@@ -25,7 +25,7 @@ struct PortableBatches {
     finished: bool,
 }
 
-fn batch_bytes(batch: &RecordBatch) -> Result<usize> {
+pub(crate) fn batch_bytes(batch: &RecordBatch) -> Result<usize> {
     batch.columns().iter().try_fold(0usize, |bytes, column| {
         Ok(bytes.saturating_add(portable_bytes(column.as_ref(), false)?))
     })

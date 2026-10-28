@@ -151,14 +151,14 @@ pub(super) async fn retain(
         }
         bytes += size;
         if writer.is_none() && reservation.try_grow(size).is_err() {
-            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes)?);
+            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes * 2)?);
             let temporary = budget
                 .runtime_env()
                 .disk_manager
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
                 .set_max_row_group_row_count(Some(budget.limits.batch_rows))
-                .set_max_row_group_bytes(Some(budget.limits.max_batch_bytes / 4))
+                .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
                 .build();
@@ -168,26 +168,28 @@ pub(super) async fn retain(
                 Some(props),
             )?;
             for previous in batches.drain(..) {
-                spill.write(&previous)?;
-                if spill.memory_size() > budget.limits.max_batch_bytes {
-                    return Err(Error::refusal(
-                        "capacity",
-                        "named step writer exceeds configured byte allowance",
-                    ));
-                }
+                super::encoding::write(
+                    &mut spill,
+                    &previous,
+                    budget,
+                    budget.limits.max_batch_bytes * 2,
+                    false,
+                    true,
+                )?;
             }
             reservation.free();
             file = Some(temporary);
             writer = Some(spill);
         }
         if let Some(writer) = &mut writer {
-            writer.write(&batch)?;
-            if writer.memory_size() > budget.limits.max_batch_bytes {
-                return Err(Error::refusal(
-                    "capacity",
-                    "named step writer exceeds configured byte allowance",
-                ));
-            }
+            super::encoding::write(
+                writer,
+                &batch,
+                budget,
+                budget.limits.max_batch_bytes * 2,
+                false,
+                true,
+            )?;
         } else {
             batches.push(batch);
         }
