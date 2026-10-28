@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod schema_metadata;
 mod scratch;
 mod subqueries;
 pub(crate) use scratch::ScratchWriter;
@@ -155,8 +156,10 @@ impl Budget {
                 .with_config(config)
                 .with_runtime_env(self.runtime.clone())
                 .with_default_features()
+                .with_analyzer_rule(Arc::new(schema_metadata::Planner))
                 .with_optimizer_rules(subqueries::rules())
                 .with_physical_optimizer_rules(rules)
+                .with_query_planner(Arc::new(schema_metadata::Planner))
                 .build(),
         )
     }
