@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod array_admission;
+mod distinct;
 pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
 mod schema_metadata;
 mod scratch;
@@ -323,6 +324,49 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[tokio::test]
+    async fn distinct_using_preserves_nulls_empty_inputs_and_distinct_on() {
+        let context = Budget::new(Limits::default()).unwrap().context();
+        for (sql, expected_rows) in [
+            (
+                "SELECT DISTINCT z.id FROM (VALUES (1),(2),(2),(NULL)) z(id) FULL JOIN (VALUES (1),(3),(NULL)) a(id) USING(id)",
+                3,
+            ),
+            (
+                "SELECT DISTINCT z.id,a.id FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) USING(id)",
+                3,
+            ),
+            (
+                "SELECT DISTINCT z.id FROM (VALUES (1),(2)) z(id) JOIN (VALUES (3)) a(id) USING(id)",
+                0,
+            ),
+            (
+                "SELECT DISTINCT 1 FROM (VALUES (1),(2)) z(id) JOIN (VALUES (1),(2)) a(id) USING(id)",
+                1,
+            ),
+            (
+                "SELECT DISTINCT ON (z.id) z.id FROM (VALUES (1),(2),(2),(3)) z(id) JOIN (VALUES (1),(2),(3)) a(id) USING(id) ORDER BY z.id",
+                3,
+            ),
+        ] {
+            let batches = context.sql(sql).await.unwrap().collect().await.unwrap();
+            assert_eq!(
+                batches.iter().map(|b| b.num_rows()).sum::<usize>(),
+                expected_rows,
+                "{sql}"
+            );
+            if sql.contains("FULL JOIN") {
+                assert_eq!(
+                    batches
+                        .iter()
+                        .map(|b| b.column(0).null_count())
+                        .sum::<usize>(),
+                    1
+                );
+            }
+        }
     }
 
     #[test]
