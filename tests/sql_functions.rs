@@ -23,6 +23,57 @@ async fn scalar(sql: &str) -> Value {
 }
 
 #[tokio::test]
+async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
+    let root = tempfile::tempdir().unwrap();
+    let mut ceiling = limits();
+    ceiling.batch_rows = 400;
+    ceiling.max_batch_bytes = 1024;
+    let queries = [
+        (
+            "many",
+            r#"SELECT count(json_get_many(concat('{"a":"',repeat('x',64),'","id":',cast(value AS VARCHAR),'}'),'[["a"],["a"],["a"]]')) AS n FROM generate_series(1,128)"#,
+            128,
+        ),
+        (
+            "dates",
+            "SELECT count(http_date(CASE WHEN value%2=0 THEN 'Thu, 01 Jan 1970 00:00:00 GMT' ELSE 'invalid' END)) AS n FROM generate_series(1,400)",
+            200,
+        ),
+        (
+            "canonical",
+            "SELECT sum(length(json_canonical(concat('1e',cast(value % 2 AS VARCHAR))))) AS n FROM generate_series(1,400)",
+            600,
+        ),
+        (
+            "conditional",
+            "SELECT count(CASE WHEN value%2=0 THEN json_canonical(CASE WHEN value%2=0 THEN '{\"a\":1}' ELSE '{bad' END) END) AS n FROM generate_series(1,400)",
+            200,
+        ),
+        (
+            "variable",
+            "SELECT sum(length(json_array(repeat('x',cast(value%3+1 AS BIGINT)*100)))) AS n FROM generate_series(1,120)",
+            24480,
+        ),
+    ];
+    for (name, sql, expected) in queries {
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join(name),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":name,"sql":sql}]})).unwrap();
+        assert_eq!(
+            spec.run(ceiling.clone()).await.unwrap().queries[0].data,
+            json!([{"n":expected}]),
+            "{name}"
+        );
+    }
+    for sql in [
+        "SELECT json_array(repeat('x',2048)) AS value",
+        r#"SELECT json_get_many(concat('{"a":"',repeat('x',512),'"}'),'[["a"],["a"],["a"]]') AS value"#,
+    ] {
+        let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("single"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"single","sql":sql}]})).unwrap();
+        let error = spec.run(ceiling.clone()).await.unwrap_err().to_string();
+        assert!(error.contains("function output"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn http_dates_are_nullable_utc_values_without_application_retry_policy() {
     let values = scalar(
         "SELECT id,cast(http_date(value) AS BIGINT) AS micros FROM (VALUES
