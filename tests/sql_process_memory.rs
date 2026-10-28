@@ -18,6 +18,10 @@ const OVERHEAD: usize = 64 << 20;
 const ROWS: usize = 2048;
 const INPUT: &str = "DOCSPEC_TEST_VIEW_MEMORY_INPUT";
 
+// Match the ordinary CLI allocator for this isolated process qualification.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn run_projection(path: &Path) {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -38,7 +42,7 @@ fn run_projection(path: &Path) {
             .unwrap();
             job.register_parquet("source", path).await.unwrap();
             let batches = job
-                .sql("SELECT json_get_many(raw,'[[\"keep\"]]') AS selected FROM source")
+                .sql("SELECT json_get_many(raw,paths) AS selected FROM source")
                 .await
                 .unwrap()
                 .collect()
@@ -59,8 +63,12 @@ fn run_projection(path: &Path) {
                     .as_any()
                     .downcast_ref::<StringArray>()
                     .unwrap();
-                assert_eq!(values.len(), batch.num_rows());
-                assert!(values.iter().all(|v| v == Some("1")));
+                assert_eq!(values.len(), batch.num_rows() * 2);
+                for row in 0..selected.len() {
+                    let offset = selected.value_offsets()[row] as usize;
+                    assert_eq!(values.value(offset), "1");
+                    assert!(values.is_null(offset + 1));
+                }
             }
         });
 }
@@ -79,11 +87,13 @@ fn repeated_dictionary_views_respect_process_memory() {
     let one = StringViewArray::from(vec![raw]);
     let values = arrow::compute::take(&one, &UInt32Array::from(vec![0; ROWS]), None).unwrap();
     assert!(values.get_array_memory_size() < 2 << 20);
-    let schema = Arc::new(Schema::new(vec![Field::new(
-        "raw",
-        DataType::Utf8View,
-        false,
-    )]));
+    let paths = Arc::new(StringViewArray::from_iter_values(
+        (0..ROWS).map(|row| format!(r#"[["keep"],["missing_{row}"]]"#)),
+    ));
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("raw", DataType::Utf8View, false),
+        Field::new("paths", DataType::Utf8View, false),
+    ]));
     let props = WriterProperties::builder()
         .set_dictionary_enabled(true)
         .set_dictionary_page_size_limit(2 << 20)
@@ -96,7 +106,7 @@ fn repeated_dictionary_views_respect_process_memory() {
     )
     .unwrap();
     writer
-        .write(&RecordBatch::try_new(schema, vec![values]).unwrap())
+        .write(&RecordBatch::try_new(schema, vec![values, paths]).unwrap())
         .unwrap();
     writer.close().unwrap();
     assert!(std::fs::metadata(&path).unwrap().len() < 2 << 20);
@@ -142,4 +152,18 @@ fn repeated_dictionary_views_respect_process_memory() {
         "peak_process_memory_bytes={peak}, configured_memory_bytes={MEMORY}, fixed_overhead_bytes={OVERHEAD}"
     );
     assert!(peak <= MEMORY + OVERHEAD, "{stdout}\n{stderr}");
+    #[cfg(target_os = "macos")]
+    {
+        let footprint = stderr
+            .lines()
+            .find(|line| line.contains("peak memory footprint"))
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        println!("peak_physical_footprint_bytes={footprint}");
+        assert!(footprint <= MEMORY + OVERHEAD, "{stdout}\n{stderr}");
+    }
 }
