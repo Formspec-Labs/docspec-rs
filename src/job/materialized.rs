@@ -185,9 +185,6 @@ pub(super) async fn retain(
                     "named step writer exceeds configured byte allowance",
                 ));
             }
-            file.as_mut()
-                .expect("spill owns temporary file")
-                .update_disk_usage()?;
         } else {
             batches.push(batch);
         }
@@ -195,8 +192,7 @@ pub(super) async fn retain(
     let (storage, retained) = if let Some(writer) = writer {
         writer.close()?;
         drop(writer_memory);
-        let mut file = file.expect("spill owns temporary file");
-        file.update_disk_usage()?;
+        let file = file.expect("spill owns temporary file");
         // A frame from the job's own catalog would retain this table and form
         // a cycle. A fresh context shares its runtime, not its catalog.
         let frame = budget

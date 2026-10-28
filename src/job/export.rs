@@ -221,7 +221,7 @@ pub(super) async fn export(
             properties = properties.set_column_statistics_enabled(path, EnabledStatistics::Page);
         }
     }
-    let mut temporary = budget
+    let temporary = budget
         .runtime_env()
         .disk_manager
         .create_tmp_file("SQL export")?;
@@ -322,14 +322,12 @@ pub(super) async fn export(
                     "export encoder exceeds reserved memory",
                 ));
             }
-            temporary.update_disk_usage()?;
         }
         if exhausted {
             break;
         }
     }
     writer.finish()?;
-    temporary.update_disk_usage()?;
     let hashed = writer.inner();
     let footer_bytes =
         u32::from_le_bytes(hashed.tail[..4].try_into().expect("fixed trailer")) as usize;
