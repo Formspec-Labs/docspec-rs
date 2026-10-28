@@ -119,9 +119,21 @@ pub async fn local_catalog(root: &Path) -> Result<Arc<dyn Catalog>> {
 
 /// Opens one explicitly selected native catalog during fenced local recovery.
 pub(crate) async fn local_catalog_at(root: &Path, file: &Path) -> Result<Arc<dyn Catalog>> {
-    std::fs::create_dir_all(root.join("warehouse"))?;
+    open_local_catalog(root, file, false).await
+}
+
+/// Resolves an existing local authority without creating or changing its files.
+pub(crate) async fn local_catalog_read_only(root: &Path) -> Result<Arc<dyn Catalog>> {
+    open_local_catalog(root, &crate::restore::catalog_path(root)?, true).await
+}
+
+async fn open_local_catalog(root: &Path, file: &Path, read_only: bool) -> Result<Arc<dyn Catalog>> {
+    if !read_only {
+        std::fs::create_dir_all(root.join("warehouse"))?;
+    }
+    let mode = if read_only { "ro" } else { "rwc" };
     let catalog = SqlCatalogBuilder::default()
-        .uri(format!("sqlite://{}?mode=rwc", file.display()))
+        .uri(format!("sqlite://{}?mode={mode}", file.display()))
         .warehouse_location(root.join("warehouse").to_string_lossy())
         .sql_bind_style(SqlBindStyle::QMark)
         .with_storage_factory(Arc::new(LocalFsStorageFactory))
