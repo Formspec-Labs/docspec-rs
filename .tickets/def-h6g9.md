@@ -1,0 +1,14 @@
+---
+id: def-h6g9
+status: open
+deps: []
+links: []
+created: 2026-10-28T00:25:07Z
+type: bug
+priority: 1
+assignee: mikewolfd
+---
+# Bound Parquet scan metadata and decode memory under the SQL job budget
+
+C6: raw immutable reproduction codex-coord/shared/raw-prior-repro-fdb9242c contains exact jobs, 0c5545a/48636e5 configs, limits, input lists and manifest. Prior-only original failed in188.26s/maxRSS24471601152B under configured14GiB (7GiB DataFusion pool plus7GiB custom admission),3GiB spill. Explicit materialized prior_scalars486 prototype completed207.47s/maxRSS23.64GB/64761groups, so view compaction does not establish a fix. Investigate heap/allocation profile on original486 control:218332850B footer, cache50MiB oversize refusal/repeated decode,3independent parquet scans underUnion, row-group decode outsidepool are hypotheses. No heap profile collected yet. Owner defers fix until E2 first release unless narrowD1reproduces. Done when real reproduction and regression test show RSS within configured admission plus measured small fixed overhead, without weakening correctness or increasing limits.
+
