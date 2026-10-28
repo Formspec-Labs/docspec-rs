@@ -4,6 +4,7 @@ mod admitted;
 mod canonical;
 mod components;
 mod export;
+mod encoding;
 pub(crate) mod fitting;
 mod functions;
 mod json_lines;
