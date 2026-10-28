@@ -234,6 +234,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scratch_writes_refuse_before_effect_and_reuse_capacity_after_drop() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let budget = Budget::in_workspace(
+            Limits {
+                scratch_bytes: 64,
+                ..Limits::default()
+            },
+            root.path(),
+        )
+        .unwrap();
+        let file = budget
+            .runtime
+            .disk_manager
+            .create_tmp_file("physical guard")
+            .unwrap();
+        let mut writer = budget.scratch_writer(&file).unwrap();
+        writer.write_all(&[1; 60]).unwrap();
+        assert!(writer.write_all(&[2; 5]).is_err());
+        assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 60);
+        assert_eq!(budget.runtime.disk_manager.used_disk_space(), 60);
+        writer.write_all(&[3; 4]).unwrap();
+        assert_eq!(
+            std::fs::read(file.path()).unwrap(),
+            [[1; 60].as_slice(), &[3; 4]].concat()
+        );
+        drop(writer);
+        drop(file);
+        assert_eq!(budget.runtime.disk_manager.used_disk_space(), 0);
+    }
+
+    #[test]
+    fn scratch_writers_share_remaining_capacity() {
+        use std::io::Write;
+        let budget = Budget::new(Limits {
+            scratch_bytes: 100,
+            ..Limits::default()
+        })
+        .unwrap();
+        let first = budget
+            .runtime
+            .disk_manager
+            .create_tmp_file("first")
+            .unwrap();
+        let second = budget
+            .runtime
+            .disk_manager
+            .create_tmp_file("second")
+            .unwrap();
+        let mut one = budget.scratch_writer(&first).unwrap();
+        let mut two = budget.scratch_writer(&second).unwrap();
+        one.write_all(&[0; 60]).unwrap();
+        assert!(two.write_all(&[0; 41]).is_err());
+        assert_eq!(std::fs::metadata(second.path()).unwrap().len(), 0);
+        two.write_all(&[0; 40]).unwrap();
+        assert!(one.write_all(&[0]).is_err());
+    }
+
+    #[test]
     fn contexts_share_native_memory_and_spill_accounting() {
         use datafusion::execution::memory_pool::MemoryConsumer;
         let root = tempfile::tempdir().unwrap();
