@@ -8,17 +8,18 @@ fn inline_view_compaction_releases_sliced_headers_and_null_bitmap() {
         array::{Array, StringViewArray},
         buffer::NullBuffer,
     };
-    let values = StringViewArray::from_iter_values(
+    let source = StringViewArray::from_iter_values(
         std::iter::once("x".repeat(2 << 20)).chain(std::iter::repeat_n("inline".into(), 200_000)),
     );
     let values = Arc::new(
         StringViewArray::try_new(
-            values.views().clone(),
-            values.data_buffers().to_vec(),
-            Some(NullBuffer::new_valid(values.len())),
+            source.views().clone(),
+            source.data_buffers().to_vec(),
+            Some(NullBuffer::new_valid(source.len())),
         )
         .unwrap(),
     );
+    drop(source);
     let headers = values.views().inner().clone();
     let validity = values.nulls().unwrap().inner().inner().clone();
     let batch = RecordBatch::try_from_iter([("value", values.clone() as ArrayRef)]).unwrap();

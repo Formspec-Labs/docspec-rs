@@ -154,7 +154,24 @@ fn collect<T: ByteViewType>(
         .as_any()
         .downcast_ref::<GenericByteViewArray<T>>()
         .expect("clearing headers preserves the view type");
-    let result = Arc::new(view.gc());
+    let collected = view.gc();
+    // Arrow's inline-only fast path shares sliced headers, and every gc path
+    // shares validity. Copy those small descriptors before wrapping owners so
+    // a tiny slice cannot retain a hidden parent allocation.
+    let headers = if payload == 0 {
+        collected.views().to_vec().into()
+    } else {
+        collected.views().clone()
+    };
+    let nulls = collected
+        .nulls()
+        .map(|nulls| nulls.iter().collect::<arrow::buffer::NullBuffer>());
+    let result = Arc::new(GenericByteViewArray::<T>::try_new(
+        headers,
+        collected.data_buffers().to_vec(),
+        nulls,
+    )?);
+    drop(collected);
     drop(cleared);
     drop(temporary);
     admit_array(result, memory)
