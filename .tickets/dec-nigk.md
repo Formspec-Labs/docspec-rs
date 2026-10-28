@@ -1,6 +1,6 @@
 ---
 id: dec-nigk
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-10-28T02:32:05Z
@@ -24,3 +24,7 @@ Regression3423d08 now passes: 2048 repeated views (>2GiB logical, <2MiB backing)
 **2026-10-28T02:55:52Z**
 
 Independent review found untyped NULL companion fallback. Regression28e8fc2 failed on injected Utf8 cast; include exact Null signatures and handle NullArray explicitly. Guardtests3PASS4.78s and SQLfunctions15PASS4.01s. Original official audit now bounded refusal63.22s/maxRSS7105298432B, no Arrow panic, no acceptedcount.
+
+**2026-10-28T03:10:26Z**
+
+Closed after independent string review and NULL follow-up APPROVE, >2GiB logical view and all representation/NULL regressions, SQLfunctions15PASS, complete scripts/check pass, and official audit proper capacity refusal without panic at7.11GB under14GiB. No accepted official source-line count claimed.
