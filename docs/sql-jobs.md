@@ -9,10 +9,13 @@ Inputs are named Parquet paths, exact Iceberg pins, or plain/gzip JSON-lines fil
 with an explicit Arrow schema. Every JSON field must be nullable. The reader
 adds `__source_key`, one-based `__source_line` and the unchanged `__raw_line`.
 A complete source line must fit `max_batch_bytes` and the signed 32-bit Arrow
-string limit. Before reading or decoding grows buffers, the reader reserves
-raw and decoded string bytes plus structural and declared schema expansion.
-Large string values therefore do not pay the worst-case token cost of dense
-JSON. Decoded batches remain subject to the same byte allowance.
+string limit. The reader admits raw-buffer growth before reading, holds the
+native decoder's
+returned arrays at their measured allocation, and releases completed raw
+workspace before the next yield. Native Arrow owns decoding and its temporary
+workspace. No structural or declared-width multiplier estimates decoded size.
+Reservation failures retain their resource cause and identify the source key
+and line. Decoded batches remain subject to the same byte allowance.
 
 A `native_table` input selects `name`, immutable `metadata_location`,
 `table_uuid`, `snapshot` and `schema_id` from a completed table operation.

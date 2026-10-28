@@ -373,7 +373,7 @@ async fn refuses_required_json_fields_and_reports_exact_bad_line_safely() {
 }
 
 #[tokio::test]
-async fn sparse_schema_is_admitted_before_decoding() {
+async fn sparse_schema_uses_actual_decoded_allocation() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("sparse.gz");
     let mut gzip = GzEncoder::new(std::fs::File::create(&path).unwrap(), Compression::fast());
@@ -392,15 +392,26 @@ async fn sparse_schema_is_admitted_before_decoding() {
         Arc::new(Schema::new(fields)),
     )
     .unwrap();
-    let error = job
+    let batches = job
         .sql("SELECT * FROM sparse")
         .await
         .unwrap()
         .collect()
         .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("Resources exhausted"), "{error}");
+        .unwrap();
+    assert_eq!(
+        batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+        1
+    );
+    for batch in batches {
+        assert_eq!(batch.num_columns(), 20003);
+        assert!(
+            batch.columns()[..20000]
+                .iter()
+                .all(|column| column.is_null(0))
+        );
+        assert!(batch.get_array_memory_size() <= limits().max_batch_bytes);
+    }
 }
 
 fn scratch_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -632,7 +643,7 @@ async fn two_hundred_small_json_files_reuse_bounded_reader_slots() {
 }
 
 #[tokio::test]
-async fn sparse_json_fixed_width_elements_refuse_before_native_decode_allocation() {
+async fn sparse_json_fixed_width_output_is_charged_before_yield() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("sparse.jsonl");
     std::fs::write(
@@ -676,7 +687,7 @@ async fn sparse_json_fixed_width_elements_refuse_before_native_decode_allocation
 }
 
 #[tokio::test]
-async fn run_end_encoded_fixed_width_values_refuse_before_temporary_decode() {
+async fn run_end_encoded_fixed_width_output_is_charged_before_yield() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("wrapped.jsonl");
     std::fs::write(&path, "{\"wrapped\":null}\n").unwrap();
@@ -775,4 +786,55 @@ async fn json_view_schemas_admit_native_descriptor_capacity_and_keep_values() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn json_reservation_errors_keep_file_key_line_and_resource_cause() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("two.jsonl");
+    std::fs::write(
+        &path,
+        format!(
+            "{{\"id\":1}}\n{{\"ignored\":\"{}\"}}\n",
+            "x".repeat(700 << 10)
+        ),
+    )
+    .unwrap();
+    let job = Job::new(
+        Limits {
+            memory_bytes: 2 << 20,
+            batch_rows: 1,
+            compute_threads: 1,
+            ..limits()
+        },
+        root.path().join("scratch"),
+    )
+    .unwrap();
+    job.register_json_lines(
+        "input",
+        vec![JsonLinesFile {
+            key: "context-fixture".into(),
+            path,
+        }],
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)])),
+    )
+    .unwrap();
+    let error = job
+        .sql("SELECT id FROM input")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.find_root(),
+            datafusion::common::DataFusionError::ResourcesExhausted(_)
+        ),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("context-fixture line 2"),
+        "{error}"
+    );
 }
