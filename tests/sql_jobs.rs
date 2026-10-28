@@ -674,3 +674,105 @@ async fn sparse_json_fixed_width_elements_refuse_before_native_decode_allocation
     );
     assert!(error.to_string().contains("JSON-lines decoder"), "{error}");
 }
+
+#[tokio::test]
+async fn run_end_encoded_fixed_width_values_refuse_before_temporary_decode() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("wrapped.jsonl");
+    std::fs::write(&path, "{\"wrapped\":null}\n").unwrap();
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int32, false)),
+        Arc::new(Field::new(
+            "values",
+            DataType::FixedSizeBinary(32 << 20),
+            true,
+        )),
+    );
+    job.register_json_lines(
+        "input",
+        vec![JsonLinesFile {
+            key: "wrapped".into(),
+            path,
+        }],
+        Arc::new(Schema::new(vec![Field::new("wrapped", encoded, true)])),
+    )
+    .unwrap();
+    let error = job
+        .sql("SELECT * FROM input")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.find_root(),
+            datafusion::common::DataFusionError::ResourcesExhausted(_)
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("JSON-lines decoder"), "{error}");
+}
+
+#[tokio::test]
+async fn json_view_schemas_admit_native_descriptor_capacity_and_keep_values() {
+    use arrow::array::{BinaryViewArray, StringViewArray};
+    for data_type in [DataType::Utf8View, DataType::BinaryView] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("view.jsonl");
+        let text = "c".repeat(1 << 20);
+        std::fs::write(&path, format!("{{\"value\":\"{text}\"}}\n")).unwrap();
+        let ceiling = Limits {
+            memory_bytes: 64 << 20,
+            max_batch_bytes: 32 << 20,
+            ..limits()
+        };
+        let job = Job::new(ceiling, root.path().join("scratch")).unwrap();
+        job.register_json_lines(
+            "input",
+            vec![JsonLinesFile {
+                key: "view".into(),
+                path,
+            }],
+            Arc::new(Schema::new(vec![Field::new(
+                "value",
+                data_type.clone(),
+                true,
+            )])),
+        )
+        .unwrap();
+        let batches = job
+            .sql("SELECT * FROM input")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            1
+        );
+        let value = batches[0].column(0);
+        assert_eq!(value.data_type(), &data_type);
+        if data_type == DataType::Utf8View {
+            assert_eq!(
+                value
+                    .as_any()
+                    .downcast_ref::<StringViewArray>()
+                    .unwrap()
+                    .value(0),
+                text
+            );
+        } else {
+            assert_eq!(
+                value
+                    .as_any()
+                    .downcast_ref::<BinaryViewArray>()
+                    .unwrap()
+                    .value(0),
+                text.as_bytes()
+            );
+        }
+    }
+}
