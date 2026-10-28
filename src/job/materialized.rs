@@ -242,3 +242,130 @@ pub(super) async fn retain(
     context.register_table(name, Arc::new(ReservedTable { table, rows, bytes }))?;
     Ok(storage)
 }
+
+#[cfg(test)]
+mod statistics_tests {
+    use super::*;
+    use crate::budget::Limits;
+    use arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+    };
+    use datafusion::common::stats::Precision;
+
+    async fn check(name: &str, limits: Limits, batches: Vec<RecordBatch>, expected: StepStorage) {
+        let root = tempfile::tempdir().unwrap();
+        let budget = Budget::in_workspace(limits, root.path()).unwrap();
+        let context = budget.context();
+        let schema = batches[0].schema();
+        let rows = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
+        let bytes = batches
+            .iter()
+            .map(RecordBatch::get_array_memory_size)
+            .sum::<usize>();
+        let stream = Box::pin(RecordBatchStreamAdapter::new(
+            schema,
+            stream::iter(batches.into_iter().map(Ok)),
+        ));
+        assert_eq!(
+            retain(&context, &budget, name, stream.schema(), stream)
+                .await
+                .unwrap(),
+            expected
+        );
+        let provider = context.table_provider(name).await.unwrap();
+        let state = context.state();
+        for projection in [None, Some(vec![0])] {
+            let plan = provider
+                .scan(&state, projection.as_ref(), &[], None)
+                .await
+                .unwrap();
+            for partition in [None, Some(0)] {
+                let facts = plan.partition_statistics(partition).unwrap();
+                assert_eq!(facts.num_rows, Precision::Inexact(rows));
+                assert_eq!(facts.total_byte_size, Precision::Inexact(bytes));
+                assert_eq!(
+                    facts.column_statistics.len(),
+                    projection.as_ref().map_or(2, Vec::len)
+                );
+            }
+            assert!(plan.partition_statistics(Some(1)).is_err());
+            let plan = provider
+                .scan(&state, projection.as_ref(), &[], Some(1))
+                .await
+                .unwrap();
+            assert_eq!(
+                plan.partition_statistics(None).unwrap().num_rows,
+                Precision::Inexact(rows.min(1))
+            );
+        }
+        let result = context
+            .sql(&format!("SELECT count(*) FROM {name}"))
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            result[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            rows as i64
+        );
+    }
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("value", DataType::Utf8, false),
+        ]))
+    }
+    #[tokio::test]
+    async fn retained_memory_and_empty_scans_publish_inexact_rows_and_bytes() {
+        let schema = schema();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1, 2])),
+                Arc::new(StringArray::from(vec!["one", "two"])),
+            ],
+        )
+        .unwrap();
+        check(
+            "retained",
+            Limits::default(),
+            vec![batch],
+            StepStorage::Memory,
+        )
+        .await;
+        check(
+            "empty",
+            Limits::default(),
+            vec![RecordBatch::new_empty(schema)],
+            StepStorage::Memory,
+        )
+        .await;
+    }
+    #[tokio::test]
+    async fn retained_scratch_scan_reuses_materialized_size_estimates() {
+        let limits = Limits {
+            compute_threads: 1,
+            memory_bytes: 8 << 20,
+            max_batch_bytes: 1 << 20,
+            scratch_bytes: 32 << 20,
+            ..Limits::default()
+        };
+        let schema = schema();
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![1])),
+                Arc::new(StringArray::from(vec!["x".repeat(512 << 10)])),
+            ],
+        )
+        .unwrap();
+        check("spilled", limits, vec![batch; 12], StepStorage::Scratch).await;
+    }
+}
