@@ -354,3 +354,49 @@ async fn native_selector_admits_observed_metadata_under_a_larger_size_ceiling() 
         json!([{"id":2}])
     );
 }
+
+#[tokio::test]
+async fn append_identity_refuses_side_effects_with_nonempty_work() {
+    use iceberg::Catalog;
+    for command in ["copy", "ddl", "set"] {
+        let root = tempfile::tempdir().unwrap();
+        let value = spec(root.path());
+        serde_json::from_value::<JobSpec>(value.clone())
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap();
+        let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+            .await
+            .unwrap();
+        let ident = TableIdent::new(NamespaceIdent::new("archive".into()), "captures".into());
+        let before = catalog.load_table(&ident).await.unwrap();
+        let target = root.path().join("identity-copy.parquet");
+        let identity = match command {
+            "copy" => format!(
+                "COPY (SELECT id FROM pending) TO '{}' STORED AS PARQUET",
+                target.display()
+            ),
+            "ddl" => "CREATE TABLE injected AS SELECT id FROM pending".into(),
+            "set" => "SET datafusion.execution.batch_size = 1".into(),
+            _ => unreachable!(),
+        };
+        let mut next = value.clone();
+        next["steps"][0]["sql"] = json!("SELECT cast(3 AS BIGINT) AS id");
+        next["table_operations"] = json!([value["table_operations"][2].clone()]);
+        next["table_operations"][0]["identity_sql"] = json!(identity);
+        let failed = serde_json::from_value::<JobSpec>(next)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap_err();
+        assert_eq!(failed.error.code(), "query", "{command}: {failed}");
+        assert!(!target.exists());
+        let after = catalog.load_table(&ident).await.unwrap();
+        assert_eq!(before.metadata_location(), after.metadata_location());
+        assert_eq!(
+            before.metadata().current_snapshot_id(),
+            after.metadata().current_snapshot_id()
+        );
+    }
+}

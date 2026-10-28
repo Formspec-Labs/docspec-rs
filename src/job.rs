@@ -289,3 +289,54 @@ impl Job {
         export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
 }
+
+#[cfg(test)]
+mod sql_guard_tests {
+    use super::Job;
+    use crate::budget::Limits;
+
+    #[tokio::test]
+    async fn caller_sql_refuses_commands_before_session_or_filesystem_effects() {
+        for retained in [false, true] {
+            for command in ["copy", "ddl", "set"] {
+                let root = tempfile::tempdir().unwrap();
+                let job = Job::new(Limits::default(), root.path().join("scratch")).unwrap();
+                let target = root.path().join("unrequested.parquet");
+                let sql = match command {
+                    "copy" => format!(
+                        "COPY (SELECT 1 AS id) TO '{}' STORED AS PARQUET",
+                        target.display()
+                    ),
+                    "ddl" => "CREATE TABLE injected AS SELECT 1 AS id".into(),
+                    "set" => "SET datafusion.execution.batch_size = 1".into(),
+                    _ => unreachable!(),
+                };
+                let before = job.context.copied_config().batch_size();
+                let refused = if retained {
+                    job.materialize("attempt", &sql).await.is_err()
+                } else {
+                    match job.sql(&sql).await {
+                        Ok(frame) => {
+                            let _ = frame.collect().await;
+                            false
+                        }
+                        Err(_) => true,
+                    }
+                };
+                assert!(refused, "{command}, materialize={retained}");
+                assert!(!target.exists(), "COPY made an unrequested file");
+                assert!(!job.context.table_exist("injected").unwrap());
+                assert_eq!(job.context.copied_config().batch_size(), before);
+                assert_eq!(
+                    job.sql("SELECT 1 AS id")
+                        .await
+                        .unwrap()
+                        .count()
+                        .await
+                        .unwrap(),
+                    1
+                );
+            }
+        }
+    }
+}
