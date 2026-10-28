@@ -277,6 +277,32 @@ impl Drop for WorkspaceLock {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sort_spill_headroom_scales_to_native_pool_and_partitions() {
+        for (memory, threads, expected) in [
+            (192 << 20, 2, 3 << 20),
+            (192 << 20, 4, 1536 << 10),
+            (24usize << 30, 12, 10 << 20),
+            (32, 64, 1),
+        ] {
+            let budget = Budget::new(Limits {
+                memory_bytes: memory,
+                compute_threads: threads,
+                ..Limits::default()
+            })
+            .unwrap();
+            assert_eq!(
+                budget
+                    .context()
+                    .state()
+                    .config_options()
+                    .execution
+                    .sort_spill_reservation_bytes,
+                expected
+            );
+        }
+    }
+
     #[tokio::test]
     async fn distinct_using_keeps_explicit_selected_columns() {
         let context = Budget::new(Limits::default()).unwrap().context();
