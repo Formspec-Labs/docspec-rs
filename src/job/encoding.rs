@@ -40,6 +40,13 @@ pub(super) fn write<W: Write + Send>(
                 target = take / 2;
                 continue;
             }
+            Err(_) if flush && writer.in_progress_rows() > 0 => {
+                // The caller still owns the fixed input/retained-state
+                // reservation. Release that group before refusing a row that
+                // can fit by itself; no new input is written during retry.
+                writer.flush()?;
+                continue;
+            }
             Err(error) => return Err(error),
         };
         writer.write(&piece)?;
@@ -162,10 +169,31 @@ mod tests {
         let budget = budget(288 << 10);
         let base = 2 * budget.limits.max_batch_bytes;
         let _base = budget.reserve(base).unwrap();
-        let input = RecordBatch::try_new(Arc::new(Schema::new(vec![Field::new("value", DataType::Utf8, false)])), vec![Arc::new(StringArray::from(vec!["x".repeat(15 << 10), "y".repeat(20 << 10)]))]).unwrap();
+        let input = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new(
+                "value",
+                DataType::Utf8,
+                false,
+            )])),
+            vec![Arc::new(StringArray::from(vec![
+                "x".repeat(15 << 10),
+                "y".repeat(20 << 10),
+            ]))],
+        )
+        .unwrap();
         let mut output = writer(&input);
         super::write(&mut output, &input, &budget, base, false, true).unwrap();
-        let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(output.into_inner().unwrap())).unwrap().build().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(arrow::compute::concat_batches(&input.schema(), &read).unwrap(), input);
+        let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(
+            output.into_inner().unwrap(),
+        ))
+        .unwrap()
+        .build()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+        assert_eq!(
+            arrow::compute::concat_batches(&input.schema(), &read).unwrap(),
+            input
+        );
     }
 }
