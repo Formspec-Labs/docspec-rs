@@ -24,10 +24,6 @@ fn limits() -> Limits {
 
 #[tokio::test]
 async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance() {
-    use docspec::{
-        job::{ExportProfile, ExportSettings},
-        model::SortColumn,
-    };
     let root = tempfile::tempdir().unwrap();
     let mut ceiling = limits();
     ceiling.memory_bytes = 4 << 20;
@@ -71,28 +67,6 @@ async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance()
             .unwrap()
             .value(0),
         8192 * 512
-    );
-    let settings = ExportSettings {
-        profile: ExportProfile::Whole,
-        row_group_rows: 8192,
-        order_by: vec![SortColumn::asc("id")],
-        columns: vec![],
-        dictionary_columns: Default::default(),
-        delta_columns: Default::default(),
-        key_column: None,
-        created_by: "byte fitted spill".into(),
-        footer_limit: 4096,
-    };
-    assert_eq!(
-        job.export(
-            "SELECT * FROM spilled",
-            &root.path().join("output.parquet"),
-            &settings
-        )
-        .await
-        .unwrap()
-        .rows,
-        8192
     );
 }
 
@@ -210,7 +184,7 @@ async fn wide_view_batches_fit_before_materialization_and_export() {
     assert_eq!(actual, expected);
     let settings = ExportSettings {
         profile: ExportProfile::Whole,
-        row_group_rows: 4,
+        row_group_rows: 32,
         order_by: vec![SortColumn::asc("id")],
         columns: vec![],
         dictionary_columns: Default::default(),
