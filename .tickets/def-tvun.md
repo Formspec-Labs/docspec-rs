@@ -41,3 +41,19 @@ b7576e6/4df787b contracts first; strict maintained Arrow conversion and declared
 **2026-10-28T08:58:28Z**
 
 Metadata contract first: two real local native tables with field IDs 1 and 2, plus NULL branches, retain exact row multisets and declared batch schemas. Current focused lane fails both tests: aggregate physical/logical PARQUET metadata disagreement and fabricated union field identity. Upstream PR21127 fixes only empty metadata; the retained daily fixture has actual conflicting IDs (captures SHA16 versus readings SHA1), requiring metadata reconciliation without stripping input IDs or disabling validation.
+
+**2026-10-28T09:37:52Z**
+
+Metadata contracts 7e13d61/215e35c precede 30255bf. Missing/conflicting native UNION field IDs and TRY_CAST source-tag leakage now pass seven native selectors/contracts, three zero-copy/schema units and all-target/all-feature Clippy. Native model replay with rebuilt CLI and independent review remain pending; no final acceptance claim.
+
+**2026-10-28T09:39:38Z**
+
+30255bf metadata behavior plus C1 fixtures48ec2f2: rebuilt ordinary remote-only CLI completes25 native-table model outputs, list29, all invariant/completeness guards zero; 4.93s, peak RSS418349056B, footprint301417600B. Exact cxc_run4_native_model_meta2 evidence retained. Candidate48ec2f2 SHA427b772aabb62cccafb3b5005a46a900b7678d31062981883da82a6fe97a4f52 handed engine/raw/release; independent metadata review and final full gate active. Native consumer qualification remains separate.
+
+**2026-10-28T09:52:42Z**
+
+Candidate48 full scripts/check PASS:429lib/423integration/15restore/1processmemory/2worker/11probe/31Dagster,17existing skips. Seven actual daily cases expose stale ancestor schemas after child UNION metadata changes; contract59af50e reproduces physical{} versus logical fieldID2. Native rewrite_with_subqueries and selective native recompute_schema now pass73 SQL checks/8native matrix cases and all-target Clippy; actual daily rebuilt replay and follow-up review pending.
+
+**2026-10-28T10:02:22Z**
+
+Review F1 confirmed by27a4511: native TypeCoercion creates merged UNION tags inside a scalar subquery, and unchanged outer relational input leaves stale outer metadata. Observe direct child and embedded subquery schemas through native apply_subqueries before selective reconstruction. Final4metadata unitsPASS0.03s,74SQLPASS21.45s and ClippyPASS; e812 rebuilt retained daily fixture yields1workitem/0admissions/allconflictguards0. Final CLI/review/fullgate follow.

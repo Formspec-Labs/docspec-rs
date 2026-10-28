@@ -9,7 +9,7 @@ use datafusion::{
         DFSchemaRef, Result,
         config::ConfigOptions,
         internal_err,
-        tree_node::{Transformed, TreeNode},
+        tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter},
     },
     execution::{SessionState, TaskContext, context::QueryPlanner},
     logical_expr::{
@@ -32,42 +32,100 @@ pub(super) struct Planner;
 
 fn normalize(plan: LogicalPlan, wrap: bool) -> Result<LogicalPlan> {
     Ok(plan
-        .transform_up(|plan| {
-            if wrap && let LogicalPlan::Projection(projection) = &plan {
-                for expr in &projection.expr {
-                    if expr.exists(|expr| Ok(matches!(expr, Expr::TryCast(_))))? {
-                        // Native TryCastExpr::return_field retains input tags;
-                        // logical TRY_CAST declares a new field without them.
-                        return Ok(Transformed::yes(wrapped(plan)));
-                    }
-                }
-            }
-            let LogicalPlan::Union(union) = plan else {
-                return Ok(Transformed::no(plan));
-            };
-            let prior = union.schema.clone();
-            // Type coercion in 53.1 merges metadata; subsequent column pruning
-            // intersects it. Use the native logical constructor consistently.
-            let union = if union.inputs.len() > 1 {
-                Union::try_new(union.inputs)?
-            } else {
-                union
-            };
-            let needs_adapter = union
-                .inputs
-                .iter()
-                .any(|input| input.schema().as_arrow() != union.schema.as_arrow());
-            let changed = union.schema != prior;
-            let plan = LogicalPlan::Union(union);
-            if wrap && needs_adapter {
-                Ok(Transformed::yes(wrapped(plan)))
-            } else if changed {
-                Ok(Transformed::yes(plan))
-            } else {
-                Ok(Transformed::no(plan))
-            }
+        .rewrite_with_subqueries(&mut Reconcile {
+            wrap,
+            input_schemas: Vec::new(),
         })?
         .data)
+}
+
+struct Reconcile {
+    wrap: bool,
+    input_schemas: Vec<Vec<DFSchemaRef>>,
+}
+
+fn child_schemas(plan: &LogicalPlan) -> Result<Vec<DFSchemaRef>> {
+    let mut schemas: Vec<_> = plan
+        .inputs()
+        .iter()
+        .map(|input| input.schema().clone())
+        .collect();
+    plan.apply_subqueries(|subquery| {
+        schemas.push(subquery.schema().clone());
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(schemas)
+}
+
+impl TreeNodeRewriter for Reconcile {
+    type Node = LogicalPlan;
+
+    fn f_down(&mut self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        self.input_schemas.push(child_schemas(&plan)?);
+        Ok(Transformed::no(plan))
+    }
+
+    fn f_up(&mut self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        let before = self
+            .input_schemas
+            .pop()
+            .expect("paired native plan traversal");
+        let changed_input = before != child_schemas(&plan)?;
+        let prior = plan.schema().clone();
+        // Native tree rewriting retains cached parent schemas. Reconstruct
+        // only ancestors whose relational or embedded declaration changed.
+        let plan = if changed_input {
+            plan.recompute_schema()?
+        } else {
+            plan
+        };
+        let result = self.node(plan)?;
+        let changed_schema = result.data.schema() != &prior;
+        Ok(Transformed::new(
+            result.data,
+            result.transformed || changed_schema,
+            result.tnr,
+        ))
+    }
+}
+
+impl Reconcile {
+    fn node(&self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
+        let wrap = self.wrap;
+        if wrap && let LogicalPlan::Projection(projection) = &plan {
+            for expr in &projection.expr {
+                if expr.exists(|expr| Ok(matches!(expr, Expr::TryCast(_))))? {
+                    // Native TryCastExpr::return_field retains input tags;
+                    // logical TRY_CAST declares a new field without them.
+                    return Ok(Transformed::yes(wrapped(plan)));
+                }
+            }
+        }
+        let LogicalPlan::Union(union) = plan else {
+            return Ok(Transformed::no(plan));
+        };
+        let prior = union.schema.clone();
+        // Type coercion in 53.1 merges metadata; subsequent column pruning
+        // intersects it. Use the native logical constructor consistently.
+        let union = if union.inputs.len() > 1 {
+            Union::try_new(union.inputs)?
+        } else {
+            union
+        };
+        let needs_adapter = union
+            .inputs
+            .iter()
+            .any(|input| input.schema().as_arrow() != union.schema.as_arrow());
+        let changed = union.schema != prior;
+        let plan = LogicalPlan::Union(union);
+        if wrap && needs_adapter {
+            Ok(Transformed::yes(wrapped(plan)))
+        } else if changed {
+            Ok(Transformed::yes(plan))
+        } else {
+            Ok(Transformed::no(plan))
+        }
+    }
 }
 
 fn wrapped(plan: LogicalPlan) -> LogicalPlan {
@@ -335,6 +393,59 @@ mod tests {
             for batch in batches {
                 assert_eq!(batch.schema(), declared);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn scalar_subquery_only_changes_rebuild_the_outer_schema() {
+        use datafusion::{
+            logical_expr::{LogicalPlanBuilder, logical_plan::Subquery},
+            optimizer::analyzer::type_coercion::TypeCoercion,
+            prelude::SessionContext,
+        };
+        let context = SessionContext::new();
+        context
+            .register_batch("left_input", batch(Some(7), "left").0)
+            .unwrap();
+        context
+            .register_batch("right_input", batch(None, "right").0)
+            .unwrap();
+        let mut inputs = Vec::new();
+        for name in ["left_input", "right_input"] {
+            inputs.push(Arc::new(
+                context.table(name).await.unwrap().into_unoptimized_plan(),
+            ));
+        }
+        // Use native coercion to produce its merged UNION tags before our
+        // reconciliation; the scalar result initially inherits those tags.
+        let union = TypeCoercion::new()
+            .analyze(
+                LogicalPlan::Union(Union::try_new(inputs).unwrap()),
+                &ConfigOptions::new(),
+            )
+            .unwrap();
+        let subquery = LogicalPlanBuilder::from(union)
+            .limit(0, Some(1))
+            .unwrap()
+            .build()
+            .unwrap();
+        let plan = LogicalPlanBuilder::empty(true)
+            .project(vec![
+                Expr::ScalarSubquery(Subquery {
+                    subquery: Arc::new(subquery),
+                    outer_ref_columns: vec![],
+                    spans: Default::default(),
+                })
+                .alias("value"),
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+        let expected = HashMap::from([("common".into(), "unit".into())]);
+        assert_ne!(plan.schema().field(0).metadata(), &expected);
+        for wrap in [false, true] {
+            let normalized = normalize(plan.clone(), wrap).unwrap();
+            assert_eq!(normalized.schema().field(0).metadata(), &expected);
         }
     }
 
