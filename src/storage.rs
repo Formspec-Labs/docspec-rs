@@ -4,7 +4,8 @@
 mod batch;
 pub(crate) use batch::{
     arrow_schema_to_schema_auto_assign_ids, coerce_batch, coerce_data_type, compact_batch_slice,
-    effective_batch_bytes, has_list_of_struct, has_splittable_skewed_column, split_oversized_batch,
+    compact_views, effective_batch_bytes, has_list_of_struct, has_splittable_skewed_column,
+    referenced_batch_bytes, split_oversized_batch,
 };
 pub(crate) mod defaults;
 mod flat;
@@ -240,8 +241,15 @@ async fn read_projected_batches_inner(
     let stream = result.stream();
     let pending = std::collections::VecDeque::<RecordBatch>::new();
     Ok(futures::stream::try_unfold(
-        (stream, pending, reservation, selection, observation),
-        move |(mut stream, mut pending, reservation, selection, observation)| async move {
+        (
+            stream,
+            pending,
+            reservation,
+            selection,
+            observation,
+            budget.clone(),
+        ),
+        move |(mut stream, mut pending, reservation, selection, observation, budget)| async move {
             loop {
                 if let Some(sub_batch) = pending.pop_front() {
                     let sub_batch = match &selection {
@@ -250,7 +258,7 @@ async fn read_projected_batches_inner(
                     };
                     return Ok(Some((
                         sub_batch,
-                        (stream, pending, reservation, selection, observation),
+                        (stream, pending, reservation, selection, observation, budget),
                     )));
                 }
                 let Some(batch) = stream.try_next().await? else {
@@ -260,7 +268,7 @@ async fn read_projected_batches_inner(
                     return Ok(None);
                 };
                 let batch = schema::strip_file_column(batch, limit)?;
-                for slice in split_oversized_batch(batch, limit)? {
+                for slice in split_oversized_batch(batch, limit, &budget)? {
                     pending.push_back(slice);
                 }
             }
@@ -567,7 +575,7 @@ where
                 } else {
                     budget.limits.max_batch_bytes
                 };
-                for batch in split_oversized_batch(raw_batch, write_split_limit)? {
+                for batch in split_oversized_batch(raw_batch, write_split_limit, budget)? {
                     let batch =
                         identity::materialize(batch, &origin, next_row, budget.limits.max_batch_bytes)?;
                     next_row = next_row

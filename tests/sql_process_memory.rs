@@ -111,6 +111,16 @@ fn repeated_dictionary_views_respect_process_memory() {
     writer.close().unwrap();
     assert!(std::fs::metadata(&path).unwrap().len() < 2 << 20);
 
+    measure_child(
+        "repeated_dictionary_views_respect_process_memory",
+        INPUT,
+        &path,
+        MEMORY,
+        MEMORY + OVERHEAD,
+    );
+}
+
+fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, ceiling: usize) {
     let mut command = Command::new("/usr/bin/time");
     #[cfg(target_os = "macos")]
     command.arg("-l");
@@ -118,12 +128,8 @@ fn repeated_dictionary_views_respect_process_memory() {
     command.args(["-f", "DOCSPEC_MAXRSS_KIB=%M"]);
     let output = command
         .arg(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "repeated_dictionary_views_respect_process_memory",
-            "--nocapture",
-        ])
-        .env(INPUT, path)
+        .args(["--exact", test, "--nocapture"])
+        .env(variable, path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -149,9 +155,9 @@ fn repeated_dictionary_views_respect_process_memory() {
         .unwrap()
         * 1024;
     println!(
-        "peak_process_memory_bytes={peak}, configured_memory_bytes={MEMORY}, fixed_overhead_bytes={OVERHEAD}"
+        "peak_process_memory_bytes={peak}, configured_memory_bytes={configured}, fixed_overhead_bytes={OVERHEAD}"
     );
-    assert!(peak <= MEMORY + OVERHEAD, "{stdout}\n{stderr}");
+    assert!(peak <= ceiling, "{stdout}\n{stderr}");
     #[cfg(target_os = "macos")]
     {
         let footprint = stderr
@@ -164,6 +170,61 @@ fn repeated_dictionary_views_respect_process_memory() {
             .parse::<usize>()
             .unwrap();
         println!("peak_physical_footprint_bytes={footprint}");
-        assert!(footprint <= MEMORY + OVERHEAD, "{stdout}\n{stderr}");
+        assert!(footprint <= ceiling, "{stdout}\n{stderr}");
     }
+}
+
+const JSON_ROOT: &str = "DOCSPEC_TEST_JSON_LINES_MEMORY_ROOT";
+const LARGE_LINE: usize = 187_661_339;
+
+#[test]
+fn large_json_lines_fit_decode_and_preserve_the_line_byte_ceiling() {
+    if let Some(root) = std::env::var_os(JSON_ROOT) {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let root=std::path::PathBuf::from(root);
+            let limits=Limits {compute_threads:1,memory_bytes:10<<30,max_batch_bytes:512<<20,..Limits::default()};
+            let schema=Arc::new(Schema::new(vec![Field::new("id",DataType::Int64,true),Field::new("payload",DataType::Utf8,true)]));
+            {
+                let job=Job::new(limits.clone(),root.join("valid-scratch")).unwrap();
+                job.register_json_lines("input",vec![docspec::job::JsonLinesFile {key:"large".into(),path:root.join("valid.jsonl")}],schema.clone()).unwrap();
+                let batches=job.sql("SELECT id,cast(length(payload) AS BIGINT),cast(length(__raw_line) AS BIGINT),__source_line FROM input").await.unwrap().collect().await.unwrap();
+                assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(),1);
+                let batch=&batches[0];
+                for (column,expected) in [7,(LARGE_LINE-b"{\"id\":7,\"payload\":\"".len()-b"\"}\n".len()) as i64,LARGE_LINE as i64,1].into_iter().enumerate() {
+                    assert_eq!(batch.column(column).as_any().downcast_ref::<arrow::array::Int64Array>().unwrap().value(0),expected);
+                }
+            }
+            let job=Job::new(limits,root.join("oversized-scratch")).unwrap();
+            job.register_json_lines("input",vec![docspec::job::JsonLinesFile {key:"oversized".into(),path:root.join("oversized.jsonl")}],schema).unwrap();
+            let error=job.sql("SELECT id FROM input").await.unwrap().collect().await.unwrap_err();
+            assert!(error.to_string().contains("line exceeds configured allowance"),"{error}");
+        });
+        return;
+    }
+    use std::io::Write;
+    fn write_line(path: &Path, length: usize) {
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        let prefix = b"{\"id\":7,\"payload\":\"";
+        let suffix = b"\"}\n";
+        file.write_all(prefix).unwrap();
+        let chunk = [b'x'; 64 << 10];
+        let mut remaining = length - prefix.len() - suffix.len();
+        while remaining != 0 {
+            let n = remaining.min(chunk.len());
+            file.write_all(&chunk[..n]).unwrap();
+            remaining -= n;
+        }
+        file.write_all(suffix).unwrap();
+        file.flush().unwrap();
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_line(&root.path().join("valid.jsonl"), LARGE_LINE);
+    write_line(&root.path().join("oversized.jsonl"), 513 << 20);
+    measure_child(
+        "large_json_lines_fit_decode_and_preserve_the_line_byte_ceiling",
+        JSON_ROOT,
+        root.path(),
+        10 << 30,
+        (2 << 30) + OVERHEAD,
+    );
 }

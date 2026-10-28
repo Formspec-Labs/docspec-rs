@@ -805,7 +805,7 @@ fn append_bounded_batch_slice(
     if len == 0 {
         return Ok(());
     }
-    let batch = storage::compact_batch_slice(merged_batch, offset, len)?;
+    let batch = storage::compact_batch_slice(merged_batch, offset, len, budget)?;
     let bytes = batch.get_array_memory_size();
     if bytes > budget.limits.max_batch_bytes {
         if len <= 1 {

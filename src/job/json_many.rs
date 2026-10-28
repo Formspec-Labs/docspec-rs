@@ -634,7 +634,7 @@ fn project(
         }
         builder.append(true);
     }
-    let result = super::admitted::array(Arc::new(builder.finish()), memory)
+    let result = crate::budget::admit_array(Arc::new(builder.finish()), memory)
         .map_err(|e| DataFusionError::External(Box::new(e)))?;
     if scalar {
         let list = result

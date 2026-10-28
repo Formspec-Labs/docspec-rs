@@ -8,6 +8,11 @@ A job declares `scratch`, `inputs`, `steps`, `outputs` and optional `queries`.
 Inputs are named Parquet paths, exact Iceberg pins, or plain/gzip JSON-lines files
 with an explicit Arrow schema. Every JSON field must be nullable. The reader
 adds `__source_key`, one-based `__source_line` and the unchanged `__raw_line`.
+A complete source line must fit `max_batch_bytes` and the signed 32-bit Arrow
+string limit. Before reading or decoding grows buffers, the reader reserves
+raw and decoded string bytes plus structural and declared schema expansion.
+Large string values therefore do not pay the worst-case token cost of dense
+JSON. Decoded batches remain subject to the same byte allowance.
 
 A `native_table` input selects `name`, immutable `metadata_location`,
 `table_uuid`, `snapshot` and `schema_id` from a completed table operation.

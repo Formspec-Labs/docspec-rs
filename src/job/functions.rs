@@ -570,7 +570,7 @@ fn admitted_output(
     array: ArrayRef,
     memory: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<ColumnarValue> {
-    super::admitted::array(array, memory)
+    crate::budget::admit_array(array, memory)
         .map(ColumnarValue::Array)
         .map_err(|e| DataFusionError::External(Box::new(e)))
 }

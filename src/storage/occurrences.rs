@@ -150,6 +150,7 @@ struct Occurrences {
     selection: Option<super::selection::Selection>,
     located: bool,
     limit: usize,
+    budget: Budget,
     _batches: OwnedSemaphorePermit,
     _metadata: Arc<OwnedSemaphorePermit>,
 }
@@ -268,6 +269,7 @@ impl Occurrences {
             selection,
             located,
             limit: budget.limits.max_batch_bytes,
+            budget: budget.clone(),
             _batches: batches,
             _metadata: Arc::new(inventory._reservation),
         })
@@ -281,7 +283,9 @@ impl Occurrences {
                         && let Some(raw_batch) = file.stream.try_next().await?
                     {
                         let stripped = super::schema::strip_file_column(raw_batch, self.limit)?;
-                        for slice in super::split_oversized_batch(stripped, self.limit)? {
+                        for slice in
+                            super::split_oversized_batch(stripped, self.limit, &self.budget)?
+                        {
                             file.pending.push_back(slice);
                         }
                     }
@@ -618,6 +622,7 @@ impl OccurrenceScan {
             current: None,
             observation,
             limit: budget.limits.max_batch_bytes,
+            budget: budget.clone(),
             _batches: budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?,
             _metadata: self._metadata.clone(),
         };

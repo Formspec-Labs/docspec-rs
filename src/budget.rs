@@ -19,9 +19,12 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod array_admission;
+pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
 mod schema_metadata;
 mod scratch;
 mod subqueries;
+mod view_compaction;
 pub(crate) use scratch::ScratchWriter;
 
 /// Declared limits for one workspace execution host.
@@ -138,6 +141,7 @@ impl Budget {
             }
             if rule.name() == "SanityCheckPlan" {
                 rules.push(Arc::new(crate::job::fitting::FitFunctions));
+                rules.push(Arc::new(view_compaction::Planner(self.clone())));
             }
             rules.push(rule);
         }

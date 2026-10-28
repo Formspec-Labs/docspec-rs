@@ -221,7 +221,9 @@ impl ChildAccumulator {
         }
 
         let child_batch = RecordBatch::try_new(self.child_schema.clone(), cols)?;
-        for slice in storage::split_oversized_batch(child_batch, budget.limits.max_batch_bytes)? {
+        for slice in
+            storage::split_oversized_batch(child_batch, budget.limits.max_batch_bytes, budget)?
+        {
             let mem = budget.reserve(storage::effective_batch_bytes(&slice))?;
             self.reservations.push(mem);
             self.batches.push(slice);
@@ -313,7 +315,9 @@ impl ChildAccumulator {
                 if batch.num_rows() == 0 {
                     continue;
                 }
-                for slice in storage::split_oversized_batch(batch, budget.limits.max_batch_bytes)? {
+                for slice in
+                    storage::split_oversized_batch(batch, budget.limits.max_batch_bytes, budget)?
+                {
                     total_rows = total_rows
                         .checked_add(slice.num_rows() as u64)
                         .ok_or_else(invalid_export)?;

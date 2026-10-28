@@ -1,6 +1,5 @@
 //! SQL jobs share one bounded execution context; callers supply all domain rules.
 // Rust guideline compliant 2026-02-21
-mod admitted;
 mod canonical;
 mod components;
 mod encoding;

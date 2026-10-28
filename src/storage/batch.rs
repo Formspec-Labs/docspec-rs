@@ -4,6 +4,8 @@
 use crate::{Error, Result};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
+mod views;
+pub(crate) use views::{compact_views, referenced_batch_bytes};
 
 #[cfg(test)]
 mod alignment_tests;
@@ -114,7 +116,7 @@ fn referenced_variable_bytes(col: &dyn arrow::array::Array, num_rows: usize) -> 
         let data = usize::try_from(offsets[num_rows] - offsets[0]).unwrap_or(0);
         Some(data.saturating_add((num_rows + 1) * std::mem::size_of::<i64>()))
     } else {
-        None
+        views::reference_bytes(col, num_rows)
     }
 }
 
@@ -219,6 +221,7 @@ pub(crate) fn compact_batch_slice(
     batch: &RecordBatch,
     offset: usize,
     length: usize,
+    budget: &crate::budget::Budget,
 ) -> Result<RecordBatch> {
     let sliced = batch.slice(offset, length);
     if sliced.num_columns() == 0 {
@@ -226,13 +229,18 @@ pub(crate) fn compact_batch_slice(
     }
     let schema = batch.schema();
     let empty = RecordBatch::new_empty(schema.clone());
-    Ok(arrow::compute::concat_batches(&schema, &[sliced, empty])?)
+    let compacted = arrow::compute::concat_batches(&schema, &[sliced, empty])?;
+    compact_views(compacted, budget)
 }
 
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into
 /// deep-compacted row slices that fit within `limit` in a single linear pass
 /// by per-row byte weight so each slice is compacted at most once.
-pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<Vec<RecordBatch>> {
+pub(crate) fn split_oversized_batch(
+    batch: RecordBatch,
+    limit: usize,
+    budget: &crate::budget::Budget,
+) -> Result<Vec<RecordBatch>> {
     if batch.get_array_memory_size() <= limit {
         return Ok(vec![batch]);
     }
@@ -249,7 +257,7 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
     if num_rows <= 1 {
         let compacted =
             if num_rows == 1 && batch.get_array_memory_size() > effective_batch_bytes(&batch) {
-                compact_batch_slice(&batch, 0, 1)?
+                compact_batch_slice(&batch, 0, 1, budget)?
             } else {
                 batch
             };
@@ -268,6 +276,9 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
     // Estimate per-row byte weights in a single linear pass across columns.
     let mut row_weights = vec![0usize; num_rows];
     for col in batch.columns() {
+        if views::add_weights(col.as_ref(), &mut row_weights) {
+            continue;
+        }
         let col_bytes = col.get_array_memory_size();
         if let Some(list) = col.as_any().downcast_ref::<arrow::array::ListArray>() {
             let offsets = list.value_offsets();
@@ -335,7 +346,7 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
 
     let mut out = Vec::with_capacity(ranges.len());
     for (start, len) in ranges {
-        let slice = compact_batch_slice(&batch, start, len)?;
+        let slice = compact_batch_slice(&batch, start, len, budget)?;
         if slice.get_array_memory_size() <= limit {
             out.push(slice);
         } else if slice.num_rows() <= 1 {
@@ -351,7 +362,7 @@ pub(crate) fn split_oversized_batch(batch: RecordBatch, limit: usize) -> Result<
             out.push(slice);
         } else {
             for r in 0..slice.num_rows() {
-                let one = compact_batch_slice(&batch, start + r, 1)?;
+                let one = compact_batch_slice(&batch, start + r, 1, budget)?;
                 let effective = effective_batch_bytes(&one);
                 if effective > limit {
                     return Err(Error::refusal(
@@ -542,7 +553,7 @@ pub(crate) fn align_native_batch(
                         Arc::new(Schema::new(vec![field.clone()])),
                         vec![array.clone()],
                     )?;
-                    compact_batch_slice(&one, 0, batch.num_rows())?
+                    compact_batch_slice(&one, 0, batch.num_rows(), budget)?
                         .column(0)
                         .clone()
                 } else {

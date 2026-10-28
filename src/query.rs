@@ -830,18 +830,19 @@ pub(crate) fn bounded(
             stream,
             std::collections::VecDeque::<arrow::record_batch::RecordBatch>::new(),
             reservation,
+            budget.clone(),
         ),
-        move |(mut stream, mut pending, reservation)| async move {
+        move |(mut stream, mut pending, reservation, budget)| async move {
             loop {
                 if let Some(batch) = pending.pop_front() {
-                    return Ok(Some((batch, (stream, pending, reservation))));
+                    return Ok(Some((batch, (stream, pending, reservation, budget))));
                 }
                 let Some(batch) = stream.try_next().await? else {
                     return Ok(None);
                 };
                 if crate::storage::has_splittable_skewed_column(&batch, limit) {
-                    for slice in
-                        crate::storage::split_oversized_batch(batch, limit).map_err(external)?
+                    for slice in crate::storage::split_oversized_batch(batch, limit, &budget)
+                        .map_err(external)?
                     {
                         pending.push_back(slice);
                     }
@@ -853,7 +854,7 @@ pub(crate) fn bounded(
                         "combined result exceeds the consumer batch allowance",
                     )));
                 }
-                return Ok(Some((batch, (stream, pending, reservation))));
+                return Ok(Some((batch, (stream, pending, reservation, budget))));
             }
         },
     );

@@ -26,6 +26,9 @@ use std::{
     sync::Arc,
 };
 
+// Keep reader buffers and gzip history admitted until the reader closes.
+const READER_BYTES: usize = 256 << 10;
+
 /// One source file and its stable, non-secret evidence key.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,12 +57,94 @@ fn field_allowance(field: &Field) -> Option<usize> {
         DataType::FixedSizeList(child, n) => {
             field_allowance(child)?.checked_mul(usize::try_from(*n).ok()?)?
         }
-        DataType::List(child) | DataType::LargeList(child) | DataType::Map(child, _) => {
-            field_allowance(child)?
-        }
+        DataType::List(child)
+        | DataType::LargeList(child)
+        | DataType::ListView(child)
+        | DataType::LargeListView(child)
+        | DataType::Map(child, _) => field_allowance(child)?,
+        DataType::FixedSizeBinary(width) => usize::try_from(*width).ok()?,
+        // Native REE decoding holds a flat value array while take() builds its
+        // run-compressed values, so both shapes can be live simultaneously.
+        DataType::RunEndEncoded(_, values) => field_allowance(values)?.checked_mul(2)?,
         _ => 0,
     };
     children.checked_add(128)
+}
+
+// Variable containers can produce many sparse typed values from short JSON.
+// Charge their largest declared element shape per possible source value;
+// fixed-size descendants are already multiplied by field_allowance.
+fn item_allowance(field: &Field) -> Option<usize> {
+    match field.data_type() {
+        DataType::List(child)
+        | DataType::LargeList(child)
+        | DataType::ListView(child)
+        | DataType::LargeListView(child)
+        | DataType::Map(child, _) => Some(field_allowance(child)?.max(item_allowance(child)?)),
+        DataType::Struct(fields) => fields
+            .iter()
+            .try_fold(0, |n, f| Some(n.max(item_allowance(f)?))),
+        DataType::FixedSizeList(child, _) => item_allowance(child),
+        DataType::RunEndEncoded(_, values) => item_allowance(values)?.checked_mul(2),
+        _ => Some(0),
+    }
+}
+
+/// Allocation preflight for the locked Arrow58 JSON decoder, not a JSON parser.
+/// Strings pay for raw/decoded byte buffers; structural units pay for tape,
+/// offsets, stack and schema-dependent sparse list elements. Native Arrow
+/// still validates and decodes every record exactly once.
+#[derive(Default)]
+struct DecodeAllocation {
+    bytes: usize,
+    units: usize,
+    quoted: bool,
+    escaped: bool,
+    view_schema: bool,
+}
+impl DecodeAllocation {
+    fn grow(&mut self, input: &[u8], fixed: usize, item: usize) -> Result<usize> {
+        for byte in input {
+            if self.quoted {
+                if self.escaped {
+                    self.escaped = false;
+                } else if *byte == b'\\' {
+                    self.escaped = true;
+                } else if *byte == b'"' {
+                    self.quoted = false;
+                }
+            } else if !byte.is_ascii_whitespace() {
+                self.units = self.units.checked_add(1).ok_or_else(allocation_overflow)?;
+                self.quoted = *byte == b'"';
+            }
+        }
+        self.bytes = self
+            .bytes
+            .checked_add(input.len())
+            .ok_or_else(allocation_overflow)?;
+        // Eight byte copies cover raw Vec reallocations (old+new), native tape
+        // strings, typed values and original-line evidence. A 128-byte unit
+        // covers geometrically grown 8-byte tape/offset/stack entries, decoder
+        // position vectors and validation fallback nodes. Twice each variable
+        // element's fixed shape covers sparse typed arrays and their workspace.
+        // Arrow58's view JSON builders incorrectly interpret string byte
+        // capacity as a count of sixteen-byte view descriptors. Account for
+        // that maintained decoder behavior when any descendant is a byte view.
+        let factor = if self.view_schema { 24 } else { 8 };
+        self.bytes
+            .checked_mul(factor)
+            .and_then(|bytes| {
+                item.checked_mul(2)
+                    .and_then(|item| item.checked_add(128))
+                    .and_then(|unit| self.units.checked_mul(unit))
+                    .and_then(|units| bytes.checked_add(units))
+            })
+            .and_then(|bytes| bytes.checked_add(fixed))
+            .ok_or_else(allocation_overflow)
+    }
+}
+fn allocation_overflow() -> DataFusionError {
+    DataFusionError::ResourcesExhausted("JSON decode allocation overflow".into())
 }
 
 pub(super) fn provider(
@@ -94,6 +179,15 @@ pub(super) fn provider(
         .ok_or_else(|| {
             DataFusionError::ResourcesExhausted("JSON schema allowance overflow".into())
         })?;
+    let item_per_value = input
+        .fields()
+        .iter()
+        .try_fold(0usize, |n, f| Some(n.max(item_allowance(f)?)))
+        .ok_or_else(allocation_overflow)?;
+    let view_schema = input
+        .flattened_fields()
+        .iter()
+        .any(|field| matches!(field.data_type(), DataType::Utf8View | DataType::BinaryView));
     // One sequential group per compute slot bounds open files and queued batches.
     let mut groups = vec![Vec::new(); limits.compute_threads];
     for (i, file) in files.into_iter().enumerate() {
@@ -107,10 +201,13 @@ pub(super) fn provider(
                 files,
                 input: input.clone(),
                 schema: schema.clone(),
-                // Half the configured memory belongs to the DataFusion pool.
-                max_line: (limits.memory_bytes / 64).min(512 << 20),
+                // One batch must hold a complete source line. Keep the native
+                // signed-32-bit string offset bound as an independent ceiling.
+                max_line: limits.max_batch_bytes.min(i32::MAX as usize),
                 batch_rows: limits.batch_rows.min(64),
                 fixed_per_row,
+                item_per_value,
+                view_schema,
                 max_batch_bytes: limits.max_batch_bytes,
             }) as Arc<dyn PartitionStream>
         })
@@ -126,6 +223,8 @@ struct JsonPartition {
     max_line: usize,
     batch_rows: usize,
     fixed_per_row: usize,
+    item_per_value: usize,
+    view_schema: bool,
     max_batch_bytes: usize,
 }
 impl PartitionStream for JsonPartition {
@@ -138,6 +237,8 @@ impl PartitionStream for JsonPartition {
         let max_line = self.max_line;
         let batch_rows = self.batch_rows;
         let fixed_per_row = self.fixed_per_row;
+        let item_per_value = self.item_per_value;
+        let view_schema = self.view_schema;
         let max_batch_bytes = self.max_batch_bytes;
         let files = stream::iter(self.files.clone())
             .map(move |file| {
@@ -150,6 +251,8 @@ impl PartitionStream for JsonPartition {
                     max_line,
                     batch_rows,
                     fixed_per_row,
+                    item_per_value,
+                    view_schema,
                     max_batch_bytes,
                     reservation: MemoryConsumer::new("JSON-lines decoder")
                         .register(context.memory_pool()),
@@ -176,6 +279,8 @@ struct Reader {
     max_line: usize,
     batch_rows: usize,
     fixed_per_row: usize,
+    item_per_value: usize,
+    view_schema: bool,
     max_batch_bytes: usize,
     reservation: MemoryReservation,
 }
@@ -188,7 +293,9 @@ impl Reader {
             .fixed_per_row
             .checked_add(self.file.key.len())
             .and_then(|n| n.checked_mul(self.batch_rows))
-            .and_then(|n| n.checked_add(8192))
+            // Cover the8KiB BufReader and the locked miniz inflater's32KiB
+            // history, Huffman tables and stream state before opening gzip.
+            .and_then(|n| n.checked_add(READER_BYTES))
             .ok_or_else(|| self.error(self.line + 1, "schema and evidence allowance overflow"))?;
         self.reservation.try_resize(fixed)?;
         if self.reader.is_none() {
@@ -211,6 +318,10 @@ impl Reader {
         }
         let first = self.line + 1;
         let mut raw = Vec::new();
+        let mut allocation = DecodeAllocation {
+            view_schema: self.view_schema,
+            ..DecodeAllocation::default()
+        };
         let mut offsets = vec![0usize];
         while offsets.len() <= self.batch_rows && raw.len() < (8 << 20) {
             let start = raw.len();
@@ -240,15 +351,9 @@ impl Reader {
                         "line exceeds configured allowance",
                     ));
                 }
-                // Admit raw storage and decoder expansion before extending the buffer.
-                // Decoder tape, variable data, raw evidence and Vec capacity.
-                // Schema and repeated source-key storage are admitted separately.
-                let allowance = (raw.len() + n)
-                    .checked_mul(32)
-                    .and_then(|n| n.checked_add(fixed))
-                    .ok_or_else(|| {
-                        DataFusionError::ResourcesExhausted("JSON line allocation overflow".into())
-                    })?;
+                // Count without allocating, then admit raw growth and the
+                // native decoder's byte/tape/schema expansion before either.
+                let allowance = allocation.grow(&buffer[..n], fixed, self.item_per_value)?;
                 self.reservation.try_resize(allowance)?;
                 let newline = buffer[n - 1] == b'\n';
                 raw.extend_from_slice(&buffer[..n]);
@@ -263,6 +368,8 @@ impl Reader {
             offsets.push(raw.len());
         }
         if offsets.len() == 1 {
+            self.reader = None;
+            self.reservation.free();
             return Ok(None);
         }
         let mut decoder = ReaderBuilder::new(self.input.clone())
@@ -304,6 +411,136 @@ impl Reader {
         if result.get_array_memory_size() > self.max_batch_bytes {
             return Err(self.error(first, "decoded batch exceeds configured byte allowance"));
         }
+        // Native consumers reserve the returned batch before asking for the
+        // next one. Release completed decoder/raw workspace now, rather than
+        // retaining the preflight upper bound between reader polls.
+        drop(raw);
+        let bytes = result
+            .get_array_memory_size()
+            .checked_add(READER_BYTES)
+            .ok_or_else(allocation_overflow)?;
+        if bytes > self.reservation.size() {
+            return Err(DataFusionError::Internal(
+                "JSON decoded output exceeded its preflight bound".into(),
+            ));
+        }
+        self.reservation.shrink(self.reservation.size() - bytes);
         Ok(Some(result))
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[test]
+    fn escaped_strings_have_the_same_bound_across_every_chunk_boundary() {
+        let raw = br#"{"a":"quoted \\\" text","b":[null,{"c":12}]}"#;
+        let expected = DecodeAllocation::default().grow(raw, 4096, 256).unwrap();
+        for boundary in 0..=raw.len() {
+            let mut allocation = DecodeAllocation::default();
+            allocation.grow(&raw[..boundary], 4096, 256).unwrap();
+            assert_eq!(
+                allocation.grow(&raw[boundary..], 4096, 256).unwrap(),
+                expected
+            );
+        }
+        let sparse = format!("{{\"a\":\"{}\"}}", "x".repeat(32 << 10));
+        assert!(
+            DecodeAllocation::default()
+                .grow(sparse.as_bytes(), 0, 0)
+                .unwrap()
+                < sparse.len() * 12
+        );
+        let dense = format!("[{}]", vec!["0"; 16 << 10].join(","));
+        assert!(
+            DecodeAllocation::default()
+                .grow(dense.as_bytes(), 0, 0)
+                .unwrap()
+                > dense.len() * 32
+        );
+    }
+    #[test]
+    fn sparse_variable_elements_include_fixed_width_and_nested_schema_cost() {
+        let child = Arc::new(Field::new("item", DataType::FixedSizeBinary(4096), true));
+        let field = Field::new("items", DataType::List(child), true);
+        assert!(item_allowance(&field).unwrap() > 4096);
+        assert!(
+            DecodeAllocation::default()
+                .grow(
+                    b"{\"items\":[null,null]}",
+                    0,
+                    item_allowance(&field).unwrap()
+                )
+                .unwrap()
+                > 8192
+        );
+    }
+}
+
+#[cfg(test)]
+mod reader_lifetime_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn gzip_reader_keeps_workspace_admitted_between_yields_and_closes_at_eof() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("one.gz");
+        let mut writer = flate2::write::GzEncoder::new(
+            File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        writer.write_all(b"{\"id\":1}\n").unwrap();
+        writer.finish().unwrap();
+        let limits = crate::budget::Limits {
+            memory_bytes: 64 << 20,
+            ..crate::budget::Limits::default()
+        };
+        let budget = crate::budget::Budget::new(limits.clone()).unwrap();
+        let input = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let files = vec![JsonLinesFile {
+            key: "one".into(),
+            path,
+        }];
+        let schema = provider(files.clone(), input.clone(), &limits)
+            .unwrap()
+            .schema();
+        let pool = &budget.runtime_env().memory_pool;
+        let before = pool.reserved();
+        let make = || Reader {
+            file: files[0].clone(),
+            input: input.clone(),
+            schema: schema.clone(),
+            reader: None,
+            line: 0,
+            max_line: 1 << 20,
+            batch_rows: 64,
+            fixed_per_row: 160,
+            item_per_value: 0,
+            view_schema: false,
+            max_batch_bytes: 1 << 20,
+            reservation: MemoryConsumer::new("JSON-lines lifetime fixture").register(pool),
+        };
+        let mut reader = make();
+        let batch = reader.next().unwrap().unwrap();
+        assert!(reader.reader.is_some());
+        assert!(
+            reader.reservation.size() >= batch.get_array_memory_size() + (40 << 10),
+            "gzip history and buffered reader must retain separate admission"
+        );
+        drop(batch);
+        assert!(reader.next().unwrap().is_none());
+        assert!(
+            reader.reader.is_none(),
+            "close gzip buffers before releasing EOF admission"
+        );
+        assert_eq!(pool.reserved(), before);
+        drop(reader);
+        let mut reader = make();
+        drop(reader.next().unwrap().unwrap());
+        assert!(pool.reserved() > before);
+        drop(reader);
+        assert_eq!(pool.reserved(), before);
     }
 }

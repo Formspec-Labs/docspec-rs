@@ -1111,6 +1111,12 @@ fn split_oversized_batch_splits_skewed_utf8_and_compacts_single_row_slices() {
         Field::new("payload", DataType::Utf8, false),
     ]));
     let limit = 4 * 1024 * 1024; // 4 MiB
+    let budget = Budget::new(crate::budget::Limits {
+        memory_bytes: 128 << 20,
+        max_batch_bytes: limit,
+        ..crate::budget::Limits::default()
+    })
+    .unwrap();
     let big_a = "A".repeat(2_500_000);
     let big_b = "B".repeat(2_500_000);
     let batch = RecordBatch::try_new(
@@ -1126,7 +1132,7 @@ fn split_oversized_batch_splits_skewed_utf8_and_compacts_single_row_slices() {
     assert!(batch.get_array_memory_size() > limit);
 
     // 1. Multi-row batch with two 2.5 MB Utf8 cells splits cleanly under 4 MiB per slice.
-    let slices = split_oversized_batch(batch.clone(), limit).unwrap();
+    let slices = split_oversized_batch(batch.clone(), limit, &budget).unwrap();
     assert!(slices.len() >= 2);
     let total_rows: usize = slices.iter().map(RecordBatch::num_rows).sum();
     assert_eq!(total_rows, 4);
@@ -1143,7 +1149,7 @@ fn split_oversized_batch_splits_skewed_utf8_and_compacts_single_row_slices() {
     // until split_oversized_batch compacts it via compact_batch_slice.
     let uncompacted_one = batch.slice(1, 1);
     assert!(uncompacted_one.get_array_memory_size() > limit);
-    let compacted_slices = split_oversized_batch(uncompacted_one, limit).unwrap();
+    let compacted_slices = split_oversized_batch(uncompacted_one, limit, &budget).unwrap();
     assert_eq!(compacted_slices.len(), 1);
     assert_eq!(compacted_slices[0].num_rows(), 1);
     assert!(compacted_slices[0].get_array_memory_size() <= limit);
