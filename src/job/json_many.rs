@@ -532,6 +532,35 @@ fn project(input: &ColumnarValue, paths: &Paths, budget: &Budget) -> Result<Colu
 mod tests {
     use super::*;
     #[test]
+    fn projected_children_keep_output_admission_after_parent_drop() {
+        let budget = Budget::new(crate::budget::Limits {
+            memory_bytes: 128 << 10,
+            max_batch_bytes: 4 << 10,
+            ..crate::budget::Limits::default()
+        })
+        .unwrap();
+        let paths = Paths::compile(r#"[["key"]]"#, &budget).unwrap();
+        let available = budget.limits.memory_bytes / 2 - paths._memory.num_permits();
+        for input in [
+            ColumnarValue::Scalar(ScalarValue::Utf8(Some(r#"{"key":"value"}"#.into()))),
+            ColumnarValue::Array(Arc::new(arrow::array::StringArray::from(vec![
+                r#"{"key":"value"}"#,
+            ]))),
+        ] {
+            let output = project(&input, &paths, &budget).unwrap();
+            let array = match output {
+                ColumnarValue::Array(array) => array,
+                ColumnarValue::Scalar(ScalarValue::List(array)) => array,
+                _ => panic!("list expected"),
+            };
+            let child = array.to_data().child_data()[0].clone();
+            drop(array);
+            assert!(budget.reserve(available).is_err());
+            drop(child);
+            drop(budget.reserve(available).unwrap());
+        }
+    }
+    #[test]
     fn deep_unselected_frames_refuse_capacity_and_release_it_for_reuse() {
         let budget = Budget::new(crate::budget::Limits {
             memory_bytes: 128 << 10,

@@ -663,3 +663,55 @@ fn disposition(value: &str) -> Option<String> {
         .or(plain)
         .filter(|s| !s.is_empty())
 }
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn output_buffers_keep_admission_after_array_and_function_drop() {
+        let budget = Budget::new(crate::budget::Limits {
+            memory_bytes: 1 << 20,
+            max_batch_bytes: 64 << 10,
+            ..crate::budget::Limits::default()
+        })
+        .unwrap();
+        for kind in [
+            Kind::Normalize,
+            Kind::JsonCanonical,
+            Kind::JsonArray,
+            Kind::HttpDate,
+        ] {
+            let function = GenericFunction {
+                kind,
+                signature: Signature::variadic_any(Volatility::Immutable),
+                budget: budget.clone(),
+            };
+            let value = match kind {
+                Kind::JsonCanonical => r#"{"key":"value"}"#,
+                Kind::HttpDate => "Sun, 06 Nov 1994 08:49:37 GMT",
+                _ => "value with spaces",
+            };
+            let inputs = [(Arc::new(StringArray::from(vec![value])) as ArrayRef, false)];
+            let output = match kind {
+                Kind::JsonCanonical => function.canonical(&inputs, 1),
+                Kind::JsonArray => function.json(&inputs, 1),
+                Kind::HttpDate => function.http_date(&inputs, 1),
+                _ => function.strings(&inputs, 1),
+            }
+            .unwrap();
+            let ColumnarValue::Array(array) = output else {
+                panic!("array output expected")
+            };
+            let buffer = array.slice(0, 1).to_data().buffers()[0].clone();
+            drop(array);
+            drop(function);
+            assert!(
+                budget.reserve(budget.limits.memory_bytes / 2).is_err(),
+                "{kind:?}"
+            );
+            drop(buffer);
+            drop(budget.reserve(budget.limits.memory_bytes / 2).unwrap());
+        }
+    }
+}
