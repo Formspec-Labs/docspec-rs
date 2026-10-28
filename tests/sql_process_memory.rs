@@ -136,6 +136,15 @@ fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, cei
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stdout}\n{stderr}");
     assert!(stdout.contains("1 passed"), "{stdout}");
+    for line in stdout.lines().filter(|line| line.contains("json_case")) {
+        println!("{line}");
+    }
+    for line in stderr
+        .lines()
+        .filter(|line| line.contains("JSON-lines decoded allocation") || line.contains(" real "))
+    {
+        println!("{line}");
+    }
     #[cfg(target_os = "macos")]
     let peak = stderr
         .lines()
@@ -225,6 +234,195 @@ fn large_json_lines_fit_decode_and_preserve_the_line_byte_ceiling() {
         JSON_ROOT,
         root.path(),
         10 << 30,
+        (2 << 30) + OVERHEAD,
+    );
+}
+
+const RECEIPT_CHILD: &str = "DOCSPEC_RECEIPT_SCHEMA_CHILD";
+const RECEIPT_ROOT: &str = "DOCSPEC_RECEIPT_SCHEMA_REAL_ROOT";
+
+#[test]
+fn receipt_schema_charges_measured_allocations_for_both_record_shapes() {
+    if let Some(spec) = std::env::var_os(RECEIPT_CHILD) {
+        let case: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(spec).unwrap()).unwrap();
+        tracing_subscriber::fmt()
+            .with_env_filter("docspec::job::json_lines=debug")
+            .with_writer(std::io::stderr)
+            .try_init()
+            .unwrap();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let root = tempfile::tempdir().unwrap();
+                let schema: Schema =
+                    serde_json::from_str(include_str!("fixtures/json_lines_receipt_schema.json"))
+                        .unwrap();
+                let limits: Limits = serde_json::from_value(case["limits"].clone()).unwrap();
+                let files: Vec<docspec::job::JsonLinesFile> =
+                    serde_json::from_value(case["files"].clone()).unwrap();
+                let job = Job::new(limits, root.path().join("scratch")).unwrap();
+                job.register_json_lines("source", files, Arc::new(schema))
+                    .unwrap();
+                let batches = job
+                    .sql("SELECT * FROM source")
+                    .await
+                    .unwrap()
+                    .collect()
+                    .await
+                    .unwrap();
+                assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+                let mut seen = std::collections::BTreeSet::new();
+                for batch in batches {
+                    let keys = batch
+                        .column(24)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    let lines = batch
+                        .column(25)
+                        .as_any()
+                        .downcast_ref::<arrow::array::Int64Array>()
+                        .unwrap();
+                    let raw = batch
+                        .column(26)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    for row in 0..batch.num_rows() {
+                        let key = keys.value(row);
+                        assert!(seen.insert(key.to_owned()));
+                        assert_eq!(lines.value(row), 1);
+                        assert_eq!(
+                            raw.value(row).len() as u64,
+                            case["lengths"][key].as_u64().unwrap()
+                        );
+                        println!(
+                            "json_case key={key} raw_line_bytes={} decoded_batch_bytes={}",
+                            raw.value(row).len(),
+                            batch.get_array_memory_size()
+                        );
+                    }
+                }
+            });
+        return;
+    }
+    use std::io::{BufRead, Write};
+    let root = tempfile::tempdir().unwrap();
+    let mut files = Vec::new();
+    let mut lengths = serde_json::Map::new();
+    let real = std::env::var_os(RECEIPT_ROOT).map(std::path::PathBuf::from);
+    for (key, relative, list) in [
+        (
+            "house",
+            "house/meeting-xml/undated/assemble-20260930.jsonl.gz",
+            false,
+        ),
+        (
+            "youtube",
+            "youtube/api/2026-09-29/assemble-20260930.jsonl.gz",
+            true,
+        ),
+    ] {
+        let path = root.path().join(format!("{key}.jsonl.gz"));
+        let mut writer = flate2::write::GzEncoder::new(
+            std::fs::File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let length = if let Some(real) = &real {
+            let mut reader = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(
+                std::fs::File::open(real.join(relative)).unwrap(),
+            ));
+            let mut length = 0;
+            loop {
+                let buffer = reader.fill_buf().unwrap();
+                assert!(!buffer.is_empty(), "missing retained line1");
+                let count = buffer
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map_or(buffer.len(), |index| index + 1);
+                let end = buffer[count - 1] == b'\n';
+                writer.write_all(&buffer[..count]).unwrap();
+                length += count;
+                reader.consume(count);
+                if end {
+                    break;
+                }
+            }
+            if key == "house" {
+                assert_eq!(length, 187_661_339);
+            } else {
+                assert!(length > 50_000_000);
+            }
+            length
+        } else {
+            // The real schema's unselected nested records must not multiply
+            // admission for its two declared list fields.
+            let prefix = if list {
+                "{\"record\":["
+            } else {
+                "{\"record\":{\"unselected\":["
+            };
+            writer.write_all(prefix.as_bytes()).unwrap();
+            let item = b"{\"unused\":0,\"nested\":[0,1,2]}";
+            let count = 17_244;
+            for index in 0..count {
+                if index != 0 {
+                    writer.write_all(b",").unwrap();
+                }
+                writer.write_all(item).unwrap();
+            }
+            let middle = if list {
+                b"],\"padding\":\"".as_slice()
+            } else {
+                b"]},\"padding\":\"".as_slice()
+            };
+            writer.write_all(middle).unwrap();
+            let suffix = b"\"}\n";
+            let length = 8 << 20;
+            let mut remaining = length
+                - prefix.len()
+                - count * item.len()
+                - (count - 1)
+                - middle.len()
+                - suffix.len();
+            let chunk = [b'x'; 64 << 10];
+            while remaining != 0 {
+                let count = remaining.min(chunk.len());
+                writer.write_all(&chunk[..count]).unwrap();
+                remaining -= count;
+            }
+            writer.write_all(suffix).unwrap();
+            length
+        };
+        writer.finish().unwrap();
+        files.push(docspec::job::JsonLinesFile {
+            key: key.into(),
+            path,
+        });
+        lengths.insert(key.into(), serde_json::json!(length));
+    }
+    let memory = if real.is_some() { 10 << 30 } else { 256 << 20 };
+    let limits = Limits {
+        compute_threads: 2,
+        memory_bytes: memory,
+        max_batch_bytes: 512 << 20,
+        ..Limits::default()
+    };
+    let spec = root.path().join("case.json");
+    std::fs::write(
+        &spec,
+        serde_json::to_vec(&serde_json::json!({"files":files,"limits":limits,"lengths":lengths}))
+            .unwrap(),
+    )
+    .unwrap();
+    measure_child(
+        "receipt_schema_charges_measured_allocations_for_both_record_shapes",
+        RECEIPT_CHILD,
+        &spec,
+        memory,
         (2 << 30) + OVERHEAD,
     );
 }
