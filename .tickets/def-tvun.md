@@ -53,3 +53,7 @@ Metadata contracts 7e13d61/215e35c precede 30255bf. Missing/conflicting native U
 **2026-10-28T09:52:42Z**
 
 Candidate48 full scripts/check PASS:429lib/423integration/15restore/1processmemory/2worker/11probe/31Dagster,17existing skips. Seven actual daily cases expose stale ancestor schemas after child UNION metadata changes; contract59af50e reproduces physical{} versus logical fieldID2. Native rewrite_with_subqueries and selective native recompute_schema now pass73 SQL checks/8native matrix cases and all-target Clippy; actual daily rebuilt replay and follow-up review pending.
+
+**2026-10-28T10:02:22Z**
+
+Review F1 confirmed by27a4511: native TypeCoercion creates merged UNION tags inside a scalar subquery, and unchanged outer relational input leaves stale outer metadata. Observe direct child and embedded subquery schemas through native apply_subqueries before selective reconstruction. Final4metadata unitsPASS0.03s,74SQLPASS21.45s and ClippyPASS; e812 rebuilt retained daily fixture yields1workitem/0admissions/allconflictguards0. Final CLI/review/fullgate follow.

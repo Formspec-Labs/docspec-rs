@@ -9,7 +9,7 @@ use datafusion::{
         DFSchemaRef, Result,
         config::ConfigOptions,
         internal_err,
-        tree_node::{Transformed, TreeNode, TreeNodeRewriter},
+        tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter},
     },
     execution::{SessionState, TaskContext, context::QueryPlanner},
     logical_expr::{
@@ -44,16 +44,24 @@ struct Reconcile {
     input_schemas: Vec<Vec<DFSchemaRef>>,
 }
 
+fn child_schemas(plan: &LogicalPlan) -> Result<Vec<DFSchemaRef>> {
+    let mut schemas: Vec<_> = plan
+        .inputs()
+        .iter()
+        .map(|input| input.schema().clone())
+        .collect();
+    plan.apply_subqueries(|subquery| {
+        schemas.push(subquery.schema().clone());
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(schemas)
+}
+
 impl TreeNodeRewriter for Reconcile {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>> {
-        self.input_schemas.push(
-            plan.inputs()
-                .iter()
-                .map(|input| input.schema().clone())
-                .collect(),
-        );
+        self.input_schemas.push(child_schemas(&plan)?);
         Ok(Transformed::no(plan))
     }
 
@@ -62,13 +70,10 @@ impl TreeNodeRewriter for Reconcile {
             .input_schemas
             .pop()
             .expect("paired native plan traversal");
-        let changed_input = before
-            .iter()
-            .zip(plan.inputs())
-            .any(|(before, input)| before != input.schema());
+        let changed_input = before != child_schemas(&plan)?;
         let prior = plan.schema().clone();
         // Native tree rewriting retains cached parent schemas. Reconstruct
-        // only ancestors whose child declaration actually changed.
+        // only ancestors whose relational or embedded declaration changed.
         let plan = if changed_input {
             plan.recompute_schema()?
         } else {
