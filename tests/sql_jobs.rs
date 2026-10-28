@@ -597,3 +597,36 @@ async fn plain_and_gzip_json_lines_share_exact_evidence_and_conflict_behavior() 
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn two_hundred_small_json_files_reuse_bounded_reader_slots() {
+    let root = tempfile::tempdir().unwrap();
+    let mut files = Vec::new();
+    for index in 0..200 {
+        let path = root.path().join(format!("{index}.jsonl"));
+        std::fs::write(&path, "{\"id\":7}\n").unwrap();
+        files.push(JsonLinesFile {
+            key: format!("file-{index}"),
+            path,
+        });
+    }
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    job.register_json_lines(
+        "input",
+        files,
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)])),
+    )
+    .unwrap();
+    let rows=job.sql("SELECT count(DISTINCT __source_key),sum(id),min(__source_line),max(__source_line) FROM input").await.unwrap().collect().await.unwrap();
+    for (column, expected) in [200, 1400, 1, 1].into_iter().enumerate() {
+        assert_eq!(
+            rows[0]
+                .column(column)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            expected
+        );
+    }
+}
