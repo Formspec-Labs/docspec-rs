@@ -1,4 +1,4 @@
-//! Keep native subquery rewrites type-consistent before predicate inference.
+//! Keep native logical rewrites type- and column-consistent.
 // Rust guideline compliant 2026-02-21
 use datafusion::{
     common::{Result, tree_node::Transformed},
@@ -46,7 +46,10 @@ pub(super) fn rules() -> Vec<Arc<dyn OptimizerRule + Send + Sync>> {
         .rules
         .into_iter()
         .map(|rule| {
-            if rule.name() == "decorrelate_predicate_subquery" {
+            if rule.name() == "replace_distinct_aggregate" {
+                Arc::new(super::distinct::SelectedColumns(rule))
+                    as Arc<dyn OptimizerRule + Send + Sync>
+            } else if rule.name() == "decorrelate_predicate_subquery" {
                 Arc::new(TypedSubqueries(rule)) as Arc<dyn OptimizerRule + Send + Sync>
             } else {
                 rule

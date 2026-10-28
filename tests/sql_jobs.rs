@@ -23,6 +23,50 @@ fn limits() -> Limits {
 }
 
 #[tokio::test]
+async fn distinct_preserves_real_seed_join_keys() {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    for (name, file) in [
+        ("old_ids", "distinct_using_old.parquet"),
+        ("new_ids", "distinct_using_new.parquet"),
+    ] {
+        job.register_parquet(
+            name,
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(file),
+        )
+        .await
+        .unwrap();
+    }
+    let plain = "SELECT o.document_id FROM old_ids o JOIN new_ids n USING(legacy_document_id,document_id) WHERE o.source_ids=n.source_ids";
+    let expected = job.sql(plain).await.unwrap().collect().await.unwrap();
+    assert_eq!(expected.iter().map(|b| b.num_rows()).sum::<usize>(), 48);
+    let actual = job
+        .sql(&plain.replacen("SELECT", "SELECT DISTINCT", 1))
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    let values = |batches: &[arrow::record_batch::RecordBatch]| {
+        let mut rows = batches
+            .iter()
+            .flat_map(|b| {
+                (0..b.num_rows()).map(|row| {
+                    arrow::util::display::array_value_to_string(b.column(0), row).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        rows.sort();
+        rows
+    };
+    let expected = values(&expected);
+    assert!(expected.windows(2).all(|pair| pair[0] != pair[1]));
+    assert_eq!(values(&actual), expected);
+}
+
+#[tokio::test]
 async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance() {
     let root = tempfile::tempdir().unwrap();
     let mut ceiling = limits();
