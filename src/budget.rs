@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod scratch;
+mod subqueries;
 pub(crate) use scratch::ScratchWriter;
 
 /// Declared limits for one workspace execution host.
@@ -141,6 +142,7 @@ impl Budget {
                 .with_config(config)
                 .with_runtime_env(self.runtime.clone())
                 .with_default_features()
+                .with_optimizer_rules(subqueries::rules())
                 .with_physical_optimizer_rules(rules)
                 .build(),
         )
