@@ -633,11 +633,12 @@ async fn native_selector_reads_exact_c7_snapshot_without_catalog_lookup() {
     source["table_operations"] = json!([source["table_operations"][2].clone()]);
     source["table_operations"][0]["identity_sql"] =
         json!("SELECT 'later-3' AS identity FROM pending LIMIT 1");
-    serde_json::from_value::<JobSpec>(source)
+    let advanced = serde_json::from_value::<JobSpec>(source)
         .unwrap()
         .run(limits())
         .await
         .unwrap();
+    let advanced = serde_json::to_value(advanced).unwrap();
     let result = serde_json::from_value::<JobSpec>(read)
         .unwrap()
         .run(limits())
@@ -650,6 +651,23 @@ async fn native_selector_reads_exact_c7_snapshot_without_catalog_lookup() {
     assert_eq!(
         result["native_inputs"],
         json!([{"name":"selected","data_file_count":1,"snapshot_count":1,"manifest_count":null,"planning_seconds":null}])
+    );
+    let current = selected_job(
+        root.path(),
+        selected_input(&advanced["table_operations"][0]),
+    );
+    let current = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(current)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(current["queries"][0]["data"], json!([{"id":2},{"id":3}]));
+    assert_eq!(
+        current["native_inputs"],
+        json!([{"name":"selected","data_file_count":2,"snapshot_count":2,"manifest_count":null,"planning_seconds":null}])
     );
 }
 #[tokio::test]
