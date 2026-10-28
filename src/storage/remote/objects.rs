@@ -638,11 +638,12 @@ impl RemoteObjects {
                 match result {
                     Ok(_) => Ok(CreateFileResult::Created),
                     Err(error)
-                        if matches!(
-                            error.kind(),
-                            opendal::ErrorKind::AlreadyExists
-                                | opendal::ErrorKind::ConditionNotMatch
-                        ) =>
+                        if !error.is_temporary()
+                            && matches!(
+                                error.kind(),
+                                opendal::ErrorKind::AlreadyExists
+                                    | opendal::ErrorKind::ConditionNotMatch
+                            ) =>
                     {
                         Ok(CreateFileResult::AlreadyExists)
                     }
