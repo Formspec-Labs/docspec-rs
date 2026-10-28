@@ -14,3 +14,9 @@ assignee: mikewolfd
 
 Cheap logical expansion regression; narrow D1 reproducer completes or reports bounded capacity without panic; independent review.
 
+
+## Notes
+
+**2026-10-28T02:49:23Z**
+
+Regression3423d08 now passes: 2048 repeated views (>2GiB logical, <2MiB backing) narrow without Utf8 cast; 15 SQL-function integration tests pass. Exact combinations preserve all mixed Utf8/LargeUtf8/Utf8View inputs before admission. Real audit and independent review next.

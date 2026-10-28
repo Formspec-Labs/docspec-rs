@@ -98,11 +98,7 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
                 Volatility::Immutable,
             )
         } else {
-            Signature::uniform(
-                if kind == Kind::Resolve { 2 } else { 1 },
-                vec![DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View],
-                Volatility::Immutable,
-            )
+            string_signature(if kind == Kind::Resolve { 2 } else { 1 })
         };
         context.register_udf(ScalarUDF::from(GenericFunction {
             kind,
@@ -111,6 +107,29 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::
         }));
     }
     Ok(())
+}
+
+pub(super) fn string_signature(arity: usize) -> Signature {
+    // Uniform signatures force mixed string representations to one type. That
+    // can expand repeated views past i32 offsets before our admission runs.
+    let strings = [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View];
+    let variants = if arity == 1 {
+        strings
+            .iter()
+            .map(|t| TypeSignature::Exact(vec![t.clone()]))
+            .collect()
+    } else {
+        assert_eq!(arity, 2, "string primitives accept one or two inputs");
+        strings
+            .iter()
+            .flat_map(|left| {
+                strings
+                    .iter()
+                    .map(move |right| TypeSignature::Exact(vec![left.clone(), right.clone()]))
+            })
+            .collect()
+    };
+    Signature::one_of(variants, Volatility::Immutable)
 }
 
 pub(super) fn capacity() -> DataFusionError {

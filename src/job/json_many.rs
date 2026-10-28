@@ -9,7 +9,7 @@ use arrow::{
 use datafusion::{
     common::{DataFusionError, Result, ScalarValue},
     logical_expr::{
-        ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, Expr, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
         expr::ScalarFunction,
         simplify::{ExprSimplifyResult, SimplifyContext},
     },
@@ -176,11 +176,7 @@ impl Hash for Projection {
 impl Projection {
     fn new(budget: Budget, paths: Option<Arc<Paths>>) -> Self {
         Self {
-            signature: Signature::uniform(
-                if paths.is_some() { 1 } else { 2 },
-                vec![DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View],
-                Volatility::Immutable,
-            ),
+            signature: super::functions::string_signature(if paths.is_some() { 1 } else { 2 }),
             budget,
             paths,
         }
