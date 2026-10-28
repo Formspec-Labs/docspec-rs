@@ -504,15 +504,19 @@ pub(crate) fn align_native_batch(
             Ok(target.as_ref().clone().with_data_type(aligned))
         })
         .collect::<Result<Vec<_>>>()?;
-    let conversion = source
-        .fields()
-        .iter()
-        .zip(&fields)
-        .any(|(a, b)| a.data_type() != b.data_type());
+    let copies_payload = source.fields().iter().zip(&fields).any(|(a, b)| {
+        a.data_type() != b.data_type()
+            && !matches!((a.data_type(), b.data_type()),
+                    (DataType::Timestamp(unit, Some(_)), DataType::Timestamp(target_unit, Some(_)))
+                    if unit == target_unit)
+    });
+    // Arrow58 reinterprets and clones the same timestamp values/validity when
+    // both timezone tags are present and units match. No payload is allocated,
+    // so the already admitted input must not be charged again for this cast.
     // The whitelist widens values at most fourfold. Cover retained input,
     // slice, compacted children, casts and aligned buffer rounding before any
     // copy; writer-owned retained buffers have their separate lifetime admission.
-    let memory = if conversion {
+    let memory = if copies_payload {
         Some(
             budget.reserve(
                 batch

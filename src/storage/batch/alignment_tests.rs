@@ -3,6 +3,126 @@
 use super::*;
 
 #[test]
+fn native_alignment_refusal_reports_separate_pool_usage() {
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        memory_bytes: 16 << 20,
+        ..Default::default()
+    })
+    .unwrap();
+    let _held = budget.reserve(4 << 20).unwrap();
+    let error = budget.reserve(5 << 20).unwrap_err();
+    assert_eq!(error.code(), "capacity");
+    let message = error.to_string();
+    assert!(message.contains("requested 5242880 bytes"), "{message}");
+    assert!(
+        message.contains("available 4194304 of 8388608"),
+        "{message}"
+    );
+    assert!(message.contains("native reserved 0"), "{message}");
+    assert!(message.contains("alignment_tests.rs"), "{message}");
+}
+
+#[test]
+fn timezone_alignment_charges_only_allocated_buffers() {
+    use arrow::array::{RecordBatchReader, TimestampMicrosecondArray};
+    let source =
+        if let Some(path) = std::env::var_os("DOCSPEC_ALIGNMENT_RECEIPT_PARQUET") {
+            let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                std::fs::File::open(path).unwrap(),
+            )
+            .unwrap()
+            .with_batch_size(1 << 20)
+            .build()
+            .unwrap();
+            let schema = reader.schema();
+            let batches = reader.collect::<std::result::Result<Vec<_>, _>>().unwrap();
+            let batch = arrow::compute::concat_batches(&schema, &batches).unwrap();
+            assert_eq!(batch.num_rows(), 910574);
+            let keys = batch
+                .column_by_name("receipt_key")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            assert!((0..keys.len()).all(|row| keys.value(row)
+                == "receipts/senate/captions/undated/assemble-20260930.jsonl.gz"));
+            batch
+        } else {
+            RecordBatch::try_from_iter([
+                (
+                    "payload",
+                    Arc::new(arrow::array::StringArray::from(vec!["x".repeat(65536); 32]))
+                        as arrow::array::ArrayRef,
+                ),
+                (
+                    "retrieved_at",
+                    Arc::new(
+                        TimestampMicrosecondArray::from_iter(
+                            (0..32).map(|i| if i == 3 { None } else { Some(i) }),
+                        )
+                        .with_timezone("UTC"),
+                    ) as arrow::array::ArrayRef,
+                ),
+            ])
+            .unwrap()
+        };
+    let target = Schema::new(
+        source
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| {
+                let dtype = match field.data_type() {
+                    DataType::Timestamp(unit, Some(_)) => {
+                        DataType::Timestamp(*unit, Some("+00:00".into()))
+                    }
+                    dtype => dtype.clone(),
+                };
+                field.as_ref().clone().with_data_type(dtype)
+            })
+            .collect::<Vec<_>>(),
+    );
+    let mut changed = 0;
+    for (array, field) in source.columns().iter().zip(target.fields()) {
+        if array.data_type() != field.data_type() {
+            let cast = arrow::compute::cast(array, field.data_type()).unwrap();
+            assert_eq!(
+                array.to_data().buffers()[0].as_ptr(),
+                cast.to_data().buffers()[0].as_ptr()
+            );
+            assert_eq!(array.null_count(), cast.null_count());
+            changed += 1;
+        }
+    }
+    assert!(changed > 0);
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        compute_threads: 2,
+        memory_bytes: 10 << 30,
+        max_batch_bytes: 512 << 20,
+        ..Default::default()
+    })
+    .unwrap();
+    // The caller already owns input admission. Only 4 KiB remain for alignment;
+    // a timezone tag change must not reserve the unrelated payload again.
+    let _held = budget.reserve(3 << 30).unwrap();
+    let _also_held = budget.reserve((2 << 30) - 4096).unwrap();
+    let originals = source.columns().to_vec();
+    let bytes = source.get_array_memory_size();
+    let (aligned, _memory) = align_native_batch(source, &target, &budget).unwrap();
+    for (before, after) in originals.iter().zip(aligned.columns()) {
+        assert_eq!(
+            before.to_data().buffers()[0].as_ptr(),
+            after.to_data().buffers()[0].as_ptr()
+        );
+    }
+    assert_eq!(aligned.schema().as_ref(), &target);
+    println!(
+        "rows={} input_allocation_bytes={bytes} changed_columns={changed} additional_payload_bytes=0",
+        aligned.num_rows()
+    );
+}
+
+#[test]
 fn inline_view_compaction_releases_sliced_headers_and_null_bitmap() {
     use arrow::{
         array::{Array, StringViewArray},
