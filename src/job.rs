@@ -302,6 +302,54 @@ mod sql_guard_tests {
     use crate::budget::Limits;
 
     #[tokio::test]
+    async fn null_url_arguments_preserve_the_other_string_representation() {
+        use arrow::{
+            array::{ArrayRef, StringArray},
+            datatypes::{DataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
+        use std::sync::Arc;
+        for data_type in [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View] {
+            let root = tempfile::tempdir().unwrap();
+            let job = Job::new(Limits::default(), root.path().join("scratch")).unwrap();
+            let values = arrow::compute::cast(
+                &StringArray::from(vec![Some("https://example.test/a"), None]),
+                &data_type,
+            )
+            .unwrap();
+            let schema = Arc::new(Schema::new(vec![Field::new("value", data_type, true)]));
+            let batch = RecordBatch::try_new(schema.clone(), vec![values as ArrayRef]).unwrap();
+            let table =
+                datafusion::datasource::MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+            job.context.register_table("v", Arc::new(table)).unwrap();
+            let frame = job
+                .sql("SELECT url_resolve(value,NULL) AS absolute,url_resolve(NULL,value) AS absent FROM v")
+                .await
+                .unwrap();
+            let plan = frame
+                .clone()
+                .into_optimized_plan()
+                .unwrap()
+                .display_indent()
+                .to_string();
+            assert!(!plan.contains("CAST(v.value"), "{plan}");
+            let batches = frame.collect().await.unwrap();
+            assert_eq!(batches.len(), 1);
+            assert_eq!(batches[0].num_rows(), 2);
+            let absolute = batches[0]
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(
+                absolute,
+                &StringArray::from(vec![Some("https://example.test/a"), None])
+            );
+            assert_eq!(batches[0].column(1).null_count(), 2);
+        }
+    }
+
+    #[tokio::test]
     async fn repeated_large_views_are_narrowed_without_an_i32_string_copy() {
         use arrow::{
             array::{Array, ArrayRef, StringViewArray, UInt32Array},
