@@ -557,6 +557,154 @@ mod tests {
         )
         .unwrap()
     }
+
+    fn declared(data_type: DataType) -> SchemaRef {
+        Arc::new(Schema::new(vec![Field::new("value", data_type, true)]))
+    }
+
+    #[test]
+    fn native_binary_representation_preserves_declared_values() {
+        use arrow::array::{BinaryArray, FixedSizeBinaryArray, LargeBinaryArray};
+        let first = [7u8; 32];
+        let last = [9u8; 32];
+        let values = vec![Some(first.as_slice()), None, Some(last.as_slice())];
+        let binary: ArrayRef = Arc::new(BinaryArray::from(values.clone()));
+        let view = arrow::compute::cast(&binary, &DataType::BinaryView).unwrap();
+        for array in [binary, view, Arc::new(LargeBinaryArray::from(values))] {
+            let result = portable_batch(
+                batch(array),
+                declared(DataType::FixedSizeBinary(32)),
+                &budget(),
+            )
+            .unwrap();
+            let values = result
+                .column(0)
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            assert_eq!(values.value(0), first);
+            assert!(values.is_null(1));
+            assert_eq!(values.value(2), last);
+        }
+    }
+
+    #[test]
+    fn native_nested_nullability_preserves_declared_values() {
+        let values: ArrayRef = Arc::new(StringArray::from(vec!["one", "two", "three"]));
+        let offsets = arrow::buffer::OffsetBuffer::new(vec![0, 2, 2, 3].into());
+        let nulls = Some(arrow::buffer::NullBuffer::from(vec![true, false, true]));
+        let source = ListArray::new(
+            Arc::new(Field::new("element", DataType::Utf8, true)),
+            offsets.clone(),
+            values.clone(),
+            nulls.clone(),
+        );
+        let child = Arc::new(Field::new("item", DataType::Utf8, false));
+        let expected = ListArray::new(child.clone(), offsets, values, nulls);
+        let result = portable_batch(
+            batch(Arc::new(source)),
+            declared(DataType::List(child)),
+            &budget(),
+        )
+        .unwrap();
+        assert_eq!(result.column(0).to_data(), expected.to_data());
+    }
+
+    #[test]
+    fn native_representation_conversion_rejects_invalid_values() {
+        use arrow::array::{BinaryArray, FixedSizeBinaryArray};
+        let wrong_width = batch(Arc::new(BinaryArray::from(vec![Some(&[1u8; 31][..])])));
+        assert!(
+            portable_batch(
+                wrong_width,
+                declared(DataType::FixedSizeBinary(32)),
+                &budget()
+            )
+            .is_err()
+        );
+        let wrong_fixed = batch(Arc::new(
+            FixedSizeBinaryArray::try_from_iter([&[1u8; 16][..]].into_iter()).unwrap(),
+        ));
+        assert!(
+            portable_batch(
+                wrong_fixed,
+                declared(DataType::FixedSizeBinary(32)),
+                &budget()
+            )
+            .is_err()
+        );
+        let child = Arc::new(Field::new("item", DataType::Int64, false));
+        let source = ListArray::from_iter_primitive::<Int64Type, _, _>([Some(vec![Some(1), None])]);
+        assert!(
+            portable_batch(
+                batch(Arc::new(source)),
+                declared(DataType::List(child)),
+                &budget()
+            )
+            .is_err()
+        );
+        let unrelated = batch(Arc::new(StringArray::from(vec!["12"])));
+        assert!(portable_batch(unrelated, declared(DataType::Int64), &budget()).is_err());
+    }
+
+    #[test]
+    fn binary_conversion_fits_target_bytes_before_admission() {
+        use arrow::array::{BinaryArray, FixedSizeBinaryArray};
+        let empty = batch(Arc::new(BinaryArray::from(vec![None::<&[u8]>; 128])));
+        let output = PortableBatches::new(empty, declared(DataType::FixedSizeBinary(64)), budget())
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert!(output.len() > 1);
+        assert_eq!(output.iter().map(RecordBatch::num_rows).sum::<usize>(), 128);
+        for batch in output {
+            assert!(batch.get_array_memory_size() <= 4096);
+            assert_eq!(batch.column(0).null_count(), batch.num_rows());
+        }
+        let bytes = [5u8; 32];
+        let fixed = batch(Arc::new(
+            FixedSizeBinaryArray::try_from_iter(std::iter::repeat_n(bytes.as_slice(), 112))
+                .unwrap(),
+        ));
+        let output = PortableBatches::new(fixed, declared(DataType::Binary), budget())
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert!(output.len() > 1);
+        assert_eq!(output.iter().map(RecordBatch::num_rows).sum::<usize>(), 112);
+        for batch in output {
+            assert!(batch.get_array_memory_size() <= 4096);
+            let values = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap();
+            assert!(values.iter().all(|value| value == Some(bytes.as_slice())));
+        }
+        let large_nulls = arrow::compute::cast(
+            &BinaryArray::from(vec![None::<&[u8]>; 128]),
+            &DataType::FixedSizeBinary(64),
+        )
+        .unwrap();
+        let output = PortableBatches::new(batch(large_nulls), declared(DataType::Binary), budget())
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].num_rows(), 128);
+        assert_eq!(output[0].column(0).null_count(), 128);
+        let oversized = batch(Arc::new(BinaryArray::from(vec![None::<&[u8]>])));
+        let error = PortableBatches::new(
+            oversized,
+            declared(DataType::FixedSizeBinary(8192)),
+            budget(),
+        )
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.code(), "capacity");
+    }
     #[test]
     fn small_string_slice_compacts_unused_backing_bytes() {
         let values = StringArray::from(vec![
