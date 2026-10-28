@@ -31,6 +31,8 @@ pub use components::ComponentsSettings;
 pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
+#[doc(inline)]
+pub use native::NativeInputObservation;
 pub use query_result::QueryResult;
 pub use spec::{
     ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
@@ -272,6 +274,7 @@ impl Job {
         memory: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<()> {
         use iceberg_datafusion::table::IcebergStaticTableProvider;
+        let observation = NativeInputObservation::from_table(name, &table);
         let provider = match table.metadata().current_snapshot_id() {
             Some(snapshot) => {
                 IcebergStaticTableProvider::try_new_from_table_snapshot(table, snapshot).await?
@@ -283,9 +286,30 @@ impl Job {
             std::sync::Arc::new(native::AdmittedTable {
                 provider: std::sync::Arc::new(provider),
                 memory,
+                observation,
             }),
         )?;
         Ok(())
+    }
+
+    /// Reads available facts retained from an input's selected native metadata.
+    ///
+    /// Performs no additional catalog, manifest, planning or data reads.
+    ///
+    /// # Errors
+    /// Refuses unknown bindings and sources not registered from native metadata.
+    pub async fn native_input_observation(&self, name: &str) -> Result<NativeInputObservation> {
+        let provider = self.context.table_provider(name).await?;
+        provider
+            .as_any()
+            .downcast_ref::<native::AdmittedTable>()
+            .map(|table| table.observation.clone())
+            .ok_or_else(|| {
+                crate::Error::refusal(
+                    "invalid_spec",
+                    "observation requires a registered native input",
+                )
+            })
     }
 
     /// Exports an ordered SQL result using explicit reproducible Parquet settings.

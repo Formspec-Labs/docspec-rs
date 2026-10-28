@@ -141,6 +141,9 @@ pub struct OutputResult {
 /// Machine-readable local results; no clock or process identity enters them.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobResult {
+    /// Summary facts from exact native inputs; unavailable observations remain null.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native_inputs: Vec<super::NativeInputObservation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub table_operations: Vec<TableOperationResult>,
     pub steps: Vec<StepResult>,
@@ -234,6 +237,7 @@ impl JobSpec {
         connections: Connections,
     ) -> std::result::Result<JobResult, JobFailure> {
         let mut completed = JobResult {
+            native_inputs: Vec::new(),
             table_operations: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
@@ -353,6 +357,14 @@ impl JobSpec {
                     .await?
                 }
                 JobInput::Iceberg { name, pin } => job.register_iceberg(name, pin).await?,
+            }
+            if matches!(
+                input,
+                JobInput::NativeTable { .. } | JobInput::Iceberg { .. }
+            ) {
+                result
+                    .native_inputs
+                    .push(job.native_input_observation(input.name()).await?);
             }
         }
         for step in &self.steps {

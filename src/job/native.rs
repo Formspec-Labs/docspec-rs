@@ -12,13 +12,54 @@ use datafusion::{
     },
 };
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::{any::Any, fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
+
+/// Available summary facts from one input's exact selected native metadata.
+///
+/// These facts require no additional catalog, manifest or data reads. They
+/// describe the selected metadata, rather than independently verifying files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeInputObservation {
+    /// Registered input name, identifying its immutable selection in the job.
+    pub name: String,
+    /// Native total-data-files summary, or zero for an exactly empty selection.
+    /// Missing or invalid optional summary counts remain unknown.
+    pub data_file_count: Option<u64>,
+    /// Retained snapshots present in this selected metadata file.
+    pub snapshot_count: usize,
+    /// Unavailable until the native planner exposes a maintained observation hook.
+    pub manifest_count: Option<u64>,
+    /// Unavailable; neither first-batch latency nor reader backpressure supplies this.
+    pub planning_seconds: Option<f64>,
+}
+
+impl NativeInputObservation {
+    pub(super) fn from_table(name: &str, table: &iceberg::table::Table) -> Self {
+        let data_file_count = match table.metadata().current_snapshot() {
+            None => Some(0),
+            Some(snapshot) => snapshot
+                .summary()
+                .additional_properties
+                .get("total-data-files")
+                .and_then(|value| value.parse().ok()),
+        };
+        Self {
+            name: name.to_owned(),
+            data_file_count,
+            snapshot_count: table.metadata().snapshots().count(),
+            manifest_count: None,
+            planning_seconds: None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct AdmittedTable {
     pub provider: Arc<dyn TableProvider>,
     pub memory: Arc<OwnedSemaphorePermit>,
+    pub observation: NativeInputObservation,
 }
 #[async_trait::async_trait]
 impl TableProvider for AdmittedTable {
@@ -134,6 +175,13 @@ mod tests {
         let provider = Arc::new(AdmittedTable {
             provider: Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
             memory: Arc::new(sem.clone().try_acquire_owned().unwrap()),
+            observation: NativeInputObservation {
+                name: "source".into(),
+                data_file_count: None,
+                snapshot_count: 0,
+                manifest_count: None,
+                planning_seconds: None,
+            },
         });
         let context = SessionContext::new();
         context.register_table("source", provider).unwrap();

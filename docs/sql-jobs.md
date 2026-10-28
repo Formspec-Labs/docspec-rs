@@ -16,6 +16,16 @@ empty table. It performs no current-head lookup or lifecycle inventory. Stored
 and decoded metadata bytes are bounded, and decoded admission stays with every
 provider, plan and stream. The caller retains the selected immutable objects.
 
+Results report `native_inputs` for exact native inputs, using their registered
+names. `data_file_count` comes from the selected snapshot's native summary;
+missing or invalid optional counts remain null. An exactly empty selection has
+zero data files. `snapshot_count` counts retained snapshots in that selected
+metadata file. `manifest_count` and `planning_seconds` remain null until a
+maintained native planning hook exposes them. These observations perform no
+additional head lookup, planning pass, manifest walk or data read, and do not
+independently verify the files. Embedded callers can use
+`Job::native_input_observation(name)` on a registered native input.
+
 Steps run in order. A step's `materialize` flag selects a retained result,
 reserved in memory or stored in managed scratch; otherwise it is a view.
 SQL must use immutable functions. Each output declares its SQL, local path and
