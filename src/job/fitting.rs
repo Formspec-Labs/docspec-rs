@@ -358,6 +358,73 @@ fn fit_projection(native: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPla
 /// Projection pushdown cannot move an admitted evaluator into a scan that
 /// cannot respond to sizing hints. Keep only those projections as boundaries.
 #[derive(Debug)]
+struct FittingInput {
+    input: Arc<dyn ExecutionPlan>,
+}
+impl DisplayAs for FittingInput {
+    fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FunctionFittingInput")
+    }
+}
+impl ExecutionPlan for FittingInput {
+    fn name(&self) -> &str {
+        "FunctionFittingInput"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        self.input.properties()
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn maintains_input_order(&self) -> Vec<bool> {
+        vec![true]
+    }
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+        self.input.partition_statistics(partition)
+    }
+    fn supports_limit_pushdown(&self) -> bool {
+        true
+    }
+    fn cardinality_effect(&self) -> datafusion::physical_plan::execution_plan::CardinalityEffect {
+        datafusion::physical_plan::execution_plan::CardinalityEffect::Equal
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(Arc::new(Self {
+            input: children[0].clone(),
+        }))
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        self.input.execute(partition, context)
+    }
+    fn try_swapping_with_projection(
+        &self,
+        projection: &ProjectionExec,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
+        for expr in projection.expr() {
+            if bounded(&expr.expr)?.is_some() {
+                return Ok(None);
+            }
+        }
+        // Preserve native pruning/computation that needs no fitting. Only own
+        // admitted functions remain above this identity boundary.
+        let projected = ProjectionExec::try_new(projection.expr().to_vec(), self.input.clone())?;
+        Ok(Some(Arc::new(Self {
+            input: Arc::new(projected),
+        })))
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct FitProjections;
 impl PhysicalOptimizerRule for FitProjections {
     fn name(&self) -> &str {
@@ -373,6 +440,31 @@ impl PhysicalOptimizerRule for FitProjections {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(plan
             .transform_up(|plan| {
+                // The native pass first extracts single-side join expressions,
+                // then pushes projections into scans in that same invocation.
+                if let Some(join) = plan.as_any().downcast_ref::<NestedLoopJoinExec>()
+                    && let Some(filter) = join.filter()
+                    && bounded(filter.expression())?.is_some()
+                {
+                    let mut changed = false;
+                    let children = plan
+                        .children()
+                        .into_iter()
+                        .map(|child| {
+                            if child.as_any().is::<FittingInput>() {
+                                child.clone()
+                            } else {
+                                changed = true;
+                                Arc::new(FittingInput {
+                                    input: child.clone(),
+                                }) as Arc<dyn ExecutionPlan>
+                            }
+                        })
+                        .collect();
+                    if changed {
+                        return Ok(Transformed::yes(plan.with_new_children(children)?));
+                    }
+                }
                 if plan.as_any().is::<ProjectionExec>() {
                     let fitted = fit_projection(plan.clone())?;
                     if !Arc::ptr_eq(&fitted, &plan) {
