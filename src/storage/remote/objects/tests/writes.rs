@@ -207,6 +207,7 @@ pub(crate) enum Behavior {
     HoldPutResponse,
     HoldPutThenDelete,
     RejectPut,
+    ConflictPut,
     HeadDenied,
 }
 
@@ -357,6 +358,7 @@ impl WriteFixture {
                                 | Behavior::HoldPutResponse
                                 | Behavior::HoldPutThenDelete
                                 | Behavior::RejectPut
+                                | Behavior::ConflictPut
                         ));
                         assert!(request.create_only, "single PUT is conditional");
                         if matches!(behavior, Behavior::RejectPut) {
@@ -365,6 +367,15 @@ impl WriteFixture {
                                 "412 Precondition Failed",
                                 "",
                                 b"<Error><Code>PreconditionFailed</Code></Error>",
+                            );
+                            continue;
+                        }
+                        if matches!(behavior, Behavior::ConflictPut) {
+                            respond(
+                                &mut socket,
+                                "409 Conflict",
+                                "",
+                                b"<Error><Code>ConditionalRequestConflict</Code></Error>",
                             );
                             continue;
                         }
@@ -1030,6 +1041,9 @@ async fn existing_release_file_is_not_read_back_and_changed_source_never_writes(
         fixture.objects().create_file(&spec, &budget).await.unwrap(),
         super::super::CreateFileResult::AlreadyExists
     );
+    assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
+    let fixture = WriteFixture::new(Behavior::ConflictPut);
+    assert!(fixture.objects().create_file(&spec, &budget).await.is_err());
     assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
     let fixture = WriteFixture::new(Behavior::AcceptPut);
     std::fs::write(source.path(), b"release fixturE").unwrap();
