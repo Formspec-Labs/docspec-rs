@@ -462,6 +462,14 @@ fn output_capacity(rows: usize, preceding: usize) -> DataFusionError {
     }
 }
 
+fn fit_memory(error: DataFusionError, rows: usize, preceding: usize) -> DataFusionError {
+    if matches!(error.find_root(), DataFusionError::ResourcesExhausted(_)) {
+        output_capacity(rows, preceding)
+    } else {
+        error
+    }
+}
+
 fn project(
     input: &ColumnarValue,
     definition: Definition<'_>,
@@ -519,7 +527,7 @@ fn project(
     }
     let mut memory = budget
         .reserve(bytes.saturating_mul(2).saturating_add(1024))
-        .map_err(|_| capacity())?;
+        .map_err(|_| output_capacity(rows, rows / 2))?;
     let largest = (0..rows).try_fold(0usize, |size, row| {
         Ok::<_, DataFusionError>(size.max(row_text(input, row)?.map_or(0, str::len)))
     })?;
@@ -533,7 +541,8 @@ fn project(
         let paths = match &definition {
             Definition::Fixed(paths) => Arc::clone(paths),
             Definition::Rows(values) => {
-                Paths::compile(row_text(values, row)?.ok_or_else(invalid)?, budget)?
+                Paths::compile(row_text(values, row)?.ok_or_else(invalid)?, budget)
+                    .map_err(|error| fit_memory(error, rows, row))?
             }
         };
         items = items.checked_add(paths.slots).ok_or_else(capacity)?;
@@ -546,7 +555,7 @@ fn project(
             memory.merge(
                 budget
                     .reserve(added.saturating_mul(2))
-                    .map_err(|_| capacity())?,
+                    .map_err(|_| output_capacity(rows, row))?,
             );
         }
         let nodes = paths
@@ -564,24 +573,24 @@ fn project(
             workspace.merge(
                 budget
                     .reserve(state - workspace.num_permits())
-                    .map_err(|_| capacity())?,
+                    .map_err(|_| output_capacity(rows, row))?,
             );
         }
         if visited.capacity() < paths.nodes.len() {
             visited
                 .try_reserve_exact(paths.nodes.len() - visited.len())
-                .map_err(|_| capacity())?;
+                .map_err(|_| output_capacity(rows, row))?;
         }
         if output.capacity() < paths.slots {
             output
                 .try_reserve_exact(paths.slots - output.len())
-                .map_err(|_| capacity())?;
+                .map_err(|_| output_capacity(rows, row))?;
         }
         stack.clear();
         if stack.capacity() < paths.nodes.len() {
             stack
                 .try_reserve_exact(paths.nodes.len())
-                .map_err(|_| capacity())?;
+                .map_err(|_| output_capacity(rows, row))?;
         }
         visited.resize(paths.nodes.len(), false);
         output.resize(paths.slots, None);
@@ -597,7 +606,8 @@ fn project(
                 &mut stack,
                 budget,
                 &mut workspace,
-            )?;
+            )
+            .map_err(|error| fit_memory(error, rows, row))?;
         }
         let added = output
             .iter()
@@ -612,7 +622,7 @@ fn project(
         memory.merge(
             budget
                 .reserve(added.saturating_mul(2))
-                .map_err(|_| capacity())?,
+                .map_err(|_| output_capacity(rows, row))?,
         );
         for span in &output {
             match (raw, span) {
@@ -644,24 +654,53 @@ mod tests {
     #[test]
     fn dynamic_path_compilation_fits_around_preceding_output_admission() {
         use arrow::array::{Array, ArrayRef, StringArray};
-        let budget=Budget::new(crate::budget::Limits {
-            memory_bytes:64<<10,max_batch_bytes:4<<10,max_metadata_bytes:32<<10,
+        let budget = Budget::new(crate::budget::Limits {
+            memory_bytes: 64 << 10,
+            max_batch_bytes: 4 << 10,
+            max_metadata_bytes: 32 << 10,
             ..crate::budget::Limits::default()
-        }).unwrap();
-        let raw=format!(r#"{{"a":"{}"}}"#,"x".repeat(2048));
-        let long_path=format!(r#"[["{}"]]"#,"z".repeat(80));
-        let input:ArrayRef=Arc::new(StringArray::from(vec![Some(raw.as_str()),None]));
-        let definitions:ArrayRef=Arc::new(StringArray::from(vec![r#"[["a"]]"#,long_path.as_str()]));
-        let error=project(&ColumnarValue::Array(input.clone()),Definition::Rows(&ColumnarValue::Array(definitions.clone())),&budget).unwrap_err();
-        assert!(error.to_string().contains("fit 1 preceding rows"),"{error}");
+        })
+        .unwrap();
+        let raw = format!(r#"{{"a":"{}"}}"#, "x".repeat(2048));
+        let long_path = format!(r#"[["{}"]]"#, "z".repeat(80));
+        let input: ArrayRef = Arc::new(StringArray::from(vec![Some(raw.as_str()), None]));
+        let definitions: ArrayRef =
+            Arc::new(StringArray::from(vec![r#"[["a"]]"#, long_path.as_str()]));
+        let error = project(
+            &ColumnarValue::Array(input.clone()),
+            Definition::Rows(&ColumnarValue::Array(definitions.clone())),
+            &budget,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("fit 1 preceding rows"),
+            "{error}"
+        );
         for row in 0..2 {
-            let output=project(&ColumnarValue::Array(input.slice(row,1)),Definition::Rows(&ColumnarValue::Array(definitions.slice(row,1))),&budget).unwrap();
-            let ColumnarValue::Array(array)=output else {panic!("array expected")};
-            let array=array.as_any().downcast_ref::<arrow::array::ListArray>().unwrap();
-            let values=array.values().as_any().downcast_ref::<StringArray>().unwrap();
-            assert_eq!(values.len(),1);
-            if row==0 {assert_eq!(values.value(0),format!("\"{}\"","x".repeat(2048)));}
-            else {assert!(values.is_null(0));}
+            let output = project(
+                &ColumnarValue::Array(input.slice(row, 1)),
+                Definition::Rows(&ColumnarValue::Array(definitions.slice(row, 1))),
+                &budget,
+            )
+            .unwrap();
+            let ColumnarValue::Array(array) = output else {
+                panic!("array expected")
+            };
+            let array = array
+                .as_any()
+                .downcast_ref::<arrow::array::ListArray>()
+                .unwrap();
+            let values = array
+                .values()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            if row == 0 {
+                assert_eq!(values.value(0), format!("\"{}\"", "x".repeat(2048)));
+            } else {
+                assert!(values.is_null(0));
+            }
         }
     }
     #[test]
