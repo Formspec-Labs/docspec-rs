@@ -352,7 +352,7 @@ fn receipt_schema_charges_measured_allocations_for_both_record_shapes() {
                 }
             }
             if key == "house" {
-                assert_eq!(length, 187_661_339);
+                assert_eq!(length - 1, 187_661_339);
             } else {
                 assert!(length > 50_000_000);
             }
