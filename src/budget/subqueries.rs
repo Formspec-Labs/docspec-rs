@@ -42,7 +42,7 @@ impl OptimizerRule for TypedSubqueries {
 }
 
 pub(super) fn rules() -> Vec<Arc<dyn OptimizerRule + Send + Sync>> {
-    Optimizer::new()
+    let mut rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = Optimizer::new()
         .rules
         .into_iter()
         .map(|rule| {
@@ -52,5 +52,7 @@ pub(super) fn rules() -> Vec<Arc<dyn OptimizerRule + Send + Sync>> {
                 rule
             }
         })
-        .collect()
+        .collect();
+    rules.push(Arc::new(crate::job::fitting::windows::FitWindowInputs));
+    rules
 }

@@ -1,6 +1,7 @@
 //! Fit native scalar evaluation before its output admission.
 // Rust guideline compliant 2026-02-21
 use super::functions;
+pub(crate) mod windows;
 use arrow::{
     array::ArrayRef,
     datatypes::{DataType, Schema},
@@ -26,11 +27,14 @@ use datafusion::{
         filter::{FilterExec, FilterExecBuilder},
         joins::{
             HashJoinExec, HashJoinExecBuilder, NestedLoopJoinExec, NestedLoopJoinExecBuilder,
-            utils::JoinFilter,
+            SortMergeJoinExec, utils::JoinFilter,
         },
         metrics::{ExecutionPlanMetricsSet, MetricsSet},
         projection::ProjectionExec,
-        sorts::sort::SortExec,
+        sorts::{
+            partial_sort::PartialSortExec, sort::SortExec,
+            sort_preserving_merge::SortPreservingMergeExec,
+        },
         stream::RecordBatchStreamAdapter,
     },
 };
@@ -436,6 +440,18 @@ impl Hoist {
             self.input,
         )?))
     }
+    fn ordering(&mut self, order: &LexOrdering) -> Result<LexOrdering> {
+        let expressions = order
+            .iter()
+            .map(|e| {
+                Ok(PhysicalSortExpr {
+                    expr: self.expression(e.expr.clone())?,
+                    options: e.options,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(LexOrdering::new(expressions).expect("nonempty native ordering"))
+    }
 }
 
 #[derive(Debug)]
@@ -479,6 +495,22 @@ impl PhysicalOptimizerRule for FitFunctions {
                     )
                         as Arc<dyn ExecutionPlan>));
                 }
+                if let Some(join) = plan.as_any().downcast_ref::<SortMergeJoinExec>()
+                    && let Some(filter) = join.filter()
+                    && let Some(filter) = fit_join_filter(filter)?
+                {
+                    return Ok(Transformed::yes(Arc::new(SortMergeJoinExec::try_new(
+                        join.left().clone(),
+                        join.right().clone(),
+                        join.on().to_vec(),
+                        Some(filter),
+                        join.join_type(),
+                        join.sort_options().to_vec(),
+                        join.null_equality(),
+                    )?)
+                        as Arc<dyn ExecutionPlan>));
+                }
+
                 if let Some(filter) = plan.as_any().downcast_ref::<FilterExec>()
                     && bounded(filter.predicate())?.is_some()
                 {
@@ -512,6 +544,39 @@ impl PhysicalOptimizerRule for FitFunctions {
                         let native = SortExec::new(
                             LexOrdering::new(order).expect("nonempty native ordering"),
                             hoist.finish()?,
+                        )
+                        .with_fetch(sort.fetch())
+                        .with_preserve_partitioning(sort.preserve_partitioning());
+                        return Ok(Transformed::yes(Arc::new(ProjectionExec::try_new(
+                            columns,
+                            Arc::new(native),
+                        )?)
+                            as Arc<dyn ExecutionPlan>));
+                    }
+                }
+                if let Some(sort) = plan.as_any().downcast_ref::<SortPreservingMergeExec>() {
+                    let mut hoist = Hoist::new(sort.input().clone());
+                    let order = hoist.ordering(sort.expr())?;
+                    if hoist.changed {
+                        let columns = hoist.expressions[..sort.schema().fields().len()].to_vec();
+                        let native = SortPreservingMergeExec::new(order, hoist.finish()?)
+                            .with_fetch(sort.fetch());
+                        return Ok(Transformed::yes(Arc::new(ProjectionExec::try_new(
+                            columns,
+                            Arc::new(native),
+                        )?)
+                            as Arc<dyn ExecutionPlan>));
+                    }
+                }
+                if let Some(sort) = plan.as_any().downcast_ref::<PartialSortExec>() {
+                    let mut hoist = Hoist::new(sort.input().clone());
+                    let order = hoist.ordering(sort.expr())?;
+                    if hoist.changed {
+                        let columns = hoist.expressions[..sort.schema().fields().len()].to_vec();
+                        let native = PartialSortExec::new(
+                            order,
+                            hoist.finish()?,
+                            sort.common_prefix_length(),
                         )
                         .with_fetch(sort.fetch())
                         .with_preserve_partitioning(sort.preserve_partitioning());
