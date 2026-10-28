@@ -48,16 +48,45 @@ async fn setup(root: &std::path::Path) -> (Arc<dyn Catalog>, Table, Arc<Budget>)
 }
 
 #[derive(Debug)]
-struct AuthorityCatalog {
+pub(super) struct AuthorityCatalog {
     inner: Arc<dyn Catalog>,
     changed: Option<Table>,
     loads: AtomicUsize,
     updates: AtomicUsize,
+    read_only: bool,
+    read_failure: bool,
+}
+impl AuthorityCatalog {
+    pub(super) fn read_only(inner: Arc<dyn Catalog>, read_failure: bool) -> Self {
+        Self {
+            inner,
+            changed: None,
+            loads: AtomicUsize::new(0),
+            updates: AtomicUsize::new(0),
+            read_only: true,
+            read_failure,
+        }
+    }
+    pub(super) fn load_count(&self) -> usize {
+        self.loads.load(Ordering::SeqCst)
+    }
+    fn writing(&self) {
+        assert!(
+            !self.read_only,
+            "read-only lookup invoked a catalog mutation"
+        );
+    }
 }
 #[async_trait::async_trait]
 impl Catalog for AuthorityCatalog {
     async fn load_table(&self, id: &TableIdent) -> iceberg::Result<Table> {
         let n = self.loads.fetch_add(1, Ordering::SeqCst);
+        if self.read_failure {
+            return Err(iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "fixture catalog unavailable",
+            ));
+        }
         if n > 0
             && let Some(table) = &self.changed
         {
@@ -66,6 +95,7 @@ impl Catalog for AuthorityCatalog {
         self.inner.load_table(id).await
     }
     async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        self.writing();
         self.updates.fetch_add(1, Ordering::SeqCst);
         self.inner.update_table(commit).await
     }
@@ -80,6 +110,7 @@ impl Catalog for AuthorityCatalog {
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<Namespace> {
+        self.writing();
         self.inner.create_namespace(n, p).await
     }
     async fn get_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<Namespace> {
@@ -93,30 +124,37 @@ impl Catalog for AuthorityCatalog {
         n: &NamespaceIdent,
         p: HashMap<String, String>,
     ) -> iceberg::Result<()> {
+        self.writing();
         self.inner.update_namespace(n, p).await
     }
     async fn drop_namespace(&self, n: &NamespaceIdent) -> iceberg::Result<()> {
+        self.writing();
         self.inner.drop_namespace(n).await
     }
     async fn list_tables(&self, n: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
         self.inner.list_tables(n).await
     }
     async fn create_table(&self, n: &NamespaceIdent, c: TableCreation) -> iceberg::Result<Table> {
+        self.writing();
         self.inner.create_table(n, c).await
     }
     async fn drop_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.writing();
         self.inner.drop_table(t).await
     }
     async fn purge_table(&self, t: &TableIdent) -> iceberg::Result<()> {
+        self.writing();
         self.inner.purge_table(t).await
     }
     async fn table_exists(&self, t: &TableIdent) -> iceberg::Result<bool> {
         self.inner.table_exists(t).await
     }
     async fn rename_table(&self, a: &TableIdent, b: &TableIdent) -> iceberg::Result<()> {
+        self.writing();
         self.inner.rename_table(a, b).await
     }
     async fn register_table(&self, t: &TableIdent, m: String) -> iceberg::Result<Table> {
+        self.writing();
         self.inner.register_table(t, m).await
     }
 }
@@ -139,6 +177,8 @@ async fn append_checks_current_authority_before_update_in_every_build() {
             changed: changed.then_some(moved),
             loads: AtomicUsize::new(0),
             updates: AtomicUsize::new(0),
+            read_only: false,
+            read_failure: false,
         };
         let files = files(&table, &budget, vec![1]).await.unwrap();
         let result = docspec::storage::append(&table, &catalog, files).await;
