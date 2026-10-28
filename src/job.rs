@@ -302,6 +302,75 @@ mod sql_guard_tests {
     use crate::budget::Limits;
 
     #[tokio::test]
+    async fn repeated_large_views_are_narrowed_without_an_i32_string_copy() {
+        use arrow::{
+            array::{Array, ArrayRef, StringViewArray, UInt32Array},
+            datatypes::{DataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let job = Job::new(
+            Limits {
+                memory_bytes: 128 << 20,
+                max_batch_bytes: 4 << 20,
+                ..Limits::default()
+            },
+            root.path().join("scratch"),
+        )
+        .unwrap();
+        let raw = format!(r#"{{"keep":1,"padding":"{}"}}"#, "x".repeat(1 << 20));
+        let one = StringViewArray::from(vec![raw]);
+        let values = arrow::compute::take(&one, &UInt32Array::from(vec![0; 2048]), None).unwrap();
+        assert!(
+            values
+                .as_any()
+                .downcast_ref::<StringViewArray>()
+                .unwrap()
+                .total_bytes_len()
+                > i32::MAX as usize
+        );
+        assert!(values.get_array_memory_size() < 2 << 20);
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "raw",
+            DataType::Utf8View,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(schema.clone(), vec![values as ArrayRef]).unwrap();
+        let table = datafusion::datasource::MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        job.context
+            .register_table("expanded", Arc::new(table))
+            .unwrap();
+        let frame = job
+            .sql("SELECT json_get_many(raw,'[[\"keep\"]]') AS selected FROM expanded")
+            .await
+            .unwrap();
+        let plan = frame
+            .clone()
+            .into_optimized_plan()
+            .unwrap()
+            .display_indent()
+            .to_string();
+        // Fail cheaply before a broken coercion expands the 1 MiB backing buffer.
+        assert!(!plan.contains("CAST(expanded.raw AS Utf8)"), "{plan}");
+        let batches = frame.collect().await.unwrap();
+        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 2048);
+        for batch in batches {
+            let selected = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::ListArray>()
+                .unwrap();
+            let values = selected
+                .values()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            assert!(values.iter().all(|v| v == Some("1")));
+        }
+    }
+
+    #[tokio::test]
     async fn caller_sql_refuses_commands_before_session_or_filesystem_effects() {
         for retained in [false, true] {
             for command in ["copy", "ddl", "set"] {
