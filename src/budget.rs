@@ -19,6 +19,8 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod scratch;
+pub(crate) use scratch::ScratchWriter;
 
 /// Declared limits for one workspace execution host.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +57,7 @@ pub struct Budget {
     bytes: Arc<Semaphore>,
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
+    scratch_writes: Arc<std::sync::Mutex<()>>,
 }
 impl Budget {
     /// Creates a shared pool after validating representable limits.
@@ -97,12 +100,20 @@ impl Budget {
             bytes: Arc::new(Semaphore::new(limits.memory_bytes / 2)),
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
+            scratch_writes: Arc::default(),
             limits,
         })
     }
 
     pub(crate) fn runtime_env(&self) -> &RuntimeEnv {
         &self.runtime
+    }
+
+    pub(crate) fn scratch_writer(
+        &self,
+        file: &datafusion::execution::disk_manager::RefCountedTempFile,
+    ) -> Result<ScratchWriter> {
+        ScratchWriter::new(file.clone(), self.clone())
     }
 
     pub(crate) fn context(&self) -> SessionContext {

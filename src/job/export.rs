@@ -259,7 +259,7 @@ pub(super) async fn export(
     let mut previous_key: Option<Vec<u8>> = None;
     let mut coalescer = BatchCoalescer::new(input_schema, 1024);
     let hashed = HashedWriter {
-        inner: temporary.inner().reopen()?,
+        inner: budget.scratch_writer(&temporary)?,
         sha256: Sha256::new(),
         md5: Md5::new(),
         size: 0,

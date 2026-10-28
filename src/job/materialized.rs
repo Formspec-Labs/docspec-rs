@@ -138,7 +138,7 @@ pub(super) async fn retain(
     let mut bytes = 0;
     let mut file = None;
     let mut writer_memory = None;
-    let mut writer: Option<ArrowWriter<std::fs::File>> = None;
+    let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
     while let Some(batch) = stream.try_next().await? {
         let batch = crate::export::portable_batch(batch, schema.clone(), budget)?;
         rows += batch.num_rows();
@@ -159,8 +159,11 @@ pub(super) async fn retain(
             let props = WriterProperties::builder()
                 .set_max_row_group_row_count(Some(budget.limits.batch_rows))
                 .build();
-            let mut spill =
-                ArrowWriter::try_new(temporary.inner().reopen()?, schema.clone(), Some(props))?;
+            let mut spill = ArrowWriter::try_new(
+                budget.scratch_writer(&temporary)?,
+                schema.clone(),
+                Some(props),
+            )?;
             for previous in batches.drain(..) {
                 spill.write(&previous)?;
                 if spill.memory_size() > budget.limits.max_batch_bytes {
