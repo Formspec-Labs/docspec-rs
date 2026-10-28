@@ -208,6 +208,7 @@ pub(crate) enum Behavior {
     HoldPutThenDelete,
     RejectPut,
     ConflictPut,
+    NotModifiedPut,
     HeadDenied,
 }
 
@@ -359,6 +360,7 @@ impl WriteFixture {
                                 | Behavior::HoldPutThenDelete
                                 | Behavior::RejectPut
                                 | Behavior::ConflictPut
+                                | Behavior::NotModifiedPut
                         ));
                         assert!(request.create_only, "single PUT is conditional");
                         if matches!(behavior, Behavior::RejectPut) {
@@ -377,6 +379,10 @@ impl WriteFixture {
                                 "",
                                 b"<Error><Code>ConditionalRequestConflict</Code></Error>",
                             );
+                            continue;
+                        }
+                        if matches!(behavior, Behavior::NotModifiedPut) {
+                            respond(&mut socket, "304 Not Modified", "", b"");
                             continue;
                         }
                         assert!(report.published.is_none(), "no automatic retransmission");
@@ -1043,6 +1049,9 @@ async fn existing_release_file_is_not_read_back_and_changed_source_never_writes(
     );
     assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
     let fixture = WriteFixture::new(Behavior::ConflictPut);
+    assert!(fixture.objects().create_file(&spec, &budget).await.is_err());
+    assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
+    let fixture = WriteFixture::new(Behavior::NotModifiedPut);
     assert!(fixture.objects().create_file(&spec, &budget).await.is_err());
     assert_eq!(fixture.finish().requests, vec![("PUT".into(), None)]);
     let fixture = WriteFixture::new(Behavior::AcceptPut);
