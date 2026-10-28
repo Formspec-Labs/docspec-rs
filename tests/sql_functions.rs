@@ -123,6 +123,37 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
 }
 
 #[tokio::test]
+async fn nested_loop_join_side_projections_fit_before_native_reader_admission() {
+    use arrow::{array::Int64Array, record_batch::RecordBatch};
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("ids.parquet");
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)])),
+        vec![Arc::new(Int64Array::from_iter_values(1..=40))],
+    )
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&input).unwrap(), batch.schema(), None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"parquet","name":"source","path":input}],"steps":[],"outputs":[],"queries":[{"name":"count","sql":"SELECT count(*) AS n FROM source a JOIN source b ON length(json_array(concat(cast(a.id AS VARCHAR),repeat('x',64)))) > b.id"}]})).unwrap();
+    assert_eq!(
+        spec.run(Limits {
+            batch_rows: 40,
+            max_batch_bytes: 1024,
+            ..limits()
+        })
+        .await
+        .unwrap()
+        .queries[0]
+            .data,
+        json!([{"n":1600}])
+    );
+}
+
+#[tokio::test]
 async fn http_dates_are_nullable_utc_values_without_application_retry_policy() {
     let values = scalar(
         "SELECT id,cast(http_date(value) AS BIGINT) AS micros FROM (VALUES
