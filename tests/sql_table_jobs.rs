@@ -64,6 +64,170 @@ async fn table_job_creates_appends_and_repeated_work_is_a_noop() {
 }
 
 #[tokio::test]
+async fn resolve_batches_fresh_heads_without_catalog_mutation_or_empty_append() {
+    use super::sql_tables::AuthorityCatalog;
+    let root = tempfile::tempdir().unwrap();
+    let mut setup = spec(root.path());
+    serde_json::from_value::<JobSpec>(setup.clone())
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    let ident = TableIdent::new(NamespaceIdent::new("archive".into()), "captures".into());
+    let before = catalog.load_table(&ident).await.unwrap();
+    for name in ["readings", "filenames"] {
+        catalog
+            .create_table(
+                ident.namespace(),
+                iceberg::TableCreation::builder()
+                    .name(name.into())
+                    .location(root.path().join(name).to_string_lossy().into_owned())
+                    .schema(before.metadata().current_schema().as_ref().clone())
+                    .build(),
+            )
+            .await
+            .unwrap();
+    }
+    let readonly = Arc::new(AuthorityCatalog::read_only(catalog.clone(), false));
+    let value = json!({"scratch":root.path().join("resolve-scratch"),"inputs":[],"steps":[],"outputs":[],"table_operations":[
+        {"kind":"resolve","name":"captures_head","table":{"namespace":["archive"],"name":"captures"}},
+        {"kind":"resolve","name":"readings_head","table":{"namespace":["archive"],"name":"readings"}},
+        {"kind":"resolve","name":"filenames_head","table":{"namespace":["archive"],"name":"filenames"}},
+        {"kind":"resolve","name":"absent_head","table":{"namespace":["archive"],"name":"absent"}}]});
+    let lookup: JobSpec = serde_json::from_value(value.clone()).unwrap();
+    let first = serde_json::to_value(
+        lookup
+            .run_with_catalog(limits(), readonly.clone())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(readonly.load_count(), 4);
+    for (index, name) in ["captures", "readings", "filenames"]
+        .into_iter()
+        .enumerate()
+    {
+        let table = catalog
+            .load_table(&TableIdent::new(ident.namespace().clone(), name.into()))
+            .await
+            .unwrap();
+        let head = &first["table_operations"][index];
+        assert_eq!(head["kind"], "resolve");
+        assert_eq!(head["exists"], true);
+        assert_eq!(head["table"]["name"], name);
+        assert_eq!(
+            head["metadata_location"],
+            table.metadata_location().unwrap()
+        );
+        assert_eq!(head["table_uuid"], table.metadata().uuid().to_string());
+        assert_eq!(
+            head["snapshot"],
+            json!(table.metadata().current_snapshot_id())
+        );
+        assert_eq!(head["schema_id"], table.metadata().current_schema_id());
+        assert_eq!(head["files"], json!([]));
+        assert_eq!(head["retries"], 0);
+    }
+    assert_eq!(first["table_operations"][3]["exists"], false);
+    assert!(first["table_operations"][3].get("table_uuid").is_none());
+    let empty = &first["table_operations"][1];
+    let empty_input: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("empty-pin"),"inputs":[{"kind":"native_table","name":"empty","metadata_location":empty["metadata_location"],"table_uuid":empty["table_uuid"],"schema_id":empty["schema_id"],"snapshot":empty["snapshot"]}],"steps":[],"outputs":[],"queries":[{"name":"count","sql":"SELECT count(*) AS n FROM empty"}]})).unwrap();
+    assert_eq!(
+        empty_input.run(limits()).await.unwrap().queries[0].data,
+        json!([{"n":0}])
+    );
+    setup["table_operations"] = json!([setup["table_operations"][2].clone()]);
+    setup["steps"][0]["sql"] =
+        json!("SELECT cast(value AS BIGINT) AS id FROM generate_series(1,3)");
+    setup["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'immutable-row3-writer-v1' AS identity FROM pending LIMIT 1");
+    serde_json::from_value::<JobSpec>(setup)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    let second = serde_json::to_value(
+        lookup
+            .run_with_catalog(limits(), readonly.clone())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(readonly.load_count(), 8);
+    assert_ne!(
+        first["table_operations"][0]["metadata_location"],
+        second["table_operations"][0]["metadata_location"]
+    );
+    assert_eq!(
+        first["table_operations"][0]["table_uuid"],
+        second["table_operations"][0]["table_uuid"]
+    );
+    let unavailable = Arc::new(AuthorityCatalog::read_only(catalog, true));
+    let error = lookup
+        .run_with_catalog(limits(), unavailable)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("fixture catalog unavailable"));
+    assert!(error.completed.table_operations.is_empty());
+}
+
+#[tokio::test]
+async fn resolve_only_local_job_opens_catalog_read_only_and_never_creates_one() {
+    let root = tempfile::tempdir().unwrap();
+    let mut lookup = json!({"scratch":root.path().join("resolve-scratch"),"catalog_root":root.path().join("missing"),"inputs":[],"steps":[],"outputs":[],"table_operations":[{"kind":"resolve","name":"head","table":{"namespace":["archive"],"name":"captures"}}]});
+    let error = serde_json::from_value::<JobSpec>(lookup.clone())
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap_err();
+    assert!(!root.path().join("missing").exists(), "{error}");
+    serde_json::from_value::<JobSpec>(spec(root.path()))
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    lookup["catalog_root"] = json!(root.path().join("catalog"));
+    let database = root.path().join("catalog/catalog.sqlite");
+    let before = std::fs::read(&database).unwrap();
+    let result = serde_json::from_value::<JobSpec>(lookup.clone())
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap()["table_operations"][0]["exists"],
+        true
+    );
+    assert_eq!(std::fs::read(database).unwrap(), before);
+    let job = root.path().join("resolve.json");
+    let ceiling = root.path().join("resolve-limits.json");
+    std::fs::write(&job, serde_json::to_vec(&lookup).unwrap()).unwrap();
+    std::fs::write(&ceiling, serde_json::to_vec(&limits()).unwrap()).unwrap();
+    let unused = root.path().join("unused-lifecycle");
+    let output = Command::new(env!("CARGO_BIN_EXE_docspec"))
+        .arg("--workspace")
+        .arg(&unused)
+        .arg("--limits")
+        .arg(ceiling)
+        .arg("job")
+        .arg("--spec")
+        .arg(job)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!unused.exists());
+    let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cli["table_operations"][0]["exists"], true);
+}
+
+#[tokio::test]
 async fn table_append_matches_native_names_when_incoming_order_differs() {
     let root = tempfile::tempdir().unwrap();
     let mut value = spec(root.path());

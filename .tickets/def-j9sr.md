@@ -25,3 +25,7 @@ Typed JobSpec and local CLI share one bounded service; explicit limits required,
 **2026-10-28T05:13:18Z**
 
 Ownership transferred to core by owner051000queue decision. Engine integration retains merges/snapshot packaging only; core owns one-context native table/Parquet inputs, named materialized steps/graphs/metadata queries/guarded deterministic multi-file exports and any needed job fixes. Existing C7 spec shapes retained; actual native pins model regression sent with exact job.
+
+**2026-10-28T06:05:29Z**
+
+Owner/enginefreshhead requirement: contract-first readonly resolve operation; batch multiple names in onejob, fresh exactmetadata/UUID/snapshot/schema, typedabsence distinct fromerrors, nativecataloggenerationwrapper preserved, noemptyappend/catalogwrites. Reuse existing catalog authorityfixture with mutation denial, readonlySQLopen forresolve-onlylocal jobs.

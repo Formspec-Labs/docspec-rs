@@ -29,3 +29,11 @@ F0 exposed logical/physical string-view drift. Contract8e64a70 first failed on e
 **2026-10-28T05:13:18Z**
 
 Ownership transferred to core by owner051000queue decision. Engine integration retains merges/snapshot packaging only; core owns further deterministic model export fixes and exact native-table slice acceptance. Current same-model Parquet sliceac866passes all public bytes; native table slice fails at source_annotations materialization with executed batch type changed, exact job shared in codex-impl/cx_vertical_real_v2/model/job.json.
+
+**2026-10-28T07:17:49Z**
+
+Native-pin slice/D2 replay exposed Binary versus FixedSizeBinary(32) and nested list child-nullability drift. Contract-first tests require exact values and declared types, strict invalid-width/NULL/unrelated-type refusal, and target-byte fitting for null-heavy fixed storage plus variable offsets. Current portable unit lane: 7 pass, 3 fail at existing type guard; evidence cxc_run4_type_contract_red2.log. No application SQL cast or allowance increase.
+
+**2026-10-28T08:07:03Z**
+
+b7576e6/4df787b contracts first; strict maintained Arrow conversion and declared-target byte sizing pass final 11 portable checks, all-target/all-feature Clippy, and exact retained D2 replay. Initial 69 SQL checks pass before minor no-op cleanup. Native model completes source_annotations and all later named steps, then fails first export on DataFusion physical/logical PARQUET:field_id metadata drift; no accepted model exports. Type investigation reached 45 minutes; prioritize the independent full D1 physical-footprint bottleneck, then return to the exact metadata failure.

@@ -1,4 +1,4 @@
-//! Declarative native writes reuse one job context and the guarded table service.
+//! Explicit native catalog reads and writes share one job context.
 // Rust guideline compliant 2026-02-21
 use super::{
     Job, query_result,
@@ -20,6 +20,9 @@ use std::collections::{BTreeSet, HashMap};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TableOperation {
+    /// Resolve one current catalog head without data reads or catalog writes.
+    /// Multiple operations batch independent heads in one job/process.
+    Resolve { name: String, table: TableIdent },
     CreateNamespace {
         name: String,
         namespace: NamespaceIdent,
@@ -59,6 +62,8 @@ pub struct TableOperationResult {
     pub name: String,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub table: Option<TableIdent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_uuid: Option<uuid::Uuid>,
@@ -82,6 +87,9 @@ fn invalid(message: &str) -> Error {
     Error::refusal("invalid_spec", message)
 }
 impl TableOperation {
+    pub(super) fn is_read_only(&self) -> bool {
+        matches!(self, Self::Resolve { .. })
+    }
     pub(super) fn validate_all(operations: &[Self], mut bindings: BTreeSet<String>) -> Result<()> {
         let mut names = BTreeSet::new();
         for operation in operations {
@@ -113,7 +121,8 @@ impl TableOperation {
     }
     fn name(&self) -> &str {
         match self {
-            Self::CreateNamespace { name, .. }
+            Self::Resolve { name, .. }
+            | Self::CreateNamespace { name, .. }
             | Self::Create { name, .. }
             | Self::Append { name, .. }
             | Self::Purge { name, .. } => name,
@@ -124,9 +133,16 @@ impl TableOperation {
         job: &Job,
         catalog: &dyn Catalog,
     ) -> Result<TableOperationResult> {
+        // Retain metadata admission through the catalog load and extraction.
+        let _resolution_memory = if self.is_read_only() {
+            Some(job.budget.reserve(job.budget.limits.max_metadata_bytes)?)
+        } else {
+            None
+        };
         let mut result = TableOperationResult {
             name: self.name().to_owned(),
             kind: String::new(),
+            exists: None,
             table: None,
             table_uuid: None,
             metadata_location: None,
@@ -136,6 +152,22 @@ impl TableOperation {
             files: vec![],
         };
         let completed = match self {
+            Self::Resolve { table, .. } => {
+                result.kind = "resolve".into();
+                match catalog.load_table(table).await {
+                    Ok(loaded) => {
+                        loaded.metadata_location_result()?;
+                        result.exists = Some(true);
+                        loaded
+                    }
+                    Err(error) if error.kind() == iceberg::ErrorKind::TableNotFound => {
+                        result.exists = Some(false);
+                        result.table = Some(table.clone());
+                        return Ok(result);
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
             Self::CreateNamespace {
                 namespace,
                 properties,
@@ -271,7 +303,13 @@ impl TableOperation {
                 return Ok(result);
             }
         };
-        result.table = Some(completed.identifier().clone());
+        result.table = Some(if let Self::Resolve { table, .. } = self {
+            // A generation-scoped catalog may return its physical identifier.
+            // Report the logical name requested by the caller, without remapping.
+            table.clone()
+        } else {
+            completed.identifier().clone()
+        });
         result.table_uuid = Some(completed.metadata().uuid());
         result.metadata_location = completed.metadata_location().map(str::to_owned);
         result.snapshot = completed.metadata().current_snapshot_id();

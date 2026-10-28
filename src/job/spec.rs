@@ -380,12 +380,20 @@ impl JobSpec {
         let catalog = if !self.table_operations.is_empty() {
             match connections.catalog {
                 Some(catalog) => Some(catalog),
-                None => Some(
-                    crate::storage::local_catalog(
-                        self.catalog_root.as_ref().expect("validated local catalog"),
+                None => {
+                    let root = self.catalog_root.as_ref().expect("validated local catalog");
+                    Some(
+                        if self
+                            .table_operations
+                            .iter()
+                            .all(TableOperation::is_read_only)
+                        {
+                            crate::storage::local_catalog_read_only(root).await?
+                        } else {
+                            crate::storage::local_catalog(root).await?
+                        },
                     )
-                    .await?,
-                ),
+                }
             }
         } else {
             None
