@@ -174,6 +174,16 @@ async fn native_union_distinct_rebuilds_ancestor_and_subquery_schemas() {
 }
 
 #[tokio::test]
+async fn scalar_union_metadata_rebuilds_its_outer_result_schema() {
+    let root = tempfile::tempdir().unwrap();
+    let job = metadata_job(root.path()).await;
+    let sql = "SELECT (SELECT id FROM (SELECT id FROM first UNION SELECT id FROM second) u WHERE id=1) AS id";
+    let frame = job.sql(sql).await.unwrap();
+    assert!(frame.schema().field(0).metadata().is_empty());
+    check_metadata_union(&job, sql, vec![Some(1)]).await;
+}
+
+#[tokio::test]
 async fn native_union_conflicting_metadata_does_not_fabricate_field_identity() {
     let root = tempfile::tempdir().unwrap();
     let job = metadata_job(root.path()).await;

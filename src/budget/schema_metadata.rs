@@ -392,6 +392,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scalar_subquery_only_changes_rebuild_the_outer_schema() {
+        use datafusion::{
+            logical_expr::{LogicalPlanBuilder, logical_plan::Subquery},
+            optimizer::analyzer::type_coercion::TypeCoercion,
+            prelude::SessionContext,
+        };
+        let context = SessionContext::new();
+        context
+            .register_batch("left_input", batch(Some(7), "left").0)
+            .unwrap();
+        context
+            .register_batch("right_input", batch(None, "right").0)
+            .unwrap();
+        let mut inputs = Vec::new();
+        for name in ["left_input", "right_input"] {
+            inputs.push(Arc::new(
+                context.table(name).await.unwrap().into_unoptimized_plan(),
+            ));
+        }
+        // Use native coercion to produce its merged UNION tags before our
+        // reconciliation; the scalar result initially inherits those tags.
+        let union = TypeCoercion::new()
+            .analyze(
+                LogicalPlan::Union(Union::try_new(inputs).unwrap()),
+                &ConfigOptions::new(),
+            )
+            .unwrap();
+        let subquery = LogicalPlanBuilder::from(union)
+            .limit(0, Some(1))
+            .unwrap()
+            .build()
+            .unwrap();
+        let plan = LogicalPlanBuilder::empty(true)
+            .project(vec![
+                Expr::ScalarSubquery(Subquery {
+                    subquery: Arc::new(subquery),
+                    outer_ref_columns: vec![],
+                    spans: Default::default(),
+                })
+                .alias("value"),
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+        let expected = HashMap::from([("common".into(), "unit".into())]);
+        assert_ne!(plan.schema().field(0).metadata(), &expected);
+        for wrap in [false, true] {
+            let normalized = normalize(plan.clone(), wrap).unwrap();
+            assert_eq!(normalized.schema().field(0).metadata(), &expected);
+        }
+    }
+
+    #[tokio::test]
     async fn metadata_adapter_preserves_zero_column_rows() {
         let original = Arc::new(Schema::new_with_metadata(
             Vec::<Field>::new(),
