@@ -3,6 +3,48 @@
 use super::*;
 
 #[test]
+fn inline_view_compaction_releases_sliced_headers_and_null_bitmap() {
+    use arrow::{
+        array::{Array, StringViewArray},
+        buffer::NullBuffer,
+    };
+    let values = StringViewArray::from_iter_values(
+        std::iter::once("x".repeat(2 << 20)).chain(std::iter::repeat_n("inline".into(), 200_000)),
+    );
+    let values = Arc::new(
+        StringViewArray::try_new(
+            values.views().clone(),
+            values.data_buffers().to_vec(),
+            Some(NullBuffer::new_valid(values.len())),
+        )
+        .unwrap(),
+    );
+    let headers = values.views().inner().clone();
+    let validity = values.nulls().unwrap().inner().inner().clone();
+    let batch = RecordBatch::try_from_iter([("value", values.clone() as ArrayRef)]).unwrap();
+    let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+    let compacted = compact_views(batch.slice(1, 3), &budget).unwrap();
+    drop(batch);
+    drop(values);
+    assert_eq!(
+        headers.strong_count(),
+        1,
+        "compaction must release original header allocation"
+    );
+    assert_eq!(
+        validity.strong_count(),
+        1,
+        "compaction must release original validity allocation"
+    );
+    let values = compacted
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .unwrap();
+    assert_eq!(values.iter().collect::<Vec<_>>(), vec![Some("inline"); 3]);
+}
+
+#[test]
 fn compacted_view_slices_release_unused_payload_and_keep_admission() {
     use arrow::array::{Array, StringViewArray};
     let unused = "x".repeat(2 << 20);
