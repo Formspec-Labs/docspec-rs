@@ -54,6 +54,21 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
             "SELECT sum(length(json_array(repeat('x',cast(value%3+1 AS BIGINT)*100)))) AS n FROM generate_series(1,120)",
             24480,
         ),
+        (
+            "filter",
+            "SELECT count(*) AS n FROM generate_series(1,400) WHERE length(json_array(repeat('x',cast(value%3+1 AS BIGINT)*100)))>200",
+            267,
+        ),
+        (
+            "grouped",
+            "SELECT sum(n) AS n FROM (SELECT json_canonical(concat('1e',cast(value%2 AS VARCHAR))) AS k,count(*) AS n FROM generate_series(1,400) GROUP BY k)",
+            400,
+        ),
+        (
+            "sort",
+            "SELECT sum(value) AS n FROM (SELECT value FROM generate_series(1,120) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*10)) DESC LIMIT 3)",
+            357,
+        ),
     ];
     for (name, sql, expected) in queries {
         let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join(name),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":name,"sql":sql}]})).unwrap();
@@ -112,7 +127,10 @@ async fn http_date_output_respects_the_shared_batch_allowance() {
     ceiling.max_batch_bytes = 1024;
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],
         "queries":[{"name":"values","sql":"SELECT count(http_date(CASE WHEN value%2=0 THEN 'Thu, 01 Jan 1970 00:00:00 GMT' ELSE 'invalid' END)) AS n FROM generate_series(1,400)"}]})).unwrap();
-    assert_eq!(spec.run(ceiling).await.unwrap().queries[0].data, json!([{"n":200}]));
+    assert_eq!(
+        spec.run(ceiling).await.unwrap().queries[0].data,
+        json!([{"n":200}])
+    );
 }
 
 #[tokio::test]
@@ -320,7 +338,10 @@ async fn canonical_cumulative_output_is_fitted_before_admission() {
     ceiling.batch_rows = 400;
     ceiling.max_batch_bytes = 1024;
     let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":"SELECT sum(length(json_canonical(concat('1e',cast(value % 2 AS VARCHAR))))) AS n FROM generate_series(1,400)"}]})).unwrap();
-    assert_eq!(spec.run(ceiling).await.unwrap().queries[0].data, json!([{"n":1400}]));
+    assert_eq!(
+        spec.run(ceiling).await.unwrap().queries[0].data,
+        json!([{"n":1400}])
+    );
 }
 
 #[tokio::test]
