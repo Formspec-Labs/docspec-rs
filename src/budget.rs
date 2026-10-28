@@ -22,6 +22,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod schema_metadata;
 mod scratch;
 mod subqueries;
+mod view_compaction;
 pub(crate) use scratch::ScratchWriter;
 
 /// Declared limits for one workspace execution host.

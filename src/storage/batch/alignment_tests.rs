@@ -5,56 +5,160 @@ use super::*;
 #[test]
 fn compacted_view_slices_release_unused_payload_and_keep_admission() {
     use arrow::array::{Array, StringViewArray};
-    let unused="x".repeat(2<<20);
-    let source=Arc::new(StringViewArray::from(vec![
-        Some(unused.as_str()),Some("first retained long value"),None,Some("second retained long value")
+    let unused = "x".repeat(2 << 20);
+    let source = Arc::new(StringViewArray::from(vec![
+        Some(unused.as_str()),
+        Some("first retained long value"),
+        None,
+        Some("second retained long value"),
     ]));
-    let batch=RecordBatch::try_from_iter([("value",source as ArrayRef)]).unwrap();
-    let budget=crate::budget::Budget::new(crate::budget::Limits {
-        memory_bytes:64<<20,max_batch_bytes:1<<20,..crate::budget::Limits::default()
-    }).unwrap();
-    let compacted=compact_batch_slice(&batch,1,3).unwrap();
-    let view=compacted.column(0).as_any().downcast_ref::<StringViewArray>().unwrap();
-    assert_eq!(view.iter().collect::<Vec<_>>(),vec![Some("first retained long value"),None,Some("second retained long value")]);
-    assert!(view.data_buffers().iter().map(|buffer|buffer.len()).sum::<usize>()<1024);
-    assert_eq!(compacted.schema(),batch.schema());
-    let kept=compacted.column(0).to_data();
+    let batch = RecordBatch::try_from_iter([("value", source as ArrayRef)]).unwrap();
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        memory_bytes: 64 << 20,
+        max_batch_bytes: 1 << 20,
+        ..crate::budget::Limits::default()
+    })
+    .unwrap();
+    let compacted = compact_batch_slice(&batch, 1, 3, &budget).unwrap();
+    let view = compacted
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .unwrap();
+    assert_eq!(
+        view.iter().collect::<Vec<_>>(),
+        vec![
+            Some("first retained long value"),
+            None,
+            Some("second retained long value")
+        ]
+    );
+    assert!(
+        view.data_buffers()
+            .iter()
+            .map(|buffer| buffer.len())
+            .sum::<usize>()
+            < 1024
+    );
+    assert_eq!(compacted.schema(), batch.schema());
+    let kept = compacted.column(0).to_data();
     drop(compacted);
-    assert!(budget.reserve(budget.limits.memory_bytes/2).is_err());
+    assert!(budget.reserve(budget.limits.memory_bytes / 2).is_err());
     drop(kept);
-    drop(budget.reserve(budget.limits.memory_bytes/2).unwrap());
+    drop(budget.reserve(budget.limits.memory_bytes / 2).unwrap());
 }
 
 #[test]
 fn compacting_views_preserves_sharing_when_logical_bytes_are_large() {
     use arrow::array::{Array, StringViewArray, UInt32Array};
-    let text="x".repeat(1<<20);
-    let source=StringViewArray::from(vec![Some(text),None]);
-    let indices=UInt32Array::from((0..2048).map(|row|if row%17==0 {1}else{0}).collect::<Vec<_>>());
-    let values=arrow::compute::take(&source,&indices,None).unwrap();
-    let batch=RecordBatch::try_from_iter([("value",values)]).unwrap();
-    let compacted=compact_batch_slice(&batch,0,2048).unwrap();
-    let view=compacted.column(0).as_any().downcast_ref::<StringViewArray>().unwrap();
-    assert_eq!(view.len(),2048);
-    assert_eq!(view.null_count(),(0..2048).filter(|row|row%17==0).count());
-    assert_eq!(view.value(1).len(),1<<20);
-    assert!(view.get_array_memory_size()<2<<20);
+    let text = "x".repeat(1 << 20);
+    let source = StringViewArray::from(vec![Some(text), None]);
+    let indices = UInt32Array::from(
+        (0..2048)
+            .map(|row| if row % 17 == 0 { 1 } else { 0 })
+            .collect::<Vec<_>>(),
+    );
+    let values = arrow::compute::take(&source, &indices, None).unwrap();
+    let batch = RecordBatch::try_from_iter([("value", values)]).unwrap();
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        memory_bytes: 64 << 20,
+        max_batch_bytes: 4 << 20,
+        ..crate::budget::Limits::default()
+    })
+    .unwrap();
+    let compacted = compact_batch_slice(&batch, 0, 2048, &budget).unwrap();
+    let view = compacted
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .unwrap();
+    assert_eq!(view.len(), 2048);
+    assert_eq!(
+        view.null_count(),
+        (0..2048).filter(|row| row % 17 == 0).count()
+    );
+    assert_eq!(view.value(1).len(), 1 << 20);
+    assert!(view.get_array_memory_size() < 2 << 20);
 }
 
 #[test]
 fn view_compaction_ignores_large_headers_in_null_slots() {
-    use arrow::{array::{Array,StringViewArray},buffer::NullBuffer};
-    let source=StringViewArray::from(vec!["x".repeat(2<<20),"retained noninline text".into()]);
-    let array=Arc::new(StringViewArray::try_new(
-        vec![source.views()[0],source.views()[1]].into(),
-        source.data_buffers().to_vec(),Some(NullBuffer::from(vec![false,true]))
-    ).unwrap());
-    let batch=RecordBatch::try_from_iter([("value",array as ArrayRef)]).unwrap();
-    let compacted=compact_batch_slice(&batch,0,2).unwrap();
-    let array=compacted.column(0).as_any().downcast_ref::<StringViewArray>().unwrap();
+    use arrow::{
+        array::{Array, StringViewArray},
+        buffer::NullBuffer,
+    };
+    let source = StringViewArray::from(vec!["x".repeat(2 << 20), "retained noninline text".into()]);
+    let array = Arc::new(
+        StringViewArray::try_new(
+            vec![source.views()[0], source.views()[1]].into(),
+            source.data_buffers().to_vec(),
+            Some(NullBuffer::from(vec![false, true])),
+        )
+        .unwrap(),
+    );
+    let batch = RecordBatch::try_from_iter([("value", array as ArrayRef)]).unwrap();
+    let budget = crate::budget::Budget::new(crate::budget::Limits {
+        memory_bytes: 64 << 20,
+        max_batch_bytes: 4 << 20,
+        ..crate::budget::Limits::default()
+    })
+    .unwrap();
+    let compacted = compact_batch_slice(&batch, 0, 2, &budget).unwrap();
+    let array = compacted
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .unwrap();
     assert!(array.is_null(0));
-    assert_eq!(array.value(1),"retained noninline text");
-    assert!(array.data_buffers().iter().map(|buffer|buffer.len()).sum::<usize>()<1024);
+    assert_eq!(array.value(1), "retained noninline text");
+    assert!(
+        array
+            .data_buffers()
+            .iter()
+            .map(|buffer| buffer.len())
+            .sum::<usize>()
+            < 1024
+    );
+}
+
+#[test]
+fn compaction_releases_unused_payload_inside_list_values() {
+    use arrow::{
+        array::{Array, ListArray, StringViewArray},
+        buffer::OffsetBuffer,
+    };
+    let values = StringViewArray::from(vec![
+        "x".repeat(2 << 20),
+        "retained nested long string".into(),
+    ]);
+    let values = Arc::new(values.slice(1, 1));
+    let list = ListArray::try_new(
+        Arc::new(arrow::datatypes::Field::new(
+            "item",
+            arrow::datatypes::DataType::Utf8View,
+            true,
+        )),
+        OffsetBuffer::new(vec![0i32, 1].into()),
+        values,
+        None,
+    )
+    .unwrap();
+    let batch = RecordBatch::try_from_iter([("items", Arc::new(list) as ArrayRef)]).unwrap();
+    let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+    let compacted = compact_batch_slice(&batch, 0, 1, &budget).unwrap();
+    assert!(compacted.get_array_memory_size() < 4096);
+    assert_eq!(compacted.schema(), batch.schema());
+    let list = compacted
+        .column(0)
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .unwrap();
+    let values = list
+        .values()
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .unwrap();
+    assert_eq!(values.value(0), "retained nested long string");
 }
 
 #[test]
