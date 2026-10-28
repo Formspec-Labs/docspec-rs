@@ -84,6 +84,21 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
             "SELECT sum(value) AS n FROM (SELECT value FROM (SELECT value FROM generate_series(1,60) UNION ALL SELECT value FROM generate_series(61,120)) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*4)) DESC LIMIT 3)",
             357,
         ),
+        (
+            "window_lag",
+            "SELECT sum(length(n)) AS n FROM (SELECT lag(json_array(concat(cast(value AS VARCHAR),repeat('x',64)))) OVER (ORDER BY value) AS n FROM generate_series(1,40))",
+            2721,
+        ),
+        (
+            "window_partition",
+            "SELECT max(n) AS n FROM (SELECT count(*) OVER (PARTITION BY json_array(cast(value%2 AS VARCHAR))) AS n FROM generate_series(1,400))",
+            200,
+        ),
+        (
+            "window_filter",
+            "SELECT max(n) AS n FROM (SELECT count(*) FILTER (WHERE length(json_array(concat(cast(value AS VARCHAR),repeat('x',64))))>0) OVER () AS n FROM generate_series(1,40))",
+            40,
+        ),
     ];
     for (name, sql, expected) in queries {
         let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join(name),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":name,"sql":sql}]})).unwrap();

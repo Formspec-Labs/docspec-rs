@@ -29,12 +29,23 @@ fn settings(profile: ExportProfile) -> ExportSettings {
 async fn smallest_byte_allowances_refuse_before_writing_without_panicking() {
     let root = tempfile::tempdir().unwrap();
     for bytes in 1..=3 {
-        let job = Job::new(Limits { memory_bytes: 32 << 20, max_batch_bytes: bytes, ..Limits::default() }, root.path().join(format!("scratch-{bytes}"))).unwrap();
+        let job = Job::new(
+            Limits {
+                memory_bytes: 32 << 20,
+                max_batch_bytes: bytes,
+                ..Limits::default()
+            },
+            root.path().join(format!("scratch-{bytes}")),
+        )
+        .unwrap();
         let mut settings = settings(ExportProfile::Whole);
         settings.dictionary_columns.clear();
         settings.delta_columns.clear();
         let path = root.path().join(format!("output-{bytes}.parquet"));
-        let error = job.export("SELECT 1 AS id", &path, &settings).await.unwrap_err();
+        let error = job
+            .export("SELECT 1 AS id", &path, &settings)
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), "capacity");
         assert!(!path.exists());
     }
