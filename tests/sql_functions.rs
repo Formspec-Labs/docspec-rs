@@ -410,6 +410,88 @@ async fn canonical_cumulative_output_is_fitted_before_admission() {
 }
 
 #[tokio::test]
+async fn json_many_accepts_per_row_paths_without_string_coercion() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("dynamic.jsonl");
+    let rows = [
+        json!({"id":1,"raw":r#"{"a":{"x":1e+02},"b":[0,2]}"#,"paths":r#"[["a","x"],["b",1],["missing"],["a","x"]]"#}),
+        json!({"id":2,"raw":r#"{"a":null,"b":"é"}"#,"paths":r#"[["b"],["a"]]"#}),
+        json!({"id":3,"raw":null,"paths":r#"[["a"],[-1],[null]]"#}),
+        json!({"id":4,"raw":"invalid","paths":"[]"}),
+        json!({"id":5,"raw":r#"{"a":7,"broken":!"#,"paths":r#"[["a"]]"#}),
+    ];
+    std::fs::write(
+        &path,
+        rows.iter()
+            .map(|row| row.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("raw", DataType::Utf8, true),
+        Field::new("paths", DataType::Utf8, true),
+    ]);
+    let mut queries = Vec::new();
+    for raw_type in ["Utf8", "LargeUtf8", "Utf8View"] {
+        for path_type in ["Utf8", "LargeUtf8", "Utf8View"] {
+            queries.push(json!({"name":format!("{raw_type}_{path_type}"),"sql":format!("SELECT id,json_get_many(arrow_cast(raw,'{raw_type}'),arrow_cast(paths,'{path_type}')) AS bundle FROM source ORDER BY id")}));
+        }
+    }
+    queries.push(json!({"name":"scalar_raw","sql":"SELECT id,json_get_many('{\"a\":7}',paths) AS bundle FROM source WHERE id=5"}));
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[{"kind":"json_lines","name":"source","files":[{"key":"fixture","path":path}],"schema":schema}],"steps":[],"outputs":[],"queries":queries})).unwrap();
+    let result = spec.run(limits()).await.unwrap();
+    let expected = json!([{"id":1,"bundle":["1e+02","2",null,"1e+02"]},{"id":2,"bundle":["\"é\"","null"]},{"id":3,"bundle":[null,null,null]},{"id":4,"bundle":[]},{"id":5,"bundle":["7"]}]);
+    for query in &result.queries[..9] {
+        assert_eq!(query.data, expected, "{}", query.name);
+    }
+    assert_eq!(result.queries[9].data, json!([{"id":5,"bundle":["7"]}]));
+}
+
+#[tokio::test]
+async fn json_many_dynamic_paths_fit_and_refuse_invalid_definitions() {
+    let root = tempfile::tempdir().unwrap();
+    let job = docspec::job::Job::new(
+        Limits {
+            max_batch_bytes: 1024,
+            batch_rows: 400,
+            ..limits()
+        },
+        root.path().join("scratch"),
+    )
+    .unwrap();
+    let sql = r#"SELECT count(selected) AS n,sum(cardinality(selected)) AS slots FROM (SELECT json_get_many(concat('{"a":"',repeat('x',64),'","b":',cast(value AS VARCHAR),'}'),CASE WHEN value%2=0 THEN '[["a"],["a"],["b"]]' ELSE '[]' END) AS selected FROM generate_series(1,400))"#;
+    let batches = job.sql(sql).await.unwrap().collect().await.unwrap();
+    let n = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Int64Array>()
+        .unwrap();
+    let slots = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<arrow::array::UInt64Array>()
+        .unwrap();
+    assert_eq!(n.value(0), 400);
+    assert_eq!(slots.value(0), 600);
+    for invalid in ["null", "{}", "[1]", "[[true]]", r#"[["a"],["a","b"]]"#] {
+        let sql = format!(
+            "SELECT json_get_many('{{}}',CASE WHEN value=1 THEN '[]' ELSE '{}' END) FROM generate_series(1,2)",
+            invalid.replace('\'', "''")
+        );
+        let error = job
+            .sql(&sql)
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("JSON paths"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn json_many_matches_independent_raw_getters_and_preserves_positions() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("rows.jsonl");
