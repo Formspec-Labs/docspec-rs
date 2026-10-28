@@ -24,3 +24,7 @@ Review confirmed concurrent outer accounting update gap; removed in this follow-
 **2026-10-28T03:14:06Z**
 
 Independent review-storage/review.md REQUEST CHANGES: DocSpec guarded writes are correct in isolation, but native DataFusion spills bypass mutex and use post-write subtract-then-add accounting; mixed concurrent writes can observe an understated counter and exceed total cap. Global pre-write scratch guarantee remains OPEN. Blocked: owner must assign/authorize common native spill pre-write/accounting primitive or qualified independent allocation design before closure. Exact interleaving and dependency source paths sent engine. Do not treat existing native-spill-overrun fixture as this proof.
+
+**2026-10-28T03:22:03Z**
+
+Concrete retained upstream route: apache/datafusion PR21882 SpillFile/TempFileFactory removes old update_disk_usage and reserves before writes; issue24230 also identifies I/O rollback qualification. Locked iceberg-datafusion0.10.1 couples DataFusion53.1/Parquet58, so integration owner must select compatible dependency upgrade/backport. No version changes, local fork or budget partition introduced. Final passing gate does not close this global guarantee.

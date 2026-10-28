@@ -1,6 +1,6 @@
 ---
 id: dec-e67y
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-10-28T02:56:16Z
@@ -22,3 +22,7 @@ Generic regression now reproduces Utf8 == LargeUtf8 in0.19s: named UNION begins 
 **2026-10-28T03:08:27Z**
 
 Maintained TypeCoercion after native decorrelation fixes generic36-query matrix0.22s and exact retained D2 fake worklist0.39s (1work row/1admission row). Focused SQLjobs8PASS21.43s; all-targetClippy/format pass. No optimizer disabled and no application SQL/policy/limit changed. Independent review and final gate pending.
+
+**2026-10-28T03:22:03Z**
+
+Closed after independent semi-formal review APPROVE, generic36-query mixed-string/null matrix, exact retained D2 fake worklist on all-feature and ordinary remote-only builds, SQLjobs8PASS, and final scripts/check PASS:417lib/412integration/15restore/1processmemory/2worker/11probe plus31Dagster,17existing skips. Source code pinned9b59263; later commits are ticket metadata only. No application workaround or optimizer disable.
