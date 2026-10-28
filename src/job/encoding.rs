@@ -156,4 +156,16 @@ mod tests {
             "x".repeat(60 << 10)
         );
     }
+
+    #[test]
+    fn retained_group_is_flushed_before_refusing_the_next_fitting_row() {
+        let budget = budget(288 << 10);
+        let base = 2 * budget.limits.max_batch_bytes;
+        let _base = budget.reserve(base).unwrap();
+        let input = RecordBatch::try_new(Arc::new(Schema::new(vec![Field::new("value", DataType::Utf8, false)])), vec![Arc::new(StringArray::from(vec!["x".repeat(15 << 10), "y".repeat(20 << 10)]))]).unwrap();
+        let mut output = writer(&input);
+        super::write(&mut output, &input, &budget, base, false, true).unwrap();
+        let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(output.into_inner().unwrap())).unwrap().build().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(arrow::compute::concat_batches(&input.schema(), &read).unwrap(), input);
+    }
 }
