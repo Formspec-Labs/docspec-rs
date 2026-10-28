@@ -76,8 +76,8 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
         ),
         (
             "window",
-            "SELECT max(n) AS n FROM (SELECT sum(length(json_array(repeat('x',64)))) OVER () AS n FROM generate_series(1,40))",
-            2720,
+            "SELECT max(n) AS n FROM (SELECT sum(length(json_array(concat(cast(value AS VARCHAR),repeat('x',64))))) OVER () AS n FROM generate_series(1,40))",
+            2791,
         ),
     ];
     for (name, sql, expected) in queries {
