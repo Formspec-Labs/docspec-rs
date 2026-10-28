@@ -6,7 +6,9 @@ pub use crate::model::{
 };
 use crate::model::{Id, ObjectRef, OperationId, VersionRef};
 mod portable;
-pub(crate) use portable::{portable_batch, portable_data_type, portable_schema};
+pub(crate) use portable::{
+    coalesce_portable_stream, portable_data_type, portable_schema, portable_stream,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

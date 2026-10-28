@@ -129,8 +129,9 @@ pub(super) async fn retain(
     budget: &Budget,
     name: &str,
     schema: SchemaRef,
-    mut stream: SendableRecordBatchStream,
+    stream: SendableRecordBatchStream,
 ) -> Result<StepStorage> {
+    let mut stream = crate::export::portable_stream(stream, schema.clone(), budget);
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
     let mut batches = Vec::new();
@@ -140,7 +141,6 @@ pub(super) async fn retain(
     let mut writer_memory = None;
     let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
     while let Some(batch) = stream.try_next().await? {
-        let batch = crate::export::portable_batch(batch, schema.clone(), budget)?;
         rows += batch.num_rows();
         let size = batch.get_array_memory_size();
         if size > budget.limits.max_batch_bytes {
