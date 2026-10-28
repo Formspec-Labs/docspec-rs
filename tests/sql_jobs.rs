@@ -771,7 +771,7 @@ async fn json_view_schemas_admit_native_descriptor_capacity_and_keep_values() {
                     .downcast_ref::<BinaryViewArray>()
                     .unwrap()
                     .value(0),
-                text.as_bytes()
+                vec![0xcc; 1 << 19].as_slice()
             );
         }
     }

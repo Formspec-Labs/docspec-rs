@@ -26,6 +26,9 @@ use std::{
     sync::Arc,
 };
 
+// Keep reader buffers and gzip history admitted until the reader closes.
+const READER_BYTES: usize = 256 << 10;
+
 /// One source file and its stable, non-secret evidence key.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +63,9 @@ fn field_allowance(field: &Field) -> Option<usize> {
         | DataType::LargeListView(child)
         | DataType::Map(child, _) => field_allowance(child)?,
         DataType::FixedSizeBinary(width) => usize::try_from(*width).ok()?,
+        // Native REE decoding holds a flat value array while take() builds its
+        // run-compressed values, so both shapes can be live simultaneously.
+        DataType::RunEndEncoded(_, values) => field_allowance(values)?.checked_mul(2)?,
         _ => 0,
     };
     children.checked_add(128)
@@ -79,6 +85,7 @@ fn item_allowance(field: &Field) -> Option<usize> {
             .iter()
             .try_fold(0, |n, f| Some(n.max(item_allowance(f)?))),
         DataType::FixedSizeList(child, _) => item_allowance(child),
+        DataType::RunEndEncoded(_, values) => item_allowance(values)?.checked_mul(2),
         _ => Some(0),
     }
 }
@@ -93,6 +100,7 @@ struct DecodeAllocation {
     units: usize,
     quoted: bool,
     escaped: bool,
+    view_schema: bool,
 }
 impl DecodeAllocation {
     fn grow(&mut self, input: &[u8], fixed: usize, item: usize) -> Result<usize> {
@@ -119,8 +127,12 @@ impl DecodeAllocation {
         // covers geometrically grown 8-byte tape/offset/stack entries, decoder
         // position vectors and validation fallback nodes. Twice each variable
         // element's fixed shape covers sparse typed arrays and their workspace.
+        // Arrow58's view JSON builders incorrectly interpret string byte
+        // capacity as a count of sixteen-byte view descriptors. Account for
+        // that maintained decoder behavior when any descendant is a byte view.
+        let factor = if self.view_schema { 24 } else { 8 };
         self.bytes
-            .checked_mul(8)
+            .checked_mul(factor)
             .and_then(|bytes| {
                 item.checked_mul(2)
                     .and_then(|item| item.checked_add(128))
@@ -172,6 +184,10 @@ pub(super) fn provider(
         .iter()
         .try_fold(0usize, |n, f| Some(n.max(item_allowance(f)?)))
         .ok_or_else(allocation_overflow)?;
+    let view_schema = input
+        .flattened_fields()
+        .iter()
+        .any(|field| matches!(field.data_type(), DataType::Utf8View | DataType::BinaryView));
     // One sequential group per compute slot bounds open files and queued batches.
     let mut groups = vec![Vec::new(); limits.compute_threads];
     for (i, file) in files.into_iter().enumerate() {
@@ -191,6 +207,7 @@ pub(super) fn provider(
                 batch_rows: limits.batch_rows.min(64),
                 fixed_per_row,
                 item_per_value,
+                view_schema,
                 max_batch_bytes: limits.max_batch_bytes,
             }) as Arc<dyn PartitionStream>
         })
@@ -207,6 +224,7 @@ struct JsonPartition {
     batch_rows: usize,
     fixed_per_row: usize,
     item_per_value: usize,
+    view_schema: bool,
     max_batch_bytes: usize,
 }
 impl PartitionStream for JsonPartition {
@@ -220,6 +238,7 @@ impl PartitionStream for JsonPartition {
         let batch_rows = self.batch_rows;
         let fixed_per_row = self.fixed_per_row;
         let item_per_value = self.item_per_value;
+        let view_schema = self.view_schema;
         let max_batch_bytes = self.max_batch_bytes;
         let files = stream::iter(self.files.clone())
             .map(move |file| {
@@ -233,6 +252,7 @@ impl PartitionStream for JsonPartition {
                     batch_rows,
                     fixed_per_row,
                     item_per_value,
+                    view_schema,
                     max_batch_bytes,
                     reservation: MemoryConsumer::new("JSON-lines decoder")
                         .register(context.memory_pool()),
@@ -260,6 +280,7 @@ struct Reader {
     batch_rows: usize,
     fixed_per_row: usize,
     item_per_value: usize,
+    view_schema: bool,
     max_batch_bytes: usize,
     reservation: MemoryReservation,
 }
@@ -274,7 +295,7 @@ impl Reader {
             .and_then(|n| n.checked_mul(self.batch_rows))
             // Cover the8KiB BufReader and the locked miniz inflater's32KiB
             // history, Huffman tables and stream state before opening gzip.
-            .and_then(|n| n.checked_add(256 << 10))
+            .and_then(|n| n.checked_add(READER_BYTES))
             .ok_or_else(|| self.error(self.line + 1, "schema and evidence allowance overflow"))?;
         self.reservation.try_resize(fixed)?;
         if self.reader.is_none() {
@@ -297,7 +318,10 @@ impl Reader {
         }
         let first = self.line + 1;
         let mut raw = Vec::new();
-        let mut allocation = DecodeAllocation::default();
+        let mut allocation = DecodeAllocation {
+            view_schema: self.view_schema,
+            ..DecodeAllocation::default()
+        };
         let mut offsets = vec![0usize];
         while offsets.len() <= self.batch_rows && raw.len() < (8 << 20) {
             let start = raw.len();
@@ -344,6 +368,7 @@ impl Reader {
             offsets.push(raw.len());
         }
         if offsets.len() == 1 {
+            self.reader = None;
             self.reservation.free();
             return Ok(None);
         }
@@ -390,7 +415,10 @@ impl Reader {
         // next one. Release completed decoder/raw workspace now, rather than
         // retaining the preflight upper bound between reader polls.
         drop(raw);
-        let bytes = result.get_array_memory_size();
+        let bytes = result
+            .get_array_memory_size()
+            .checked_add(READER_BYTES)
+            .ok_or_else(allocation_overflow)?;
         if bytes > self.reservation.size() {
             return Err(DataFusionError::Internal(
                 "JSON decoded output exceeded its preflight bound".into(),
@@ -490,6 +518,7 @@ mod reader_lifetime_tests {
             batch_rows: 64,
             fixed_per_row: 160,
             item_per_value: 0,
+            view_schema: false,
             max_batch_bytes: 1 << 20,
             reservation: MemoryConsumer::new("JSON-lines lifetime fixture").register(pool),
         };
