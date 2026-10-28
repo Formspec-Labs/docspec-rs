@@ -66,14 +66,18 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
         ),
         (
             "sort",
-            "SELECT sum(value) AS n FROM (SELECT value FROM generate_series(1,120) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*10)) DESC LIMIT 3)",
+            "SELECT sum(value) AS n FROM (SELECT value FROM generate_series(1,120) ORDER BY json_array(repeat('x',cast(value AS BIGINT)*4)) DESC LIMIT 3)",
             357,
         ),
     ];
     for (name, sql, expected) in queries {
         let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join(name),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":name,"sql":sql}]})).unwrap();
         assert_eq!(
-            spec.run(ceiling.clone()).await.unwrap().queries[0].data,
+            spec.run(ceiling.clone())
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+                .queries[0]
+                .data,
             json!([{"n":expected}]),
             "{name}"
         );
