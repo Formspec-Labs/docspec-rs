@@ -633,19 +633,41 @@ async fn native_selector_reads_exact_c7_snapshot_without_catalog_lookup() {
     source["table_operations"] = json!([source["table_operations"][2].clone()]);
     source["table_operations"][0]["identity_sql"] =
         json!("SELECT 'later-3' AS identity FROM pending LIMIT 1");
-    serde_json::from_value::<JobSpec>(source)
+    let advanced = serde_json::from_value::<JobSpec>(source)
         .unwrap()
         .run(limits())
         .await
         .unwrap();
+    let advanced = serde_json::to_value(advanced).unwrap();
     let result = serde_json::from_value::<JobSpec>(read)
         .unwrap()
         .run(limits())
         .await
         .unwrap();
+    let result = serde_json::to_value(result).unwrap();
+    assert_eq!(result["queries"][0]["data"], json!([{"id":2}]));
+    // The later catalog head has two snapshots and files. These facts belong
+    // to the original immutable input, not a fresh head or another scan.
     assert_eq!(
-        serde_json::to_value(result).unwrap()["queries"][0]["data"],
-        json!([{"id":2}])
+        result["native_inputs"],
+        json!([{"name":"selected","data_file_count":1,"snapshot_count":1,"manifest_count":null,"planning_seconds":null}])
+    );
+    let current = selected_job(
+        root.path(),
+        selected_input(&advanced["table_operations"][0]),
+    );
+    let current = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(current)
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(current["queries"][0]["data"], json!([{"id":2},{"id":3}]));
+    assert_eq!(
+        current["native_inputs"],
+        json!([{"name":"selected","data_file_count":2,"snapshot_count":2,"manifest_count":null,"planning_seconds":null}])
     );
 }
 #[tokio::test]
@@ -667,9 +689,64 @@ async fn native_selector_null_snapshot_is_exactly_empty() {
         .run(limits())
         .await
         .unwrap();
+    let result = serde_json::to_value(result).unwrap();
+    assert_eq!(result["queries"][0]["data"], json!([]));
     assert_eq!(
-        serde_json::to_value(result).unwrap()["queries"][0]["data"],
-        json!([])
+        result["native_inputs"],
+        json!([{"name":"selected","data_file_count":0,"snapshot_count":0,"manifest_count":null,"planning_seconds":null}])
+    );
+}
+
+#[tokio::test]
+async fn native_input_observations_need_no_payload_or_optional_counter() {
+    let root = tempfile::tempdir().unwrap();
+    let created = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(spec(root.path()))
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let head = &created["table_operations"][2];
+    let local = |value: &str| {
+        url::Url::parse(value)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from(value))
+    };
+    // Keep the bytes, but make the referenced payload unavailable. Only the
+    // selected parsed metadata may supply these observations.
+    std::fs::rename(
+        local(head["files"][0]["path"].as_str().unwrap()),
+        root.path().join("unavailable.parquet"),
+    )
+    .unwrap();
+    let mut metadata: Value = serde_json::from_slice(
+        &std::fs::read(local(head["metadata_location"].as_str().unwrap())).unwrap(),
+    )
+    .unwrap();
+    let snapshots = metadata["snapshots"].as_array_mut().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    snapshots[0]["summary"]
+        .as_object_mut()
+        .unwrap()
+        .remove("total-data-files");
+    let external = root.path().join("without-optional-summary.metadata.json");
+    std::fs::write(&external, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    let mut known = selected_input(head);
+    known["name"] = json!("known");
+    let mut unknown = known.clone();
+    unknown["name"] = json!("unknown");
+    unknown["metadata_location"] = json!(external);
+    let job:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("observe"),"inputs":[known,unknown],"steps":[],"outputs":[],"queries":[]})).unwrap();
+    let result = serde_json::to_value(job.run(limits()).await.unwrap()).unwrap();
+    assert_eq!(
+        result["native_inputs"],
+        json!([
+            {"name":"known","data_file_count":1,"snapshot_count":1,"manifest_count":null,"planning_seconds":null},
+            {"name":"unknown","data_file_count":null,"snapshot_count":1,"manifest_count":null,"planning_seconds":null}
+        ])
     );
 }
 #[tokio::test]
