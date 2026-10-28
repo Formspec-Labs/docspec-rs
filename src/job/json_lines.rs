@@ -449,3 +449,69 @@ mod allocation_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod reader_lifetime_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn gzip_reader_keeps_workspace_admitted_between_yields_and_closes_at_eof() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("one.gz");
+        let mut writer = flate2::write::GzEncoder::new(
+            File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        writer.write_all(b"{\"id\":1}\n").unwrap();
+        writer.finish().unwrap();
+        let limits = crate::budget::Limits {
+            memory_bytes: 64 << 20,
+            ..crate::budget::Limits::default()
+        };
+        let budget = crate::budget::Budget::new(limits.clone()).unwrap();
+        let input = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let files = vec![JsonLinesFile {
+            key: "one".into(),
+            path,
+        }];
+        let schema = provider(files.clone(), input.clone(), &limits)
+            .unwrap()
+            .schema();
+        let pool = &budget.runtime_env().memory_pool;
+        let before = pool.reserved();
+        let make = || Reader {
+            file: files[0].clone(),
+            input: input.clone(),
+            schema: schema.clone(),
+            reader: None,
+            line: 0,
+            max_line: 1 << 20,
+            batch_rows: 64,
+            fixed_per_row: 160,
+            item_per_value: 0,
+            max_batch_bytes: 1 << 20,
+            reservation: MemoryConsumer::new("JSON-lines lifetime fixture").register(pool),
+        };
+        let mut reader = make();
+        let batch = reader.next().unwrap().unwrap();
+        assert!(reader.reader.is_some());
+        assert!(
+            reader.reservation.size() >= batch.get_array_memory_size() + (40 << 10),
+            "gzip history and buffered reader must retain separate admission"
+        );
+        drop(batch);
+        assert!(reader.next().unwrap().is_none());
+        assert!(
+            reader.reader.is_none(),
+            "close gzip buffers before releasing EOF admission"
+        );
+        assert_eq!(pool.reserved(), before);
+        drop(reader);
+        let mut reader = make();
+        drop(reader.next().unwrap().unwrap());
+        assert!(pool.reserved() > before);
+        drop(reader);
+        assert_eq!(pool.reserved(), before);
+    }
+}
