@@ -9,7 +9,12 @@ use futures::TryStreamExt;
 use iceberg::io::{FileIO, FileIOBuilder};
 use iceberg_storage_opendal::OpenDalStorageFactory;
 use object_store::{ClientOptions, ObjectStore, RetryConfig, aws::AmazonS3Builder};
-use opendal::{Operator, layers::TimeoutLayer, services::S3};
+use opendal::{
+    Operator,
+    layers::{HttpClientLayer, TimeoutLayer},
+    raw::{HttpBody, HttpClient, HttpFetch},
+    services::S3,
+};
 use std::{collections::HashMap, fmt, fs::File, io::Read, path::PathBuf, sync::Arc};
 
 const CHUNK: usize = 8 << 20;
@@ -22,6 +27,29 @@ const MAX_UPLOAD_BYTES: u64 = CHUNK as u64 * 10_000;
 // Admission covers source/buffered/in-flight chunks and bounded part metadata.
 // This is a conservative payload allowance, not a measured whole-process RSS cap.
 const UPLOAD_ADMISSION: usize = 4 * CHUNK + (4 << 20);
+
+struct ConditionalPutClient(HttpClient);
+impl HttpFetch for ConditionalPutClient {
+    async fn fetch(
+        &self,
+        request: axum::http::Request<opendal::Buffer>,
+    ) -> opendal::Result<axum::http::Response<HttpBody>> {
+        let conditional_put = request.method() == axum::http::Method::PUT
+            && request
+                .headers()
+                .contains_key(axum::http::header::IF_NONE_MATCH);
+        let response = self.0.fetch(request).await?;
+        // OpenDAL 0.57 maps both 304 and 412 to the same permanent error.
+        // A 304 PUT response cannot prove that our create precondition failed.
+        if conditional_put && response.status() == axum::http::StatusCode::NOT_MODIFIED {
+            return Err(opendal::Error::new(
+                opendal::ErrorKind::Unexpected,
+                "unexpected HTTP304 on conditional PUT",
+            ));
+        }
+        Ok(response)
+    }
+}
 
 /// Conditional writer and independent reader for one owned S3 prefix.
 #[derive(Clone)]
@@ -384,7 +412,10 @@ impl RemoteObjects {
                 ))
         };
         let operator = finish(make_builder()?)?;
-        let single_put = finish(make_builder()?.checksum_algorithm("md5"))?;
+        let single_put =
+            finish(make_builder()?.checksum_algorithm("md5"))?.layer(HttpClientLayer::new(
+                HttpClient::with(ConditionalPutClient(HttpClient::default())),
+            ));
         let file_io = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
             customized_credential_load: None,
         }))
