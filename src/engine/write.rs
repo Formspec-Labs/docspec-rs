@@ -733,7 +733,9 @@ impl Engine {
                 .then(execute)
                 .try_flatten()
                 .boxed();
+            let compaction_budget = budget.clone();
             let kept = source.and_then(move |batch| {
+                let budget = compaction_budget.clone();
                 let sender = sender.clone();
                 async move {
                     let bytes = storage::effective_batch_bytes(&batch);
@@ -748,10 +750,10 @@ impl Engine {
                     let (mut keep, mut remove) = split_rows(batch)?;
                     if storage::has_list_of_struct(keep.schema().as_ref()) {
                         if keep.num_rows() != 0 {
-                            keep = storage::compact_batch_slice(&keep, 0, keep.num_rows())?;
+                            keep = storage::compact_batch_slice(&keep, 0, keep.num_rows(), &budget)?;
                         }
                         if remove.num_rows() != 0 {
-                            remove = storage::compact_batch_slice(&remove, 0, remove.num_rows())?;
+                            remove = storage::compact_batch_slice(&remove, 0, remove.num_rows(), &budget)?;
                         }
                     }
                     if remove.num_rows() != 0 {

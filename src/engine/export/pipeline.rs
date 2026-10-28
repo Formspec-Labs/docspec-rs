@@ -553,7 +553,7 @@ impl Engine {
             facet_accumulator.observe(&batch, &parent_batch)?;
 
             for slice in
-                storage::split_oversized_batch(parent_batch, budget.limits.max_batch_bytes)?
+                storage::split_oversized_batch(parent_batch, budget.limits.max_batch_bytes, budget)?
             {
                 let columns = slice
                     .columns()

@@ -22,3 +22,7 @@ Narrow official audit8891171 peaked7105298432B under unchanged14GiB configured m
 **2026-10-28T03:22:03Z**
 
 Final code gate passes with isolated process-memory test registered as explicit target. Current narrow audit remains within14GiB; no further narrow-path accounting defect reproduced. The historical wide job remains explicitly owner-deferred until first E2 release; do not close from the52.8MB narrow regression or partial official audit.
+
+**2026-10-28T12:07:40Z**
+
+Run4 view hardening: measured raw caption width averages463/max593bytes versus670MB sort reservation. Candidate unused StringView backing, not allocation attribution. Contract0702c9c predates behavior; seven alignment tests now PASS including retained admission, null headers, and >2GiB logical sharing. Add native pre-sort reproduction before qualifying operator seam. Existing historical wide-memory done-when remains open.

@@ -315,7 +315,7 @@ impl ExecutionPlan for FittedProjection {
                         if state.offset == input.num_rows() {
                             state.pending = None;
                         }
-                        if batch.get_array_memory_size() < state.limit / 2 {
+                        if crate::storage::referenced_batch_bytes(&batch) < state.limit / 2 {
                             state.target = state.target.saturating_mul(2);
                         }
                         return Ok::<_, DataFusionError>(Some((batch, state)));

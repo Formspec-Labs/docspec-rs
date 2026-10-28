@@ -132,19 +132,20 @@ pub(super) async fn read(
             transport,
             metadata_memory,
             payload_memory,
+            budget.clone(),
         ),
-        move |(mut stream, mut pending, transport, metadata_memory, payload_memory)| async move {
+        move |(mut stream, mut pending, transport, metadata_memory, payload_memory, budget)| async move {
             loop {
                 if let Some(batch) = pending.pop_front() {
                     return Ok(Some((
                         batch,
-                        (stream, pending, transport, metadata_memory, payload_memory),
+                        (stream, pending, transport, metadata_memory, payload_memory, budget),
                     )));
                 }
                 let Some(batch) = stream.try_next().await.map_err(|_| invalid())? else {
                     return Ok(None);
                 };
-                for slice in super::split_oversized_batch(batch, limit).map_err(|_| {
+                for slice in super::split_oversized_batch(batch, limit, &budget).map_err(|_| {
                     Error::refusal("oversized_batch", "export batch exceeds the byte allowance")
                 })? {
                     if super::effective_batch_bytes(&slice) > limit {

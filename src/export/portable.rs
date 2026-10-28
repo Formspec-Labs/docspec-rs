@@ -1,6 +1,9 @@
 //! Normalize Arrow view representations before retaining or encoding batches.
 // Rust guideline compliant 2026-02-21
-use crate::{Error, Result, budget::Budget};
+use crate::{
+    Error, Result,
+    budget::{Budget, clean_null_views, dirty_view_bytes},
+};
 use arrow::{
     array::{
         Array, ArrayRef, BinaryArray, BinaryViewArray, FixedSizeListArray, LargeBinaryArray,
@@ -494,72 +497,6 @@ fn compact(array: &ArrayRef) -> Result<ArrayRef> {
     // an empty array uses Arrow's maintained logical-value copy for every type.
     let empty = arrow::array::new_empty_array(array.data_type());
     Ok(arrow::compute::concat(&[array.as_ref(), empty.as_ref()])?)
-}
-
-fn dirty_view_bytes(array: &dyn Array) -> usize {
-    let dirty = |views: &[u128]| {
-        if views
-            .iter()
-            .enumerate()
-            .any(|(index, view)| array.is_null(index) && *view != 0)
-        {
-            views.len().saturating_mul(16)
-        } else {
-            0
-        }
-    };
-    if let Some(array) = array.as_any().downcast_ref::<StringViewArray>() {
-        return dirty(array.views());
-    }
-    if let Some(array) = array.as_any().downcast_ref::<BinaryViewArray>() {
-        return dirty(array.views());
-    }
-    array
-        .to_data()
-        .child_data()
-        .iter()
-        .fold(0usize, |bytes, child| {
-            bytes.saturating_add(dirty_view_bytes(
-                arrow::array::make_array(child.clone()).as_ref(),
-            ))
-        })
-}
-
-fn clean_null_views(array: ArrayRef) -> Result<ArrayRef> {
-    // Arrow58's view cast reserves using every header, including null rows.
-    // Clear only ignored headers before that maintained cast, without copying
-    // source payloads or making their unknown bytes meaningful.
-    macro_rules! clean {
-        ($kind:ty) => {
-            if let Some(view) = array.as_any().downcast_ref::<$kind>() {
-                let views = view
-                    .views()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| if view.is_null(index) { 0 } else { *value })
-                    .collect::<Vec<_>>();
-                return Ok(Arc::new(<$kind>::try_new(
-                    views.into(),
-                    view.data_buffers().to_vec(),
-                    view.nulls().cloned(),
-                )?));
-            }
-        };
-    }
-    if dirty_view_bytes(array.as_ref()) == 0 {
-        return Ok(array);
-    }
-    clean!(StringViewArray);
-    clean!(BinaryViewArray);
-    let data = array.to_data();
-    let children = data
-        .child_data()
-        .iter()
-        .map(|child| Ok(clean_null_views(arrow::array::make_array(child.clone()))?.to_data()))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(arrow::array::make_array(
-        data.into_builder().child_data(children).build()?,
-    ))
 }
 
 pub(crate) fn portable_batch(
