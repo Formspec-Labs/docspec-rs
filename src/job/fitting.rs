@@ -171,6 +171,7 @@ impl TableProvider for FittedTable {
 struct FittedProjection {
     native: Arc<dyn ExecutionPlan>,
     projector: Projector,
+    properties: Arc<PlanProperties>,
     limit: usize,
     metrics: ExecutionPlanMetricsSet,
 }
@@ -180,11 +181,47 @@ impl FittedProjection {
             .as_any()
             .downcast_ref::<ProjectionExec>()
             .expect("native projection");
+        let mut properties = projection.properties().as_ref().clone();
+        let input_schema = projection.input().schema();
+        let inputs = input_schema.fields().len();
+        let preserves_inputs = projection.expr().len() >= inputs
+            && projection.expr()[..inputs]
+                .iter()
+                .enumerate()
+                .all(|(index, expr)| {
+                    expr.expr
+                        .as_any()
+                        .downcast_ref::<Column>()
+                        .is_some_and(|column| column.index() == index)
+                        && &expr.alias == input_schema.field(index).name()
+                });
+        if preserves_inputs {
+            // Hoisting preserves every input column at its original index.
+            // Record the computed value's equality with its new column, so
+            // dropping a temporary sort key retains the original ordering.
+            for (index, expr) in projection.expr().iter().enumerate().skip(inputs) {
+                let mut immutable = true;
+                expr.expr.apply(|expr| {
+                    if let Some(function) = expr.as_any().downcast_ref::<ScalarFunctionExpr>() {
+                        immutable &= function.fun().signature().volatility
+                            == datafusion::logical_expr::Volatility::Immutable;
+                    }
+                    Ok(TreeNodeRecursion::Continue)
+                })?;
+                if immutable {
+                    properties.eq_properties.add_equal_conditions(
+                        expr.expr.clone(),
+                        Arc::new(Column::new(&expr.alias, index)),
+                    )?;
+                }
+            }
+        }
         Ok(Self {
             projector: projection
                 .projection_expr()
                 .make_projector(&projection.input().schema())?,
             native,
+            properties: Arc::new(properties),
             limit,
             metrics: ExecutionPlanMetricsSet::new(),
         })
@@ -204,7 +241,19 @@ impl ExecutionPlan for FittedProjection {
         self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
-        self.native.properties()
+        &self.properties
+    }
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+        self.native.partition_statistics(partition)
+    }
+    fn benefits_from_input_partitioning(&self) -> Vec<bool> {
+        self.native.benefits_from_input_partitioning()
+    }
+    fn supports_limit_pushdown(&self) -> bool {
+        self.native.supports_limit_pushdown()
+    }
+    fn cardinality_effect(&self) -> datafusion::physical_plan::execution_plan::CardinalityEffect {
+        self.native.cardinality_effect()
     }
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         self.native.children()
@@ -303,6 +352,128 @@ fn fit_projection(native: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPla
     match limit {
         Some(limit) => Ok(Arc::new(FittedProjection::new(native, limit)?)),
         None => Ok(native),
+    }
+}
+
+/// Projection pushdown cannot move an admitted evaluator into a scan that
+/// cannot respond to sizing hints. Keep only those projections as boundaries.
+#[derive(Debug)]
+struct FittingInput {
+    input: Arc<dyn ExecutionPlan>,
+}
+impl DisplayAs for FittingInput {
+    fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FunctionFittingInput")
+    }
+}
+impl ExecutionPlan for FittingInput {
+    fn name(&self) -> &str {
+        "FunctionFittingInput"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        self.input.properties()
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn maintains_input_order(&self) -> Vec<bool> {
+        vec![true]
+    }
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+        self.input.partition_statistics(partition)
+    }
+    fn supports_limit_pushdown(&self) -> bool {
+        true
+    }
+    fn cardinality_effect(&self) -> datafusion::physical_plan::execution_plan::CardinalityEffect {
+        datafusion::physical_plan::execution_plan::CardinalityEffect::Equal
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(Arc::new(Self {
+            input: children[0].clone(),
+        }))
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        self.input.execute(partition, context)
+    }
+    fn try_swapping_with_projection(
+        &self,
+        projection: &ProjectionExec,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
+        for expr in projection.expr() {
+            if bounded(&expr.expr)?.is_some() {
+                return Ok(None);
+            }
+        }
+        // Preserve native pruning/computation that needs no fitting. Only own
+        // admitted functions remain above this identity boundary.
+        let projected = ProjectionExec::try_new(projection.expr().to_vec(), self.input.clone())?;
+        Ok(Some(Arc::new(Self {
+            input: Arc::new(projected),
+        })))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct FitProjections;
+impl PhysicalOptimizerRule for FitProjections {
+    fn name(&self) -> &str {
+        "retain_function_output_admission"
+    }
+    fn schema_check(&self) -> bool {
+        true
+    }
+    fn optimize(
+        &self,
+        plan: Arc<dyn ExecutionPlan>,
+        _config: &ConfigOptions,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(plan
+            .transform_up(|plan| {
+                // The native pass first extracts single-side join expressions,
+                // then pushes projections into scans in that same invocation.
+                if let Some(join) = plan.as_any().downcast_ref::<NestedLoopJoinExec>()
+                    && let Some(filter) = join.filter()
+                    && bounded(filter.expression())?.is_some()
+                {
+                    let mut changed = false;
+                    let children = plan
+                        .children()
+                        .into_iter()
+                        .map(|child| {
+                            if child.as_any().is::<FittingInput>() {
+                                child.clone()
+                            } else {
+                                changed = true;
+                                Arc::new(FittingInput {
+                                    input: child.clone(),
+                                }) as Arc<dyn ExecutionPlan>
+                            }
+                        })
+                        .collect();
+                    if changed {
+                        return Ok(Transformed::yes(plan.with_new_children(children)?));
+                    }
+                }
+                if plan.as_any().is::<ProjectionExec>() {
+                    let fitted = fit_projection(plan.clone())?;
+                    if !Arc::ptr_eq(&fitted, &plan) {
+                        return Ok(Transformed::yes(fitted));
+                    }
+                }
+                Ok(Transformed::no(plan))
+            })?
+            .data)
     }
 }
 

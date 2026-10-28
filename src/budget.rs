@@ -124,12 +124,22 @@ impl Budget {
         // passes native_statistics_preserve_filtered_offset_counts unguarded.
         let mut rules: Vec<
             Arc<dyn datafusion::physical_optimizer::PhysicalOptimizerRule + Send + Sync>,
-        > = PhysicalOptimizer::new()
+        > = Vec::new();
+        for rule in PhysicalOptimizer::new()
             .rules
             .into_iter()
             .filter(|rule| rule.name() != "aggregate_statistics")
-            .collect();
-        rules.push(Arc::new(crate::job::fitting::FitFunctions));
+        {
+            // Keep admitted evaluation outside scan projection pushdown, after
+            // native join/sort planning. Logical reader-column pruning remains.
+            if rule.name() == "ProjectionPushdown" {
+                rules.push(Arc::new(crate::job::fitting::FitProjections));
+            }
+            if rule.name() == "SanityCheckPlan" {
+                rules.push(Arc::new(crate::job::fitting::FitFunctions));
+            }
+            rules.push(rule);
+        }
         let config = SessionConfig::new()
             .with_batch_size(self.limits.batch_rows)
             .with_target_partitions(self.limits.compute_threads)
