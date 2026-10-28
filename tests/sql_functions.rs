@@ -492,6 +492,21 @@ async fn json_many_dynamic_paths_fit_and_refuse_invalid_definitions() {
 }
 
 #[tokio::test]
+async fn json_many_dynamic_definitions_keep_null_and_single_row_refusals() {
+    let root=tempfile::tempdir().unwrap();
+    let job=docspec::job::Job::new(Limits {max_batch_bytes:1024,max_metadata_bytes:16<<10,..limits()},root.path().join("scratch")).unwrap();
+    let error=job.sql("SELECT json_get_many('{}',CASE WHEN value=1 THEN '[]' ELSE cast(NULL AS VARCHAR) END) FROM generate_series(1,2)").await.unwrap().collect().await.unwrap_err();
+    assert!(error.to_string().contains("JSON paths"),"{error}");
+    for sql in [
+        r#"SELECT json_get_many(concat('{"a":"',repeat('x',2000),'","id":',cast(value AS VARCHAR),'}'),CASE WHEN value=1 THEN '[["a"]]' ELSE '[]' END) FROM generate_series(1,1)"#,
+        r#"SELECT json_get_many('{}',concat('[["',repeat('x',1024),cast(value AS VARCHAR),'"]]')) FROM generate_series(1,2)"#,
+    ] {
+        let error=job.sql(sql).await.unwrap().collect().await.unwrap_err();
+        assert!(matches!(error.find_root(),datafusion::error::DataFusionError::ResourcesExhausted(_)),"{error}");
+    }
+}
+
+#[tokio::test]
 async fn json_many_matches_independent_raw_getters_and_preserves_positions() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("rows.jsonl");
