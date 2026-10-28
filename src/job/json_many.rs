@@ -642,6 +642,29 @@ fn project(
 mod tests {
     use super::*;
     #[test]
+    fn dynamic_path_compilation_fits_around_preceding_output_admission() {
+        use arrow::array::StringArray;
+        let budget=Budget::new(crate::budget::Limits {
+            memory_bytes:64<<10,max_batch_bytes:4<<10,max_metadata_bytes:32<<10,
+            ..crate::budget::Limits::default()
+        }).unwrap();
+        let raw=format!(r#"{{"a":"{}"}}"#,"x".repeat(2048));
+        let long_path=format!(r#"[["{}"]]"#,"z".repeat(80));
+        let input=Arc::new(StringArray::from(vec![Some(raw.as_str()),None]));
+        let definitions=Arc::new(StringArray::from(vec![r#"[["a"]]"#,long_path.as_str()]));
+        let error=project(&ColumnarValue::Array(input.clone()),Definition::Rows(&ColumnarValue::Array(definitions.clone())),&budget).unwrap_err();
+        assert!(error.to_string().contains("fit 1 preceding rows"),"{error}");
+        for row in 0..2 {
+            let output=project(&ColumnarValue::Array(input.slice(row,1)),Definition::Rows(&ColumnarValue::Array(definitions.slice(row,1))),&budget).unwrap();
+            let ColumnarValue::Array(array)=output else {panic!("array expected")};
+            let array=array.as_any().downcast_ref::<arrow::array::ListArray>().unwrap();
+            let values=array.values().as_any().downcast_ref::<StringArray>().unwrap();
+            assert_eq!(values.len(),1);
+            if row==0 {assert_eq!(values.value(0),format!("\"{}\"","x".repeat(2048)));}
+            else {assert!(values.is_null(0));}
+        }
+    }
+    #[test]
     fn projected_children_keep_output_admission_after_parent_drop() {
         let budget = Budget::new(crate::budget::Limits {
             memory_bytes: 128 << 10,
