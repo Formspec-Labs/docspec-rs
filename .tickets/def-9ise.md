@@ -21,3 +21,9 @@ Reuse the native Parquet reader and maintained schema reconciliation. Current sr
 
 Fixture-first native regression reads real Parquet field metadata through a handoff and retains valid nested/scalar field IDs, exact rows/types/nullability, including conflicting-ID and missing-ID cases under existing reconciliation. The retained CT 50-body fixture must keep its original release ID and all nine public plus sixteen private byte-hash assertions across the phased boundary. Qualify the same immutable inputs/SQL/writer settings with memory-resident and spilled materializations; determine and document whether limits alone may change public file hashes/release identity, and enforce the chosen boundary before publication. Run focused native/project gates and one independent code review before merging; no network writes, credentials or real-data mutation.
 
+
+## Notes
+
+**2026-10-29T12:18:01Z**
+
+The isolated CT prototype is now GREEN and independently APPROVED at product8e0a64eb, using the original native reading fields instead of injecting metadata into flat handoffs. The retained50-body release ID and all9 public/16 private file hashes match;71 focused/default cases pass. It pays for two additional immutable lake-fact scans, and leaves the actual native Parquet metadata-loss capability unresolved. It is unmerged and lacks phase-mode controller/E4/full native-table qualification, so no corpus-fit or release-path promise follows. Preserve the original RED receipts. The native capability and cross-budget identity question remain open as a separate lower-priority follow-up.
