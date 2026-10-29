@@ -27,3 +27,15 @@ Fixture-first native regression reads real Parquet field metadata through a hand
 **2026-10-29T12:18:01Z**
 
 The isolated CT prototype is now GREEN and independently APPROVED at product8e0a64eb, using the original native reading fields instead of injecting metadata into flat handoffs. The retained50-body release ID and all9 public/16 private file hashes match;71 focused/default cases pass. It pays for two additional immutable lake-fact scans, and leaves the actual native Parquet metadata-loss capability unresolved. It is unmerged and lacks phase-mode controller/E4/full native-table qualification, so no corpus-fit or release-path promise follows. Preserve the original RED receipts. The native capability and cross-budget identity question remain open as a separate lower-priority follow-up.
+
+**2026-10-29T17:42:02Z**
+
+October 29 reconciliation — 30: Rust retained-memory and last-reader lifetime.
+
+Keep open; field metadata and cross-budget identity remain separately unresolved.
+
+The preserved sibling remains the owner of native Parquet field metadata and the cross-budget byte-identity question. The October 29 CT prototype success in the preceding note does not close this native capability. Keep the original RED evidence, required field-ID/conflict cases and unchanged release/hash assertions. The retained-memory candidate in dec-eog7 addresses a separate boundary.
+
+Evidence: [rust/manifest.json](/Users/mikewolfd/Work/spicy-stack-review-work/reconciliation-20261029/rust/manifest.json).
+
+Full item-to-owner mapping and preserved pre-update records: [ticket update report](/Users/mikewolfd/Work/spicy-stack-review-work/reconciliation-20261029/ticket-updates/REPORT.md).
