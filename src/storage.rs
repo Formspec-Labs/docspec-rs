@@ -62,7 +62,7 @@ use crate::{
     model::{Id, ObjectRef, TablePin},
 };
 use arrow::record_batch::RecordBatch;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use iceberg::writer::{
     base_writer::data_file_writer::DataFileWriterBuilder,
@@ -179,7 +179,16 @@ pub(crate) async fn read_projected_batches(
     budget: &Budget,
     projection: Option<&[usize]>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    read_projected_batches_inner(table, budget, projection, None).await
+    read_projected_batches_inner(table, budget, projection, None, &[]).await
+}
+
+pub(crate) async fn read_projected_batches_with_filters(
+    table: &Table,
+    budget: &Budget,
+    projection: Option<&[usize]>,
+    filters: &[datafusion::logical_expr::Expr],
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    read_projected_batches_inner(table, budget, projection, None, filters).await
 }
 
 /// Reads selected columns while observing attempted native data ranges.
@@ -200,7 +209,7 @@ pub async fn read_batches_observed(
 )> {
     let observation = NativeScanObservation::default();
     let stream =
-        read_projected_batches_inner(table, budget, projection, Some(observation.clone())).await?;
+        read_projected_batches_inner(table, budget, projection, Some(observation.clone()), &[]).await?;
     Ok((stream, observation))
 }
 
@@ -209,6 +218,7 @@ async fn read_projected_batches_inner(
     budget: &Budget,
     projection: Option<&[usize]>,
     observation: Option<scan_metrics::NativeScanObservation>,
+    filters: &[datafusion::logical_expr::Expr],
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
@@ -228,6 +238,37 @@ async fn read_projected_batches_inner(
     let tasks = match &selection {
         Some(selection) => schema::plan_selected_files(table, selection.fields.clone()).await?,
         None => schema::plan_files(table).await?,
+    };
+    let native_schema = table.metadata().current_schema().clone();
+    let partition_spec = table.metadata().default_partition_spec().clone();
+    let tasks = if filters.is_empty() {
+        tasks.boxed()
+    } else if let Ok(inventory) = snapshot_files(table, budget).await {
+        let file_map = std::sync::Arc::new(
+            inventory
+                .data
+                .into_iter()
+                .map(|f| (f.file_path().to_owned(), f))
+                .collect::<std::collections::BTreeMap<String, DataFile>>(),
+        );
+        let filters = filters.to_vec();
+        tasks
+            .try_filter_map(move |task| {
+                let matches = if let Some(file) = file_map.get(&task.data_file_path) {
+                    crate::query::file_matches_inexact_filters_with_partition(
+                        &native_schema,
+                        &partition_spec,
+                        file,
+                        &filters,
+                    )
+                } else {
+                    true
+                };
+                futures::future::ok(if matches { Some(task) } else { None })
+            })
+            .boxed()
+    } else {
+        tasks.boxed()
     };
     let result = table
         .reader_builder()

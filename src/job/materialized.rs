@@ -114,7 +114,7 @@ impl TableProvider for ReservedTable {
     }
 }
 
-pub(super) async fn materialize(job: &super::Job, name: &str, sql: &str) -> Result<StepStorage> {
+pub(super) async fn materialize(job: &super::Job, name: &str, sql: &str) -> Result<(StepStorage, usize, usize)> {
     if job.context.table_exist(name)? {
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
@@ -130,7 +130,8 @@ pub(super) async fn retain(
     name: &str,
     schema: SchemaRef,
     stream: SendableRecordBatchStream,
-) -> Result<StepStorage> {
+) -> Result<(StepStorage, usize, usize)> {
+    let pool_before = budget.runtime_env().memory_pool.reserved();
     let mut stream = crate::export::portable_stream(stream, schema.clone(), budget);
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
@@ -150,7 +151,11 @@ pub(super) async fn retain(
             ));
         }
         bytes += size;
-        if writer.is_none() && reservation.try_grow(size).is_err() {
+        let pool_cap = ((budget.limits.memory_bytes / 2).min(10 * 1024 * 1024 * 1024)) * 25 / 100;
+        let pool_reserved = budget.runtime_env().memory_pool.reserved();
+        let should_spill = pool_reserved.saturating_add(size) > pool_cap
+            || reservation.try_grow(size).is_err();
+        if writer.is_none() && should_spill {
             writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes * 2)?);
             let temporary = budget
                 .runtime_env()
@@ -240,5 +245,18 @@ pub(super) async fn retain(
     });
     let table = StreamingTable::try_new(schema, vec![partition])?;
     context.register_table(name, Arc::new(ReservedTable { table, rows, bytes }))?;
-    Ok(storage)
+    let pool_after = budget.runtime_env().memory_pool.reserved();
+    super::metrics::log_retain(
+        name,
+        match storage {
+            StepStorage::Memory => "memory",
+            StepStorage::Scratch => "scratch",
+            StepStorage::View => "view",
+        },
+        rows,
+        bytes,
+        pool_before,
+        pool_after,
+    );
+    Ok((storage, rows, bytes))
 }

@@ -245,7 +245,7 @@ pub(super) async fn compute(
     job: &Job,
     name: &str,
     settings: &ComponentsSettings,
-) -> Result<StepStorage> {
+) -> Result<(StepStorage, usize, usize)> {
     if settings.node_limit == 0
         || settings.left.is_empty()
         || settings.right.is_empty()

@@ -9,6 +9,7 @@ mod functions;
 mod json_lines;
 mod json_many;
 mod materialized;
+pub(crate) mod metrics;
 mod native;
 mod query_result;
 mod spec;
@@ -68,9 +69,17 @@ impl Job {
     /// # Errors
     /// Refuses unknown names or native catalog failures.
     pub fn release(&self, name: &str) -> Result<()> {
+        self.release_for_step(0, "", name)
+    }
+
+    /// Removes a finished name for a specific step while logging metrics.
+    pub fn release_for_step(&self, step_index: usize, step_name: &str, name: &str) -> Result<()> {
+        let pool_before = self.budget.runtime_env().memory_pool.reserved();
         self.context
             .deregister_table(name)?
             .ok_or_else(|| crate::Error::refusal("invalid_spec", "released step does not exist"))?;
+        let pool_after = self.budget.runtime_env().memory_pool.reserved();
+        metrics::log_release(step_index, step_name, name, pool_before, pool_after);
         Ok(())
     }
 
@@ -163,6 +172,12 @@ impl Job {
     /// # Errors
     /// Refuses an existing name, exhausted capacity, failed input or invalid SQL.
     pub async fn materialize(&self, name: &str, sql: &str) -> Result<StepStorage> {
+        let (storage, _, _) = materialized::materialize(self, name, sql).await?;
+        Ok(storage)
+    }
+
+    /// Computes a named step with detailed metrics (storage, rows, charged bytes).
+    pub async fn materialize_detailed(&self, name: &str, sql: &str) -> Result<(StepStorage, usize, usize)> {
         materialized::materialize(self, name, sql).await
     }
 
@@ -175,6 +190,16 @@ impl Job {
         name: &str,
         settings: &ComponentsSettings,
     ) -> Result<StepStorage> {
+        let (storage, _, _) = components::compute(self, name, settings).await?;
+        Ok(storage)
+    }
+
+    /// Groups an undirected string edge relation into deterministic components with metrics.
+    pub async fn connected_components_detailed(
+        &self,
+        name: &str,
+        settings: &ComponentsSettings,
+    ) -> Result<(StepStorage, usize, usize)> {
         components::compute(self, name, settings).await
     }
 

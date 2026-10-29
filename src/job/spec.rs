@@ -367,22 +367,44 @@ impl JobSpec {
                     .push(job.native_input_observation(input.name()).await?);
             }
         }
-        for step in &self.steps {
-            let storage = match step {
+        for (step_index, step) in self.steps.iter().enumerate() {
+            let start_epoch = super::metrics::now_epoch_secs();
+            let start_instant = std::time::Instant::now();
+            let pool_before = job.budget.runtime_env().memory_pool.reserved();
+            let (storage, rows, charged_bytes) = match step {
                 JobStep::Sql(step) if step.materialize => {
-                    job.materialize(&step.name, &step.sql).await?
+                    job.materialize_detailed(&step.name, &step.sql).await?
                 }
                 JobStep::Sql(step) => {
                     job.register_view(&step.name, &step.sql).await?;
-                    StepStorage::View
+                    (StepStorage::View, 0, 0)
                 }
                 JobStep::Components(step) => {
-                    job.connected_components(&step.name, &step.components)
+                    job.connected_components_detailed(&step.name, &step.components)
                         .await?
                 }
             };
+            let pool_after = job.budget.runtime_env().memory_pool.reserved();
+            let end_epoch = super::metrics::now_epoch_secs();
+            let duration_seconds = start_instant.elapsed().as_secs_f64();
+            super::metrics::log_step(
+                step_index,
+                step.name(),
+                match storage {
+                    StepStorage::Memory => "memory",
+                    StepStorage::Scratch => "scratch",
+                    StepStorage::View => "view",
+                },
+                rows,
+                charged_bytes,
+                start_epoch,
+                end_epoch,
+                duration_seconds,
+                pool_before,
+                pool_after,
+            );
             for name in step.release_after() {
-                job.release(name)?;
+                job.release_for_step(step_index, step.name(), name)?;
             }
             result.steps.push(StepResult {
                 name: step.name().to_owned(),
@@ -420,20 +442,120 @@ impl JobSpec {
                     .await?,
             );
         }
-        for output in &self.outputs {
+        let mut active_steps: std::collections::BTreeSet<String> = self
+            .steps
+            .iter()
+            .map(|s| s.name().to_owned())
+            .collect();
+
+        for (output_index, output) in self.outputs.iter().enumerate() {
+            let start_epoch = super::metrics::now_epoch_secs();
+            let start_instant = std::time::Instant::now();
+            let pool_before = job.budget.runtime_env().memory_pool.reserved();
             let file = job
                 .export(&output.sql, &output.path, &output.settings)
                 .await?;
+            let pool_after = job.budget.runtime_env().memory_pool.reserved();
+            let end_epoch = super::metrics::now_epoch_secs();
+            let duration_seconds = start_instant.elapsed().as_secs_f64();
+            super::metrics::log_output(
+                output_index,
+                &output.name,
+                file.rows,
+                file.size,
+                start_epoch,
+                end_epoch,
+                duration_seconds,
+                pool_before,
+                pool_after,
+            );
             result.outputs.push(OutputResult {
                 name: output.name.clone(),
                 file,
             });
+
+            let remaining_outputs_sql = self.outputs[output_index + 1..]
+                .iter()
+                .map(|o| o.sql.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let all_queries_sql = self.queries
+                .iter()
+                .map(|q| q.sql.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let to_release: Vec<String> = active_steps
+                .iter()
+                .filter(|name| {
+                    !sql_references_table(&remaining_outputs_sql, name)
+                        && !sql_references_table(&all_queries_sql, name)
+                })
+                .cloned()
+                .collect();
+            for name in to_release {
+                active_steps.remove(&name);
+                let _ = job.release(&name);
+            }
         }
-        for query in &self.queries {
-            result
-                .queries
-                .push(super::query_result::query(&job, &query.name, &query.sql).await?);
+
+        for (query_index, query) in self.queries.iter().enumerate() {
+            let start_epoch = super::metrics::now_epoch_secs();
+            let start_instant = std::time::Instant::now();
+            let pool_before = job.budget.runtime_env().memory_pool.reserved();
+            let q_res = super::query_result::query(&job, &query.name, &query.sql).await?;
+            let pool_after = job.budget.runtime_env().memory_pool.reserved();
+            let end_epoch = super::metrics::now_epoch_secs();
+            let duration_seconds = start_instant.elapsed().as_secs_f64();
+            super::metrics::log_step(
+                1000 + query_index,
+                &format!("query:{}", query.name),
+                "query",
+                q_res.data.as_array().map_or(0, |a| a.len()),
+                0,
+                start_epoch,
+                end_epoch,
+                duration_seconds,
+                pool_before,
+                pool_after,
+            );
+            result.queries.push(q_res);
+
+            let remaining_queries_sql = self.queries[query_index + 1..]
+                .iter()
+                .map(|q| q.sql.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let to_release: Vec<String> = active_steps
+                .iter()
+                .filter(|name| !sql_references_table(&remaining_queries_sql, name))
+                .cloned()
+                .collect();
+            for name in to_release {
+                active_steps.remove(&name);
+                let _ = job.release(&name);
+            }
         }
         Ok(())
     }
+}
+
+fn sql_references_table(sql: &str, table: &str) -> bool {
+    let mut start = 0;
+    while let Some(pos) = sql[start..].find(table) {
+        let abs_pos = start + pos;
+        let end_pos = abs_pos + table.len();
+        let prefix_ok = abs_pos == 0 || {
+            let prev = sql[..abs_pos].chars().last().unwrap();
+            !prev.is_alphanumeric() && prev != '_'
+        };
+        let suffix_ok = end_pos == sql.len() || {
+            let next = sql[end_pos..].chars().next().unwrap();
+            !next.is_alphanumeric() && next != '_'
+        };
+        if prefix_ok && suffix_ok {
+            return true;
+        }
+        start = end_pos;
+    }
+    false
 }

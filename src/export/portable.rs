@@ -22,6 +22,7 @@ struct PortableBatches {
     schema: SchemaRef,
     budget: Budget,
     base: usize,
+    batch_bytes: usize,
     oversized: bool,
     next_cost: Option<usize>,
     offset: usize,
@@ -51,7 +52,8 @@ fn batch_bytes_as(batch: &RecordBatch, schema: &Schema) -> Result<usize> {
 impl PortableBatches {
     fn new(batch: RecordBatch, schema: SchemaRef, budget: Budget) -> Result<Self> {
         validate_types(&batch, &schema)?;
-        let oversized = batch_bytes_as(&batch, &schema)? > budget.limits.max_batch_bytes
+        let batch_bytes = batch_bytes_as(&batch, &schema)?;
+        let oversized = batch_bytes > budget.limits.max_batch_bytes
             && batch.num_rows() > 1;
         let base = batch_bytes_as(&RecordBatch::new_empty(batch.schema()), &schema)?;
         Ok(Self {
@@ -59,6 +61,7 @@ impl PortableBatches {
             schema,
             budget,
             base,
+            batch_bytes,
             oversized,
             next_cost: None,
             offset: 0,
@@ -113,6 +116,22 @@ pub(crate) fn coalesce_portable_stream(
                 }
                 let start = pending.offset;
                 let available = rows - state.coalescer.get_buffered_rows();
+                if start == 0
+                    && !pending.oversized
+                    && pending.batch.num_rows() <= available
+                    && state
+                        .bytes
+                        .saturating_add(pending.batch_bytes.saturating_sub(pending.base))
+                        <= state.budget.limits.max_batch_bytes
+                {
+                    state.bytes = state
+                        .bytes
+                        .saturating_add(pending.batch_bytes.saturating_sub(pending.base));
+                    let full_batch = pending.batch.clone();
+                    pending.offset = pending.batch.num_rows();
+                    state.coalescer.push_batch(full_batch)?;
+                    continue;
+                }
                 let mut end = start;
                 while end < pending.batch.num_rows() && end - start < available {
                     let cost = pending.cost(end)?;

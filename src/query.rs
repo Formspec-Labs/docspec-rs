@@ -445,9 +445,14 @@ impl PartitionStream for NativePartition {
                     located: false,
                     projection,
                     ..
-                } => storage::read_projected_batches(table, &budget, projection.as_deref())
-                    .await?
-                    .boxed(),
+                } => storage::read_projected_batches_with_filters(
+                    table,
+                    &budget,
+                    projection.as_deref(),
+                    &filters,
+                )
+                .await?
+                .boxed(),
                 NativeSource::File {
                     scan,
                     path: Some(path),
@@ -646,7 +651,7 @@ fn file_matches_inexact_filters(
     file_matches_inexact_filters_with_partition(native_schema, &unpartitioned, file, filters)
 }
 
-fn file_matches_inexact_filters_with_partition(
+pub(crate) fn file_matches_inexact_filters_with_partition(
     native_schema: &iceberg::spec::Schema,
     partition_spec: &iceberg::spec::PartitionSpec,
     file: &iceberg::spec::DataFile,
