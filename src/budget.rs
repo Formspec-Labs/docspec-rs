@@ -5,7 +5,7 @@ use crate::{Error, Result};
 use datafusion::{
     execution::{
         SessionStateBuilder,
-        memory_pool::FairSpillPool,
+        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
     physical_optimizer::optimizer::PhysicalOptimizer,
@@ -56,13 +56,18 @@ impl Default for Limits {
     }
 }
 
-/// A shared admission pool; native engine limits remain separate from observed RSS.
+/// Shared admission; native limits remain separate from observed process memory.
+///
+/// Retained SQL batches also have a ceiling of one quarter of the native pool.
+/// They remain charged to that pool; this ceiling grants no additional memory.
+/// Excess retained data uses workspace scratch instead of starving execution.
 #[derive(Clone, Debug)]
 pub struct Budget {
     pub limits: Limits,
     bytes: Arc<Semaphore>,
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
+    retention_pool: Arc<dyn MemoryPool>,
     scratch_writes: Arc<std::sync::Mutex<()>>,
 }
 impl Budget {
@@ -106,6 +111,7 @@ impl Budget {
             bytes: Arc::new(Semaphore::new(limits.memory_bytes / 2)),
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
+            retention_pool: Arc::new(GreedyMemoryPool::new(limits.memory_bytes / 2 / 4)),
             scratch_writes: Arc::default(),
             limits,
         })
@@ -113,6 +119,10 @@ impl Budget {
 
     pub(crate) fn runtime_env(&self) -> &RuntimeEnv {
         &self.runtime
+    }
+
+    pub(crate) fn retention_pool(&self) -> &Arc<dyn MemoryPool> {
+        &self.retention_pool
     }
 
     pub(crate) fn scratch_writer(
@@ -156,6 +166,15 @@ impl Budget {
                 "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
                 false,
             );
+        // Bound each partition's merge headroom to 1/16 of its native share,
+        // leaving room for concurrent sorts and retained steps. Preserve the
+        // maintained default ceiling for larger pools and at least one byte.
+        let sort_spill_bytes = config
+            .options()
+            .execution
+            .sort_spill_reservation_bytes
+            .min((self.limits.memory_bytes / 2 / self.limits.compute_threads / 16).max(1));
+        let config = config.with_sort_spill_reservation_bytes(sort_spill_bytes);
         SessionContext::new_with_state(
             SessionStateBuilder::new()
                 .with_config(config)
