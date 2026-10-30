@@ -145,18 +145,18 @@ pub(crate) async fn open_snapshot(
     #[cfg(feature = "remote")] remote: Option<&super::remote::RemoteObjects>,
     budget: &Budget,
 ) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
-    #[cfg(feature = "remote")]
-    if let Some(objects) = remote {
-        objects.validate_path(&selection.metadata_location)?;
-        return open_snapshot_reader(
-            selection,
-            objects.file_io(),
-            MetadataReader::Remote(objects.clone(), selection.metadata_location.clone()),
-            budget,
-        )
-        .await;
-    }
     if super::object_io::is_remote_uri(&selection.metadata_location) {
+        #[cfg(feature = "remote")]
+        if let Some(objects) = remote {
+            objects.validate_path(&selection.metadata_location)?;
+            return open_snapshot_reader(
+                selection,
+                objects.file_io(),
+                MetadataReader::Remote(objects.clone(), selection.metadata_location.clone()),
+                budget,
+            )
+            .await;
+        }
         return Err(super::object_io::unregistered_remote_uri());
     }
     let io = FileIO::new_with_fs();
