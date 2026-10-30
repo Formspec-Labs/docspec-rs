@@ -151,7 +151,7 @@ pub(super) async fn retain(
         }
         bytes += size;
         if writer.is_none() && reservation.try_grow(size).is_err() {
-            writer_memory = Some(budget.reserve(budget.limits.max_batch_bytes * 2)?);
+            let mut permit = budget.reserve(budget.limits.max_batch_bytes * 2)?;
             let temporary = budget
                 .runtime_env()
                 .disk_manager
@@ -172,20 +172,24 @@ pub(super) async fn retain(
                     &mut spill,
                     &previous,
                     budget,
+                    &mut permit,
                     budget.limits.max_batch_bytes * 2,
                     false,
                     true,
                 )?;
             }
+            writer_memory = Some(permit);
             reservation.free();
             file = Some(temporary);
             writer = Some(spill);
         }
         if let Some(writer) = &mut writer {
+            let permit = writer_memory.as_mut().expect("spill owns writer_memory");
             super::encoding::write(
                 writer,
                 &batch,
                 budget,
+                permit,
                 budget.limits.max_batch_bytes * 2,
                 false,
                 true,

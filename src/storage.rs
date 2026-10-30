@@ -159,7 +159,7 @@ pub(crate) fn table_properties() -> HashMap<String, String> {
             "write.metadata.delete-after-commit.enabled".into(),
             "false".into(),
         ),
-        ("gc.enabled".into(), "false".into()),
+        ("gc.enabled".into(), "true".into()),
     ])
 }
 
@@ -442,45 +442,25 @@ where
     Box::pin(async move {
         if target_file_bytes == 0
             || layout.is_some_and(|l| {
-                l.row_group_rows == 0
-                    || l.row_group_rows > budget.limits.batch_rows
-                    || l.row_group_bytes == 0
-                    || l.row_group_bytes > budget.limits.max_batch_bytes / 2
+                l.file_bytes == 0 || l.row_group_rows == 0 || l.row_group_bytes == 0
             })
         {
             return Err(Error::refusal(
                 "invalid_compaction",
-                "file and row-group layout must fit configured batch bounds",
+                "file and row-group layout bounds must be positive",
             ));
         }
-        let is_remote = table.metadata().location().starts_with("s3://");
-        let target_file_bytes = if let Some(layout) = layout {
-            layout.file_bytes
-        } else if is_remote {
-            target_file_bytes.min(2 << 20)
-        } else {
-            target_file_bytes
-        };
-        let effective_batch_rows = if let Some(layout) = layout {
-            layout.row_group_rows
-        } else if is_remote {
-            budget.limits.batch_rows.clamp(1, 2048)
-        } else {
-            budget.limits.batch_rows
-        };
-        let max_row_group_bytes = if let Some(layout) = layout {
-            layout.row_group_bytes
-        } else if is_remote {
-            (budget.limits.max_batch_bytes / 2).clamp(1, 2 << 20)
-        } else {
-            budget.limits.max_batch_bytes.max(1)
-        };
+        let target_file_bytes = layout.map_or(target_file_bytes, |l| l.file_bytes);
+        let effective_batch_rows = layout.map_or(budget.limits.batch_rows, |l| l.row_group_rows);
+        let max_row_group_bytes =
+            layout.map_or(budget.limits.max_batch_bytes.max(1), |l| l.row_group_bytes);
         let partition_spec = table.metadata().default_partition_spec().clone();
         tables::validate_partition_spec(table.metadata().current_schema(), &partition_spec)?;
         let is_partitioned = !partition_spec.fields().is_empty();
         // Parquet and rolling-file buffers survive individual writes. Keep their
         // admission for the entire writer lifetime, including close and flush.
-        let _reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(4))?;
+        let base_reservation = budget.limits.max_batch_bytes.saturating_mul(4);
+        let mut reservation = budget.reserve(base_reservation)?;
         let _metadata = budget.reserve(budget.limits.max_metadata_bytes)?;
         // The maintained rolling writer retains completed file descriptors and the
         // open Parquet footer. Bound both before admitting another batch. Chunk-only
@@ -509,14 +489,14 @@ where
         let mut open_partitions: std::collections::HashSet<iceberg::spec::Struct> =
             std::collections::HashSet::new();
         let mut open_bytes = 0usize;
-        // Row groups track the admitted row and byte bounds; the native default
-        // could otherwise buffer far beyond one batch. Local writes allow one
-        // complete admitted batch per group instead of forcing half-batch groups.
-        // Four batch allowances above cover the native buffers through close.
-        // Remote defaults retain their small caps until the maintenance experiment
-        // qualifies a change. Level 3 is the recommended
-        // production Zstandard default: smaller output than the crate level-1
-        // default at still-modest CPU on hourly ingestion cadences.
+        let mut in_progress_rows = 0usize;
+        let mut in_progress_bytes = 0usize;
+        // Row groups track the configured row and byte bounds; the native default
+        // could otherwise buffer far beyond the job's budget. Four batch allowances
+        // cover default single-batch groups through close, and `reservation` grows
+        // dynamically when an explicit `WriteLayout` buffers a multi-batch row group.
+        // Level 3 is the recommended production Zstandard default: smaller output
+        // than the crate level-1 default at still-modest CPU on hourly cadences.
         let expected_arrow =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
         let props_builder = WriterProperties::builder()
@@ -637,6 +617,12 @@ where
                             metadata_bytes = 0;
                             open_partitions.clear();
                             open_bytes = 0;
+                            in_progress_rows = 0;
+                            in_progress_bytes = 0;
+                            let current = reservation.num_permits();
+                            if base_reservation < current {
+                                drop(reservation.split(current - base_reservation));
+                            }
                         }
                         if let Some(key) = &partition_key {
                             open_partitions.insert(key.data().clone());
@@ -651,16 +637,33 @@ where
                                 "native writer file and row-group metadata exceed the declared allowance",
                             ));
                         }
-                        if is_remote && sub_batch.num_rows() > effective_batch_rows {
-                            let mut offset = 0usize;
-                            while offset < sub_batch.num_rows() {
-                                let len = (sub_batch.num_rows() - offset).min(effective_batch_rows);
-                                let chunk = sub_batch.slice(offset, len);
-                                writer.write(expected, partition_key.clone(), chunk).await?;
-                                offset += len;
+                        let needed = base_reservation.max(
+                            in_progress_bytes
+                                .saturating_add(slice_bytes)
+                                .saturating_add(budget.limits.max_batch_bytes.saturating_mul(2)),
+                        );
+                        let current = reservation.num_permits();
+                        if needed > current {
+                            reservation.merge(budget.reserve(needed - current)?);
+                        }
+                        let sub_rows = sub_batch.num_rows();
+                        writer.write(expected, partition_key, sub_batch).await?;
+                        in_progress_rows = in_progress_rows.saturating_add(sub_rows);
+                        in_progress_bytes = in_progress_bytes.saturating_add(slice_bytes);
+                        if in_progress_rows >= effective_batch_rows
+                            || in_progress_bytes >= max_row_group_bytes
+                        {
+                            in_progress_rows %= effective_batch_rows;
+                            in_progress_bytes %= max_row_group_bytes;
+                            let retained = base_reservation.max(
+                                in_progress_bytes.saturating_add(
+                                    budget.limits.max_batch_bytes.saturating_mul(2),
+                                ),
+                            );
+                            let current = reservation.num_permits();
+                            if retained < current {
+                                drop(reservation.split(current - retained));
                             }
-                        } else {
-                            writer.write(expected, partition_key, sub_batch).await?;
                         }
                     }
                     if let Some(progress) = &mut progress {

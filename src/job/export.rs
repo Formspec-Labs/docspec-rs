@@ -174,10 +174,7 @@ pub(super) async fn export(
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
         .set_created_by(settings.created_by.clone())
         .set_dictionary_enabled(false)
-        .set_max_row_group_bytes(
-            (settings.profile != ExportProfile::Lookup)
-                .then_some((budget.limits.max_batch_bytes / 4).max(1)),
-        )
+        .set_max_row_group_bytes(None)
         .set_bloom_filter_enabled(false)
         .set_statistics_enabled(EnabledStatistics::Chunk)
         .set_max_row_group_row_count(Some(if settings.profile == ExportProfile::Lookup {
@@ -234,7 +231,7 @@ pub(super) async fn export(
         .max_batch_bytes
         .checked_mul(3)
         .ok_or_else(|| Error::refusal("capacity", "writer allowance overflow"))?;
-    let _writer_memory = budget.reserve(allowance)?;
+    let mut writer_memory = budget.reserve(allowance)?;
     let metadata_limit = settings
         .footer_limit
         .saturating_mul(8)
@@ -258,7 +255,7 @@ pub(super) async fn export(
             .map(|i| SortField::new(input_schema.field(*i).data_type().clone()))
             .collect(),
     )?;
-    let mut previous_key: Option<Vec<u8>> = None;
+    let previous_key: Option<Vec<u8>> = None;
     let hashed = HashedWriter {
         inner: budget.scratch_writer(&temporary)?,
         sha256: Sha256::new(),
@@ -266,64 +263,77 @@ pub(super) async fn export(
         size: 0,
         tail: [0; 8],
     };
+    let projected_schema = schema.clone();
     let mut writer = ArrowWriter::try_new(hashed, schema, Some(properties.build()))?;
     let stream =
         crate::export::portable_stream(frame.execute_stream().await?, input_schema, budget);
-    let mut stream =
-        crate::export::coalesce_portable_stream(stream, settings.row_group_rows.min(1024), budget);
+    let projected_stream = futures::stream::try_unfold(
+        (stream, converter, previous_key, key_indices, output_indices),
+        |(mut stream, converter, mut previous_key, key_indices, output_indices)| async move {
+            let Some(batch) = stream.try_next().await.map_err(Error::from)? else {
+                return Ok::<_, Error>(None);
+            };
+            let keys = converter.convert_columns(
+                &key_indices
+                    .iter()
+                    .map(|i| batch.column(*i).clone())
+                    .collect::<Vec<_>>(),
+            )?;
+            for index in 0..keys.num_rows() {
+                if (index == 0 && previous_key.as_deref() == Some(keys.row(index).as_ref()))
+                    || (index > 0 && keys.row(index - 1) == keys.row(index))
+                {
+                    return Err(Error::refusal(
+                        "invalid_export",
+                        "export ordering keys are not unique",
+                    ));
+                }
+            }
+            if keys.num_rows() > 0 {
+                previous_key = Some(keys.row(keys.num_rows() - 1).as_ref().to_vec());
+            }
+            let projected = batch.project(&output_indices)?;
+            Ok(Some((
+                projected,
+                (stream, converter, previous_key, key_indices, output_indices),
+            )))
+        },
+    )
+    .map_err(|error| datafusion::common::DataFusionError::External(Box::new(error)));
+    let projected_stream = Box::pin(
+        datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(
+            projected_schema,
+            projected_stream,
+        ),
+    );
+    let mut stream = crate::export::coalesce_portable_stream(
+        projected_stream,
+        settings.row_group_rows.min(1024),
+        budget,
+    );
     let mut rows = 0u64;
     while let Some(batch) = stream.try_next().await? {
-        let keys = converter.convert_columns(
-            &key_indices
-                .iter()
-                .map(|i| batch.column(*i).clone())
-                .collect::<Vec<_>>(),
-        )?;
-        for index in 0..keys.num_rows() {
-            if (index == 0 && previous_key.as_deref() == Some(keys.row(index).as_ref()))
-                || (index > 0 && keys.row(index - 1) == keys.row(index))
-            {
-                return Err(Error::refusal(
-                    "invalid_export",
-                    "export ordering keys are not unique",
-                ));
-            }
-        }
-        if keys.num_rows() > 0 {
-            previous_key = Some(keys.row(keys.num_rows() - 1).as_ref().to_vec());
-        }
         rows += batch.num_rows() as u64;
-        let projected = batch.project(&output_indices)?;
-        let mut offset = 0;
-        while offset < projected.num_rows() {
-            // Native byte sizing can flush several groups in one write. Each
-            // incoming row creates at most one additional group; include the
-            // existing group and schema before handing rows to the writer.
-            let groups =
-                writer.flushed_row_groups().len() + usize::from(writer.in_progress_rows() > 0);
-            let available = if settings.profile == ExportProfile::Lookup {
-                usize::from(metadata_unit.saturating_mul(2) <= metadata_limit)
-                    .saturating_mul(projected.num_rows())
-            } else {
-                (metadata_limit / metadata_unit).saturating_sub(groups + 1)
-            };
-            if available == 0 {
-                return Err(Error::refusal(
-                    "metadata_capacity",
-                    "export row groups exceed metadata allowance",
-                ));
-            }
-            let take = available.min(projected.num_rows() - offset);
-            super::encoding::write(
-                &mut writer,
-                &projected.slice(offset, take),
-                budget,
-                allowance,
-                true,
-                settings.profile != ExportProfile::Lookup,
-            )?;
-            offset += take;
+        let groups = if settings.profile == ExportProfile::Lookup {
+            usize::from(rows > 0)
+        } else {
+            (rows as usize).div_ceil(settings.row_group_rows)
+        };
+        if groups.saturating_add(1).saturating_mul(metadata_unit) > metadata_limit {
+            return Err(Error::refusal(
+                "metadata_capacity",
+                "export row groups exceed metadata allowance",
+            ));
         }
+        super::encoding::write(
+            &mut writer,
+            &batch,
+            budget,
+            &mut writer_memory,
+            allowance,
+            true,
+            false,
+        )?;
     }
     writer.finish()?;
     let hashed = writer.inner();

@@ -1,6 +1,6 @@
 //! Admit known Parquet encoding copies before native writes.
 // Rust guideline compliant 2026-02-21
-use crate::{Error, Result, budget::Budget};
+use crate::{Result, budget::Budget};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use std::io::Write;
@@ -15,7 +15,8 @@ pub(super) fn write<W: Write + Send>(
     writer: &mut ArrowWriter<W>,
     batch: &RecordBatch,
     budget: &Budget,
-    reserved: usize,
+    writer_memory: &mut tokio::sync::OwnedSemaphorePermit,
+    base_reserved: usize,
     delta: bool,
     flush: bool,
 ) -> Result<()> {
@@ -34,9 +35,10 @@ pub(super) fn write<W: Write + Send>(
             .saturating_add(encoded_growth)
             .saturating_add(statistics_copies)
             .saturating_add(delta_last_value);
-        let admission = match budget.reserve(required.saturating_sub(reserved)) {
+        let reserved = writer_memory.num_permits();
+        let mut admission = match budget.reserve(required.saturating_sub(reserved)) {
             Ok(admission) => admission,
-            Err(_) if take > 1 => {
+            Err(_) if flush && take > 1 => {
                 target = take / 2;
                 continue;
             }
@@ -50,18 +52,29 @@ pub(super) fn write<W: Write + Send>(
             Err(error) => return Err(error),
         };
         writer.write(&piece)?;
-        if writer.memory_size() > budget.limits.max_batch_bytes {
-            if flush {
-                writer.flush()?;
-            } else {
-                return Err(Error::refusal(
-                    "capacity",
-                    "single-group export encoder exceeds reserved memory",
-                ));
+        if flush && writer.memory_size() > budget.limits.max_batch_bytes {
+            writer.flush()?;
+        }
+        // Retained encoder state stays covered by `writer_memory` before
+        // releasing the transient copies. Native auto-flush is covered too.
+        if !flush {
+            let retained = writer.memory_size().max(base_reserved);
+            if retained > reserved {
+                let needed = retained - reserved;
+                let from_admission = needed.min(admission.num_permits());
+                if from_admission > 0
+                    && let Some(transferred) = admission.split(from_admission)
+                {
+                    writer_memory.merge(transferred);
+                }
+                let current = writer_memory.num_permits();
+                if retained > current {
+                    writer_memory.merge(budget.reserve(retained - current)?);
+                }
+            } else if retained < reserved {
+                drop(writer_memory.split(reserved - retained));
             }
         }
-        // Retained encoder state is back under its fixed reservation before
-        // releasing the transient copies. Native auto-flush is covered too.
         drop(admission);
         offset += take;
     }
@@ -117,10 +130,19 @@ mod tests {
     fn known_encoder_copies_fit_pieces_and_refuse_single_rows_before_write() {
         let budget = budget(512 << 10);
         let base = 2 * budget.limits.max_batch_bytes;
-        let _base = budget.reserve(base).unwrap();
+        let mut base_permit = budget.reserve(base).unwrap();
         let input = batch(40, 1500);
         let mut output = writer(&input);
-        super::write(&mut output, &input, &budget, base, false, true).unwrap();
+        super::write(
+            &mut output,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            false,
+            true,
+        )
+        .unwrap();
         let bytes = output.into_inner().unwrap();
         let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes))
             .unwrap()
@@ -136,15 +158,33 @@ mod tests {
         let input = batch(1, 60 << 10);
         let mut output = writer(&input);
         let before = output.bytes_written();
-        let error = super::write(&mut output, &input, &budget, base, false, true).unwrap_err();
+        let error = super::write(
+            &mut output,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            false,
+            true,
+        )
+        .unwrap_err();
         assert_eq!(error.code(), "capacity");
         assert_eq!(output.bytes_written(), before);
         assert_eq!(output.in_progress_rows(), 0);
 
         let larger = self::budget(2 << 20);
-        let _base = larger.reserve(base).unwrap();
+        let mut base_permit = larger.reserve(base).unwrap();
         let mut output = writer(&input);
-        super::write(&mut output, &input, &larger, base, false, true).unwrap();
+        super::write(
+            &mut output,
+            &input,
+            &larger,
+            &mut base_permit,
+            base,
+            false,
+            true,
+        )
+        .unwrap();
         let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(
             output.into_inner().unwrap(),
         ))
@@ -168,7 +208,7 @@ mod tests {
     fn retained_group_is_flushed_before_refusing_the_next_fitting_row() {
         let budget = budget(288 << 10);
         let base = 2 * budget.limits.max_batch_bytes;
-        let _base = budget.reserve(base).unwrap();
+        let mut base_permit = budget.reserve(base).unwrap();
         let input = RecordBatch::try_new(
             Arc::new(Schema::new(vec![Field::new(
                 "value",
@@ -182,7 +222,16 @@ mod tests {
         )
         .unwrap();
         let mut output = writer(&input);
-        super::write(&mut output, &input, &budget, base, false, true).unwrap();
+        super::write(
+            &mut output,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            false,
+            true,
+        )
+        .unwrap();
         let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(
             output.into_inner().unwrap(),
         ))

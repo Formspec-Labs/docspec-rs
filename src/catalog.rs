@@ -281,7 +281,11 @@ impl Lifecycle {
                             .schema(iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(
                                 &schema,
                             )?)
-                            .properties(storage::table_properties())
+                            .properties({
+                                let mut props = storage::table_properties();
+                                props.insert("gc.enabled".into(), "false".into());
+                                props
+                            })
                             .build(),
                     )
                     .await
