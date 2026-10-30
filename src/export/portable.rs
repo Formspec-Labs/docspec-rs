@@ -22,7 +22,6 @@ struct PortableBatches {
     schema: SchemaRef,
     budget: Budget,
     base: usize,
-    batch_bytes: usize,
     oversized: bool,
     next_cost: Option<usize>,
     offset: usize,
@@ -53,15 +52,13 @@ impl PortableBatches {
     fn new(batch: RecordBatch, schema: SchemaRef, budget: Budget) -> Result<Self> {
         validate_types(&batch, &schema)?;
         let batch_bytes = batch_bytes_as(&batch, &schema)?;
-        let oversized = batch_bytes > budget.limits.max_batch_bytes
-            && batch.num_rows() > 1;
+        let oversized = batch_bytes > budget.limits.max_batch_bytes && batch.num_rows() > 1;
         let base = batch_bytes_as(&RecordBatch::new_empty(batch.schema()), &schema)?;
         Ok(Self {
             batch,
             schema,
             budget,
             base,
-            batch_bytes,
             oversized,
             next_cost: None,
             offset: 0,

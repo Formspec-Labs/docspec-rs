@@ -3,7 +3,10 @@
 #[cfg(test)]
 use super::Operation;
 use super::{Engine, Inner};
-use crate::{Error, Result, model::*};
+#[cfg(any(test, feature = "test-util"))]
+use crate::model::*;
+use crate::{Error, Result};
+#[cfg(any(test, feature = "test-util"))]
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
