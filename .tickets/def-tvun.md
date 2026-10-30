@@ -1,6 +1,6 @@
 ---
 id: def-tvun
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-10-27T11:06:57Z
@@ -57,3 +57,7 @@ Candidate48 full scripts/check PASS:429lib/423integration/15restore/1processmemo
 **2026-10-28T10:02:22Z**
 
 Review F1 confirmed by27a4511: native TypeCoercion creates merged UNION tags inside a scalar subquery, and unchanged outer relational input leaves stale outer metadata. Observe direct child and embedded subquery schemas through native apply_subqueries before selective reconstruction. Final4metadata unitsPASS0.03s,74SQLPASS21.45s and ClippyPASS; e812 rebuilt retained daily fixture yields1workitem/0admissions/allconflictguards0. Final CLI/review/fullgate follow.
+
+**2026-10-30T20:16:23Z**
+
+Validated on main: ExportProfile::{Whole,Ranged,Lookup}, ExportSettings, ExportedFile, streaming SHA-256/MD5 HashedWriter, PARQUET_2_0 + ZSTD(3), and unique order_by check in src/job/export.rs. Cross-runner byte determinism across threads/batches/permutations/spills landed in b368968 (ss-iwqu closed; tests/sql_exports.rs) and range-request reader verification completed in congressional-tech F0.

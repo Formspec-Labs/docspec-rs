@@ -29,3 +29,7 @@ Ownership transferred to core by owner051000queue decision. Engine integration r
 **2026-10-28T06:05:29Z**
 
 Owner/enginefreshhead requirement: contract-first readonly resolve operation; batch multiple names in onejob, fresh exactmetadata/UUID/snapshot/schema, typedabsence distinct fromerrors, nativecataloggenerationwrapper preserved, noemptyappend/catalogwrites. Reuse existing catalog authorityfixture with mutation denial, readonlySQLopen forresolve-onlylocal jobs.
+
+**2026-10-30T20:17:52Z**
+
+All Rust CLI/library code and local full-corpus F0 verification of the 7-table congressional-tech model export spec (docs/measurements/engine-first-20261027/f0.md, site/seed-first-full.md, site/final-f0.md) are complete on main (b368968 / 0167510). Remains in_progress solely for owner-gated live Basin M1/M2 workload execution.

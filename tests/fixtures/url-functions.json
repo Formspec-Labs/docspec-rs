@@ -97,6 +97,12 @@
   },
   {
     "function": "disposition_filename",
+    "value": "attachment; filename=\"fallback.pdf\"; filename*=UTF-8'en'r%C3%A9sum%C3%A9.pdf",
+    "base": null,
+    "expected": "résumé.pdf"
+  },
+  {
+    "function": "disposition_filename",
     "value": "attachment; filename*=ISO-8859-1''caf%E9.pdf",
     "base": null,
     "expected": "café.pdf"

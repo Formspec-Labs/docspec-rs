@@ -18,7 +18,11 @@ use datafusion::{
     prelude::{ParquetReadOptions, SessionContext},
 };
 use futures::{StreamExt, TryStreamExt, stream};
-use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
+use parquet::{
+    arrow::ArrowWriter,
+    basic::{Compression, ZstdLevel},
+    file::properties::WriterProperties,
+};
 use std::{any::Any, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
@@ -167,6 +171,7 @@ pub(super) async fn retain(
                 .disk_manager
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
+                .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
                 .set_max_row_group_row_count(Some(budget.limits.batch_rows))
                 .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
