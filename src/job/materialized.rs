@@ -271,3 +271,69 @@ pub(super) async fn retain(
     );
     Ok((storage, rows, bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{budget::Limits, job::Job};
+    use arrow::{
+        array::Int64Array,
+        datatypes::{DataType, Field, Schema},
+    };
+
+    #[tokio::test]
+    async fn scratch_batches_do_not_reacquire_retained_memory() {
+        let root = tempfile::tempdir().unwrap();
+        let limits = Limits {
+            memory_bytes: 8 << 20,
+            max_batch_bytes: 64 << 10,
+            batch_rows: 1024,
+            scratch_bytes: 8 << 20,
+            ..Limits::default()
+        };
+        let job = Job::new(limits.clone(), root.path().join("scratch")).unwrap();
+        let pool = job.budget.runtime_env().memory_pool.clone();
+        // Another operator forces the first batch to scratch, then releases
+        // its memory while the rest of the input continues streaming.
+        let pressure = MemoryConsumer::new("other operator").register(&pool);
+        pressure.try_grow(limits.memory_bytes / 2).unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from_iter_values(0..1024))],
+        )
+        .unwrap();
+        let input = stream::iter(0..3).map(move |index| {
+            if index == 1 {
+                pressure.free();
+            }
+            if index > 0 {
+                assert_eq!(
+                    pool.reserved(),
+                    0,
+                    "scratch batches must leave native memory available"
+                );
+            }
+            Ok(batch.clone())
+        });
+        let input = Box::pin(RecordBatchStreamAdapter::new(schema.clone(), input));
+        let (storage, rows, _) = retain(&job.context, &job.budget, "spilled", schema, input)
+            .await
+            .unwrap();
+        assert_eq!(storage, StepStorage::Scratch);
+        assert_eq!(rows, 3072);
+        assert_eq!(
+            job.sql("SELECT * FROM spilled")
+                .await
+                .unwrap()
+                .count()
+                .await
+                .unwrap(),
+            rows
+        );
+    }
+}
