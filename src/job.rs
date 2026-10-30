@@ -177,7 +177,11 @@ impl Job {
     }
 
     /// Computes a named step with detailed metrics (storage, rows, charged bytes).
-    pub async fn materialize_detailed(&self, name: &str, sql: &str) -> Result<(StepStorage, usize, usize)> {
+    pub async fn materialize_detailed(
+        &self,
+        name: &str,
+        sql: &str,
+    ) -> Result<(StepStorage, usize, usize)> {
         materialized::materialize(self, name, sql).await
     }
 

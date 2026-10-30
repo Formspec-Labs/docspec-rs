@@ -209,7 +209,8 @@ pub async fn read_batches_observed(
 )> {
     let observation = NativeScanObservation::default();
     let stream =
-        read_projected_batches_inner(table, budget, projection, Some(observation.clone()), &[]).await?;
+        read_projected_batches_inner(table, budget, projection, Some(observation.clone()), &[])
+            .await?;
     Ok((stream, observation))
 }
 

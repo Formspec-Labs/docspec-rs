@@ -442,11 +442,8 @@ impl JobSpec {
                     .await?,
             );
         }
-        let mut active_steps: std::collections::BTreeSet<String> = self
-            .steps
-            .iter()
-            .map(|s| s.name().to_owned())
-            .collect();
+        let mut active_steps: std::collections::BTreeSet<String> =
+            self.steps.iter().map(|s| s.name().to_owned()).collect();
 
         for (output_index, output) in self.outputs.iter().enumerate() {
             let start_epoch = super::metrics::now_epoch_secs();
@@ -479,7 +476,8 @@ impl JobSpec {
                 .map(|o| o.sql.as_str())
                 .collect::<Vec<_>>()
                 .join(" ");
-            let all_queries_sql = self.queries
+            let all_queries_sql = self
+                .queries
                 .iter()
                 .map(|q| q.sql.as_str())
                 .collect::<Vec<_>>()

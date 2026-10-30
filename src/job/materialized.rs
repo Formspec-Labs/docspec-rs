@@ -114,7 +114,11 @@ impl TableProvider for ReservedTable {
     }
 }
 
-pub(super) async fn materialize(job: &super::Job, name: &str, sql: &str) -> Result<(StepStorage, usize, usize)> {
+pub(super) async fn materialize(
+    job: &super::Job,
+    name: &str,
+    sql: &str,
+) -> Result<(StepStorage, usize, usize)> {
     if job.context.table_exist(name)? {
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
@@ -153,8 +157,8 @@ pub(super) async fn retain(
         bytes += size;
         let pool_cap = ((budget.limits.memory_bytes / 2).min(10 * 1024 * 1024 * 1024)) * 25 / 100;
         let pool_reserved = budget.runtime_env().memory_pool.reserved();
-        let should_spill = pool_reserved.saturating_add(size) > pool_cap
-            || reservation.try_grow(size).is_err();
+        let should_spill =
+            pool_reserved.saturating_add(size) > pool_cap || reservation.try_grow(size).is_err();
         if writer.is_none() && should_spill {
             let mut permit = budget.reserve(budget.limits.max_batch_bytes * 2)?;
             let temporary = budget
