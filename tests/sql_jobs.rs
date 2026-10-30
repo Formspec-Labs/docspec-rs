@@ -22,6 +22,134 @@ fn limits() -> Limits {
     }
 }
 
+// Raw's comparator failed with these row widths, row counts and limits after
+// several retained tables consumed almost all of the native 96 MiB pool.
+async fn retained_wide_steps_leave_execution_memory(rows: usize) {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(
+        Limits {
+            compute_threads: 2,
+            memory_bytes: 192 << 20,
+            batch_rows: 32,
+            max_batch_bytes: 1 << 20,
+            scratch_bytes: 256 << 20,
+            ..Limits::default()
+        },
+        root.path().join("scratch"),
+    )
+    .unwrap();
+    job.register_view("source", &format!("SELECT value AS id, CASE WHEN value%17=0 THEN NULL ELSE concat(cast(value AS VARCHAR),repeat('x',8192)) END AS payload FROM generate_series(1,{rows})"))
+        .await.unwrap();
+    let old = job
+        .materialize("old", "SELECT * FROM source")
+        .await
+        .unwrap();
+    let copy = job
+        .materialize("old_copy", "SELECT * FROM old")
+        .await
+        .unwrap();
+    assert_eq!(
+        copy,
+        StepStorage::Scratch,
+        "retention must not consume execution headroom"
+    );
+    assert_eq!(
+        old,
+        if rows == 2048 {
+            StepStorage::Memory
+        } else {
+            StepStorage::Scratch
+        }
+    );
+    job.materialize("new", "SELECT * FROM source")
+        .await
+        .unwrap();
+    job.materialize("paired", "SELECT id,max(payload) AS payload,count(*) AS n FROM (SELECT id,payload,row_number() OVER (ORDER BY id,payload) AS occurrence FROM old_copy UNION ALL SELECT id,payload,row_number() OVER (ORDER BY id,payload) AS occurrence FROM new) tagged GROUP BY id,occurrence")
+        .await.unwrap();
+    let batches = job
+        .sql("SELECT count(*),sum(n),count(payload) FROM paired")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    for (column, expected) in [rows, rows * 2, rows - rows / 17].into_iter().enumerate() {
+        assert_eq!(
+            batches[0]
+                .column(column)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            expected as i64
+        );
+    }
+    // Releasing the retained tables must make the same allowance reusable.
+    for name in ["old", "old_copy", "new", "paired"] {
+        job.release(name).unwrap();
+    }
+    assert_eq!(
+        job.materialize("again", "SELECT * FROM source LIMIT 2048")
+            .await
+            .unwrap(),
+        StepStorage::Memory
+    );
+}
+
+#[tokio::test]
+async fn retained_wide_steps_fit_192_mib() {
+    retained_wide_steps_leave_execution_memory(2048).await;
+}
+
+#[tokio::test]
+async fn retained_wide_steps_fit_192_mib_at_four_times_rows() {
+    retained_wide_steps_leave_execution_memory(8192).await;
+}
+
+#[tokio::test]
+async fn retained_allowance_lives_until_the_last_frame_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(
+        Limits {
+            compute_threads: 2,
+            memory_bytes: 192 << 20,
+            batch_rows: 32,
+            max_batch_bytes: 1 << 20,
+            scratch_bytes: 256 << 20,
+            ..Limits::default()
+        },
+        root.path().join("scratch"),
+    )
+    .unwrap();
+    job.register_view(
+        "source",
+        "SELECT value AS id,repeat('x',8192) AS payload FROM generate_series(1,2048)",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        job.materialize("held", "SELECT * FROM source")
+            .await
+            .unwrap(),
+        StepStorage::Memory
+    );
+    let frame = job.sql("SELECT * FROM held").await.unwrap();
+    job.release("held").unwrap();
+    assert_eq!(
+        job.materialize("before_drop", "SELECT * FROM source")
+            .await
+            .unwrap(),
+        StepStorage::Scratch
+    );
+    assert_eq!(frame.count().await.unwrap(), 2048);
+    assert_eq!(
+        job.materialize("after_drop", "SELECT * FROM source")
+            .await
+            .unwrap(),
+        StepStorage::Memory
+    );
+}
+
 #[tokio::test]
 async fn distinct_preserves_real_seed_join_keys() {
     let root = tempfile::tempdir().unwrap();

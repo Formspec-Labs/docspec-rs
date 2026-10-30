@@ -1,4 +1,4 @@
-//! Retained Arrow batches own their pool reservation; a refused grow spills once.
+//! Retained batches own native and retention reservations; either refusal spills once.
 // Rust guideline compliant 2026-02-21
 use crate::{Error, Result, budget::Budget};
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
@@ -41,6 +41,7 @@ enum StepData {
     Memory {
         batches: Vec<RecordBatch>,
         _reservation: MemoryReservation,
+        _retention: MemoryReservation,
     },
     Scratch {
         frame: Box<datafusion::dataframe::DataFrame>,
@@ -139,6 +140,8 @@ pub(super) async fn retain(
     let mut stream = crate::export::portable_stream(stream, schema.clone(), budget);
     let reservation =
         MemoryConsumer::new(format!("SQL step {name}")).register(&budget.runtime_env().memory_pool);
+    let retention =
+        MemoryConsumer::new(format!("SQL retention {name}")).register(budget.retention_pool());
     let mut batches = Vec::new();
     let mut rows = 0;
     let mut bytes = 0;
@@ -155,11 +158,9 @@ pub(super) async fn retain(
             ));
         }
         bytes += size;
-        let pool_cap = ((budget.limits.memory_bytes / 2).min(10 * 1024 * 1024 * 1024)) * 25 / 100;
-        let pool_reserved = budget.runtime_env().memory_pool.reserved();
-        let should_spill =
-            pool_reserved.saturating_add(size) > pool_cap || reservation.try_grow(size).is_err();
-        if writer.is_none() && should_spill {
+        if writer.is_none()
+            && (retention.try_grow(size).is_err() || reservation.try_grow(size).is_err())
+        {
             let mut permit = budget.reserve(budget.limits.max_batch_bytes * 2)?;
             let temporary = budget
                 .runtime_env()
@@ -189,6 +190,7 @@ pub(super) async fn retain(
             }
             writer_memory = Some(permit);
             reservation.free();
+            retention.free();
             file = Some(temporary);
             writer = Some(spill);
         }
@@ -244,6 +246,7 @@ pub(super) async fn retain(
             StepData::Memory {
                 batches,
                 _reservation: reservation,
+                _retention: retention,
             },
         )
     };
