@@ -382,3 +382,169 @@ async fn parquet_and_materialized_strings_use_the_executed_schema() {
         );
     }
 }
+
+#[tokio::test]
+async fn export_is_byte_deterministic_across_threads_orders_batches_and_forced_spill() {
+    use arrow::{
+        array::{ArrayRef, Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    let root = tempfile::tempdir().unwrap();
+    let total = 2500i64;
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("filename", DataType::Utf8, false),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("kind", DataType::Utf8, false),
+    ]));
+    let write_input = |path: &std::path::Path, ids: Vec<i64>, row_group: usize| {
+        let filenames = ids
+            .iter()
+            .map(|id| format!("congress/119/bills/hr/{id:05}/document.pdf"))
+            .collect::<Vec<_>>();
+        let titles = ids
+            .iter()
+            .map(|id| format!("Committee Report #{id:05}: Legislative Text and Analysis"))
+            .collect::<Vec<_>>();
+        let kinds = ids
+            .iter()
+            .map(|id| ["bill", "report", "hearing", "notice"][(*id as usize) % 4])
+            .collect::<Vec<_>>();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(ids)) as ArrayRef,
+                Arc::new(StringArray::from(filenames)) as ArrayRef,
+                Arc::new(StringArray::from(titles)) as ArrayRef,
+                Arc::new(StringArray::from(kinds)) as ArrayRef,
+            ],
+        )
+        .unwrap();
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_max_row_group_row_count(Some(row_group))
+            .build();
+        let mut writer = ArrowWriter::try_new(
+            std::fs::File::create(path).unwrap(),
+            schema.clone(),
+            Some(props),
+        )
+        .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+    };
+
+    let forward = root.path().join("forward.parquet");
+    let shuffled = root.path().join("shuffled.parquet");
+    write_input(&forward, (1..=total).collect(), 256);
+    let mut permuted = (1..=total)
+        .map(|i| ((i * 1009) % total) + 1)
+        .collect::<Vec<_>>();
+    permuted.reverse();
+    write_input(&shuffled, permuted, 97);
+
+    // Run Configurations: (label, threads, batch_rows, max_batch_bytes, input, force_spill)
+    let cases = [
+        ("baseline", 1, 128, 4 << 20, &forward, false),
+        ("threads_4_permuted", 4, 128, 4 << 20, &shuffled, false),
+        ("small_batches", 2, 32, 1 << 20, &shuffled, false),
+        ("sub_1024_byte_allowance", 2, 32, 64 << 10, &shuffled, false),
+        ("large_batches", 2, 2048, 8 << 20, &forward, false),
+        ("forced_spill", 2, 64, 512 << 10, &shuffled, true),
+    ];
+
+    for profile in [
+        ExportProfile::Whole,
+        ExportProfile::Ranged,
+        ExportProfile::Lookup,
+    ] {
+        let cfg = ExportSettings {
+            profile,
+            row_group_rows: 1024,
+            order_by: vec![SortColumn::asc("id")],
+            columns: vec![
+                "id".into(),
+                "filename".into(),
+                "title".into(),
+                "kind".into(),
+            ],
+            dictionary_columns: BTreeSet::from(["kind".into()]),
+            delta_columns: BTreeSet::from(["filename".into(), "title".into()]),
+            key_column: (profile == ExportProfile::Lookup).then(|| "id".into()),
+            created_by: "docspec export determinism v1".into(),
+            footer_limit: 512 << 10,
+        };
+        let mut expected_bytes: Option<Vec<u8>> = None;
+        let mut expected_meta = None;
+        for (label, threads, batch_rows, max_batch_bytes, input_path, force_spill) in cases {
+            let job = Job::new(
+                Limits {
+                    compute_threads: threads,
+                    memory_bytes: 64 << 20,
+                    max_batch_bytes,
+                    max_metadata_bytes: 4 << 20,
+                    batch_rows,
+                    scratch_bytes: 64 << 20,
+                },
+                root.path().join(format!("scratch-{profile:?}-{label}")),
+            )
+            .unwrap();
+            job.register_parquet("source", input_path).await.unwrap();
+            let export_sql = if force_spill {
+                // Pad with a temporary wide column so materialization exceeds the retention
+                // allowance and spills to scratch Parquet before export reads and drops it.
+                job.materialize(
+                    "spilled",
+                    "SELECT id, filename, title, kind, repeat('s', 8192) AS pad FROM source",
+                )
+                .await
+                .unwrap();
+                "SELECT id, filename, title, kind FROM spilled"
+            } else {
+                "SELECT id, filename, title, kind FROM source"
+            };
+            let out_path = root.path().join(format!("{profile:?}-{label}.parquet"));
+            let exported = job.export(export_sql, &out_path, &cfg).await.unwrap();
+            let bytes = std::fs::read(&out_path).unwrap();
+            let reader =
+                SerializedFileReader::new(std::fs::File::open(&out_path).unwrap()).unwrap();
+            let meta = reader.metadata();
+            let rg_rows = meta
+                .row_groups()
+                .iter()
+                .map(|rg| rg.num_rows())
+                .collect::<Vec<_>>();
+            if profile == ExportProfile::Lookup {
+                assert_eq!(rg_rows, vec![total], "{profile:?} {label}");
+            } else {
+                assert_eq!(rg_rows, vec![1024, 1024, 452], "{profile:?} {label}");
+            }
+            for rg in meta.row_groups() {
+                for col_idx in [1, 2] {
+                    assert!(
+                        rg.column(col_idx)
+                            .encodings()
+                            .any(|e| e == Encoding::DELTA_BYTE_ARRAY),
+                        "{profile:?} {label} col {col_idx}"
+                    );
+                }
+                assert!(
+                    rg.column(3)
+                        .encodings()
+                        .any(|e| e == Encoding::RLE_DICTIONARY),
+                    "{profile:?} {label} kind dict"
+                );
+            }
+            if let Some(prev) = &expected_bytes {
+                assert_eq!(&bytes, prev, "byte mismatch on {profile:?} {label}");
+                assert_eq!(Some(&exported), expected_meta.as_ref());
+            } else {
+                expected_bytes = Some(bytes);
+                expected_meta = Some(exported);
+            }
+        }
+    }
+}

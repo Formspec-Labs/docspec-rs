@@ -564,7 +564,7 @@ async fn empty_candidate_clears_snapshot_state_but_preserves_native_schema_histo
         native.metadata().metadata_log()
     );
     assert!(!candidate.metadata().metadata_log().is_empty());
-    assert_eq!(candidate.metadata().properties()["gc.enabled"], "false");
+    assert_eq!(candidate.metadata().properties()["gc.enabled"], "true");
     assert_eq!(
         candidate.metadata().properties()["write.metadata.delete-after-commit.enabled"],
         "false"

@@ -77,7 +77,7 @@ impl PortableBatches {
     }
 }
 
-/// Pack already normalized rows without rebuilding an oversized batch.
+/// Pack already normalized rows into deterministic `rows`-sized write batches.
 pub(crate) fn coalesce_portable_stream(
     input: SendableRecordBatchStream,
     rows: usize,
@@ -87,15 +87,39 @@ pub(crate) fn coalesce_portable_stream(
         input: SendableRecordBatchStream,
         coalescer: BatchCoalescer,
         budget: Budget,
-        pending: Option<PortableBatches>,
+        reservation: Option<tokio::sync::OwnedSemaphorePermit>,
+        pending: Option<(RecordBatch, usize)>,
         bytes: usize,
         exhausted: bool,
+    }
+    impl State {
+        fn reserve(&mut self, bytes: usize) -> Result<()> {
+            let target = bytes.saturating_sub(self.budget.limits.max_batch_bytes);
+            let current = self
+                .reservation
+                .as_ref()
+                .map_or(0, tokio::sync::OwnedSemaphorePermit::num_permits);
+            if target > current {
+                let extra = self.budget.reserve(target - current)?;
+                if let Some(existing) = &mut self.reservation {
+                    existing.merge(extra);
+                } else {
+                    self.reservation = Some(extra);
+                }
+            } else if target < current
+                && let Some(existing) = &mut self.reservation
+            {
+                drop(existing.split(current - target));
+            }
+            Ok(())
+        }
     }
     let schema = input.schema();
     let state = State {
         input,
         coalescer: BatchCoalescer::new(schema.clone(), rows),
         budget: budget.clone(),
+        reservation: None,
         pending: None,
         bytes: 0,
         exhausted: false,
@@ -103,60 +127,34 @@ pub(crate) fn coalesce_portable_stream(
     let stream = futures::stream::try_unfold(state, move |mut state| async move {
         loop {
             if let Some(batch) = state.coalescer.next_completed_batch() {
-                let batch = portable_batch(batch, state.coalescer.schema(), &state.budget)?;
+                let (batch_schema, mut columns, num_rows) = batch.into_parts();
+                columns.iter_mut().for_each(|column| column.shrink_to_fit());
+                let batch = RecordBatch::try_new_with_options(
+                    batch_schema,
+                    columns,
+                    &arrow::record_batch::RecordBatchOptions::new().with_row_count(Some(num_rows)),
+                )?;
+                state.reserve(batch.get_array_memory_size())?;
+                state.bytes = 0;
+                state.reserve(0)?;
                 return Ok::<_, Error>(Some((batch, state)));
             }
-            if let Some(pending) = &mut state.pending {
-                if pending.offset == pending.batch.num_rows() {
+            if let Some((batch, offset)) = &mut state.pending {
+                if *offset == batch.num_rows() {
                     state.pending = None;
                     continue;
                 }
-                if state.coalescer.is_empty() {
-                    state.bytes = pending.base;
-                }
-                let start = pending.offset;
                 let available = rows - state.coalescer.get_buffered_rows();
-                if start == 0
-                    && !pending.oversized
-                    && pending.batch.num_rows() <= available
-                    && state
-                        .bytes
-                        .saturating_add(pending.batch_bytes.saturating_sub(pending.base))
-                        <= state.budget.limits.max_batch_bytes
-                {
-                    state.bytes = state
-                        .bytes
-                        .saturating_add(pending.batch_bytes.saturating_sub(pending.base));
-                    let full_batch = pending.batch.clone();
-                    pending.offset = pending.batch.num_rows();
-                    state.coalescer.push_batch(full_batch)?;
-                    continue;
-                }
-                let mut end = start;
-                while end < pending.batch.num_rows() && end - start < available {
-                    let cost = pending.cost(end)?;
-                    let next = state.bytes.saturating_add(cost);
-                    if next > state.budget.limits.max_batch_bytes {
-                        pending.next_cost = Some(cost);
-                        break;
-                    }
-                    state.bytes = next;
-                    end += 1;
-                }
-                if end == start {
-                    if state.coalescer.is_empty() {
-                        return Err(Error::refusal(
-                            "capacity",
-                            "single portable row exceeds configured byte allowance",
-                        ));
-                    }
-                    state.coalescer.finish_buffered_batch()?;
-                    continue;
-                }
-                state
-                    .coalescer
-                    .push_batch(pending.batch.slice(start, end - start))?;
-                pending.offset = end;
+                let take = available.min(batch.num_rows() - *offset);
+                let slice = batch.slice(*offset, take);
+                let slice_bytes = batch_bytes(&slice)?;
+                let next_bytes = state.bytes.saturating_add(slice_bytes);
+                state.reserve(next_bytes)?;
+                state.bytes = next_bytes;
+                let (pending_batch, pending_offset) = state.pending.as_mut().expect("checked Some");
+                let slice = pending_batch.slice(*pending_offset, take);
+                state.coalescer.push_batch(slice)?;
+                *pending_offset += take;
                 continue;
             }
             if state.exhausted {
@@ -164,11 +162,8 @@ pub(crate) fn coalesce_portable_stream(
             }
             match state.input.try_next().await? {
                 Some(batch) => {
-                    state.pending = Some(PortableBatches::new(
-                        batch,
-                        state.coalescer.schema(),
-                        state.budget.clone(),
-                    )?);
+                    validate_types(&batch, state.coalescer.schema().as_ref())?;
+                    state.pending = Some((batch, 0));
                 }
                 None => {
                     state.exhausted = true;

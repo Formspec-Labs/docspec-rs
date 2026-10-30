@@ -851,3 +851,93 @@ async fn append_identity_refuses_side_effects_with_nonempty_work() {
         );
     }
 }
+
+#[tokio::test]
+async fn create_defaults_data_model_properties_and_uncapped_layout_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let mut value = spec(root.path());
+    value["steps"][0]["sql"] =
+        json!("SELECT cast(value AS BIGINT) AS id FROM generate_series(1,3000)");
+    value["table_operations"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("format_version");
+    value["table_operations"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("properties");
+    value["table_operations"][2]["layout"] = json!({
+        "file_bytes": 128 << 20,
+        "row_group_rows": 65536,
+        "row_group_bytes": 64 << 20
+    });
+    let result = serde_json::to_value(
+        serde_json::from_value::<JobSpec>(value.clone())
+            .unwrap()
+            .run(limits())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        result["table_operations"][2]["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(result["table_operations"][2]["files"][0]["rows"], 3000);
+    let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
+        .await
+        .unwrap();
+    let ident = TableIdent::new(NamespaceIdent::new("archive".into()), "captures".into());
+    let table = catalog.load_table(&ident).await.unwrap();
+    assert_eq!(
+        table.metadata().format_version(),
+        iceberg::spec::FormatVersion::V2
+    );
+    assert_eq!(table.metadata().properties()["gc.enabled"], "true");
+    assert_eq!(
+        table.metadata().properties()["commit.retry.num-retries"],
+        "0"
+    );
+    assert_eq!(
+        table.metadata().properties()["write.metadata.delete-after-commit.enabled"],
+        "false"
+    );
+
+    let mut bad_gc = value.clone();
+    bad_gc["table_operations"][1]["properties"] = json!({"gc.enabled": "false"});
+    let err = serde_json::from_value::<JobSpec>(bad_gc)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap_err();
+    assert_eq!(err.error.code(), "invalid_spec");
+
+    let mut bad_retry = value.clone();
+    bad_retry["table_operations"][1]["properties"] = json!({"commit.retry.num-retries": "3"});
+    let err = serde_json::from_value::<JobSpec>(bad_retry)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap_err();
+    assert_eq!(err.error.code(), "invalid_spec");
+
+    let no_pk_schema = Schema::builder()
+        .with_fields(vec![Arc::new(NestedField::required(
+            1,
+            "id",
+            Type::Primitive(PrimitiveType::Long),
+        ))])
+        .build()
+        .unwrap();
+    let mut bad_pk = value;
+    bad_pk["table_operations"][1]["schema"] = serde_json::to_value(no_pk_schema).unwrap();
+    let err = serde_json::from_value::<JobSpec>(bad_pk)
+        .unwrap()
+        .run(limits())
+        .await
+        .unwrap_err();
+    assert_eq!(err.error.code(), "invalid_spec");
+}

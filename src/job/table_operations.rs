@@ -16,6 +16,10 @@ use iceberg::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
+fn default_format_version() -> FormatVersion {
+    FormatVersion::V2
+}
+
 /// One explicit catalog operation; schemas, work and physical layout are caller policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -26,6 +30,7 @@ pub enum TableOperation {
     CreateNamespace {
         name: String,
         namespace: NamespaceIdent,
+        #[serde(default)]
         properties: HashMap<String, String>,
     },
     Create {
@@ -33,7 +38,9 @@ pub enum TableOperation {
         table: TableIdent,
         location: String,
         schema: Box<Schema>,
+        #[serde(default = "default_format_version")]
         format_version: FormatVersion,
+        #[serde(default)]
         properties: HashMap<String, String>,
         #[serde(default)]
         partition_spec: Option<UnboundPartitionSpec>,
@@ -96,6 +103,26 @@ impl TableOperation {
             let name = operation.name();
             if name.is_empty() || !names.insert(name.to_lowercase()) {
                 return Err(invalid("duplicate or empty table operation name"));
+            }
+            if let Self::Create {
+                schema,
+                format_version,
+                properties,
+                ..
+            } = operation
+            {
+                let mut ids = schema.identifier_field_ids().peekable();
+                if *format_version != FormatVersion::V2
+                    || ids.peek().is_none()
+                    || ids.any(|id| schema.field_by_id(id).is_none_or(|field| !field.required))
+                    || crate::storage::table_properties()
+                        .iter()
+                        .any(|(k, v)| properties.get(k).is_some_and(|actual| actual != v))
+                {
+                    return Err(invalid(
+                        "table creation requires format_version 2, required identifier fields, and gc.enabled=true",
+                    ));
+                }
             }
             if let Self::Append {
                 current_table,
@@ -190,6 +217,8 @@ impl TableOperation {
                 ..
             } => {
                 result.kind = "create".into();
+                let mut effective = storage::table_properties();
+                effective.extend(properties.iter().map(|(k, v)| (k.clone(), v.clone())));
                 catalog
                     .create_table(
                         table.namespace(),
@@ -198,7 +227,7 @@ impl TableOperation {
                             .location(location.clone())
                             .schema((**schema).clone())
                             .format_version(*format_version)
-                            .properties(properties.clone())
+                            .properties(effective)
                             .partition_spec_opt(partition_spec.clone())
                             .sort_order_opt(sort_order.clone())
                             .build(),
