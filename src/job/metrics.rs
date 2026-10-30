@@ -17,14 +17,15 @@ pub fn get_log_path() -> Option<String> {
 }
 
 fn write_jsonl(val: &serde_json::Value) {
-    if let Some(path) = get_log_path() {
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
-            let _ = writeln!(f, "{}", val);
-        }
+    if let Some(path) = get_log_path()
+        && let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path)
+    {
+        let _ = writeln!(f, "{}", val);
     }
     eprintln!("[docspec-metric] {}", val);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn log_step(
     step_index: usize,
     name: &str,
@@ -82,11 +83,7 @@ pub fn log_release(
     pool_after: usize,
 ) {
     let now = now_epoch_secs();
-    let released_bytes = if pool_before >= pool_after {
-        pool_before - pool_after
-    } else {
-        0
-    };
+    let released_bytes = pool_before.saturating_sub(pool_after);
     let val = serde_json::json!({
         "event": "release",
         "step_index": step_index,
@@ -100,6 +97,7 @@ pub fn log_release(
     write_jsonl(&val);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn log_output(
     output_index: usize,
     name: &str,
