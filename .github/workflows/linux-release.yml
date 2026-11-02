@@ -42,7 +42,7 @@ jobs:
           echo "docspec bytes: $size"
           test "$size" -lt 1073741824
           sha256sum docspec | tee docspec.sha256
-          ldd --version | head -n 1
+          ldd --version | sed -n 1p  # sed reads to EOF; head can SIGPIPE ldd under pipefail (exit 141)
       - uses: actions/upload-artifact@v4
         with:
           name: docspec-linux-amd64-${{ github.sha }}
