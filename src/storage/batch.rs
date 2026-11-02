@@ -1,7 +1,7 @@
 //! Arrow batch type coercion, skewed-column detection, and bounded batch splitting.
 // Rust guideline compliant 2026-02-21
 
-use crate::{Error, Result};
+use crate::{Error, Result, budget::Budget};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
 mod views;
@@ -221,7 +221,7 @@ pub(crate) fn compact_batch_slice(
     batch: &RecordBatch,
     offset: usize,
     length: usize,
-    budget: &crate::budget::Budget,
+    budget: &Budget,
 ) -> Result<RecordBatch> {
     let sliced = batch.slice(offset, length);
     if sliced.num_columns() == 0 {
@@ -231,6 +231,43 @@ pub(crate) fn compact_batch_slice(
     let empty = RecordBatch::new_empty(schema.clone());
     let compacted = arrow::compute::concat_batches(&schema, &[sliced, empty])?;
     compact_views(compacted, budget)
+}
+
+/// Bytes a batch's rows reference, counting view payloads and slice ranges.
+fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
+    batch
+        .columns()
+        .iter()
+        .map(|array| {
+            views::reference_bytes(array.as_ref(), array.len()).unwrap_or_else(|| {
+                array
+                    .to_data()
+                    .get_slice_memory_size()
+                    .unwrap_or_else(|_| array.get_array_memory_size())
+            })
+        })
+        .fold(0, usize::saturating_add)
+}
+
+/// Releases buffers a batch retains beyond its own rows before an operator keeps it.
+///
+/// DataFusion 53.1 emits a grouped aggregate's output as `batch_rows` slices
+/// of one array, and repartition, sort and hash-join build inputs charge each
+/// slice for the whole array: charges grow with the square of groups per
+/// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). A batch charged
+/// at more than four times what its rows reference, and by more than 1 MiB,
+/// is copied once into its own buffers; others keep only view compaction.
+///
+/// # Errors
+/// Refuses when the shared memory pool cannot admit a view compaction copy.
+pub(crate) fn compact_retained(batch: RecordBatch, budget: &Budget) -> Result<RecordBatch> {
+    let charged = datafusion::common::utils::memory::get_record_batch_memory_size(&batch);
+    let referenced = sliced_batch_bytes(&batch);
+    if charged > referenced.saturating_mul(4) && charged - referenced > 1 << 20 {
+        compact_batch_slice(&batch, 0, batch.num_rows(), budget)
+    } else {
+        compact_views(batch, budget)
+    }
 }
 
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into

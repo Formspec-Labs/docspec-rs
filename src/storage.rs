@@ -4,7 +4,7 @@
 mod batch;
 pub(crate) use batch::{
     arrow_schema_to_schema_auto_assign_ids, coerce_batch, coerce_data_type, compact_batch_slice,
-    compact_views, effective_batch_bytes, has_list_of_struct, has_splittable_skewed_column,
+    compact_retained, effective_batch_bytes, has_list_of_struct, has_splittable_skewed_column,
     referenced_batch_bytes, split_oversized_batch,
 };
 pub(crate) mod defaults;
