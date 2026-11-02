@@ -92,6 +92,18 @@ impl OptimizerRule for PortableRowAggregateArguments {
             }
             changed = true;
             let mut function: AggregateFunction = function.clone();
+            // DISTINCT requires ORDER BY keys to appear among the arguments,
+            // so a key equal to an argument takes the argument's rewrite.
+            for sort in &mut function.params.order_by {
+                if let Some(index) = function
+                    .params
+                    .args
+                    .iter()
+                    .position(|arg| *arg == sort.expr)
+                {
+                    sort.expr = args[index].clone();
+                }
+            }
             function.params.args = args;
             aggr_expr.push(Expr::AggregateFunction(function).alias_if_changed(name)?);
         }
@@ -286,6 +298,18 @@ mod tests {
     async fn ordered_string_agg_keeps_shared_view_state_linear() {
         let groups =
             bounded("SELECT k, string_agg(s, ',' ORDER BY i) AS a FROM t GROUP BY k").await;
+        assert_eq!(groups, expected(true));
+    }
+
+    #[tokio::test]
+    async fn distinct_aggregates_ordered_by_their_argument_keep_that_order() {
+        // DataFusion requires DISTINCT ORDER BY keys to appear as arguments.
+        let groups =
+            bounded("SELECT k, array_agg(DISTINCT s ORDER BY s) AS a FROM t GROUP BY k").await;
+        assert_eq!(groups, expected(false));
+        let groups =
+            bounded("SELECT k, string_agg(DISTINCT s, ',' ORDER BY s) AS a FROM t GROUP BY k")
+                .await;
         assert_eq!(groups, expected(true));
     }
 
