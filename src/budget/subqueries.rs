@@ -57,5 +57,8 @@ pub(super) fn rules() -> Vec<Arc<dyn OptimizerRule + Send + Sync>> {
         })
         .collect();
     rules.push(Arc::new(crate::job::fitting::windows::FitWindowInputs));
+    rules.push(Arc::new(
+        super::portable_aggregates::PortableRowAggregateArguments,
+    ));
     rules
 }

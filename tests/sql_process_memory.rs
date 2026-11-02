@@ -1,10 +1,11 @@
-//! Check observed process memory for a wide dictionary decoded into string views.
+//! Check observed process memory for SQL over shared or decoded string views.
 // Rust guideline compliant 2026-02-21
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use arrow::{
-    array::{Array, StringArray, StringViewArray, UInt32Array},
-    datatypes::{DataType, Field, Schema},
+    array::{Array, ListArray, StringArray, StringViewArray, StructArray, UInt32Array},
+    buffer::OffsetBuffer,
+    datatypes::{DataType, Field, Fields, Schema},
     record_batch::RecordBatch,
 };
 use docspec::{budget::Limits, job::Job};
@@ -181,6 +182,131 @@ fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, cei
         println!("peak_physical_footprint_bytes={footprint}");
         assert!(footprint <= ceiling, "{stdout}\n{stderr}");
     }
+}
+
+const AGGREGATE_INPUT: &str = "DOCSPEC_TEST_ORDERED_AGGREGATE_INPUT";
+const AGGREGATE_ROWS: usize = 400;
+
+fn committee_code(row: usize) -> String {
+    format!(
+        "hs{}{:02}",
+        if row % 2 == 1 { "cn" } else { "ag" },
+        row % 100
+    )
+}
+
+fn run_ordered_aggregate(path: &Path) {
+    // ct-deg8: DataFusion 53.1 types the computed THEN as Utf8View and casts
+    // the ELSE into one view buffer shared by the batch.
+    let code = "lower(c['system_code'])";
+    let sql = format!(
+        "WITH r AS (SELECT event_id, unnest(raw) AS c, \
+         unnest(range(0, cast(array_length(raw) AS BIGINT))) AS idx FROM source) \
+         SELECT event_id, array_agg(named_struct('s', CASE WHEN {code} = 'hsag00' \
+         THEN 'hl' || substr({code}, 3) ELSE {code} END, 'r', c['role']) ORDER BY idx) AS a \
+         FROM r GROUP BY event_id"
+    );
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let root = tempfile::tempdir().unwrap();
+            let job = Job::new(
+                Limits {
+                    memory_bytes: MEMORY,
+                    compute_threads: 2,
+                    ..Limits::default()
+                },
+                root.path().join("scratch"),
+            )
+            .unwrap();
+            job.register_parquet("source", path).await.unwrap();
+            let batches = job.sql(&sql).await.unwrap().collect().await.unwrap();
+            let mut seen = vec![false; AGGREGATE_ROWS];
+            for batch in &batches {
+                let events = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap();
+                let lists = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<arrow::array::ListArray>()
+                    .unwrap();
+                for row in 0..batch.num_rows() {
+                    let event = usize::try_from(events.value(row)).unwrap();
+                    assert!(!std::mem::replace(&mut seen[event], true));
+                    let item = lists.value(row);
+                    let item = item
+                        .as_any()
+                        .downcast_ref::<arrow::array::StructArray>()
+                        .unwrap();
+                    assert_eq!(item.len(), 1);
+                    let text = |column: usize| {
+                        let value =
+                            arrow::compute::cast(item.column(column), &DataType::Utf8).unwrap();
+                        value
+                            .as_any()
+                            .downcast_ref::<StringArray>()
+                            .unwrap()
+                            .value(0)
+                            .to_owned()
+                    };
+                    let code = committee_code(event);
+                    let expected = if code == "hsag00" {
+                        "hlag00".to_owned()
+                    } else {
+                        code
+                    };
+                    assert_eq!(text(0), expected);
+                    assert_eq!(text(1), "host");
+                }
+            }
+            assert!(seen.into_iter().all(|seen| seen));
+        });
+}
+
+#[test]
+fn ordered_aggregate_over_shared_views_respects_process_memory() {
+    if let Some(path) = std::env::var_os(AGGREGATE_INPUT) {
+        run_ordered_aggregate(Path::new(&path));
+        return;
+    }
+    let item = Fields::from(vec![
+        Field::new("system_code", DataType::Utf8, true),
+        Field::new("role", DataType::Utf8, true),
+    ]);
+    let codes = StringArray::from_iter_values((0..AGGREGATE_ROWS).map(committee_code));
+    let roles = StringArray::from_iter_values((0..AGGREGATE_ROWS).map(|_| "host"));
+    let items = StructArray::new(item.clone(), vec![Arc::new(codes), Arc::new(roles)], None);
+    let field = Arc::new(Field::new("item", DataType::Struct(item), true));
+    let raw = ListArray::new(
+        field,
+        OffsetBuffer::from_lengths(std::iter::repeat_n(1, AGGREGATE_ROWS)),
+        Arc::new(items),
+        None,
+    );
+    let events = arrow::array::Int64Array::from_iter_values(0..AGGREGATE_ROWS as i64);
+    let batch = RecordBatch::try_from_iter([
+        ("event_id", Arc::new(events) as _),
+        ("raw", Arc::new(raw) as _),
+    ])
+    .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("committees.parquet");
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), batch.schema(), None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    measure_child(
+        "ordered_aggregate_over_shared_views_respects_process_memory",
+        AGGREGATE_INPUT,
+        &path,
+        MEMORY,
+        MEMORY + OVERHEAD,
+    );
 }
 
 const JSON_ROOT: &str = "DOCSPEC_TEST_JSON_LINES_MEMORY_ROOT";
