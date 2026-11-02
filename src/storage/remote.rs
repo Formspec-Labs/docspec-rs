@@ -11,13 +11,14 @@ use iceberg::{
     table::Table,
 };
 use iceberg_catalog_rest::RestCatalogBuilder;
-use iceberg_storage_opendal::OpenDalStorageFactory;
 use std::{collections::HashMap, fmt, sync::Arc, time::Duration};
 
 mod namespaces;
 pub mod objects;
+mod parts;
 #[doc(inline)]
 pub use objects::RemoteObjects;
+pub(crate) use parts::{FixedPartS3, PART_BYTES};
 
 /// Startup connections sharing one resolved configuration.
 #[derive(Clone)]
@@ -210,9 +211,7 @@ async fn catalog_from_resolved(
         .map_err(|_| Error::refusal("remote_config", "native HTTP client initialization failed"))?;
     let inner = RestCatalogBuilder::default()
         .with_client(client)
-        .with_storage_factory(Arc::new(OpenDalStorageFactory::S3 {
-            customized_credential_load: None,
-        }))
+        .with_storage_factory(Arc::new(FixedPartS3))
         .load("docspec", properties)
         .await
         .map_err(|_| Error::refusal("remote_config", "native catalog initialization failed"))?;

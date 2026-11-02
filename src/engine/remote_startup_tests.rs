@@ -673,7 +673,6 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
     };
     use iceberg::CatalogBuilder;
     use iceberg_catalog_sql::{SqlBindStyle, SqlCatalogBuilder};
-    use iceberg_storage_opendal::OpenDalStorageFactory;
     use parquet::arrow::ArrowWriter;
 
     let root = tempfile::tempdir().unwrap();
@@ -685,9 +684,7 @@ async fn remote_lifecycle_refresh_backfill_evidence_and_maintenance_verify_deep(
             .uri(format!("sqlite://{}?mode=rwc", sqlite_path.display()))
             .warehouse_location("s3://bucket/owned-deep")
             .sql_bind_style(SqlBindStyle::QMark)
-            .with_storage_factory(Arc::new(OpenDalStorageFactory::S3 {
-                customized_credential_load: None,
-            }))
+            .with_storage_factory(Arc::new(storage::remote::FixedPartS3))
             .load("docspec", props.clone())
             .await
             .unwrap(),

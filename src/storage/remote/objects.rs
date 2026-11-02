@@ -7,7 +7,6 @@
 use crate::{Error, Result, budget::Budget, model::ObjectRef};
 use futures::TryStreamExt;
 use iceberg::io::{FileIO, FileIOBuilder};
-use iceberg_storage_opendal::OpenDalStorageFactory;
 use object_store::{ClientOptions, ObjectStore, RetryConfig, aws::AmazonS3Builder};
 use opendal::{
     Operator,
@@ -17,7 +16,7 @@ use opendal::{
 };
 use std::{collections::HashMap, fmt, fs::File, io::Read, path::PathBuf, sync::Arc};
 
-const CHUNK: usize = 8 << 20;
+use super::PART_BYTES as CHUNK;
 // Shared admission allowance for a streaming read. The HTTP transport manages
 // response buffers; this is not a configured chunk limit or exact RSS bound.
 pub(in crate::storage) const READ_ADMISSION: usize = 2 << 20;
@@ -416,11 +415,9 @@ impl RemoteObjects {
             finish(make_builder()?.checksum_algorithm("md5"))?.layer(HttpClientLayer::new(
                 HttpClient::with(ConditionalPutClient(HttpClient::default())),
             ));
-        let file_io = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
-            customized_credential_load: None,
-        }))
-        .with_props(properties.iter().filter(|(key, _)| key.starts_with("s3.")))
-        .build();
+        let file_io = FileIOBuilder::new(Arc::new(super::FixedPartS3))
+            .with_props(properties.iter().filter(|(key, _)| key.starts_with("s3.")))
+            .build();
         // Build the maintained query client from the same explicit resolution.
         // Never use from_env: both required credential fields select its static
         // provider, preventing metadata/config discovery and ambient credentials.

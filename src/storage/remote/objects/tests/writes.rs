@@ -198,6 +198,72 @@ async fn source_admission_transfers_once_and_qualifies_exact_remote_bytes() {
     assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
 }
 
+#[tokio::test]
+async fn file_io_multipart_writes_use_equal_non_trailing_parts() {
+    // Iceberg data and manifest writers flush uneven buffers (row groups,
+    // footers); R2 refuses a multipart upload whose leading parts differ.
+    let path = "/bucket/owned/data/part-0.parquet";
+    let fixture = WriteFixture::for_path(Behavior::R2Multipart, path.into());
+    let mut writer = fixture
+        .objects()
+        .file_io()
+        .new_output(format!("s3:/{path}"))
+        .unwrap()
+        .writer()
+        .await
+        .unwrap();
+    let mut expected = Vec::new();
+    for (fill, length) in [
+        (1u8, 3 << 20),
+        (2, CHUNK + 5),
+        (3, 7 << 20),
+        (4, 1 << 20),
+        (5, 6 << 20),
+    ] {
+        let bytes = vec![fill; length];
+        expected.extend_from_slice(&bytes);
+        let written = tokio::time::timeout(DEADLINE, writer.write(bytes.into())).await;
+        written.unwrap().unwrap();
+    }
+    let closed = tokio::time::timeout(DEADLINE, writer.close())
+        .await
+        .unwrap();
+    let report = fixture.finish();
+    assert!(
+        report.rejected_parts.is_empty(),
+        "rejected part lengths: {:?}",
+        report.rejected_parts
+    );
+    closed.unwrap();
+    assert_eq!(report.published.as_deref(), Some(expected.as_slice()));
+}
+
+#[tokio::test]
+async fn upload_file_multipart_meets_the_equal_part_rule() {
+    let bytes = vec![23; 2 * CHUNK + 31];
+    let expected = object(&bytes);
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), &bytes).unwrap();
+    let fixture = WriteFixture::new(Behavior::R2Multipart);
+    let budget = Budget::new(Limits::default()).unwrap();
+    let uploaded = tokio::time::timeout(
+        DEADLINE,
+        fixture
+            .objects()
+            .upload_file(&expected, source.path().to_owned(), &budget),
+    )
+    .await
+    .unwrap();
+    let report = fixture.finish();
+    assert!(
+        report.rejected_parts.is_empty(),
+        "{:?}",
+        report.rejected_parts
+    );
+    uploaded.unwrap();
+    assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Behavior {
     AcceptPut,
@@ -210,6 +276,8 @@ pub(crate) enum Behavior {
     ConflictPut,
     NotModifiedPut,
     HeadDenied,
+    /// Cloudflare R2's multipart rule: non-trailing parts share one length.
+    R2Multipart,
 }
 
 #[derive(Default)]
@@ -220,6 +288,7 @@ pub(crate) struct WriteReport {
     pub(crate) published: Option<Vec<u8>>,
     content_md5: Vec<Option<String>>,
     parts: BTreeMap<u64, Vec<u8>>,
+    rejected_parts: Vec<Vec<usize>>,
 }
 
 impl WriteReport {
@@ -298,7 +367,9 @@ impl WriteFixture {
                     {
                         assert!(matches!(
                             behavior,
-                            Behavior::AbortMultipart | Behavior::LoseCompleteResponse
+                            Behavior::AbortMultipart
+                                | Behavior::LoseCompleteResponse
+                                | Behavior::R2Multipart
                         ));
                         let xml = format!(
                             "<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>owned/file.bin</Key><UploadId>{UPLOAD_ID}</UploadId></InitiateMultipartUploadResult>"
@@ -334,6 +405,32 @@ impl WriteFixture {
                         );
                         report.parts.clear();
                         respond(&mut socket, "204 No Content", "", b"");
+                    }
+                    "POST" if matches!(behavior, Behavior::R2Multipart) => {
+                        assert_eq!(upload, Some(UPLOAD_ID));
+                        let parts = std::mem::take(&mut report.parts);
+                        let lengths = parts.values().map(Vec::len).collect::<Vec<_>>();
+                        let leading = &lengths[..lengths.len().saturating_sub(1)];
+                        if leading
+                            .iter()
+                            .any(|length| *length != leading[0] || *length < 5 << 20)
+                        {
+                            report.rejected_parts.push(lengths);
+                            respond(
+                                &mut socket,
+                                "400 Bad Request",
+                                "",
+                                b"<Error><Code>InvalidPart</Code><Message>All non-trailing parts must have the same length.</Message></Error>",
+                            );
+                            continue;
+                        }
+                        report.published = Some(parts.into_values().flatten().collect());
+                        respond(
+                            &mut socket,
+                            "200 OK",
+                            "",
+                            b"<CompleteMultipartUploadResult><ETag>\"fixture-object\"</ETag></CompleteMultipartUploadResult>",
+                        );
                     }
                     "POST" => {
                         assert!(matches!(behavior, Behavior::LoseCompleteResponse));
