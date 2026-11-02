@@ -561,6 +561,97 @@ mod tests {
         assert_eq!(fresh.runtime.disk_manager.used_disk_space(), 0);
     }
 
+    #[tokio::test]
+    async fn native_spills_write_view_columns_by_referenced_bytes() {
+        use arrow::{
+            array::{ArrayRef, AsArray, BinaryViewArray, Int64Array, StringViewArray},
+            compute::cast,
+            datatypes::DataType,
+            record_batch::RecordBatch,
+        };
+        use datafusion::{
+            datasource::MemTable,
+            physical_plan::{ExecutionPlan, collect},
+        };
+        fn spilled(plan: &Arc<dyn ExecutionPlan>) -> usize {
+            let own = plan
+                .metrics()
+                .and_then(|metrics| metrics.spilled_bytes())
+                .unwrap_or(0);
+            own + plan.children().into_iter().map(spilled).sum::<usize>()
+        }
+        // The aggregate and the sort spill each sorted run as batch_rows
+        // batches sharing the run's buffers. Arrow IPC writes every data buffer
+        // a view column references, so DataFusion 53.1 rewrote the whole run
+        // once per batch (ss-vuwa).
+        const ROWS: usize = 128 << 10;
+        // 28 bytes: out of line in a view.
+        let key = |value: usize| format!("receipt-{value:020}");
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 16 << 20,
+            batch_rows: 1024,
+            ..Limits::default()
+        })
+        .unwrap();
+        let batches = (0..ROWS / 1024)
+            .map(|chunk| {
+                // Descending, so the sort reorders every row.
+                let keys = || (0..1024).map(move |row| key(ROWS - chunk * 1024 - row));
+                RecordBatch::try_from_iter([
+                    (
+                        "k",
+                        Arc::new(StringViewArray::from_iter_values(keys())) as ArrayRef,
+                    ),
+                    ("b", Arc::new(BinaryViewArray::from_iter_values(keys()))),
+                    ("n", Arc::new(Int64Array::from_iter_values(0..1024))),
+                ])
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let input = batches
+            .iter()
+            .map(RecordBatch::get_array_memory_size)
+            .sum::<usize>();
+        let context = budget.context();
+        let table = MemTable::try_new(batches[0].schema(), vec![batches]).unwrap();
+        context.register_table("t", Arc::new(table)).unwrap();
+        for (sql, expected) in [
+            (
+                "SELECT k FROM t GROUP BY k, n HAVING count(*) > 1",
+                Vec::new(),
+            ),
+            ("SELECT b FROM t ORDER BY b", (1..=ROWS).map(key).collect()),
+        ] {
+            let plan = context
+                .sql(sql)
+                .await
+                .unwrap()
+                .create_physical_plan()
+                .await
+                .unwrap();
+            let output = collect(plan.clone(), context.task_ctx()).await.unwrap();
+            let values = output
+                .iter()
+                .flat_map(|batch| {
+                    let values = cast(batch.column(0), &DataType::BinaryView).unwrap();
+                    values
+                        .as_binary_view()
+                        .iter()
+                        .map(|value| String::from_utf8(value.unwrap().to_vec()).unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            assert!(values == expected, "{sql} returned other values");
+            let spilled = spilled(&plan);
+            assert!(spilled > 0, "{sql} did not spill");
+            assert!(
+                spilled < input,
+                "{sql} spilled {spilled} B for {input} B of input"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn releasing_workspace_ownership_unlocks_inherited_descriptors() {
