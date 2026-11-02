@@ -52,57 +52,59 @@ jobs:
           if-no-files-found: error
 
   qualify:
+    # The whole congressional-tech production-offline lane, through its own runner and
+    # setup actions, in the six shards its CI uses. The earlier 54 client tests ran no
+    # model SQL, so 425e346 passed here and then failed 46 lane tests on one planner
+    # error (ss-x71z): a qualification has to run the SQL the pin will serve.
+    name: qualify (production-offline ${{ matrix.shard }}/6)
     needs: build
     runs-on: ubuntu-24.04
-    container: python:3.12-slim-bookworm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: docspec-linux-amd64-${{ github.sha }}
-          path: /opt/docspec-artifact
-      - name: Install tools
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq git poppler-utils procps >/dev/null
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: civictechdc/congressional-tech
           ref: ${{ inputs.congressional_tech_ref || 'main' }}
-          path: ct
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: docspec-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/docspec-artifact
+      - uses: ./.github/actions/setup-python-project
+      - uses: ./.github/actions/setup-node-project
       - name: Pin this binary in the checkout
-        working-directory: ct
         env:
           SOURCE_REVISION: ${{ github.sha }}
+          ARTIFACT: ${{ runner.temp }}/docspec-artifact
+          BINARY: ${{ runner.temp }}/docspec
+          CONFIG: ${{ runner.temp }}/runtime.json
+          WORKSPACE: ${{ runner.temp }}/ds-work
         run: |
-          install -m 0755 /opt/docspec-artifact/docspec /opt/docspec
-          (cd /opt/docspec-artifact && sha256sum -c docspec.sha256)
-          python - <<'PY'
+          (cd "$ARTIFACT" && sha256sum -c docspec.sha256)
+          install -m 0555 "$ARTIFACT/docspec" "$BINARY"
+          .venv/bin/python - <<'PY'
           import json, os, subprocess
-          sha = subprocess.run(['sha256sum', '/opt/docspec'], capture_output=True, text=True, check=True).stdout.split()[0]
+          sha = subprocess.run(['sha256sum', os.environ['BINARY']], capture_output=True, text=True, check=True).stdout.split()[0]
           path = 'model/docspec-runtime-pin.json'
           pin = json.load(open(path))
           pin['source_revision'] = os.environ['SOURCE_REVISION']
           pin['platforms']['linux-amd64']['sha256'] = sha
           json.dump(pin, open(path, 'w'), indent=2)
-          json.dump(dict(version=1, required_capabilities=pin['required_capabilities'], binary='/opt/docspec',
+          json.dump(dict(version=1, required_capabilities=pin['required_capabilities'], binary=os.environ['BINARY'],
                          binary_sha256=sha, source_revision=pin['source_revision'], platform='linux-amd64',
                          build_features=pin['build_features'], limits=os.path.abspath('.github/docspec-local-limits.json'),
-                         workspace='/tmp/ds-work', timeout_seconds=2700), open('/tmp/runtime.json', 'w'))
+                         workspace=os.environ['WORKSPACE'], timeout_seconds=2700), open(os.environ['CONFIG'], 'w'))
           PY
+          echo "DOCSPEC_JOB_CONFIG=$CONFIG" >> "$GITHUB_ENV"
+          echo "DOCSPEC_BINARY=$BINARY" >> "$GITHUB_ENV"
       - name: Binary checks
         run: |
-          ldd /opt/docspec | { ! grep 'not found'; }
-          /opt/docspec --help >/dev/null
-          /opt/docspec serve --help | grep -E 'ready-file|shutdown-on-stdin-eof'
-      - name: congressional-tech client tests
-        working-directory: ct
-        env:
-          DOCSPEC_BINARY: /opt/docspec
-          DOCSPEC_JOB_CONFIG: /tmp/runtime.json
-        run: |
-          pip install -q -e packages/docspec_client -e 'packages/house-naming[test]' -e packages/committee_meeting \
-            -e packages/congress_shared -e packages/viewer_publication -e 'packages/congress_api[archive,test]' \
-            -e packages/news_lake -e packages/corpus_recovery -e packages/youtube_api 'PyYAML>=6,<7' pytest
-          export PYTHONPATH="$(printf '%s:' "$PWD"/packages/{house-naming,committee_meeting,congress_shared,docspec_client,youtube_api,congress_api,viewer_publication,corpus_recovery,news_lake}/src)$PWD/apps/committee_youtube/src"
-          python -m pytest -q -p no:cacheprovider -rs packages/docspec_client/tests \
-            packages/congress_api/tests/test_captures_final34.py packages/congress_api/tests/test_captures_version.py
+          ldd "$DOCSPEC_BINARY" | { ! grep 'not found'; }
+          "$DOCSPEC_BINARY" --help >/dev/null
+          "$DOCSPEC_BINARY" serve --help | grep -E 'ready-file|shutdown-on-stdin-eof'
+      - name: congressional-tech production-offline lane
+        run: .venv/bin/python scripts/dev.py test production-offline --shard ${{ matrix.shard }}/6 -- -rs
