@@ -31,9 +31,16 @@ jobs:
       - name: Build
         # rust-toolchain.toml selects the toolchain; the image only provides rustup.
         run: cargo build --locked --release --features remote --bin docspec
-      - name: Digest
+      - name: Strip and digest
+        # [profile.release] keeps debug info for local profiling; the pinned
+        # runtime is stripped like eb40c54's, and congressional-tech's
+        # publish and setup scripts refuse a runtime of 1 GiB or more.
         run: |
           cp target/release/docspec docspec
+          strip docspec
+          size=$(stat -c %s docspec)
+          echo "docspec bytes: $size"
+          test "$size" -lt 1073741824
           sha256sum docspec | tee docspec.sha256
           ldd --version | head -n 1
       - uses: actions/upload-artifact@v4
