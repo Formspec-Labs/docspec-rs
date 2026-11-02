@@ -635,11 +635,7 @@ impl KeyTargets {
             };
             match slot {
                 None => return false,
-                Some(Literal::Primitive(p)) => {
-                    if !allowed.contains(p) {
-                        return false;
-                    }
-                }
+                Some(Literal::Primitive(p)) if !allowed.contains(p) => return false,
                 _ => {}
             }
         }
@@ -784,11 +780,8 @@ pub(in crate::engine) fn file_may_overlap_mapped_key_files(
                 continue;
             };
             match slot {
-                None => {
-                    if !keys_may_have_null {
-                        return false;
-                    }
-                }
+                None if !keys_may_have_null => return false,
+                None => {}
                 Some(Literal::Primitive(file_part)) => {
                     let all_disjoint = key_files.iter().all(|kf| {
                         let (Some(kf_low), Some(kf_high)) = (

@@ -4,20 +4,20 @@ use crate::{Error, Result, budget::Budget};
 use datafusion::{
     common::{
         DataFusionError, ScalarValue,
-        tree_node::{Transformed, TreeNode},
+        tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     },
     execution::TaskContext,
     functions_window::row_number::RowNumber,
     physical_expr::window::StandardWindowExpr,
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, InputOrderMode,
-        PlanProperties, SendableRecordBatchStream,
+        PhysicalExpr, PlanProperties, SendableRecordBatchStream, replace_children_if_necessary,
         stream::RecordBatchStreamAdapter,
         windows::{BoundedWindowAggExec, WindowAggExec, WindowUDFExpr},
     },
 };
 use futures::StreamExt;
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
 /// Rewrites `plan` to admit per-partition window memory and guard input batch sizes before `BoundedWindowAggExec`.
@@ -27,13 +27,13 @@ pub(super) fn admit(
 ) -> Result<Arc<dyn ExecutionPlan>> {
     Ok(plan
         .transform_up(|plan| {
-            if plan.as_any().is::<WindowAggExec>() {
+            if plan.is::<WindowAggExec>() {
                 return Err(refusal(
                     "comparison_plan",
                     "comparison requires a bounded window",
                 ));
             }
-            let Some(window) = plan.as_any().downcast_ref::<BoundedWindowAggExec>() else {
+            let Some(window) = plan.downcast_ref::<BoundedWindowAggExec>() else {
                 return Ok(Transformed::no(plan));
             };
             let ranking = window
@@ -46,7 +46,7 @@ pub(super) fn admit(
                         .as_any()
                         .downcast_ref::<WindowUDFExpr>()
                 })
-                .is_some_and(|expr| expr.fun().inner().as_any().is::<RowNumber>());
+                .is_some_and(|expr| expr.fun().inner().is::<RowNumber>());
             if !ranking || !matches!(window.input_order_mode, InputOrderMode::Sorted) {
                 return Err(refusal(
                     "comparison_plan",
@@ -93,7 +93,10 @@ pub(super) fn admit(
                 rows: budget.limits.batch_rows,
                 memory: Arc::new(memory),
             });
-            Ok(Transformed::yes(plan.with_new_children(vec![checked])?))
+            Ok(Transformed::yes(replace_children_if_necessary(
+                plan,
+                vec![checked],
+            )?))
         })?
         .data)
 }
@@ -129,9 +132,6 @@ impl ExecutionPlan for WindowInput {
     fn name(&self) -> &str {
         "ComparisonWindowInput"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
@@ -140,6 +140,12 @@ impl ExecutionPlan for WindowInput {
     }
     fn maintains_input_order(&self) -> Vec<bool> {
         vec![true]
+    }
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
     }
     fn with_new_children(
         self: Arc<Self>,

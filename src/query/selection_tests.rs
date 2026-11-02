@@ -103,12 +103,17 @@ async fn direct_table_scan_preserves_repeats_empty_rows_and_statistics() {
         .scan(&state, Some(&indices), &[], None)
         .await
         .unwrap();
-    assert!(plan.as_any().is::<DataSourceExec>());
+    assert!(plan.is::<DataSourceExec>());
     assert_eq!(
         plan.schema().as_ref(),
         &provider.schema().project(&indices).unwrap()
     );
-    let statistics = plan.partition_statistics(None).unwrap();
+    let statistics = datafusion::physical_plan::StatisticsContext::new()
+        .compute(
+            plan.as_ref(),
+            &datafusion::physical_plan::StatisticsArgs::new(),
+        )
+        .unwrap();
     assert_eq!(statistics.num_rows, Precision::Inexact(3));
     assert_eq!(statistics.column_statistics.len(), 3);
     let result = collect(plan, context.task_ctx()).await.unwrap();
@@ -270,7 +275,7 @@ async fn projected_mapping_admission_is_owned_by_plan_and_stream() {
         ..budget.limits.clone()
     })
     .unwrap();
-    let source = provider.as_any().downcast_ref::<NativeTable>().unwrap();
+    let source = provider.downcast_ref::<NativeTable>().unwrap();
     let partition = NativePartition {
         source: source.0.source.clone(),
         schema: source.schema(),
@@ -289,7 +294,7 @@ async fn empty_projection_admits_cloned_schema_metadata_before_allocation() {
     let (_root, _engine, native) = fixture().await;
     let budget = budget();
     let provider = table(native, budget.clone(), Some(3)).unwrap();
-    let source = provider.as_any().downcast_ref::<NativeTable>().unwrap();
+    let source = provider.downcast_ref::<NativeTable>().unwrap();
     let metadata = std::collections::HashMap::from([("provenance".to_owned(), "x".repeat(8192))]);
     let schema = Arc::new(source.schema().as_ref().clone().with_metadata(metadata));
     let small = Budget::new(Limits {

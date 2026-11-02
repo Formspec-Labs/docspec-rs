@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admission_survives_eof_until_provider_and_stream_owners_drop() {
+    async fn admission_survives_until_the_provider_drops_and_streams_finish() {
         let probe = Arc::new(Probe::default());
         let ready = Arc::new(AtomicBool::new(true));
         let semaphore = Arc::new(Semaphore::new(1));
@@ -294,8 +294,11 @@ mod tests {
         drop(provider);
         assert_eq!(semaphore.available_permits(), 0);
         assert!(surviving.try_next().await.unwrap().is_some());
-        assert!(surviving.try_next().await.unwrap().is_none());
         assert_eq!(semaphore.available_permits(), 0);
+        // DataFusion 55's stream adapter drops a finished inner stream, so the
+        // last owner releases the admission at end of stream, not at drop.
+        assert!(surviving.try_next().await.unwrap().is_none());
+        assert_eq!(semaphore.available_permits(), 1);
         drop(surviving);
         assert_eq!(semaphore.available_permits(), 1);
     }

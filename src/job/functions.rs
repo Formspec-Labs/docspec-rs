@@ -20,7 +20,6 @@ use datafusion::{
 };
 use percent_encoding::percent_decode_str;
 use std::{
-    any::Any,
     fmt,
     hash::{Hash, Hasher},
     sync::Arc,
@@ -41,7 +40,6 @@ enum Kind {
 pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
     function
         .inner()
-        .as_any()
         .downcast_ref::<GenericFunction>()
         .map(|function| function.budget.limits.max_batch_bytes)
         .or_else(|| super::json_many::byte_limit(function))
@@ -286,9 +284,6 @@ fn json_list_bytes(array: &dyn Array, start: usize, end: usize) -> Result<usize>
 }
 
 impl ScalarUDFImpl for GenericFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         self.kind.name()
     }

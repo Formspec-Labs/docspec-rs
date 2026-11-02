@@ -236,7 +236,7 @@ async fn fallback_admission(add_dependencies: bool) {
     let manifests = native.manifest_list_reader(snapshot).load().await.unwrap();
     let mut files = Vec::new();
     for entry in manifests.entries() {
-        let manifest = entry.load_manifest(native.file_io()).await.unwrap();
+        let manifest = native.manifest_reader().read(entry).await.unwrap();
         files.extend(
             manifest
                 .entries()

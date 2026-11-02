@@ -199,7 +199,7 @@ mod tests {
     }
 
     fn spills(plan: &Arc<dyn ExecutionPlan>) -> usize {
-        let own = if plan.as_any().is::<AggregateExec>() {
+        let own = if plan.is::<AggregateExec>() {
             let metrics = plan.metrics().unwrap_or_default();
             metrics.spill_count().unwrap_or(0) + metrics.spilled_bytes().unwrap_or(0)
         } else {

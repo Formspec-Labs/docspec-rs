@@ -128,7 +128,7 @@ async fn physical_files(pin: &TablePin, pin_budget: &docspec::budget::Budget) ->
         .plan_files()
         .await
         .unwrap()
-        .map_ok(|task| task.data_file_path.clone())
+        .map_ok(|task| task.data_file_path().to_owned())
         .try_collect()
         .await
         .unwrap()

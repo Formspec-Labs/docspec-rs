@@ -257,7 +257,7 @@ pub(super) async fn export(
     )?;
     let previous_key: Option<Vec<u8>> = None;
     let hashed = HashedWriter {
-        inner: budget.scratch_writer(&temporary)?,
+        inner: temporary.open_writer()?,
         sha256: Sha256::new(),
         md5: Md5::new(),
         size: 0,
@@ -353,7 +353,8 @@ pub(super) async fn export(
         footer_bytes,
     };
     drop(writer);
-    temporary.inner().as_file().sync_all()?;
-    std::fs::hard_link(temporary.path(), path)?;
+    let scratch = Budget::scratch_path(temporary.as_ref())?;
+    std::fs::File::open(scratch)?.sync_all()?;
+    std::fs::hard_link(scratch, path)?;
     Ok(result)
 }

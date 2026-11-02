@@ -17,7 +17,7 @@ use datafusion::{
         function::{AccumulatorArgs, StateFieldsArgs},
     },
 };
-use std::{any::Any, cmp::Ordering, collections::BTreeMap, sync::Arc};
+use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct OrderSpec {
@@ -91,10 +91,6 @@ struct FirstValueByUdaf {
 }
 
 impl AggregateUDFImpl for FirstValueByUdaf {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         &self.name
     }
@@ -329,10 +325,6 @@ impl CollectDistinctWithProvenanceUdaf {
 }
 
 impl AggregateUDFImpl for CollectDistinctWithProvenanceUdaf {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         &self.name
     }

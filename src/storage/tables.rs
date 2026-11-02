@@ -10,11 +10,24 @@ use iceberg::{
     Catalog, MetadataLocation, TableIdent,
     spec::{
         FormatVersion, PartitionSpec, PrimitiveType, Schema, SortOrder, TableMetadata,
-        TableMetadataBuilder, Transform, Type, UnboundPartitionSpec,
+        TableMetadataBuilder, Transform, Type, UnboundPartitionField, UnboundPartitionSpec,
     },
     table::Table,
 };
 use std::{collections::BTreeSet, path::Path, sync::Arc};
+
+/// One single-source field of an unbound partition spec.
+pub(crate) fn unbound_partition_field(
+    source_id: i32,
+    name: impl Into<String>,
+    transform: Transform,
+) -> iceberg::Result<UnboundPartitionField> {
+    UnboundPartitionField::builder()
+        .source_ids(vec![source_id])
+        .name(name)
+        .transform(transform)
+        .build()
+}
 
 pub(crate) fn to_iceberg_transform(spec: &PartitionTransformSpec) -> Transform {
     match spec {
@@ -84,9 +97,12 @@ pub(crate) fn build_unbound_partition_spec(
                 "partition spec field names must be non-empty and distinct",
             ));
         }
-        builder = builder
-            .add_partition_field(source.id, field_name, to_iceberg_transform(&spec.transform))
-            .map_err(|_| unsupported_partition_spec("partition spec could not be constructed"))?;
+        builder =
+            unbound_partition_field(source.id, field_name, to_iceberg_transform(&spec.transform))
+                .and_then(|field| builder.add_partition_field(field))
+                .map_err(|_| {
+                    unsupported_partition_spec("partition spec could not be constructed")
+                })?;
     }
     let unbound = builder.build();
     validate_unbound_partition_spec(schema, &unbound)?;
@@ -375,14 +391,13 @@ impl CandidateWriter {
             ));
         }
         match self {
-            Self::Local => {
-                Ok(MetadataLocation::new_with_metadata(metadata.location(), metadata).to_string())
-            }
+            Self::Local => Ok(MetadataLocation::try_new_with_metadata(metadata)?.to_string()),
             #[cfg(feature = "remote")]
             Self::Remote(_, selected) => {
-                let location = selected.clone().unwrap_or_else(|| {
-                    MetadataLocation::new_with_metadata(metadata.location(), metadata)
-                });
+                let location = match selected {
+                    Some(selected) => selected.clone(),
+                    None => MetadataLocation::try_new_with_metadata(metadata)?,
+                };
                 let path = location.to_string();
                 let prefix = format!("{}/metadata/", metadata.location());
                 let filename = path.strip_prefix(&prefix);
@@ -613,11 +628,17 @@ mod tests {
             .build()
             .unwrap();
         let spec = UnboundPartitionSpec::builder()
-            .add_partition_field(10, "observed_at_month", Transform::Month)
+            .add_partition_field(
+                super::unbound_partition_field(10, "observed_at_month", Transform::Month).unwrap(),
+            )
             .unwrap()
-            .add_partition_field(20, "recorded_at_month", Transform::Month)
+            .add_partition_field(
+                super::unbound_partition_field(20, "recorded_at_month", Transform::Month).unwrap(),
+            )
             .unwrap()
-            .add_partition_field(30, "source_feed", Transform::Identity)
+            .add_partition_field(
+                super::unbound_partition_field(30, "source_feed", Transform::Identity).unwrap(),
+            )
             .unwrap()
             .build();
         let fresh = fresh_partitioned_metadata_at(&schema, "/tmp/news-lake-source", spec).unwrap();
@@ -686,15 +707,23 @@ mod tests {
 
         for valid in [
             UnboundPartitionSpec::builder()
-                .add_partition_field(10, "observed_bucket", Transform::Bucket(16))
+                .add_partition_field(
+                    super::unbound_partition_field(10, "observed_bucket", Transform::Bucket(16))
+                        .unwrap(),
+                )
                 .unwrap()
                 .build(),
             UnboundPartitionSpec::builder()
-                .add_partition_field(20, "title_trunc", Transform::Truncate(4))
+                .add_partition_field(
+                    super::unbound_partition_field(20, "title_trunc", Transform::Truncate(4))
+                        .unwrap(),
+                )
                 .unwrap()
                 .build(),
             UnboundPartitionSpec::builder()
-                .add_partition_field(10, "observed_year", Transform::Year)
+                .add_partition_field(
+                    super::unbound_partition_field(10, "observed_year", Transform::Year).unwrap(),
+                )
                 .unwrap()
                 .build(),
         ] {
@@ -705,42 +734,70 @@ mod tests {
         for invalid in [
             // Zero-bucket transform is not qualified.
             UnboundPartitionSpec::builder()
-                .add_partition_field(10, "observed_bucket_zero", Transform::Bucket(0))
+                .add_partition_field(
+                    super::unbound_partition_field(
+                        10,
+                        "observed_bucket_zero",
+                        Transform::Bucket(0),
+                    )
+                    .unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Zero-width truncate transform is not qualified.
             UnboundPartitionSpec::builder()
-                .add_partition_field(20, "title_trunc_zero", Transform::Truncate(0))
+                .add_partition_field(
+                    super::unbound_partition_field(20, "title_trunc_zero", Transform::Truncate(0))
+                        .unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Truncate on a Date column is not qualified.
             UnboundPartitionSpec::builder()
-                .add_partition_field(10, "observed_trunc", Transform::Truncate(4))
+                .add_partition_field(
+                    super::unbound_partition_field(10, "observed_trunc", Transform::Truncate(4))
+                        .unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Void transform must be rejected even though Iceberg treats all-void as is_unpartitioned().
             UnboundPartitionSpec::builder()
-                .add_partition_field(10, "observed_void", Transform::Void)
+                .add_partition_field(
+                    super::unbound_partition_field(10, "observed_void", Transform::Void).unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Month on a String column is invalid.
             UnboundPartitionSpec::builder()
-                .add_partition_field(20, "title_month", Transform::Month)
+                .add_partition_field(
+                    super::unbound_partition_field(20, "title_month", Transform::Month).unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Identity on a Double column is not qualified.
             UnboundPartitionSpec::builder()
-                .add_partition_field(30, "weight", Transform::Identity)
+                .add_partition_field(
+                    super::unbound_partition_field(30, "weight", Transform::Identity).unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Nested field source_id is not a top-level field.
             UnboundPartitionSpec::builder()
-                .add_partition_field(99, "nested_month", Transform::Month)
+                .add_partition_field(
+                    super::unbound_partition_field(99, "nested_month", Transform::Month).unwrap(),
+                )
                 .unwrap()
                 .build(),
             // Internal occurrence identity field cannot be partitioned on.
             UnboundPartitionSpec::builder()
-                .add_partition_field(50, super::super::identity::ORIGIN_FILE, Transform::Identity)
+                .add_partition_field(
+                    super::unbound_partition_field(
+                        50,
+                        super::super::identity::ORIGIN_FILE,
+                        Transform::Identity,
+                    )
+                    .unwrap(),
+                )
                 .unwrap()
                 .build(),
         ] {
@@ -774,10 +831,11 @@ mod tests {
             .add_default_partition_spec(
                 UnboundPartitionSpec::builder()
                     .add_partition_fields([UnboundPartitionField::builder()
-                        .source_id(10)
+                        .source_ids(vec![10])
                         .name("bad_part".to_owned())
                         .transform(bad_transform)
-                        .build()])
+                        .build()
+                        .unwrap()])
                     .unwrap()
                     .build(),
             )

@@ -6,8 +6,7 @@ use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
     common::{Statistics, stats::Precision},
     execution::{
-        TaskContext,
-        disk_manager::RefCountedTempFile,
+        SpillFile, SpillWriter, TaskContext,
         memory_pool::{MemoryConsumer, MemoryReservation},
     },
     logical_expr::{Expr, TableType},
@@ -23,7 +22,7 @@ use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties,
 };
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 /// Physical storage selected for a reusable SQL step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -40,7 +39,6 @@ struct Batches {
     retained: Arc<StepData>,
 }
 
-#[derive(Debug)]
 enum StepData {
     Memory {
         batches: Vec<RecordBatch>,
@@ -49,8 +47,20 @@ enum StepData {
     },
     Scratch {
         frame: Box<datafusion::dataframe::DataFrame>,
-        _file: RefCountedTempFile,
+        _file: Arc<dyn SpillFile>,
     },
+}
+// Spill files have no Debug; name the storage without dumping retained batches.
+impl std::fmt::Debug for StepData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Memory { batches, .. } => f
+                .debug_struct("Memory")
+                .field("batches", &batches.len())
+                .finish_non_exhaustive(),
+            Self::Scratch { .. } => f.debug_struct("Scratch").finish_non_exhaustive(),
+        }
+    }
 }
 impl PartitionStream for Batches {
     fn schema(&self) -> &SchemaRef {
@@ -92,9 +102,6 @@ struct ReservedTable {
 }
 #[async_trait::async_trait]
 impl TableProvider for ReservedTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> SchemaRef {
         self.table.schema()
     }
@@ -151,7 +158,7 @@ pub(super) async fn retain(
     let mut bytes = 0;
     let mut file = None;
     let mut writer_memory = None;
-    let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
+    let mut writer: Option<ArrowWriter<Box<dyn SpillWriter>>> = None;
     while let Some(batch) = stream.try_next().await? {
         rows += batch.num_rows();
         let size = batch.get_array_memory_size();
@@ -177,11 +184,8 @@ pub(super) async fn retain(
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
                 .build();
-            let mut spill = ArrowWriter::try_new(
-                budget.scratch_writer(&temporary)?,
-                schema.clone(),
-                Some(props),
-            )?;
+            let mut spill =
+                ArrowWriter::try_new(temporary.open_writer()?, schema.clone(), Some(props))?;
             for previous in batches.drain(..) {
                 super::encoding::write(
                     &mut spill,
@@ -234,7 +238,9 @@ pub(super) async fn retain(
             .schema_force_view_types = false;
         let frame = reader
             .read_parquet(
-                file.path().to_string_lossy().as_ref(),
+                Budget::scratch_path(file.as_ref())?
+                    .to_string_lossy()
+                    .as_ref(),
                 ParquetReadOptions::default().file_extension(""),
             )
             .await?;

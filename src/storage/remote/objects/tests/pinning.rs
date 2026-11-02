@@ -142,7 +142,9 @@ fn candidate_table(
 async fn configured_snapshot_reuses_inherited_files_without_payload_io() {
     let shared = "s3://bucket/owned/prior/data/shared.parquet";
     let (metadata, mut contents) = native_inventory_at(LIST, MANIFEST, shared).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let identities = contents
         .iter()
@@ -225,7 +227,9 @@ async fn configured_snapshot_reuses_inherited_files_without_payload_io() {
 #[tokio::test]
 async fn populated_pin_binds_native_inventory_and_identities_to_configured_backend() {
     let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let expected = contents
         .iter()
@@ -282,7 +286,9 @@ async fn populated_pin_binds_native_inventory_and_identities_to_configured_backe
     // Reuse the complete exact closure with an original owner. Native list and
     // manifest decoding still occurs once each; there are no identity GETs.
     let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let shared = contents
         .iter()
@@ -369,7 +375,9 @@ async fn populated_pin_guards_manifest_list_and_manifest_before_native_read() {
         ),
     ] {
         let (metadata, mut contents) = native_inventory(list, manifest).await;
-        let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+        let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+            .unwrap()
+            .to_string();
         contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
         let shared = if inherited {
             let bytes = contents.get(rejected).unwrap();
@@ -443,7 +451,9 @@ async fn populated_gzip_selected_metadata_preserves_absent_write_property_and_sh
         metadata.metadata_compression_codec().unwrap(),
         iceberg::compression::CompressionCodec::None
     );
-    let plain_location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let plain_location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     let location = format!(
         "{}.gz.metadata.json",
         plain_location.strip_suffix(".metadata.json").unwrap()
@@ -563,7 +573,9 @@ async fn populated_gzip_selected_metadata_preserves_absent_write_property_and_sh
 async fn configured_inspection_reuses_one_inventory_and_bounded_samples_then_streams_values() {
     use futures::TryStreamExt;
     let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let fixture = ReadFixture::inventory(contents);
     let objects = Objects::Remote(fixture.objects());
@@ -685,7 +697,9 @@ async fn configured_inspection_reuses_one_inventory_and_bounded_samples_then_str
 #[tokio::test]
 async fn configured_pin_open_and_availability_refuse_entire_scope_before_io() {
     let (metadata, mut contents) = native_inventory(LIST, MANIFEST).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let fixture = ReadFixture::inventory(contents);
     let objects = Objects::Remote(fixture.objects());
@@ -755,7 +769,9 @@ async fn configured_inspection_preserves_evolved_nullable_and_default_field_ids(
         .build()
         .unwrap()
         .metadata;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let fixture = ReadFixture::inventory(contents);
     let objects = Objects::Remote(fixture.objects());
@@ -837,7 +853,9 @@ async fn configured_inspection_preserves_evolved_nullable_and_default_field_ids(
 async fn configured_inspection_refuses_manifest_scope_before_native_decode() {
     let rejected = "s3://bucket/elsewhere/list.avro";
     let (metadata, mut contents) = native_inventory(rejected, MANIFEST).await;
-    let location = iceberg::MetadataLocation::new_with_metadata(ROOT, &metadata).to_string();
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata)
+        .unwrap()
+        .to_string();
     contents.insert(location.clone(), serde_json::to_vec(&metadata).unwrap());
     let identities = contents
         .iter()

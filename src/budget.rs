@@ -24,10 +24,8 @@ mod distinct;
 pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
 mod portable_aggregates;
 mod schema_metadata;
-mod scratch;
 mod subqueries;
 mod view_compaction;
-pub(crate) use scratch::ScratchWriter;
 
 /// Declared limits for one workspace execution host.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,7 +67,6 @@ pub struct Budget {
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
     retention_pool: Arc<dyn MemoryPool>,
-    scratch_writes: Arc<std::sync::Mutex<()>>,
 }
 impl Budget {
     /// Creates a shared pool after validating representable limits.
@@ -113,7 +110,6 @@ impl Budget {
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
             retention_pool: Arc::new(GreedyMemoryPool::new(limits.memory_bytes / 2 / 4)),
-            scratch_writes: Arc::default(),
             limits,
         })
     }
@@ -126,11 +122,18 @@ impl Budget {
         &self.retention_pool
     }
 
-    pub(crate) fn scratch_writer(
-        &self,
-        file: &datafusion::execution::disk_manager::RefCountedTempFile,
-    ) -> Result<ScratchWriter> {
-        ScratchWriter::new(file.clone(), self.clone())
+    /// Returns a scratch file's local path; this runtime creates only local files.
+    ///
+    /// The file's own writer (`SpillFile::open_writer`) charges the shared
+    /// scratch limit and refuses a write that would exceed it before writing.
+    ///
+    /// # Errors
+    /// Refuses a scratch file without a local path.
+    pub(crate) fn scratch_path(
+        file: &dyn datafusion::execution::SpillFile,
+    ) -> Result<&std::path::Path> {
+        file.path()
+            .ok_or_else(|| Error::refusal("scratch_path", "scratch file has no local path"))
     }
 
     pub(crate) fn context(&self) -> SessionContext {
@@ -442,14 +445,15 @@ mod tests {
             .disk_manager
             .create_tmp_file("physical guard")
             .unwrap();
-        let mut writer = budget.scratch_writer(&file).unwrap();
+        let path = Budget::scratch_path(file.as_ref()).unwrap().to_owned();
+        let mut writer = file.open_writer().unwrap();
         writer.write_all(&[1; 60]).unwrap();
         assert!(writer.write_all(&[2; 5]).is_err());
-        assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 60);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 60);
         assert_eq!(budget.runtime.disk_manager.used_disk_space(), 60);
         writer.write_all(&[3; 4]).unwrap();
         assert_eq!(
-            std::fs::read(file.path()).unwrap(),
+            std::fs::read(&path).unwrap(),
             [[1; 60].as_slice(), &[3; 4]].concat()
         );
         drop(writer);
@@ -475,11 +479,11 @@ mod tests {
             .disk_manager
             .create_tmp_file("second")
             .unwrap();
-        let mut one = budget.scratch_writer(&first).unwrap();
-        let mut two = budget.scratch_writer(&second).unwrap();
+        let mut one = first.open_writer().unwrap();
+        let mut two = second.open_writer().unwrap();
         one.write_all(&[0; 60]).unwrap();
         assert!(two.write_all(&[0; 41]).is_err());
-        assert_eq!(std::fs::metadata(second.path()).unwrap().len(), 0);
+        assert_eq!(second.size(), Some(0));
         two.write_all(&[0; 40]).unwrap();
         assert!(one.write_all(&[0]).is_err());
     }
@@ -508,16 +512,15 @@ mod tests {
         two.try_grow(4 << 20).unwrap();
         drop(two);
         assert_eq!(first.memory_pool.reserved(), 0);
-        let mut spill = first
+        let spill = first
             .disk_manager
             .create_tmp_file("shared accounting probe")
             .unwrap();
-        assert!(spill.path().starts_with(root.path()));
-        spill.inner().as_file().set_len(768).unwrap();
-        spill.update_disk_usage().unwrap();
+        let path = Budget::scratch_path(spill.as_ref()).unwrap().to_owned();
+        assert!(path.starts_with(root.path()));
+        std::io::Write::write_all(&mut spill.open_writer().unwrap(), &[0; 768]).unwrap();
         assert_eq!(second.disk_manager.used_disk_space(), 768);
         let retained = spill.clone();
-        let path = spill.path().to_owned();
         drop(spill);
         assert_eq!(first.disk_manager.used_disk_space(), 768);
         drop(retained);
@@ -526,39 +529,121 @@ mod tests {
     }
 
     #[test]
-    fn pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen() {
-        // Capability probe for DataFusion 53.1: quota failure updates global
-        // usage before the file's own charge, so dropping it cannot refund it.
-        // Keep this limitation explicit until a maintained dependency fixes it.
-        let limits = Limits {
+    fn native_spill_overrun_is_refused_without_a_phantom_charge() {
+        // DataFusion 53.1 charged a refused spill globally and never refunded
+        // it until the runtime reopened. 55's spill writer checks before it
+        // writes and refunds the refused charge; keep that guarantee probed.
+        use std::io::Write;
+        let budget = Budget::new(Limits {
             scratch_bytes: 16,
             ..Limits::default()
-        };
-        let budget = Budget::new(limits.clone()).unwrap();
+        })
+        .unwrap();
         let manager = &budget.runtime.disk_manager;
-        let mut spill = manager.create_tmp_file("quota overrun probe").unwrap();
-        spill.inner().as_file().set_len(17).unwrap();
-        assert!(spill.update_disk_usage().is_err());
-        let path = spill.path().to_owned();
+        let spill = manager.create_tmp_file("quota overrun probe").unwrap();
+        let path = Budget::scratch_path(spill.as_ref()).unwrap().to_owned();
+        assert!(spill.open_writer().unwrap().write_all(&[0; 17]).is_err());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(manager.used_disk_space(), 0);
         drop(spill);
         assert!(!path.exists());
-        assert_eq!(manager.used_disk_space(), 17);
         assert_eq!(manager.spilling_progress().active_files_count, 0);
-        let mut next = manager.create_tmp_file("retry after failure").unwrap();
-        next.inner().as_file().set_len(1).unwrap();
-        assert!(next.update_disk_usage().is_err());
+        let next = manager.create_tmp_file("retry after failure").unwrap();
+        next.open_writer().unwrap().write_all(&[0; 16]).unwrap();
+        assert_eq!(manager.used_disk_space(), 16);
         drop(next);
-        drop(budget);
-        let fresh = Budget::new(limits).unwrap();
-        let mut spill = fresh
-            .runtime
-            .disk_manager
-            .create_tmp_file("reopened runtime")
-            .unwrap();
-        spill.inner().as_file().set_len(1).unwrap();
-        spill.update_disk_usage().unwrap();
-        drop(spill);
-        assert_eq!(fresh.runtime.disk_manager.used_disk_space(), 0);
+        assert_eq!(manager.used_disk_space(), 0);
+    }
+
+    #[tokio::test]
+    async fn native_spills_write_view_columns_by_referenced_bytes() {
+        use arrow::{
+            array::{ArrayRef, AsArray, BinaryViewArray, Int64Array, StringViewArray},
+            compute::cast,
+            datatypes::DataType,
+            record_batch::RecordBatch,
+        };
+        use datafusion::{
+            datasource::MemTable,
+            physical_plan::{ExecutionPlan, collect},
+        };
+        fn spilled(plan: &Arc<dyn ExecutionPlan>) -> usize {
+            let own = plan
+                .metrics()
+                .and_then(|metrics| metrics.spilled_bytes())
+                .unwrap_or(0);
+            own + plan.children().into_iter().map(spilled).sum::<usize>()
+        }
+        // The aggregate and the sort spill each sorted run as batch_rows
+        // batches sharing the run's buffers. Arrow IPC writes every data buffer
+        // a view column references, so DataFusion 53.1 rewrote the whole run
+        // once per batch (ss-vuwa).
+        const ROWS: usize = 128 << 10;
+        // 28 bytes: out of line in a view.
+        let key = |value: usize| format!("receipt-{value:020}");
+        let budget = Budget::new(Limits {
+            compute_threads: 1,
+            memory_bytes: 16 << 20,
+            batch_rows: 1024,
+            ..Limits::default()
+        })
+        .unwrap();
+        let batches = (0..ROWS / 1024)
+            .map(|chunk| {
+                // Descending, so the sort reorders every row.
+                let keys = || (0..1024).map(move |row| key(ROWS - chunk * 1024 - row));
+                RecordBatch::try_from_iter([
+                    (
+                        "k",
+                        Arc::new(StringViewArray::from_iter_values(keys())) as ArrayRef,
+                    ),
+                    ("b", Arc::new(BinaryViewArray::from_iter_values(keys()))),
+                    ("n", Arc::new(Int64Array::from_iter_values(0..1024))),
+                ])
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let input = batches
+            .iter()
+            .map(RecordBatch::get_array_memory_size)
+            .sum::<usize>();
+        let context = budget.context();
+        let table = MemTable::try_new(batches[0].schema(), vec![batches]).unwrap();
+        context.register_table("t", Arc::new(table)).unwrap();
+        for (sql, expected) in [
+            (
+                "SELECT k FROM t GROUP BY k, n HAVING count(*) > 1",
+                Vec::new(),
+            ),
+            ("SELECT b FROM t ORDER BY b", (1..=ROWS).map(key).collect()),
+        ] {
+            let plan = context
+                .sql(sql)
+                .await
+                .unwrap()
+                .create_physical_plan()
+                .await
+                .unwrap();
+            let output = collect(plan.clone(), context.task_ctx()).await.unwrap();
+            let values = output
+                .iter()
+                .flat_map(|batch| {
+                    let values = cast(batch.column(0), &DataType::BinaryView).unwrap();
+                    values
+                        .as_binary_view()
+                        .iter()
+                        .map(|value| String::from_utf8(value.unwrap().to_vec()).unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            assert!(values == expected, "{sql} returned other values");
+            let spilled = spilled(&plan);
+            assert!(spilled > 0, "{sql} did not spill");
+            assert!(
+                spilled < input,
+                "{sql} spilled {spilled} B for {input} B of input"
+            );
+        }
     }
 
     #[cfg(unix)]

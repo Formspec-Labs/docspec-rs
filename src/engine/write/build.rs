@@ -524,7 +524,7 @@ impl Engine {
                 let bytes = storage::bounded_json(&metadata, limit)?;
                 let metadata_ref = ObjectRef {
                     owner,
-                    path: MetadataLocation::new_with_metadata(&location, &metadata).to_string(),
+                    path: MetadataLocation::try_new_with_metadata(&metadata)?.to_string(),
                     digest: blake3::hash(&bytes).to_hex().to_string(),
                     bytes: bytes.len() as u64,
                 };

@@ -25,7 +25,7 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    container: rust:1.94.0-bookworm
+    container: rust:1.95.0-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Build

@@ -301,7 +301,7 @@ impl Job {
         table: iceberg::table::Table,
         memory: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<()> {
-        use iceberg_datafusion::table::IcebergStaticTableProvider;
+        use iceberg_datafusion::IcebergStaticTableProvider;
         let observation = NativeInputObservation::from_table(name, &table);
         let provider = match table.metadata().current_snapshot_id() {
             Some(snapshot) => {
@@ -329,7 +329,6 @@ impl Job {
     pub async fn native_input_observation(&self, name: &str) -> Result<NativeInputObservation> {
         let provider = self.context.table_provider(name).await?;
         provider
-            .as_any()
             .downcast_ref::<native::AdmittedTable>()
             .map(|table| table.observation.clone())
             .ok_or_else(|| {

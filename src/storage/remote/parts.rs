@@ -144,7 +144,7 @@ impl FileWrite for FixedPartWriter {
         Ok(())
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<iceberg::io::FileMetadata> {
         if !self.pending.is_empty() {
             self.inner.write(self.pending.split().freeze()).await?;
         }

@@ -807,6 +807,8 @@ mod tests {
         changed_source.logical_metadata = Some(source.metadata.clone());
         // A forged logical-equivalence marker must not let a changed read
         // default pass only because this origins object was checked earlier.
+        // Iceberg now rejects an initial default in v2 metadata while decoding
+        // it (a v3 feature), so the forged file fails before schema comparison.
         assert_eq!(
             checks
                 .check(
@@ -823,7 +825,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code(),
-            "invalid_group"
+            "invalid_json"
         );
         assert_eq!(
             ScalarOriginChecks::default()
@@ -841,7 +843,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code(),
-            "invalid_group"
+            "invalid_json"
         );
         let retained_bytes = checks.bytes;
         for path in [&object.path, &source.metadata.path, &group.metadata.path] {

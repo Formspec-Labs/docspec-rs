@@ -247,11 +247,9 @@ pub(super) async fn count(table: &Table, predicate: &str) -> i64 {
         .register_table(
             "current",
             Arc::new(
-                iceberg_datafusion::table::IcebergStaticTableProvider::try_new_from_table(
-                    table.clone(),
-                )
-                .await
-                .unwrap(),
+                iceberg_datafusion::IcebergStaticTableProvider::try_new_from_table(table.clone())
+                    .await
+                    .unwrap(),
             ),
         )
         .unwrap();

@@ -218,13 +218,22 @@ async fn native_union_conflicting_metadata_does_not_fabricate_field_identity() {
     );
 }
 #[tokio::test]
-async fn native_try_cast_does_not_inherit_source_field_identity() {
+async fn native_try_cast_keeps_declared_field_identity() {
     let root = tempfile::tempdir().unwrap();
     let job = metadata_job(root.path()).await;
     let sql = "SELECT try_cast(id AS DOUBLE) AS converted FROM first";
     let frame = job.sql(sql).await.unwrap();
     let declared = frame.schema().inner().clone();
-    assert!(declared.field(0).metadata().is_empty());
+    // DataFusion 55 carries source field metadata through type-only casts, so
+    // TRY_CAST now keeps the source's Parquet field ID as CAST always did.
+    assert_eq!(
+        declared
+            .field(0)
+            .metadata()
+            .get("PARQUET:field_id")
+            .map(String::as_str),
+        Some("1")
+    );
     assert!(declared.field(0).is_nullable());
     for batch in frame.collect().await.unwrap() {
         assert_eq!(batch.schema(), declared);

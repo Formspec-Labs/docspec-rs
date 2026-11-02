@@ -3,17 +3,17 @@
 use arrow::datatypes::SchemaRef;
 use datafusion::{
     catalog::{Session, TableProvider},
-    common::{Result, Statistics},
+    common::{Result, Statistics, tree_node::TreeNodeRecursion},
     execution::TaskContext,
     logical_expr::{Expr, TableProviderFilterPushDown, TableType},
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
-        stream::RecordBatchStreamAdapter,
+        ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr, PlanProperties,
+        SendableRecordBatchStream, StatisticsArgs, stream::RecordBatchStreamAdapter,
     },
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
 /// Available summary facts from one input's exact selected native metadata.
@@ -63,9 +63,6 @@ pub(super) struct AdmittedTable {
 }
 #[async_trait::async_trait]
 impl TableProvider for AdmittedTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> SchemaRef {
         self.provider.schema()
     }
@@ -111,9 +108,6 @@ impl ExecutionPlan for AdmittedPlan {
     fn name(&self) -> &str {
         "NativeMetadataAdmission"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
@@ -152,8 +146,21 @@ impl ExecutionPlan for AdmittedPlan {
             }),
         )))
     }
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.input.partition_statistics(partition)
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        _args: &StatisticsArgs,
+    ) -> Result<Arc<Statistics>> {
+        Ok(Arc::clone(&input_stats[0]))
     }
 }
 
@@ -192,8 +199,11 @@ mod tests {
         let mut stream = frame.execute_stream().await.unwrap();
         assert_eq!(sem.available_permits(), 0);
         assert_eq!(stream.next().await.unwrap().unwrap().num_rows(), 1);
-        assert!(stream.next().await.is_none());
         assert_eq!(sem.available_permits(), 0);
+        // DataFusion 55's stream adapter drops a finished inner stream, so the
+        // last owner releases the admission at end of stream, not at drop.
+        assert!(stream.next().await.is_none());
+        assert_eq!(sem.available_permits(), 1);
         drop(stream);
         assert_eq!(sem.available_permits(), 1);
     }

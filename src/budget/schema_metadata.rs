@@ -5,27 +5,30 @@ use arrow::{
     record_batch::{RecordBatch, RecordBatchOptions},
 };
 use datafusion::{
+    catalog::Session,
     common::{
         DFSchemaRef, Result,
         config::ConfigOptions,
         internal_err,
         tree_node::{Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter},
     },
-    execution::{SessionState, TaskContext, context::QueryPlanner},
+    execution::{TaskContext, context::QueryPlanner},
     logical_expr::{
         Expr, LogicalPlan,
         logical_plan::{Extension, Union, UserDefinedLogicalNode, UserDefinedLogicalNodeCore},
+        physical_planning_context::PhysicalPlanningContext,
     },
     optimizer::analyzer::AnalyzerRule,
     physical_expr::expressions::Column,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
-        SendableRecordBatchStream, projection::ProjectionExec, stream::RecordBatchStreamAdapter,
+        ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
+        PhysicalExpr, PlanProperties, SendableRecordBatchStream, StatisticsArgs,
+        projection::ProjectionExec, stream::RecordBatchStreamAdapter,
     },
     physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner},
 };
 use futures::StreamExt;
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 #[derive(Debug)]
 pub(super) struct Planner;
@@ -95,8 +98,9 @@ impl Reconcile {
         if wrap && let LogicalPlan::Projection(projection) = &plan {
             for expr in &projection.expr {
                 if expr.exists(|expr| Ok(matches!(expr, Expr::TryCast(_))))? {
-                    // Native TryCastExpr::return_field retains input tags;
-                    // logical TRY_CAST declares a new field without them.
+                    // DataFusion 53.1's native TryCastExpr kept input tags its
+                    // logical TRY_CAST dropped; 55 keeps them in both. Batches
+                    // still follow the declared field.
                     return Ok(Transformed::yes(wrapped(plan)));
                 }
             }
@@ -150,13 +154,13 @@ impl QueryPlanner for Planner {
     async fn create_physical_plan(
         &self,
         plan: &LogicalPlan,
-        state: &SessionState,
+        session: &dyn Session,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // This hook runs after native logical optimization. Keep all native
         // physical planning and checks; only bridge the metadata discrepancy.
         let plan = normalize(plan.clone(), true)?;
         DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(Self)])
-            .create_physical_plan(&plan, state)
+            .create_physical_plan(&plan, session)
             .await
     }
 }
@@ -204,7 +208,8 @@ impl ExtensionPlanner for Planner {
         node: &dyn UserDefinedLogicalNode,
         _logical_inputs: &[&LogicalPlan],
         inputs: &[Arc<dyn ExecutionPlan>],
-        _state: &SessionState,
+        _session: &dyn Session,
+        _planning_ctx: &PhysicalPlanningContext,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         let Some(node) = node.as_any().downcast_ref::<DeclaredSchema>() else {
             return Ok(None);
@@ -258,11 +263,14 @@ impl ExecutionPlan for MetadataExec {
     fn name(&self) -> &str {
         "DeclaredSchema"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
+    }
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
     }
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![&self.input]
@@ -300,11 +308,15 @@ impl ExecutionPlan for MetadataExec {
             stream,
         )))
     }
-    fn partition_statistics(
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+    fn statistics_from_inputs(
         &self,
-        partition: Option<usize>,
-    ) -> Result<datafusion::common::Statistics> {
-        self.input.partition_statistics(partition)
+        input_stats: &[Arc<datafusion::common::Statistics>],
+        _args: &StatisticsArgs,
+    ) -> Result<Arc<datafusion::common::Statistics>> {
+        Ok(Arc::clone(&input_stats[0]))
     }
     fn try_swapping_with_projection(
         &self,
@@ -312,11 +324,7 @@ impl ExecutionPlan for MetadataExec {
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         // Column pruning is metadata-neutral. Keep expression evaluation in
         // the existing admitted projection path rather than creating it here.
-        if !projection
-            .expr()
-            .iter()
-            .all(|p| p.expr.as_any().is::<Column>())
-        {
+        if !projection.expr().iter().all(|p| p.expr.is::<Column>()) {
             return Ok(None);
         }
         let input = Arc::new(ProjectionExec::try_new(

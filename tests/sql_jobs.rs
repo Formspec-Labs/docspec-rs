@@ -681,11 +681,11 @@ async fn joins_two_pinned_tables_with_file_and_receipt() {
     let description = datafusion::physical_plan::displayable(plan.as_ref())
         .indent(true)
         .to_string();
+    // apache/datafusion-iceberg plans a DataSourceExec, not IcebergTableScan.
     assert!(
-        description.contains("IcebergTableScan projection:[id]"),
+        description.contains("format=iceberg, projection=[id], predicate=id = 1"),
         "{description}"
     );
-    assert!(!description.contains("predicate:[]"), "{description}");
     job.register_parquet("f", &root.path().join("input.parquet"))
         .await
         .unwrap();

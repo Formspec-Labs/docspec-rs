@@ -22,7 +22,8 @@ use datafusion::{
     },
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+        ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties,
+        SendableRecordBatchStream, StatisticsArgs,
         aggregates::{AggregateExec, AggregateInputMode, PhysicalGroupBy},
         filter::{FilterExec, FilterExecBuilder},
         joins::{
@@ -31,6 +32,7 @@ use datafusion::{
         },
         metrics::{ExecutionPlanMetricsSet, MetricsSet},
         projection::ProjectionExec,
+        replace_children_if_necessary,
         sorts::{
             partial_sort::PartialSortExec, sort::SortExec,
             sort_preserving_merge::SortPreservingMergeExec,
@@ -40,7 +42,6 @@ use datafusion::{
 };
 use futures::TryStreamExt;
 use std::{
-    any::Any,
     fmt,
     hash::{Hash, Hasher},
     sync::Arc,
@@ -95,7 +96,7 @@ fn hint(error: &DataFusionError) -> Option<usize> {
 fn bounded(expr: &Arc<dyn PhysicalExpr>) -> Result<Option<usize>> {
     let mut limit = None;
     expr.apply(|expr| {
-        if let Some(function) = expr.as_any().downcast_ref::<ScalarFunctionExpr>()
+        if let Some(function) = expr.downcast_ref::<ScalarFunctionExpr>()
             && let Some(bytes) = functions::byte_limit(function.fun())
         {
             limit = Some(limit.map_or(bytes, |old: usize| old.min(bytes)));
@@ -138,9 +139,6 @@ pub(super) struct FittedTable {
 }
 #[async_trait::async_trait]
 impl TableProvider for FittedTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> arrow::datatypes::SchemaRef {
         self.provider.schema()
     }
@@ -178,7 +176,6 @@ struct FittedProjection {
 impl FittedProjection {
     fn new(native: Arc<dyn ExecutionPlan>, limit: usize) -> Result<Self> {
         let projection = native
-            .as_any()
             .downcast_ref::<ProjectionExec>()
             .expect("native projection");
         let mut properties = projection.properties().as_ref().clone();
@@ -190,7 +187,6 @@ impl FittedProjection {
                 .enumerate()
                 .all(|(index, expr)| {
                     expr.expr
-                        .as_any()
                         .downcast_ref::<Column>()
                         .is_some_and(|column| column.index() == index)
                         && &expr.alias == input_schema.field(index).name()
@@ -202,7 +198,7 @@ impl FittedProjection {
             for (index, expr) in projection.expr().iter().enumerate().skip(inputs) {
                 let mut immutable = true;
                 expr.expr.apply(|expr| {
-                    if let Some(function) = expr.as_any().downcast_ref::<ScalarFunctionExpr>() {
+                    if let Some(function) = expr.downcast_ref::<ScalarFunctionExpr>() {
                         immutable &= function.fun().signature().volatility
                             == datafusion::logical_expr::Volatility::Immutable;
                     }
@@ -237,14 +233,24 @@ impl ExecutionPlan for FittedProjection {
     fn name(&self) -> &str {
         "ByteFittedProjection"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.native.partition_statistics(partition)
+    fn apply_expressions(
+        &self,
+        f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        self.native.apply_expressions(f)
+    }
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        self.native.child_stats_requests(partition)
+    }
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        args: &StatisticsArgs,
+    ) -> Result<Arc<Statistics>> {
+        self.native.statistics_from_inputs(input_stats, args)
     }
     fn benefits_from_input_partitioning(&self) -> Vec<bool> {
         self.native.benefits_from_input_partitioning()
@@ -269,7 +275,7 @@ impl ExecutionPlan for FittedProjection {
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(Self::new(
-            self.native.clone().with_new_children(children)?,
+            replace_children_if_necessary(self.native.clone(), children)?,
             self.limit,
         )?))
     }
@@ -340,7 +346,6 @@ impl ExecutionPlan for FittedProjection {
 
 fn fit_projection(native: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>> {
     let projection = native
-        .as_any()
         .downcast_ref::<ProjectionExec>()
         .expect("native projection");
     let mut limit = None;
@@ -370,9 +375,6 @@ impl ExecutionPlan for FittingInput {
     fn name(&self) -> &str {
         "FunctionFittingInput"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
@@ -382,8 +384,21 @@ impl ExecutionPlan for FittingInput {
     fn maintains_input_order(&self) -> Vec<bool> {
         vec![true]
     }
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.input.partition_statistics(partition)
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        _args: &StatisticsArgs,
+    ) -> Result<Arc<Statistics>> {
+        Ok(Arc::clone(&input_stats[0]))
     }
     fn supports_limit_pushdown(&self) -> bool {
         true
@@ -442,7 +457,7 @@ impl PhysicalOptimizerRule for FitProjections {
             .transform_up(|plan| {
                 // The native pass first extracts single-side join expressions,
                 // then pushes projections into scans in that same invocation.
-                if let Some(join) = plan.as_any().downcast_ref::<NestedLoopJoinExec>()
+                if let Some(join) = plan.downcast_ref::<NestedLoopJoinExec>()
                     && let Some(filter) = join.filter()
                     && bounded(filter.expression())?.is_some()
                 {
@@ -451,7 +466,7 @@ impl PhysicalOptimizerRule for FitProjections {
                         .children()
                         .into_iter()
                         .map(|child| {
-                            if child.as_any().is::<FittingInput>() {
+                            if child.is::<FittingInput>() {
                                 child.clone()
                             } else {
                                 changed = true;
@@ -462,10 +477,12 @@ impl PhysicalOptimizerRule for FitProjections {
                         })
                         .collect();
                     if changed {
-                        return Ok(Transformed::yes(plan.with_new_children(children)?));
+                        return Ok(Transformed::yes(replace_children_if_necessary(
+                            plan, children,
+                        )?));
                     }
                 }
-                if plan.as_any().is::<ProjectionExec>() {
+                if plan.is::<ProjectionExec>() {
                     let fitted = fit_projection(plan.clone())?;
                     if !Arc::ptr_eq(&fitted, &plan) {
                         return Ok(Transformed::yes(fitted));
@@ -500,9 +517,6 @@ impl fmt::Display for FittedPredicate {
     }
 }
 impl PhysicalExpr for FittedPredicate {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn data_type(&self, schema: &Schema) -> Result<DataType> {
         self.native.data_type(schema)
     }
@@ -641,10 +655,10 @@ impl PhysicalOptimizerRule for FitFunctions {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(plan
             .transform_up(|plan| {
-                if plan.as_any().is::<ProjectionExec>() {
+                if plan.is::<ProjectionExec>() {
                     return Ok(Transformed::yes(fit_projection(plan)?));
                 }
-                if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>()
+                if let Some(join) = plan.downcast_ref::<HashJoinExec>()
                     && let Some(filter) = join.filter()
                     && let Some(filter) = fit_join_filter(filter)?
                 {
@@ -655,7 +669,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                     )
                         as Arc<dyn ExecutionPlan>));
                 }
-                if let Some(join) = plan.as_any().downcast_ref::<NestedLoopJoinExec>()
+                if let Some(join) = plan.downcast_ref::<NestedLoopJoinExec>()
                     && let Some(filter) = join.filter()
                     && let Some(filter) = fit_join_filter(filter)?
                 {
@@ -666,7 +680,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                     )
                         as Arc<dyn ExecutionPlan>));
                 }
-                if let Some(join) = plan.as_any().downcast_ref::<SortMergeJoinExec>()
+                if let Some(join) = plan.downcast_ref::<SortMergeJoinExec>()
                     && let Some(filter) = join.filter()
                     && let Some(filter) = fit_join_filter(filter)?
                 {
@@ -682,7 +696,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                         as Arc<dyn ExecutionPlan>));
                 }
 
-                if let Some(filter) = plan.as_any().downcast_ref::<FilterExec>()
+                if let Some(filter) = plan.downcast_ref::<FilterExec>()
                     && bounded(filter.predicate())?.is_some()
                 {
                     let columns = filter.input().schema().fields().len();
@@ -698,7 +712,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                         Arc::new(builder.build()?) as Arc<dyn ExecutionPlan>
                     ));
                 }
-                if let Some(sort) = plan.as_any().downcast_ref::<SortExec>() {
+                if let Some(sort) = plan.downcast_ref::<SortExec>() {
                     let mut hoist = Hoist::new(sort.input().clone());
                     let order = sort
                         .expr()
@@ -725,7 +739,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                             as Arc<dyn ExecutionPlan>));
                     }
                 }
-                if let Some(sort) = plan.as_any().downcast_ref::<SortPreservingMergeExec>() {
+                if let Some(sort) = plan.downcast_ref::<SortPreservingMergeExec>() {
                     let mut hoist = Hoist::new(sort.input().clone());
                     let order = hoist.ordering(sort.expr())?;
                     if hoist.changed {
@@ -739,7 +753,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                             as Arc<dyn ExecutionPlan>));
                     }
                 }
-                if let Some(sort) = plan.as_any().downcast_ref::<PartialSortExec>() {
+                if let Some(sort) = plan.downcast_ref::<PartialSortExec>() {
                     let mut hoist = Hoist::new(sort.input().clone());
                     let order = hoist.ordering(sort.expr())?;
                     if hoist.changed {
@@ -758,7 +772,7 @@ impl PhysicalOptimizerRule for FitFunctions {
                             as Arc<dyn ExecutionPlan>));
                     }
                 }
-                if let Some(aggregate) = plan.as_any().downcast_ref::<AggregateExec>() {
+                if let Some(aggregate) = plan.downcast_ref::<AggregateExec>() {
                     if aggregate.mode().input_mode() != AggregateInputMode::Raw {
                         return Ok(Transformed::no(plan));
                     }

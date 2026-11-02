@@ -17,7 +17,6 @@ use datafusion::{
 };
 use jiter::{Jiter, Peek};
 use std::{
-    any::Any,
     collections::HashMap,
     fmt,
     hash::{Hash, Hasher},
@@ -52,7 +51,7 @@ fn literal(expr: &Expr) -> Result<Option<&str>> {
         Expr::Literal(value, _) => string(value).map(Some),
         Expr::Cast(c)
             if matches!(
-                c.data_type,
+                c.field.data_type(),
                 DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
             ) =>
         {
@@ -193,14 +192,10 @@ pub(super) fn register(context: &mut SessionContext, budget: &Budget) {
 pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
     function
         .inner()
-        .as_any()
         .downcast_ref::<Projection>()
         .map(|function| function.budget.limits.max_batch_bytes)
 }
 impl ScalarUDFImpl for Projection {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "json_get_many"
     }

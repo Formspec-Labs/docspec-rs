@@ -98,10 +98,11 @@ fn print_nodes(plan: &dyn ExecutionPlan, path: &str) -> Result<()> {
     println!(
         "node={path}; name={}; statistics={:?}; schema={:?}",
         plan.name(),
-        plan.partition_statistics(None)?,
+        datafusion::physical_plan::StatisticsContext::new()
+            .compute(plan, &datafusion::physical_plan::StatisticsArgs::new())?,
         plan.schema()
     );
-    if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
+    if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
         println!(
             "node={path}; join_type={:?}; partition_mode={:?}; null_equality={:?}; build_child={path}/0; probe_child={path}/1",
             join.join_type(),
