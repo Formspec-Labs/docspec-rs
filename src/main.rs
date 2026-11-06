@@ -5,7 +5,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_evidence, read_group, read_receipts, verify_input_coverage, verify_release_at},
+    engine::{
+        ManagedBuildCommand, NativeVersionRead, read_evidence, read_group, read_receipts,
+        verify_input_coverage, verify_release_at,
+    },
     evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
@@ -120,6 +123,12 @@ struct ReleaseOutputArgs {
 enum Command {
     /// Run a declarative multi-input SQL job without a lifecycle workspace.
     Job(SpecArg),
+    /// Prepare a calculation using schemas only, with optional Substrait output.
+    JobPlan(SpecArg),
+    /// Prepare, qualify, select or reconcile a protected local Build.
+    ManagedBuild(SpecArg),
+    /// Stream an exact protected source version as Arrow IPC.
+    ReadVersion(SpecArg),
     /// Upload one known local file with a create-only single PUT.
     #[cfg(feature = "remote")]
     CreateFile(SpecArg),
@@ -543,10 +552,14 @@ async fn async_main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse_from(normalize_cli_args(std::env::args_os()));
     check_startup(&cli)?;
-    if matches!(&cli.command, Command::Job(_)) && cli.limits.is_none() {
+    if matches!(
+        &cli.command,
+        Command::Job(_) | Command::JobPlan(_) | Command::ManagedBuild(_) | Command::ReadVersion(_)
+    ) && cli.limits.is_none()
+    {
         return Err(docspec::Error::refusal(
             "invalid_budget",
-            "SQL job requires --limits for its execution host",
+            "execution profile requires --limits for its execution host",
         )
         .into());
     }
@@ -579,6 +592,19 @@ async fn async_main() -> anyhow::Result<()> {
             print_json(
                 &serde_json::json!({"result":result,"destination":spec.destination,"sha256":spec.sha256,"md5":spec.md5,"size":spec.size}),
             )?;
+        }
+        Command::JobPlan(SpecArg { spec }) => {
+            let spec: docspec::job::JobPlanSpec = read_json(spec)?;
+            match spec.prepare(limits).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
         }
         Command::Job(SpecArg { spec }) => {
             let spec = read_json::<docspec::job::JobSpec>(spec)?;
@@ -746,6 +772,39 @@ async fn execute_engine_command(
         }
         Command::Plan(SpecArg { spec }) => {
             print_json(&engine.plan(&read_json::<RunSpec>(spec)?).await?)?
+        }
+        Command::ManagedBuild(SpecArg { spec }) => {
+            let request = read_json::<ManagedBuildCommand>(spec)?;
+            let (dataset, operation) = request.identity();
+            let reconcile = ManagedBuildCommand::Inspect {
+                dataset: dataset.clone(),
+                operation: operation.clone(),
+            };
+            match engine.managed_build(request).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    let completed = engine.managed_build(reconcile).await.ok();
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "completed": completed,
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
+        }
+        Command::ReadVersion(SpecArg { spec }) => {
+            let request: NativeVersionRead = read_json(spec)?;
+            let receipt = engine
+                .write_source_version(&request.version, std::io::stdout())
+                .await?;
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(request.receipt_path)?;
+            serde_json::to_writer(file, &receipt)?;
+            engine.shutdown().await?;
         }
         Command::Run(SpecArg { spec }) | Command::Resume(SpecArg { spec }) => {
             print_json(&engine.run(&read_json::<RunSpec>(spec)?).await?)?
@@ -1378,7 +1437,7 @@ async fn write_stream(
     output: PathBuf,
     mut stream: datafusion::physical_plan::SendableRecordBatchStream,
 ) -> anyhow::Result<()> {
-    let file = std::fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(output)?;

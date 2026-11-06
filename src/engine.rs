@@ -48,6 +48,9 @@ pub use inputs::verify_input_coverage;
 mod intake;
 mod key_pruning;
 pub(crate) mod locations;
+mod managed_build;
+#[doc(inline)]
+pub use managed_build::{ManagedBuildCommand, NativeReadReceipt, NativeVersionRead};
 mod pipeline;
 mod planner;
 #[cfg(test)]

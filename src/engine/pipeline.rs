@@ -8,6 +8,7 @@ use super::{
     ValidatedReadback, admission, backfill,
     changes::verify_changes,
     completion_records, evidence, inputs, locations,
+    managed_build::QualificationPolicy,
     planner::{
         captured_manifest, check_authority, check_base, check_definition, check_group_rebuild,
         check_preparation, check_update_eligibility, conflicting_operation, fingerprint, phase_key,
@@ -107,7 +108,7 @@ impl Engine {
                 .await?;
         }
         let request = fingerprint(spec)?;
-        let result = self.prepare_and_select(spec, stop).await;
+        let result = self.prepare_and_select(spec, stop, None).await;
         if result
             .as_ref()
             .is_err_and(|error| error.code() != "injected_failure")
@@ -122,6 +123,10 @@ impl Engine {
                 .get(&view, &format!("operation/{}", spec.operation()))
                 .await?;
             if operation.is_some_and(|operation| operation.request_digest == request)
+                && self
+                    .initial_qualification(&view, spec.operation())
+                    .await?
+                    .is_none()
                 && let Some(completed) = lifecycle
                     .get(&view, &format!("result/{}", spec.operation()))
                     .await?
@@ -476,13 +481,17 @@ impl Engine {
         &'a self,
         spec: &'a OperationRequest,
         stop: Option<&'a str>,
+        policy: Option<&'a QualificationPolicy>,
     ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
         // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             validate_request(spec)?;
             let request = fingerprint(spec)?;
             let lifecycle = &self.inner.lifecycle;
-            let operation = match self.admit_or_resume_operation(spec, &request).await? {
+            let operation = match self
+                .admit_or_resume_operation(spec, &request, policy)
+                .await?
+            {
                 AdmissionOutcome::Completed(result) => return Ok(result),
                 AdmissionOutcome::Admitted(operation) => operation,
             };
@@ -506,7 +515,11 @@ impl Engine {
                 .await?
             {
                 stop_after(stop, "readback")?;
-                return self.select_prepared(spec, &operation, retained, stop).await;
+                return if policy.is_some() {
+                    Ok(retained.value)
+                } else {
+                    self.select_prepared(spec, &operation, retained, stop).await
+                };
             }
 
             let PreparedSource {
@@ -699,7 +712,11 @@ impl Engine {
                 )
                 .await?;
             stop_after(stop, "readback")?;
-            self.select_prepared(spec, &operation, release, stop).await
+            if policy.is_some() {
+                Ok(release.value)
+            } else {
+                self.select_prepared(spec, &operation, release, stop).await
+            }
         })
     }
 
@@ -722,6 +739,7 @@ impl Engine {
         &self,
         spec: &OperationRequest,
         request: &str,
+        policy: Option<&QualificationPolicy>,
     ) -> Result<AdmissionOutcome> {
         let lifecycle = &self.inner.lifecycle;
         let mut prepared: Option<admission::PreparedAdmission> = None;
@@ -737,6 +755,18 @@ impl Engine {
             let old: Option<Operation> = lifecycle
                 .get(&view, &format!("operation/{}", spec.operation()))
                 .await?;
+            if old.is_some()
+                && self
+                    .initial_qualification(&view, spec.operation())
+                    .await?
+                    .as_ref()
+                    != policy
+            {
+                return Err(Error::refusal(
+                    "qualification_policy_mismatch",
+                    "operation was admitted with a different qualification policy or mode",
+                ));
+            }
             if old.as_ref().is_some_and(|o| o.request_digest != request) {
                 return Err(conflicting_operation());
             }
@@ -771,6 +801,9 @@ impl Engine {
                 lifecycle.get(&view, "authority").await?.unwrap_or_default();
             self.validate_operation_eligibility(&view, &mut authority, spec, true)
                 .await?;
+            if let Some(policy) = policy {
+                policy.check_authority(&authority)?;
+            }
             let Some(protected) = &prepared else {
                 // Unbased builds retain only the ordering receipt of the
                 // previous selection; no previous payload is consumed.
@@ -875,6 +908,12 @@ impl Engine {
             ];
             if !composition {
                 records.push(record("authority", &authority)?);
+            }
+            if let Some(policy) = policy {
+                records.push(record(
+                    super::managed_build::initial_policy_key(spec.operation()),
+                    policy,
+                )?);
             }
             protected.records(&view, spec, &mut records)?;
             lifecycle.commit(&view, records).await?;

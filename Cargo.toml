@@ -35,6 +35,7 @@ path = "tests/sql_process_memory.rs"
 
 [features]
 test-util = []
+substrait = ["dep:datafusion-substrait", "dep:prost", "dep:substrait"]
 remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store", "dep:typetag"]
 
 [dependencies]
@@ -47,6 +48,9 @@ blake3 = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 datafusion = "=53.1.0"
+datafusion-substrait = { version = "=53.1.0", default-features = false, optional = true }
+prost = { version = "=0.14.4", optional = true }
+substrait = { version = "=0.62.2", features = ["serde"], optional = true }
 datafusion-functions-json = "=0.53.1"
 url = "=2.5.8"
 percent-encoding = "=2.3.2"

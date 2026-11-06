@@ -55,6 +55,15 @@ impl NativeInputObservation {
     }
 }
 
+/// Exact native version and interpreted schema admitted by a bounded job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeVersionObservation {
+    pub name: String,
+    pub version: crate::model::VersionRef,
+    pub schema_id: i32,
+    pub schema: arrow::datatypes::Schema,
+}
+
 #[derive(Debug)]
 pub(super) struct AdmittedTable {
     pub provider: Arc<dyn TableProvider>,

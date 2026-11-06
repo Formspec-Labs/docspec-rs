@@ -11,8 +11,11 @@ mod json_many;
 mod materialized;
 pub(crate) mod metrics;
 mod native;
+mod plan;
 mod query_result;
 mod spec;
+#[cfg(feature = "substrait")]
+mod substrait;
 mod table_operations;
 pub mod tables;
 
@@ -32,7 +35,9 @@ pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
 #[doc(inline)]
-pub use native::NativeInputObservation;
+pub use native::{NativeInputObservation, NativeVersionObservation};
+#[doc(inline)]
+pub use plan::JobPlanSpec;
 pub use query_result::QueryResult;
 pub use spec::{
     ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
@@ -54,13 +59,17 @@ impl Job {
     /// # Errors
     /// Refuses an existing name or an invalid or volatile SQL expression.
     pub async fn register_view(&self, name: &str, sql: &str) -> Result<()> {
+        let frame = self.sql(sql).await?;
+        self.register_frame(name, frame)
+    }
+
+    fn register_frame(&self, name: &str, frame: DataFrame) -> Result<()> {
         if self.context.table_exist(name)? {
             return Err(crate::Error::refusal(
                 "invalid_spec",
-                "named step already exists",
+                "named relation already exists",
             ));
         }
-        let frame = self.sql(sql).await?;
         self.context.register_table(name, frame.into_view())?;
         Ok(())
     }
