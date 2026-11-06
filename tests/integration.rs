@@ -39,6 +39,7 @@ mod incremental_view_algebra;
 mod input_generations;
 mod layout_probe;
 mod lifecycle;
+mod managed_updates;
 mod merge_and_provenance;
 mod operation_retirement;
 mod operation_retirement_transport;

@@ -1,5 +1,58 @@
 # Implementation and qualification status
 
+## Managed local source Update extension — November 6, 2026
+
+The local source-only Update extension passes the required repository gate and
+both independent changed-boundary reviews on frozen source 09. `managed-build`
+accepts `prepare_update` with an existing `UpdateSpec` and qualification policy.
+It reuses native admission, preparation, protected readback, evidence acceptance
+and guarded selection, and refuses a computed, related or coupled base before
+admission. Ordinary SQL jobs retain their bounded execution behavior.
+
+Exact accepted-evidence retries resolve native completion before opening caller
+files. New acceptances retain the original resolved-rule UTF-8 bytes. Status,
+replay and selection use narrow retained-record decodes with admitted memory;
+compaction also admits the original request and applicable policy companions.
+Native checkpoint compaction preserves still-promised managed request/result
+identity until existing recovery or availability retirement ends that promise.
+Quality control records remain audit metadata and do not add payload lifetime.
+
+The complete `scripts/check` run passed with Rust 1.94.0: formatting and linting,
+457 unit tests, 447 ordinary integration tests, the 15/4/2 explicit process suites,
+11 example tests, and all 31 Dagster adapter tests. Seventeen qualification-only
+tests remain intentionally ignored. The Python gate used CPython 3.12.13, Dagster
+1.13.16 and PyArrow 26.0.1. This final uninterrupted gate completed in 1,056.37
+seconds. Five-second samples observed a peak 3,330,932,736 bytes of aggregate owned
+process RSS and at least 96,394,432,512 bytes free disk; these are observations,
+not whole-process memory guarantees for other workloads.
+
+The registered [native examples](../tests/managed_updates.rs) cover correction,
+explicit deletion, untouched rows, rule-only phase reuse, cold restart, null
+replacement versus declared coalescing, successful empty scope, computed-base
+refusal, and pending quality metadata through compaction. The actual DDK wrapper
+also qualifies exact-native evidence acceptance, missing/duplicate/failed/unknown/
+not-run and wrong-candidate refusals, caller loss, removed caller input locators,
+lost acceptance/selection responses, and historical retries after a successor.
+Its retirement case observes obsolete bulk removal while quality metadata remains
+and the selected successor stays readable. A separate low-budget compaction probe
+refuses unadmitted request/policy companion decoding before removing any keys.
+
+Source 07's five-native/six-wrapper proof and source 09's changed budget unit and
+actual-wrapper proof retain their exact tuple identities separately. Expected
+business values are independently authored small mechanism examples. Full
+SpicyRegs and congressional-tech replacement acceptance remains separate work.
+
+Source identities, review coordination and raw execution records are retained
+under `/Users/mikewolfd/Work/artifacts/ddk-replacements-20261106/native-update`.
+Those records preserve earlier failed/interrupted attempts, including the initial
+wrong-compiler runs, offline dependency miss and repaired compaction boundaries.
+
+The tested extension is local, independent and source-only. Refresh, Backfill,
+candidate recomposition, computed/related or multi-view qualification, existing
+native-table admission, retained multi-output SQL and publication remain outside
+this evidence. These are greenfield application integrations. Historical readers
+in these examples use protected native versions inside the new stack.
+
 ## Plan completion
 
 The [implementation plan](PLAN.md) is **complete for the supported v1 scope**.

@@ -1,4 +1,4 @@
-//! External quality gates on the existing source-only local Build lifecycle.
+//! External quality gates on the source-only local Build and Update lifecycle.
 // Rust guideline compliant 2026-02-21
 use super::*;
 use arrow::datatypes::Schema;
@@ -167,17 +167,35 @@ struct ObservedArtifact {
 struct AcceptedQualification {
     identity: String,
     evidence: ExternalEvidence,
+    /// Original verified bytes; legacy acceptances did not retain their rule artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolved_rules_json: Option<String>,
     native_report: serde_json::Value,
     evaluator_report: serde_json::Value,
     native_read: NativeReadReceipt,
 }
 
-/// Commands for the local, source-only, quality-gated Build.
+#[derive(Deserialize)]
+struct AcceptedIdentity {
+    identity: String,
+}
+
+#[derive(Deserialize)]
+struct AcceptedReplay {
+    identity: String,
+    evidence: ExternalEvidence,
+}
+
+/// Commands for local, source-only, quality-gated Build and Update operations.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ManagedBuildCommand {
     Prepare {
         build: RunSpec,
+        policy: QualificationPolicy,
+    },
+    PrepareUpdate {
+        update: UpdateSpec,
         policy: QualificationPolicy,
     },
     Inspect {
@@ -258,8 +276,147 @@ fn read_key(receipt: &NativeReadReceipt) -> Result<String> {
     ))
 }
 
+/// Names companion records decoded while validating quality control metadata.
+///
+/// # Errors
+/// Refuses malformed operation keys or policy identifiers.
+pub(in crate::engine) fn retention_companions(
+    key: &str,
+    json: &str,
+    rows: &crate::catalog::SnapshotRows,
+) -> Result<Vec<String>> {
+    let operation = Id::new(key.split('/').nth(1).ok_or_else(unknown_operation)?)?;
+    let mut keys = vec![
+        format!("request/{operation}"),
+        initial_policy_key(&operation),
+    ];
+    let policy = if key == active_policy_key(&operation) {
+        Some(serde_json::from_str::<Id>(json)?)
+    } else if let Some(id) = key.strip_prefix(&format!("managed-quality-evidence/{operation}/")) {
+        Some(Id::new(id)?)
+    } else {
+        None
+    };
+    if let Some(policy) = policy {
+        let key = policy_key(&operation, &policy);
+        if rows.contains_key(&key) {
+            keys.push(key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Validates quality control metadata without adding a payload lifetime.
+pub(in crate::engine) fn retention_record(
+    key: &str,
+    json: &str,
+    rows: &crate::catalog::SnapshotRows,
+    table: &str,
+) -> Result<Option<serde_json::Value>> {
+    if !key.starts_with("managed-quality-") {
+        return Ok(None);
+    }
+    let invalid = || {
+        Error::refusal(
+            "retention_inventory",
+            format!("managed quality identity differs for {key}"),
+        )
+    };
+    let operation = Id::new(key.split('/').nth(1).ok_or_else(invalid)?)?;
+    let (_, _, request): (_, _, OperationRequest) = rows
+        .get_record(&format!("request/{operation}"))?
+        .ok_or_else(invalid)?;
+    let dataset = request.dataset();
+    if request.operation() != &operation
+        || !matches!(
+            &request,
+            OperationRequest::Build(_) | OperationRequest::Update(_)
+        )
+        || crate::catalog::lifecycle_ident(dataset).to_string() != table
+    {
+        return Err(invalid());
+    }
+    let original: QualificationPolicy = rows
+        .get_record(&initial_policy_key(&operation))?
+        .map(|(_, _, policy)| policy)
+        .ok_or_else(invalid)?;
+    let policy_for = |id: &Id| -> Result<QualificationPolicy> {
+        if &original.id == id {
+            return Ok(original.clone());
+        }
+        rows.get_record(&policy_key(&operation, id))?
+            .map(|(_, _, policy)| policy)
+            .ok_or_else(invalid)
+    };
+    let known = if key.starts_with("managed-quality-policy/") {
+        let policy: QualificationPolicy = serde_json::from_str(json)?;
+        policy.validate()?;
+        if key != initial_policy_key(&operation) && key != policy_key(&operation, &policy.id) {
+            return Err(invalid());
+        }
+        serde_json::to_value(policy)?
+    } else if key == active_policy_key(&operation) {
+        let active: Id = serde_json::from_str(json)?;
+        if policy_for(&active)?.id != active {
+            return Err(invalid());
+        }
+        serde_json::to_value(active)?
+    } else if key.starts_with("managed-quality-evidence/") {
+        let accepted: AcceptedQualification = serde_json::from_str(json)?;
+        let evidence = &accepted.evidence;
+        if key != evidence_key(&operation, &evidence.policy_id) {
+            return Err(invalid());
+        }
+        let policy = policy_for(&evidence.policy_id)?;
+        if evidence.candidate.dataset != *dataset
+            || evidence.candidate.version != operation
+            || evidence.candidate.manifest.owner != *dataset
+            || evidence.rules.sha256 != policy.rules_sha256
+            || evidence.evaluator != policy.evaluator
+            || evidence.semantics != policy.semantics
+            || accepted.native_read.version != evidence.candidate
+            || accepted.identity != qualification_identity(&policy, evidence)?
+            || accepted.resolved_rules_json.as_ref().is_some_and(|rules| {
+                format!("{:x}", Sha256::digest(rules.as_bytes())) != evidence.rules.sha256
+            })
+        {
+            return Err(invalid());
+        }
+        serde_json::to_value(accepted)?
+    } else if key.starts_with("managed-quality-read/") {
+        let read: NativeReadReceipt = serde_json::from_str(json)?;
+        if key != read_key(&read)?
+            || read.version.dataset != *dataset
+            || read.version.version != operation
+            || read.version.manifest.owner != *dataset
+            || !valid_digest(&read.ipc_sha256)
+        {
+            return Err(invalid());
+        }
+        serde_json::to_value(read)?
+    } else {
+        return Err(invalid());
+    };
+    Ok(Some(known))
+}
+
 fn evidence_key(operation: &Id, policy: &Id) -> String {
     format!("managed-quality-evidence/{operation}/{policy}")
+}
+
+fn qualification_identity(
+    policy: &QualificationPolicy,
+    evidence: &ExternalEvidence,
+) -> Result<String> {
+    Ok(storage::json_digest(&(
+        policy,
+        &evidence.candidate,
+        &evidence.checks,
+        &evidence.native_report.sha256,
+        &evidence.native_read.sha256,
+    ))?
+    .to_hex()
+    .to_string())
 }
 
 fn invalid_policy() -> Error {
@@ -286,7 +443,7 @@ fn quality_mismatch() -> Error {
 fn unknown_operation() -> Error {
     Error::refusal(
         "unknown_operation",
-        "managed Build has no retained admission",
+        "managed operation has no retained admission",
     )
 }
 
@@ -310,6 +467,23 @@ fn source_only(release: &ReleasePin) -> Result<&TablePin> {
         "unsupported_native_mapping",
         "the local exact-version profile requires a single source group without computed groups",
     ))
+}
+
+pub(super) fn check_quality_base(authority: &Authority) -> Result<()> {
+    let base = authority.release.as_ref().ok_or_else(|| {
+        Error::refusal(
+            "invalid_base",
+            "managed Update requires a selected source base",
+        )
+    })?;
+    source_only(base)?;
+    if base.dataset.relationship != SourceRelationship::Independent {
+        return Err(Error::refusal(
+            "unsupported_managed_update",
+            "managed Update requires an independent source base",
+        ));
+    }
+    Ok(())
 }
 
 impl QualificationPolicy {
@@ -348,6 +522,7 @@ impl ManagedBuildCommand {
     pub fn identity(&self) -> (&Id, &Id) {
         match self {
             Self::Prepare { build, .. } => (&build.dataset, &build.operation),
+            Self::PrepareUpdate { update, .. } => (&update.dataset, &update.operation),
             Self::Inspect { dataset, operation }
             | Self::Requalify {
                 dataset, operation, ..
@@ -363,7 +538,7 @@ impl ManagedBuildCommand {
 }
 
 impl Engine {
-    /// Applies an explicit request to the existing local Build lifecycle.
+    /// Applies an explicit request to the local Build or Update lifecycle.
     ///
     /// # Errors
     /// Refuses incompatible requests, unavailable candidate evidence, or stale authority.
@@ -378,20 +553,22 @@ impl Engine {
         self.admit_work(memory, move |engine| async move {
             match command {
                 ManagedBuildCommand::Prepare { build, policy } => {
-                    policy.validate()?;
                     if build.base.is_some() || !matches!(build.relationship, None | Some(SourceRelationship::Independent)) {
                         return Err(Error::refusal(
                             "unsupported_managed_build",
                             "managed quality supports an independent source-only Build with no inherited base",
                         ));
                     }
-                    let dataset = build.dataset.clone();
-                    let operation = build.operation.clone();
-                    let spec = OperationRequest::Build(build);
-                    engine.check_request_backend(&spec)?;
-                    let candidate = engine.prepare_and_select(&spec, None, Some(&policy)).await?;
-                    source_only(&candidate)?;
-                    engine.managed_status(&dataset, &operation).await
+                    engine.prepare_qualified(OperationRequest::Build(build), &policy).await
+                }
+                ManagedBuildCommand::PrepareUpdate { update, policy } => {
+                    if !matches!(update.relationship, None | Some(SourceRelationship::Independent)) {
+                        return Err(Error::refusal(
+                            "unsupported_managed_update",
+                            "managed quality supports an independent source-only Update",
+                        ));
+                    }
+                    engine.prepare_qualified(OperationRequest::Update(update), &policy).await
                 }
                 ManagedBuildCommand::Inspect { dataset, operation } => {
                     engine.managed_status(&dataset, &operation).await
@@ -411,6 +588,18 @@ impl Engine {
                 }
             }
         }).await
+    }
+
+    async fn prepare_qualified(
+        &self,
+        spec: OperationRequest,
+        policy: &QualificationPolicy,
+    ) -> Result<ManagedBuildReceipt> {
+        policy.validate()?;
+        self.check_request_backend(&spec)?;
+        let candidate = self.prepare_and_select(&spec, None, Some(policy)).await?;
+        source_only(&candidate)?;
+        self.managed_status(spec.dataset(), spec.operation()).await
     }
 
     pub(super) async fn initial_qualification(
@@ -485,9 +674,12 @@ impl Engine {
             };
             (self.quality_candidate(&view, operation).await?, selection)
         };
-        let accepted: Option<AcceptedQualification> = lifecycle
-            .get(&view, &evidence_key(operation, &policy.id))
-            .await?;
+        let accepted_key = evidence_key(operation, &policy.id);
+        let _accepted_memory = lifecycle
+            .rows(&view)
+            .await?
+            .reserve_decoded(&lifecycle.budget, &[&accepted_key])?;
+        let accepted: Option<AcceptedIdentity> = lifecycle.get(&view, &accepted_key).await?;
         let spec: OperationRequest = lifecycle
             .get(&view, &format!("request/{operation}"))
             .await?
@@ -579,12 +771,69 @@ impl Engine {
         Ok(())
     }
 
+    async fn reuse_accepted_quality(
+        &self,
+        dataset: &Id,
+        operation: &Id,
+        evidence: &ExternalEvidence,
+    ) -> Result<bool> {
+        let lock = self.lock(dataset).await;
+        let _guard = lock.lock().await;
+        let view = self.existing_lifecycle_view(dataset).await?;
+        self.check_operation_available(&view, operation).await?;
+        self.check_not_abandoned(&view, operation).await?;
+        let policy = self.quality_policy(&view, operation).await?;
+        let lifecycle = &self.inner.lifecycle;
+        let accepted_key = evidence_key(operation, &policy.id);
+        let result_key = format!("result/{operation}");
+        let readback_key = format!("readback/{operation}");
+        let rows = lifecycle.rows(&view).await?;
+        let _accepted_memory = rows.reserve_decoded(&lifecycle.budget, &[&accepted_key])?;
+        let accepted: Option<AcceptedReplay> = lifecycle.get(&view, &accepted_key).await?;
+        let Some(accepted) = accepted else {
+            return Ok(false);
+        };
+        if accepted.evidence != *evidence || evidence.policy_id != policy.id {
+            return Ok(false);
+        }
+        let _candidate_memory = rows.reserve_decoded(
+            &lifecycle.budget,
+            &[if rows.contains_key(&result_key) {
+                &result_key
+            } else {
+                &readback_key
+            }],
+        )?;
+        let release = match lifecycle.get::<ReleasePin>(&view, &result_key).await? {
+            Some(release) => release,
+            None => self
+                .quality_candidate(&view, operation)
+                .await?
+                .ok_or_else(quality_pending)?,
+        };
+        source_only(&release)?;
+        if evidence.candidate != release.version_ref()
+            || accepted.identity != qualification_identity(&policy, evidence)?
+        {
+            return Err(quality_mismatch());
+        }
+        // This acknowledges existing acceptance, including after a successor
+        // selection. Mutable selection authority still guards any new selection.
+        Ok(true)
+    }
+
     async fn accept_quality(
         &self,
         dataset: &Id,
         operation: &Id,
         evidence: ExternalEvidence,
     ) -> Result<()> {
+        if self
+            .reuse_accepted_quality(dataset, operation, &evidence)
+            .await?
+        {
+            return Ok(());
+        }
         let lifecycle = &self.inner.lifecycle;
         // Keep each verified artifact and its decoder allowance alive through acceptance.
         let (rules, _rules_memory) = read_artifact(&evidence.rules, &lifecycle.budget)?;
@@ -698,16 +947,12 @@ impl Engine {
             &native_read,
         )?;
         let key = evidence_key(operation, &policy.id);
-        let identity = storage::json_digest(&(
-            &policy,
-            &evidence.candidate,
-            &evidence.checks,
-            &evidence.native_report.sha256,
-            &evidence.native_read.sha256,
-        ))?
-        .to_hex()
-        .to_string();
-        if let Some(accepted) = lifecycle.get::<AcceptedQualification>(&view, &key).await? {
+        let identity = qualification_identity(&policy, &evidence)?;
+        let _accepted_memory = lifecycle
+            .rows(&view)
+            .await?
+            .reserve_decoded(&lifecycle.budget, &[&key])?;
+        if let Some(accepted) = lifecycle.get::<AcceptedIdentity>(&view, &key).await? {
             if accepted.identity == identity {
                 return Ok(());
             }
@@ -729,6 +974,11 @@ impl Engine {
         let accepted = AcceptedQualification {
             identity,
             evidence,
+            resolved_rules_json: Some(
+                std::str::from_utf8(&rules)
+                    .map_err(|_| quality_mismatch())?
+                    .to_owned(),
+            ),
             native_report,
             evaluator_report,
             native_read,
@@ -819,10 +1069,14 @@ impl Engine {
         }
         policy.check_authority(authority)?;
         self.check_operation_available(view, operation).await?;
-        let accepted: AcceptedQualification = self
-            .inner
-            .lifecycle
-            .get(view, &evidence_key(operation, &policy.id))
+        let lifecycle = &self.inner.lifecycle;
+        let accepted_key = evidence_key(operation, &policy.id);
+        let _accepted_memory = lifecycle
+            .rows(view)
+            .await?
+            .reserve_decoded(&lifecycle.budget, &[&accepted_key])?;
+        let accepted: AcceptedReplay = lifecycle
+            .get(view, &accepted_key)
             .await?
             .ok_or_else(quality_pending)?;
         if accepted.evidence.candidate != release.version_ref() {

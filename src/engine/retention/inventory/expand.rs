@@ -642,6 +642,9 @@ impl Inventory {
                     }
                 }
             }
+        } else if super::quality_control_record(key, json, rows, &origin.table)? {
+            // Operation/result/readback roots own payload availability. Quality
+            // control records do not turn caller file paths into native objects.
         } else if crate::engine::backfill::continuous::validate_control_record(
             key,
             json,

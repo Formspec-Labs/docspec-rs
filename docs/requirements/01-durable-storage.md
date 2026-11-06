@@ -41,6 +41,48 @@ Before staging payloads, look up qualified results using known immutable input i
 
 Expose one supported inspection/resume path over these results. It reports the identities actually consumed, reusable phases, required reruns and reasons, next action, and resource preconditions. A lost response reconciles its exact phase commit. An old running marker is an observation requiring reconciliation, not proof of completion or permission to delete its outputs.
 
+## Managed external qualification
+
+A local managed source-only Build or based Update retains its admitted quality
+policy with the original native operation. The policy binds exact rules, evaluator
+semantics, required checks, expected selection and authority epoch. A complete
+protected read identifies the candidate evaluated. Missing or duplicate required
+checks, failed, unknown or not-run outcomes, and evidence for another candidate
+cannot authorize selection. Ordinary jobs retain their bounded execution meaning.
+
+Requalification records a new policy without changing the original computation
+request or repeating valid completed phases. The guarded selection checks the
+active accepted qualification and current native authority. A changed base or
+selection refuses; supporting a newly composed candidate requires an explicit
+native transition and new exact-candidate qualification. On caller loss, inspect
+or retry the original operation. A completed matching retry returns the historical
+result and never selects it again over a newer result.
+
+An identical accepted-evidence retry MUST resolve the native retained acceptance
+before reopening caller files. It MUST match the full submitted evidence, active
+policy, retained candidate and acceptance identity, while respecting explicit
+retirement and abandonment. It confirms an existing outcome without checking
+current selection authority again or selecting anything. New acceptance records
+retain the original resolved-rule UTF-8 bytes under the metadata budget; legacy
+records without those bytes do not claim their custody.
+
+Native checkpoint compaction retains the original managed operation, request and
+result while reconciliation remains promised. Existing `OperationRecovery` or
+`ResultAvailability` retirement, including its availability marker, ends this
+managed promise. Retained quality policies, evidence and read receipts remain
+audit metadata; their native-version and caller-file paths do not independently
+protect payloads. Validate their typed bindings before pruning protection.
+
+The initial Update profile accepts only an independent source-only selected base.
+It reuses complete-key replacement and explicit deletions from `UpdateSpec`:
+absence from partial input retains old rows; an explicit null replaces the old
+value unless a declared column merge rule says otherwise. An empty replacement
+input can still carry explicit successful-scope deletions. Preserve its original
+input evidence, prior native versions and their protected readers. This is a
+greenfield integration, without legacy application-state or reader migration.
+Broader Refresh, Backfill,
+computed/related or multi-view quality and publication are separate capabilities.
+
 ## Implementation tasks
 
 | Task | Owner and dependencies | Deliverable and acceptance |

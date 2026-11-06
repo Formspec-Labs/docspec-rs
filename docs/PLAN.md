@@ -105,6 +105,35 @@ Restore points bind verified metadata and the required object closure. Restore
 into a fresh catalog with old destructive actors fenced at the actual storage
 boundary. Do not promise recovery beyond the last completed restore point.
 
+## Local external quality gates
+
+The local `managed-build` command supports independent source-only Build and
+based Update operations. `prepare_update` carries the existing `UpdateSpec` and
+an immutable qualification policy. Reuse the native admission, retained phases,
+exact protected reads, evidence acceptance and guarded selection; do not add
+another lifecycle or treat ordinary SQL jobs as managed operations.
+
+The first Update profile requires a selected independent source-only base. Keep
+complete-key replacement, explicit deletion, declared column merge rules and
+unchanged-row inheritance distinct. Qualify the exact candidate before selection.
+A changed selection or authority refuses promotion; this profile does not compose
+a new candidate from a newer sibling state. Rule-only changes reuse computed
+values. Completed retries return the original historical result without requiring
+it to remain current or selecting it over a successor.
+
+An exact retry of accepted evidence resolves native retained acceptance before
+opening caller artifacts again. Compare the complete submitted evidence, active
+policy, candidate and retained acceptance identity. New acceptances retain the
+original resolved-rule bytes; older records do not gain a byte-custody claim.
+Keep the exact managed request/result through checkpoint compaction until native
+recovery or availability retirement ends that promise. Quality control metadata
+does not add a separate payload lifetime.
+
+Refresh, Backfill, computed/related views, multi-view qualification and publication
+need their own supported selection paths and exact candidate evidence. This local
+profile does not qualify those extensions. Its focused tests, DDK wrapper tests,
+repository gate and independent review remain separate evidence.
+
 ## Delivery and completion checklist
 
 - [x] **Local foundation and probes:** pinned compatible dependencies, guarded

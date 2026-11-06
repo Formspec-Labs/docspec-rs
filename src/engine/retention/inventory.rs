@@ -13,6 +13,23 @@ mod expand;
 mod roots;
 mod strict;
 
+pub(super) fn quality_control_record(
+    key: &str,
+    json: &str,
+    rows: &crate::catalog::SnapshotRows,
+    table: &str,
+) -> Result<bool> {
+    let Some(known) = crate::engine::managed_build::retention_record(key, json, rows, table)?
+    else {
+        return Ok(false);
+    };
+    let original: serde_json::Value = serde_json::from_str(json)?;
+    if !strict::known_fields(&original, &known) {
+        return Err(invalid_inventory("unsupported managed quality fields"));
+    }
+    Ok(true)
+}
+
 pub(in crate::engine) use strict::validate_object;
 use strict::{Strict, capacity, decode, invalid_inventory, reference_bytes, unknown_dependencies};
 

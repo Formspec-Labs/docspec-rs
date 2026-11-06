@@ -8,7 +8,7 @@ use super::{
     ValidatedReadback, admission, backfill,
     changes::verify_changes,
     completion_records, evidence, inputs, locations,
-    managed_build::QualificationPolicy,
+    managed_build::{QualificationPolicy, check_quality_base},
     planner::{
         captured_manifest, check_authority, check_base, check_definition, check_group_rebuild,
         check_preparation, check_update_eligibility, conflicting_operation, fingerprint, phase_key,
@@ -803,6 +803,9 @@ impl Engine {
                 .await?;
             if let Some(policy) = policy {
                 policy.check_authority(&authority)?;
+                if matches!(spec, OperationRequest::Update(_)) {
+                    check_quality_base(&authority)?;
+                }
             }
             let Some(protected) = &prepared else {
                 // Unbased builds retain only the ordering receipt of the

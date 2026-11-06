@@ -125,7 +125,7 @@ enum Command {
     Job(SpecArg),
     /// Prepare a calculation using schemas only, with optional Substrait output.
     JobPlan(SpecArg),
-    /// Prepare, qualify, select or reconcile a protected local Build.
+    /// Prepare, qualify, select or reconcile a protected local Build or Update.
     ManagedBuild(SpecArg),
     /// Stream an exact protected source version as Arrow IPC.
     ReadVersion(SpecArg),

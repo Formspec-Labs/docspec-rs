@@ -5,6 +5,10 @@ use crate::catalog::View;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
+#[cfg(all(test, feature = "test-util"))]
+#[path = "compaction/quality_budget_tests.rs"]
+mod quality_budget_tests;
+
 pub(super) struct CheckpointCompactionPlan {
     pub(super) records: Vec<(String, serde_json::Value)>,
     pub(super) new_archive_path: String,
@@ -147,7 +151,13 @@ impl Engine {
         } else {
             BTreeSet::new()
         };
-        prune_obsolete_protections(&rows, &head_ref_paths, &mut remove_keys)?;
+        prune_obsolete_protections(
+            &rows,
+            &view.identifier().to_string(),
+            &lifecycle.budget,
+            &head_ref_paths,
+            &mut remove_keys,
+        )?;
         drop(rows);
         let upserts = checkpoint_plan
             .as_ref()
@@ -249,6 +259,7 @@ impl Engine {
             return Ok(None);
         };
         let mut protected_ops = BTreeSet::from([head_release.id.clone()]);
+        let mut ended_managed = BTreeSet::new();
         let mut protected_keys = BTreeSet::new();
         for (_, _, json) in rows.prefix("retirement/") {
             let receipt: Retirement = serde_json::from_str(json)?;
@@ -256,6 +267,7 @@ impl Engine {
                 RetirementScope::ResultAvailability { operation }
                 | RetirementScope::OperationRecovery { operation } => {
                     protected_ops.insert(operation.clone());
+                    ended_managed.insert(operation.clone());
                 }
                 _ => {}
             }
@@ -276,7 +288,21 @@ impl Engine {
             if let Some(op_str) = key.strip_prefix("availability-retired/")
                 && let Ok(op) = Id::new(op_str)
             {
-                protected_ops.insert(op);
+                protected_ops.insert(op.clone());
+                ended_managed.insert(op);
+            }
+        }
+        // Managed reconciliation promises the original request/result until an
+        // existing native recovery or availability retirement explicitly ends it.
+        for (key, _, _) in rows.prefix("managed-quality-policy/") {
+            let Some(operation) = key.strip_prefix("managed-quality-policy/") else {
+                continue;
+            };
+            if !operation.contains('/') {
+                let operation = Id::new(operation)?;
+                if !ended_managed.contains(&operation) {
+                    protected_ops.insert(operation);
+                }
             }
         }
         for (key, _, json) in rows.prefix("operation/") {
@@ -698,12 +724,24 @@ fn collect_record_paths(value: &serde_json::Value, paths: &mut BTreeSet<String>)
 
 fn prune_obsolete_protections(
     rows: &crate::catalog::SnapshotRows,
+    table: &str,
+    budget: &crate::budget::Budget,
     head_ref_paths: &BTreeSet<String>,
     remove_keys: &mut BTreeSet<String>,
 ) -> Result<()> {
     let index = ObsoleteLifecycleIndex::from_rows(rows)?;
     let mut kept_record_paths = head_ref_paths.clone();
     for (k, _, json) in rows.prefix("") {
+        if k.starts_with("managed-quality-") {
+            let _decoded = rows.reserve_decoded(budget, &[k])?;
+            let companions = crate::engine::managed_build::retention_companions(k, json, rows)?;
+            let companion_keys = companions.iter().map(String::as_str).collect::<Vec<_>>();
+            let _companion_decoded = rows.reserve_decoded(budget, &companion_keys)?;
+            super::inventory::quality_control_record(k, json, rows, table)?;
+            // Only native operation/result/readback roots own availability.
+            // Caller artifact paths and completed read identities are audit data.
+            continue;
+        }
         if !remove_keys.contains(k)
             && !k.starts_with("protection/")
             && !k.starts_with("reference-binding/")
