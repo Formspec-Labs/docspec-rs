@@ -227,6 +227,8 @@ pub struct NativeVersionRead {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeReadReceipt {
+    #[serde(default, skip_serializing_if = "uuid::Uuid::is_nil")]
+    pub read_id: uuid::Uuid,
     pub version: VersionRef,
     pub schema_id: i32,
     pub schema: Schema,
@@ -594,12 +596,6 @@ impl Engine {
         let native_read: NativeReadReceipt = serde_json::from_slice(&read)?;
         let native_report = serde_json::from_slice(&report)?;
         let evaluator_report = serde_json::from_slice(&evaluator_report)?;
-        validate_dcc(
-            &evaluated,
-            &serde_json::from_slice(&rules)?,
-            DccReport::deserialize(&evaluator_report)?,
-            &native_read,
-        )?;
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.existing_lifecycle_view(dataset).await?;
@@ -613,9 +609,6 @@ impl Engine {
         let pin = source_only(&release)?;
         let recorded_read: Option<NativeReadReceipt> =
             lifecycle.get(&view, &read_key(&native_read)?).await?;
-        let mut checks = BTreeSet::new();
-        let evaluated_required = evaluated.required_check_ids.iter().collect::<BTreeSet<_>>();
-        let declared_required = policy.required_checks.iter().collect::<BTreeSet<_>>();
         if evidence.policy_id != policy.id
             || evaluated.target.kind != "native"
             || evaluated.target.native_version != evidence.candidate
@@ -626,44 +619,84 @@ impl Engine {
             || evaluated.mapping_semantics != evidence.semantics
             || evaluated.native_read.path != evidence.native_read.path
             || evaluated.native_read.sha256 != evidence.native_read.sha256
-            || evaluated_required != declared_required
-            || evaluated_required.len() != evaluated.required_check_ids.len()
-            || evaluated.checks.len() != evidence.checks.len()
-            || evaluated
-                .checks
-                .iter()
-                .map(|check| &check.id)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != evaluated.checks.len()
-            || evaluated.checks.iter().any(|observed| {
-                !evidence
-                    .checks
-                    .iter()
-                    .any(|check| check.id == observed.id && check.status == observed.status)
-            })
             || evidence.candidate != release.version_ref()
             || evidence.candidate != native_read.version
-            || recorded_read.as_ref() != Some(&native_read)
             || pin.schema_id != native_read.schema_id
             || pin.rows != native_read.rows
             || !valid_digest(&native_read.ipc_sha256)
             || evidence.rules.sha256 != policy.rules_sha256
             || evidence.evaluator != policy.evaluator
             || evidence.semantics != policy.semantics
-            || evidence
-                .checks
-                .iter()
-                .any(|check| !checks.insert(&check.id))
-            || policy.required_checks.iter().any(|id| {
-                !evidence
-                    .checks
-                    .iter()
-                    .any(|check| &check.id == id && check.status == CheckStatus::Passed)
-            })
         {
             return Err(quality_mismatch());
         }
+        if recorded_read.as_ref() != Some(&native_read) {
+            if lifecycle
+                .get::<ReleasePin>(&view, &format!("result/{operation}"))
+                .await?
+                .is_some()
+            {
+                return Err(Error::refusal(
+                    "qualification_audit_only",
+                    "an exact read after selection is audit evidence",
+                ));
+            }
+            return Err(quality_mismatch());
+        }
+        let declared_required = policy.required_checks.iter().collect::<BTreeSet<_>>();
+        let evaluated_required = evaluated.required_check_ids.iter().collect::<BTreeSet<_>>();
+        let submitted = evidence
+            .checks
+            .iter()
+            .map(|check| (&check.id, check.status))
+            .collect::<BTreeMap<_, _>>();
+        let observed = evaluated
+            .checks
+            .iter()
+            .map(|check| (&check.id, check.status))
+            .collect::<BTreeMap<_, _>>();
+        if submitted.len() != evidence.checks.len()
+            || observed.len() != evaluated.checks.len()
+            || evaluated_required != declared_required
+            || evaluated_required.len() != evaluated.required_check_ids.len()
+            || declared_required
+                .iter()
+                .any(|id| !submitted.contains_key(id))
+        {
+            return Err(Error::refusal(
+                "qualification_coverage",
+                "qualification requires one outcome for every admitted required check",
+            ));
+        }
+        if submitted != observed {
+            return Err(quality_mismatch());
+        }
+        if declared_required
+            .iter()
+            .any(|id| submitted.get(id) == Some(&CheckStatus::Failed))
+        {
+            return Err(Error::refusal(
+                "qualification_failed",
+                "a required evaluator check failed",
+            ));
+        }
+        if declared_required.iter().any(|id| {
+            matches!(
+                submitted.get(id),
+                Some(CheckStatus::Unknown | CheckStatus::NotRun)
+            )
+        }) {
+            return Err(Error::refusal(
+                "qualification_unknown",
+                "the evaluator could not establish all required outcomes",
+            ));
+        }
+        validate_dcc(
+            &evaluated,
+            &serde_json::from_slice(&rules)?,
+            DccReport::deserialize(&evaluator_report)?,
+            &native_read,
+        )?;
         let key = evidence_key(operation, &policy.id);
         let identity = storage::json_digest(&(
             &policy,
@@ -840,6 +873,7 @@ impl Engine {
         let mut output = writer.into_inner()?;
         output.flush()?;
         let receipt = NativeReadReceipt {
+            read_id: uuid::Uuid::new_v4(),
             version: version.clone(),
             schema_id,
             schema,

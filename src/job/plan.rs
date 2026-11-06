@@ -2,8 +2,14 @@
 // Rust guideline compliant 2026-02-21
 use super::Job;
 use crate::{Error, Result, budget::Limits};
-use arrow::datatypes::Schema;
-use datafusion::{common::ScalarValue, dataframe::DataFrame, datasource::empty::EmptyTable};
+use arrow::datatypes::{Schema, SchemaRef};
+use datafusion::{
+    catalog::{Session, TableProvider},
+    common::{DataFusionError, ScalarValue},
+    dataframe::DataFrame,
+    logical_expr::{Expr, TableType},
+    physical_plan::ExecutionPlan,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -11,6 +17,36 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+
+#[derive(Debug)]
+struct SchemaOnlyTable(SchemaRef);
+
+#[async_trait::async_trait]
+impl TableProvider for SchemaOnlyTable {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.0.clone()
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        _state: &dyn Session,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        Err(DataFusionError::Plan(
+            "a schema-only input cannot scan rows".into(),
+        ))
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,7 +104,7 @@ impl JobPlanSpec {
                 ));
             }
             job.context
-                .register_table(name, Arc::new(EmptyTable::new(Arc::new(schema))))?;
+                .register_table(name, Arc::new(SchemaOnlyTable(Arc::new(schema))))?;
         }
         match self.calculation {
             Calculation::Sql {
@@ -146,5 +182,55 @@ impl Job {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(frame.with_param_values(values)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::datatypes::{DataType, Field};
+
+    #[tokio::test]
+    async fn schema_only_preparation_uses_a_provider_that_refuses_scans() {
+        let root = tempfile::tempdir().unwrap();
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("region", DataType::Utf8, true),
+        ]);
+        let sql = "SELECT region, id FROM orders WHERE id > 2";
+        let result = JobPlanSpec {
+            scratch: root.path().join("prepare"),
+            inputs: vec![SchemaInput {
+                name: "orders".into(),
+                schema: schema.clone(),
+            }],
+            calculation: Calculation::Sql {
+                sql: sql.into(),
+                parameters: BTreeMap::new(),
+                #[cfg(feature = "substrait")]
+                save_substrait: None,
+            },
+        }
+        .prepare(Limits::default())
+        .await
+        .unwrap();
+        assert_eq!(
+            result.schema,
+            Schema::new(vec![
+                Field::new("region", DataType::Utf8, true),
+                Field::new("id", DataType::Int64, false),
+            ])
+        );
+
+        let job = Job::new(Limits::default(), root.path().join("canary")).unwrap();
+        job.context
+            .register_table("orders", Arc::new(SchemaOnlyTable(Arc::new(schema))))
+            .unwrap();
+        let error = job.sql(sql).await.unwrap().collect().await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("a schema-only input cannot scan rows")
+        );
     }
 }
