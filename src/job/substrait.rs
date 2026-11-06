@@ -412,7 +412,8 @@ mod tests {
             read_type: Some(read_rel::ReadType::VirtualTable(Default::default())),
             ..Default::default()
         })));
-        assert!(decoded_error(plan).message().contains("separate FilterRel"));
+        let error = decoded_error(plan).await;
+        assert!(error.message().contains("separate FilterRel"));
     }
 
     #[tokio::test]
@@ -420,6 +421,7 @@ mod tests {
         let plan = single_relation(rel::RelType::Join(Box::default()));
         assert!(
             decoded_error(plan)
+                .await
                 .message()
                 .contains("unsupported Substrait relation")
         );
@@ -442,6 +444,6 @@ mod tests {
                 })),
             })
             .into();
-        assert_eq!(decoded_error(plan).code(), "substrait_extensions");
+        assert_eq!(decoded_error(plan).await.code(), "substrait_extensions");
     }
 }
