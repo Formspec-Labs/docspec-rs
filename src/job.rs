@@ -12,7 +12,9 @@ mod materialized;
 pub(crate) mod metrics;
 mod native;
 mod plan;
+mod prepare;
 mod query_result;
+pub(crate) mod retained;
 mod spec;
 #[cfg(feature = "substrait")]
 mod substrait;
@@ -28,7 +30,10 @@ use datafusion::{
     dataframe::DataFrame,
     prelude::{ParquetReadOptions, SessionContext},
 };
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub use components::ComponentsSettings;
 pub use export::{ExportProfile, ExportSettings, ExportedFile};
@@ -38,6 +43,11 @@ pub use materialized::StepStorage;
 pub use native::{NativeInputObservation, NativeVersionObservation};
 #[doc(inline)]
 pub use plan::JobPlanSpec;
+#[doc(inline)]
+pub use prepare::{
+    DeclaredInputSchema, JobArtifact, PrepareJobSpec, PreparedInput, PreparedJob, PreparedRelation,
+    SchemaArtifact, SchemaArtifactFormat,
+};
 pub use query_result::QueryResult;
 pub use spec::{
     ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
@@ -49,11 +59,46 @@ pub use table_operations::{TableOperation, TableOperationResult};
 pub struct Job {
     context: SessionContext,
     budget: Budget,
+    relation_aliases: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
     #[cfg(feature = "remote")]
     remote: Option<crate::storage::remote::RemoteStorage>,
 }
 
 impl Job {
+    fn register_output_provider(
+        &self,
+        name: &str,
+        provider: Arc<dyn datafusion::catalog::TableProvider>,
+    ) -> Result<()> {
+        let catalog = self.context.catalog("datafusion").ok_or_else(|| {
+            crate::Error::refusal("invalid_spec", "native job catalog is missing")
+        })?;
+        if catalog.schema("outputs").is_none() {
+            catalog.register_schema(
+                "outputs",
+                Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+            )?;
+        }
+        let reference = datafusion::common::TableReference::partial("outputs", name);
+        if self.context.table_exist(reference.clone())? {
+            return Err(crate::Error::refusal(
+                "invalid_spec",
+                "named export relation already exists",
+            ));
+        }
+        self.context.register_table(reference, provider)?;
+        Ok(())
+    }
+
+    pub(crate) async fn register_completed_output(&self, name: &str, path: &Path) -> Result<()> {
+        let frame = materialized::read_retained(&self.budget, path).await?;
+        let frame = self.owned_relation_frame(name, true, frame)?;
+        self.register_output_provider(name, frame.into_view())
+    }
+
+    fn register_declared_output(&self, name: &str, schema: SchemaRef) -> Result<()> {
+        self.register_output_provider(name, Arc::new(plan::SchemaOnlyTable(schema)))
+    }
     /// Registers a reusable logical view without collecting its rows.
     ///
     /// # Errors
@@ -98,12 +143,17 @@ impl Job {
     /// Refuses invalid limits or an unavailable scratch directory.
     pub fn new(limits: Limits, scratch: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&scratch)?;
-        let budget = Budget::in_workspace(limits, &scratch)?;
+        Self::from_budget(Budget::in_workspace(limits, &scratch)?)
+    }
+
+    pub(crate) fn from_budget(budget: Budget) -> Result<Self> {
         let mut context = budget.context();
         functions::register(&mut context, &budget)?;
+        plan::constants::register(&context, &budget)?;
         Ok(Self {
             context,
             budget,
+            relation_aliases: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             #[cfg(feature = "remote")]
             remote: None,
         })
@@ -132,6 +182,13 @@ impl Job {
     /// # Errors
     /// Returns native schema, input I/O, or registration errors.
     pub async fn register_parquet(&self, name: &str, path: &Path) -> Result<()> {
+        let metadata_memory = if path.is_file() {
+            Some(Arc::new(
+                crate::storage::admit_parquet_footer(path, &self.budget).await?,
+            ))
+        } else {
+            None
+        };
         self.context
             .register_parquet(
                 name,
@@ -141,8 +198,13 @@ impl Job {
             .await?;
         let provider = self.context.table_provider(name).await?;
         self.context.deregister_table(name)?;
-        self.context
-            .register_table(name, std::sync::Arc::new(fitting::FittedTable { provider }))?;
+        self.context.register_table(
+            name,
+            std::sync::Arc::new(fitting::FittedTable {
+                provider,
+                metadata_memory,
+            }),
+        )?;
         Ok(())
     }
 
@@ -163,10 +225,20 @@ impl Job {
 
     /// Plans read-only relational SQL in the shared job context.
     ///
+    /// The returned `DataFrame` is a native DataFusion escape hatch. Calling its
+    /// `collect` or `create_physical_plan` directly does not include this Job's
+    /// cumulative optimizer/stream ownership. `JobSpec::run`, materialization,
+    /// exports and managed commands use the maintained admitted consumer paths.
+    ///
     /// # Errors
-    /// Refuses DDL, DML and session statements before effects, or invalid functions.
+    /// Refuses DDL, DML, session statements, unbound parameters and invalid functions.
     /// Returns planning errors; execution errors propagate from the frame.
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
+        self.sql_bound(sql, &std::collections::BTreeMap::new())
+            .await
+    }
+
+    async fn sql_unbound(&self, sql: &str) -> Result<DataFrame> {
         let options = datafusion::execution::context::SQLOptions::new()
             .with_allow_ddl(false)
             .with_allow_dml(false)

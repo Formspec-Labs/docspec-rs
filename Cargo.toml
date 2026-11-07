@@ -39,6 +39,7 @@ substrait = ["dep:datafusion-substrait", "dep:prost", "dep:substrait"]
 remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store", "dep:typetag"]
 
 [dependencies]
+base64 = "=0.22.1"
 anyhow = "1"
 arrow = { version = "58", features = ["ipc", "json"] }
 arrow-schema = { version = "=58.4.0", features = ["serde"] }
@@ -98,7 +99,6 @@ name = "r2_candidate_probe"
 required-features = ["remote"]
 
 [dev-dependencies]
-base64 = "=0.22.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 

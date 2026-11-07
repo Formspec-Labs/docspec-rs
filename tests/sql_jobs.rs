@@ -205,7 +205,7 @@ async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance()
     let job = Job::new(ceiling, root.path().join("scratch")).unwrap();
     job.register_view(
         "source",
-        "SELECT unnest(range(0,8192)) AS id,repeat('x',512) AS value",
+        "SELECT value AS id,repeat('x',512) AS value FROM range(0,8192)",
     )
     .await
     .unwrap();
@@ -216,7 +216,7 @@ async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance()
         StepStorage::Scratch
     );
     let batches = job
-        .sql("SELECT count(*) AS n,sum(length(value)) AS bytes FROM spilled")
+        .sql("SELECT count(*) AS n,sum(length(value)) AS bytes,min(id) AS first_id,max(id) AS last_id,sum(id) AS total_ids FROM spilled")
         .await
         .unwrap()
         .collect()
@@ -240,6 +240,17 @@ async fn byte_fitted_spill_and_row_groups_do_not_accumulate_past_the_allowance()
             .value(0),
         8192 * 512
     );
+    for (column, expected) in [(2, 0), (3, 8191), (4, 33550336)] {
+        assert_eq!(
+            batches[0]
+                .column(column)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            expected
+        );
+    }
 }
 
 #[tokio::test]
@@ -498,6 +509,24 @@ async fn named_step_spills_and_keeps_exact_rows() {
         .await
         .unwrap();
     assert_eq!(storage, StepStorage::Scratch);
+    let files = scratch_files(&root.path().join("scratch"));
+    assert_eq!(files.len(), 1);
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        std::fs::File::open(&files[0]).unwrap(),
+    )
+    .unwrap();
+    let groups = reader.metadata().num_row_groups();
+    assert!(groups < 24000_usize.div_ceil(limits().batch_rows));
+    use std::io::{Read, Seek};
+    let mut file = std::fs::File::open(&files[0]).unwrap();
+    file.seek(std::io::SeekFrom::End(-8)).unwrap();
+    let mut tail = [0u8; 8];
+    file.read_exact(&mut tail).unwrap();
+    assert_eq!(&tail[4..], b"PAR1");
+    eprintln!(
+        "private_spill_layout {}",
+        serde_json::json!({"rows":24000,"compute_batch_rows":limits().batch_rows,"row_groups":groups,"footer_bytes":u32::from_le_bytes(tail[..4].try_into().unwrap()),"file_bytes":file.metadata().unwrap().len()})
+    );
     assert_eq!(
         job.sql("SELECT * FROM large")
             .await

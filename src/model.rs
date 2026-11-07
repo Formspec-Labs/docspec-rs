@@ -2,12 +2,14 @@
 
 pub mod expr;
 pub mod id;
+pub mod job;
 pub mod operations;
 pub mod retention;
 pub mod transform;
 
 pub use expr::*;
 pub use id::*;
+pub use job::*;
 pub use operations::*;
 pub use retention::*;
 pub use transform::*;

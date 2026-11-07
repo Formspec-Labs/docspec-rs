@@ -731,7 +731,28 @@ fn prune_obsolete_protections(
 ) -> Result<()> {
     let index = ObsoleteLifecycleIndex::from_rows(rows)?;
     let mut kept_record_paths = head_ref_paths.clone();
-    for (k, _, json) in rows.prefix("") {
+    for (k, revision, json) in rows.prefix("") {
+        if k.starts_with("job-") {
+            let _decoded = rows.reserve_decoded(budget, &[k])?;
+            if !remove_keys.contains(k) {
+                // Audit metadata never grants payload lifetime after its exact native promise ends.
+                let marker = super::retirement::marker_key(&RetainedGeneration {
+                    key: k.into(),
+                    revision,
+                });
+                if !rows.contains_key(&marker) {
+                    for object in
+                        crate::engine::managed_job::retention::record_roots(k, json, table, budget)?
+                            .ok_or_else(|| {
+                                Error::refusal("retention_inventory", "unknown whole-job record")
+                            })?
+                    {
+                        kept_record_paths.insert(object.path);
+                    }
+                }
+            }
+            continue;
+        }
         if k.starts_with("managed-quality-") {
             let _decoded = rows.reserve_decoded(budget, &[k])?;
             let companions = crate::engine::managed_build::retention_companions(k, json, rows)?;
@@ -771,6 +792,22 @@ fn prune_obsolete_protections(
         let Some((op_str, kind)) = protection.purpose.split_once('/') else {
             continue;
         };
+        if kind == "job" {
+            let operation_key = format!("job-operation/{op_str}");
+            if let Some(revision) = rows.revision(&operation_key) {
+                let marker = super::retirement::marker_key(&RetainedGeneration {
+                    key: operation_key,
+                    revision,
+                });
+                if rows.contains_key(&marker) {
+                    if rows.contains_key(&bkey) {
+                        remove_keys.insert(bkey);
+                    }
+                    remove_keys.insert(key.to_owned());
+                }
+            }
+            continue;
+        }
         if kind == "compaction" {
             let req_key = format!("compaction-request/{op_str}");
             let res_key = format!("compaction-result/{op_str}");

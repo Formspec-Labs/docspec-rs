@@ -1,5 +1,126 @@
 # Implementation and qualification status
 
+## Retained whole-job implementation — review repairs in progress
+
+The development `managed-job` route seals individual input members, expensive
+materializations, exports and native report IPC, then assembles a distinct
+whole-job candidate. Completed native `JobResult` and original admitted request
+bytes support inspect/retry without reopening caller artifacts. Exact report
+acceptance and guarded selection remain separate from completed computation.
+Schema-only SQL and retained view descriptions use maintained optimized-plan
+schemas, since scalar-subquery rewrites can change native Arrow nullability.
+Ordinary materialization/export and standalone schema planning use that same
+rule. Thin scalar wrappers admit repeat/pad and integer array-size kernels at
+actual invocation, including constants introduced by native CASE/view rewrites,
+constructors or parameter binding. Native kernels remain authoritative. A
+conservative cumulative constant allowance reserves actual estimates lazily from
+the shared host budget before kernel invocation and remains owned through
+Job/planning/stream lifetimes. Empty contexts reserve no unused literal allowance;
+this does not establish a
+whole-process memory bound or arbitrary-query support. Native row batches reuse
+existing fitting admission. Current column-dependent expressions and native
+typed empty constructors retain their interpretation.
+The bounded array-repeat profile accepts flat scalar elements; nested repetition
+and nested resize elements/fill remain unsupported. Null resize lengths refuse
+because the pinned kernel can read a nonzero value beneath their null bitmap.
+Raw `Job::sql` DataFrames expose maintained DataFusion methods; direct consumers
+do not inherit the Job APIs' cumulative planning/stream ownership guarantee.
+Retained report inventory continues to describe its actual sealed IPC schema.
+An unaccepted candidate can receive a distinct policy under fresh authority;
+this does not rewrite its original request, policy, manifest or runtime origin.
+Small native and actual DDK consumer examples passed on immutable retained-job
+source 06; they do not qualify the current repair source or a release.
+
+The source 19 installed consumer exposed shared-admission exhaustion under its
+unchanged 128 MiB host limit: one unused 4 MiB scalar allowance reserved 16 MiB
+from the shared pool and prevented a
+lifecycle writer's 4 MiB metadata reservation. This was a shared-budget refusal,
+not observed process-memory exhaustion. Its failed consumer and interrupted
+full gate remain retained. The successor replaces the fixed allowance reservation
+with cumulative actual charges and adds empty-context, shared-capacity and stream
+lifetime probes; exact installed consumer and full-gate evidence remain pending.
+
+The successor source 20 passed the same installed four-case consumer without
+changing its limits. Its full gate passed the native library suite, then an
+external disk observer raced with a disappearing test directory. The interrupted
+run remains evidence rather than a passing gate. The larger synthetic Congress
+fixture retained all 17 exports and five reports but refused the final lifecycle
+seal under shared-admission pressure. Fresh admission still held an obsolete
+32 MiB lifecycle snapshot across execution. The next repair ends that authority
+read after admission and ends the SQL computation owner after its final consumer;
+sealed reports, schemas, witnesses, native disk accounting and protection keep
+their independent owners. Focused and final-gate evidence for that repair remain
+pending. Native snapshot custody, producer prerequisites and publication intent
+remain unsupported.
+
+Source 22's installed and fresh rich Congress examples passed, including the
+unchanged-limit first-attempt completion. Its full repository gate failed 20
+integration cases after the native library passed. Diagnostic-only source 23
+identified lifecycle string-builder spare capacity before identity allocation,
+an eager export metadata maximum overlapping required reader ownership, and
+private spill row groups coupled to small compute batches. The next repair
+pre-sizes known lifecycle strings, grows the existing conservative export
+metadata-unit estimate before writes, and keeps native byte bounds while using
+the native default private row-group row ceiling. Authored literal and streaming
+table-function test inputs preserve the original metadata-result and spill
+boundaries. Original limits and expected values remain in place. Diagnostic
+prints are removed from the implementation; failed gate and observations remain
+retained. Focused and full-gate execution of this repair remain pending.
+Exact local-file metadata transport also uses the smaller of the proven file
+size and the existing 2 MiB transport estimate. The native reader's in-file
+ranges justify that small-file bound; decoded footer, enclosing page-index and
+cache admission remain separate. The tiny spill fixture keeps its 4 MiB host
+limit and checks the original population, byte total and explicit integer IDs.
+
+The next focused checkpoint covers expression-subquery dependency traversal,
+per-member interrupted admission, exact originating-runtime phase attribution,
+shared retained/spill disk admission, and bounded Parquet footer/cache ownership.
+Retained disk jobs serialize against the host's existing disk work and preserve
+the shared memory pool. A live prior native disk manager blocks a new disk job;
+metadata inspection remains available. Published retained files keep accounting
+handles without scratch names. Cold reopen under the OS workspace lock reclaims
+only private DataFusion scratch directories, including publication crash aliases.
+Native spill quota checks occur after a spill write; focused evidence must report
+that chunk overshoot separately from retained-writer pre-write admission and RSS.
+
+Exact local Parquet registration checks one footer before decoding its native
+index descriptors, then checks footer plus the enclosing column/offset index
+transport span, including gaps, before DataFusion can decode indexes. The initial
+retained profile disables optional Bloom pruning through native reader settings;
+it does not parse or misclassify valid offset-only Bloom metadata. Provider/plan/stream permits retain
+reader admission; cache-entry permits cover cache residency, since native bare
+metadata Arcs may outlive eviction. The conservative decode estimates and this
+exact-file profile do not establish directory-reader or whole-process bounds.
+The existing result-availability promise conservatively retains input and
+materialized-step payloads as well as outputs/reports. Retiring phase recovery
+alone does not free bytes still rooted by result availability or selection.
+Unsealed report attempts use distinct native immutable paths, so a changed
+execution batch size cannot collide with an earlier unsealed report artifact.
+
+Original native snapshot custody, producer-definition adoption/prerequisites and
+publication intent remain unavailable. Generic local-file examples do not close
+those application migration requirements. The prior source-06 artifacts, failed
+retention-size gate and controlled path-length diagnostics remain retained under
+`native-retained-job`, `native-job-prepare` and `native-update` in the external
+November 6 replacement evidence directory. The required repaired-source gate is
+pending; no production or publication claim follows from this implementation.
+
+## Whole-job schema preparation — work in progress
+
+The `prepare-job` implementation is pending focused verification and independent
+review. It accepts an exact captured `JobSpec` artifact plus one same-name declared
+Arrow IPC schema or exact native Arrow-serde/Iceberg schema artifact per native input. It plans all steps, exports and report queries
+using shared native guards, without opening inputs or writing job destinations.
+Results distinguish inferred schemas from input admission and execution, both
+`not_run`. Standard IPC schema bytes retain native nested types and metadata for
+PyArrow readers. Nonempty table operations refuse.
+
+The small managed-quality policy change separately admits mapping revision `2`
+alongside `1`, preserving exact evidence/policy/rules equality. Focused policy tests,
+streaming-evaluator integration acceptance, independent reviews and the required
+final repository gate remain pending. No retained version-1 evidence is relabeled.
+The immutable `d96e001` runtime and its completed gate retain their earlier scope.
+
 ## Managed local source Update extension — November 6, 2026
 
 The local source-only Update extension passes the required repository gate and
@@ -4201,3 +4322,24 @@ forgery cases and shared replacement paths. See the
 Format 10 adds schema requests and distinguishes expected from selected definitions.
 Optional/default additions, durable absence interpretation, nested evolution,
 global IDs across full rebuilds and the broader R3/R7 performance gates remain open.
+# Retained whole-job implementation checkpoint (unqualified)
+
+The native `managed-job` family now has source implementation for local file
+custody, independently sealed SQL/component materializations, exports and typed
+Arrow report completions, exact zero-counter acceptance, guarded selection and
+historical reconciliation. The original complete prepare request, job and policy
+bytes remain in native lifecycle custody. Material dependencies exclude caller
+custody paths, policy and whole-job provenance; successor report-only changes can
+resolve native material completions before opening caller files.
+
+This is not a qualified runtime yet. The first type-check retained mechanical
+digest/dispatch errors, now repaired. Experimental source05 passed three native
+recovery/reuse/counter tests and the output-namespace schema-only case, including
+the caller-alias invalidation negative. Earlier alias/dependency refusals remain
+retained. Partial inspection now reports already sealed output/report facts and
+the corresponding maintained partial `JobResult`; that follow-up still needs
+focused proof and the complete repository gate. This initial family refuses raw native snapshot
+selectors without owner custody, nonempty table operations, retained Substrait
+artifacts and unsupported prerequisite profiles. Congress producer-interpretation
+adoption, population prerequisites, remote custody and publisher intent remain
+separate unfinished work. Ordinary `JobSpec::run` retains its bounded semantics.

@@ -109,7 +109,13 @@ impl TableProvider for AdmittedTable {
 #[derive(Debug)]
 struct AdmittedPlan {
     input: Arc<dyn ExecutionPlan>,
-    memory: Arc<OwnedSemaphorePermit>,
+    memory: Arc<dyn fmt::Debug + Send + Sync>,
+}
+pub(super) fn admit_metadata_plan(
+    input: Arc<dyn ExecutionPlan>,
+    memory: Arc<dyn fmt::Debug + Send + Sync>,
+) -> Arc<dyn ExecutionPlan> {
+    Arc::new(AdmittedPlan { input, memory })
 }
 impl DisplayAs for AdmittedPlan {
     fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {

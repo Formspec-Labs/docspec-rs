@@ -17,6 +17,23 @@ pub struct QueryResult {
     pub data: serde_json::Value,
     #[serde(skip)]
     _memory: Option<Arc<MemoryReservation>>,
+    #[serde(skip)]
+    _metadata: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+}
+
+impl QueryResult {
+    pub(crate) fn retained(
+        name: &str,
+        data: serde_json::Value,
+        memory: tokio::sync::OwnedSemaphorePermit,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            data,
+            _memory: None,
+            _metadata: Some(Arc::new(memory)),
+        }
+    }
 }
 
 struct Buffer {
@@ -48,7 +65,7 @@ impl Write for Buffer {
 }
 
 pub(super) async fn query(job: &Job, name: &str, sql: &str) -> Result<QueryResult> {
-    let mut stream = job.sql(sql).await?.execute_stream().await?;
+    let mut stream = super::plan::execute_stream(job.sql(sql).await?).await?;
     let buffer = Buffer {
         bytes: Vec::new(),
         limit: job.budget.limits.max_metadata_bytes,
@@ -78,5 +95,6 @@ pub(super) async fn query(job: &Job, name: &str, sql: &str) -> Result<QueryResul
         name: name.into(),
         data,
         _memory: Some(Arc::new(buffer.memory)),
+        _metadata: None,
     })
 }

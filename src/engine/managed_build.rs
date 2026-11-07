@@ -486,6 +486,9 @@ pub(super) fn check_quality_base(authority: &Authority) -> Result<()> {
     Ok(())
 }
 
+// Revision 2 records completed bounded evaluator execution separately from raw DCC checks.
+const QUALITY_EXECUTION_COMPLETE: &str = "ddk:quality-execution-complete";
+
 impl QualificationPolicy {
     fn validate(&self) -> Result<()> {
         if !valid_digest(&self.rules_sha256)
@@ -493,7 +496,12 @@ impl QualificationPolicy {
             || self.evaluator.version != "1.2.9"
             || !valid_digest(&self.evaluator.distribution_sha256)
             || self.semantics.id != "urn:ddk:quality:duckdb-direct-view"
-            || self.semantics.revision != "1"
+            || !matches!(self.semantics.revision.as_str(), "1" | "2")
+            || (self.semantics.revision == "2"
+                && !self
+                    .required_checks
+                    .iter()
+                    .any(|id| id == QUALITY_EXECUTION_COMPLETE))
             || self.required_checks.is_empty()
             || self.required_checks.iter().any(String::is_empty)
             || self.required_checks.iter().collect::<BTreeSet<_>>().len()
@@ -1266,6 +1274,24 @@ fn validate_dcc(
     {
         return Err(quality_mismatch());
     }
+    if rules.mapping_semantics.revision == "2"
+        && (!rules
+            .required_check_ids
+            .iter()
+            .any(|id| id == QUALITY_EXECUTION_COMPLETE)
+            || evaluated
+                .checks
+                .iter()
+                .filter(|check| {
+                    check.id == QUALITY_EXECUTION_COMPLETE
+                        && check.status == CheckStatus::Passed
+                        && check.native_check_ids.is_empty()
+                })
+                .count()
+                != 1)
+    {
+        return Err(quality_mismatch());
+    }
     let expected_count = raw.checks.len();
     let mut native = raw
         .checks
@@ -1283,6 +1309,8 @@ fn validate_dcc(
             [id] if native
                 .remove(id)
                 .is_some_and(|(key, result)| key == observed.id && result == "passed") => {}
+            [] if observed.id == QUALITY_EXECUTION_COMPLETE
+                && evaluated.mapping_semantics.revision == "2" => {}
             [] if observed.id == "ddk:exact-field-names"
                 && dataset.properties.iter().all(|field| {
                     let name = field.physical_name.as_deref().unwrap_or(&field.name);
@@ -1342,3 +1370,6 @@ impl<W: Write> Write for IpcDigest<W> {
         self.writer.flush()
     }
 }
+
+#[cfg(test)]
+mod semantics_tests;

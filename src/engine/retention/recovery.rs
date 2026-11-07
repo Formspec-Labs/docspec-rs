@@ -14,7 +14,7 @@ fn keys(operation: &Id) -> [String; 4] {
 }
 
 pub(super) fn scope_key(operation: &Id, key: &str) -> bool {
-    keys(operation).iter().any(|candidate| candidate == key)
+    key == format!("job-operation/{operation}") || keys(operation).iter().any(|candidate| candidate == key)
         || key
             .strip_prefix(&format!("source-attempt/{operation}/"))
             .is_some_and(|suffix| {
@@ -222,6 +222,11 @@ pub(super) fn collect(
     root: &Path,
     budget: &Budget,
 ) -> Result<Vec<RetainedGeneration>> {
+    if let Some(records) = crate::engine::managed_job::retention::retirement_records(
+        rows, view, operation, false, budget,
+    )? {
+        return Ok(records);
+    }
     let limit = budget.limits.max_metadata_bytes;
     let _state = budget.reserve(limit)?;
     let _decoded = reserve_identity(rows, operation, budget)?;
@@ -323,6 +328,15 @@ pub(super) fn validate_saved(
         return Ok(());
     };
     let budget = &engine.inner.lifecycle.budget;
+    if let Some(mut records) = crate::engine::managed_job::retention::retirement_records(
+        rows, view, operation, false, budget,
+    )? {
+        records.sort();
+        if records != receipt.plan.records {
+            return Err(invalid_retirement());
+        }
+        return Ok(());
+    }
     let _decoded = reserve_identity(rows, operation, budget)?;
     let (revision, request, admitted) = admission(rows, view, operation)?;
     terminal(rows, revision, &request, &admitted, receipt.plan.revision)?;

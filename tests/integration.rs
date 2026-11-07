@@ -37,6 +37,7 @@ mod http_optional_changes;
 mod http_read;
 mod incremental_view_algebra;
 mod input_generations;
+mod job_preparation;
 mod layout_probe;
 mod lifecycle;
 mod managed_updates;

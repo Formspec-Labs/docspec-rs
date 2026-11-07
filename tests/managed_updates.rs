@@ -352,3 +352,48 @@ async fn pending_quality_policy_and_completed_read_survive_lifecycle_compaction(
         base
     );
 }
+
+#[tokio::test]
+async fn quality_mapping_revisions_are_explicit_and_cannot_relabel_a_policy() {
+    let root = TempDir::new().unwrap();
+    let (engine, base) = fixture(root.path()).await;
+    let spec = update(root.path(), "mapping-two", &[("A", Some(120))]);
+    let mut policy_two = policy(&base);
+    policy_two["semantics"]["revision"] = json!("2");
+    let missing_fact = policy_two.clone();
+    let missing_request = json!({"action":"prepare_update","update":spec,"policy":missing_fact});
+    assert_eq!(
+        managed(&engine, missing_request).await.unwrap_err().code(),
+        "invalid_qualification_policy"
+    );
+    policy_two["required_checks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("ddk:quality-execution-complete"));
+    let request = json!({"action":"prepare_update", "update":spec, "policy":policy_two});
+    let prepared = managed(&engine, request.clone()).await.unwrap();
+    assert_eq!(prepared["policy"]["semantics"]["revision"], "2");
+    assert_eq!(prepared["accepted_qualification"], Value::Null);
+    for crossed in ["1", "3"] {
+        let mut changed = request.clone();
+        changed["policy"]["semantics"]["revision"] = json!(crossed);
+        let error = managed(&engine, changed).await.unwrap_err();
+        assert_eq!(
+            error.code(),
+            if crossed == "3" {
+                "invalid_qualification_policy"
+            } else {
+                "qualification_policy_mismatch"
+            }
+        );
+    }
+    let one = update(root.path(), "mapping-one", &[("A", Some(121))]);
+    let prepared_one = managed(
+        &engine,
+        json!({"action":"prepare_update", "update":one, "policy":policy(&base)}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared_one["policy"]["semantics"]["revision"], "1");
+    assert_eq!(prepared_one["accepted_qualification"], Value::Null);
+}

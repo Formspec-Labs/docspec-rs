@@ -52,11 +52,7 @@ fn allocation_overflow() -> DataFusionError {
     DataFusionError::ResourcesExhausted("JSON allocation size overflow".into())
 }
 
-pub(super) fn provider(
-    files: Vec<JsonLinesFile>,
-    input: SchemaRef,
-    limits: &crate::budget::Limits,
-) -> Result<Arc<dyn TableProvider>> {
+pub(super) fn describe(input: &Schema) -> Result<Schema> {
     if input
         .fields()
         .iter()
@@ -76,7 +72,15 @@ pub(super) fn provider(
         Field::new("__source_line", DataType::Int64, false),
         Field::new("__raw_line", DataType::Utf8, false),
     ]);
-    let schema = Arc::new(Schema::new(fields));
+    Ok(Schema::new(fields))
+}
+
+pub(super) fn provider(
+    files: Vec<JsonLinesFile>,
+    input: SchemaRef,
+    limits: &crate::budget::Limits,
+) -> Result<Arc<dyn TableProvider>> {
+    let schema = Arc::new(describe(&input)?);
     // One sequential group per compute slot bounds open files and queued batches.
     let mut groups = vec![Vec::new(); limits.compute_threads];
     for (i, file) in files.into_iter().enumerate() {

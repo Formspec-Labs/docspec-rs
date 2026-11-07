@@ -376,6 +376,7 @@ async fn profile_lifecycle_compaction_and_warm_commit_scaling() {
                 selected: Some(next_pin.dataset.clone()),
                 release: Some(next_pin.clone()),
                 selection_revision: Some(view.revision + 2),
+                ..Authority::default()
             };
             view = engine
                 .inner

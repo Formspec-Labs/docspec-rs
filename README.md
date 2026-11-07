@@ -13,6 +13,25 @@ public distribution or full-scale remote throughput. See
 the [revision and consumer evidence map](docs/reviews/supported-scope-2026-10-18.md)
 for the retained proof and remaining adoption decisions.
 
+## Whole-job preparation and retained execution
+
+`prepare-job --spec request.json` infers one complete existing `JobSpec` from
+explicit named Arrow or Iceberg schema declarations. It returns standard Arrow
+IPC schemas without opening input rows or exporting data. Reports can reference
+the projected export schema as `outputs."exact output name"`.
+
+The experimental `managed-job` family adds native-owned local file custody,
+reopenable materializations/exports/reports, exact native SQL counter acceptance
+and guarded whole-candidate selection. Its focused small-fixture proof does not
+qualify a release. Raw native/remote snapshot custody, producer prerequisites and
+publisher intent remain unavailable; unsupported requests refuse explicitly.
+See [current status](docs/STATUS.md) for the active checks and remaining scope.
+
+`JobSpec::run`, materialization, exports and managed commands own cumulative
+scalar planning and stream admission. Raw `Job::sql` DataFrames expose native
+DataFusion methods; direct `collect` or physical planning does not inherit that
+ownership. The guarded kernel/type subset is recorded in the current status.
+
 ## Exports and local maintenance
 
 `export export.json` creates an independently readable Parquet file containing

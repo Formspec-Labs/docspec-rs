@@ -523,6 +523,35 @@ pub(super) fn publish_candidate_metadata(
     Ok(())
 }
 
+pub(super) fn publish_retained_metadata(
+    expected: &crate::model::ObjectRef,
+    bytes: &[u8],
+    budget: &Budget,
+) -> Result<()> {
+    let path = Path::new(&expected.path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::refusal("metadata_location", "candidate metadata needs a parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let temporary = budget
+        .runtime_env()
+        .disk_manager
+        .create_tmp_file("retained job metadata")?;
+    {
+        let mut writer = budget.scratch_writer(&temporary)?;
+        std::io::Write::write_all(&mut writer, bytes)?;
+    }
+    temporary.inner().as_file().sync_all()?;
+    match std::fs::hard_link(temporary.path(), path) {
+        Ok(()) => budget.retain_temporary(temporary)?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            super::verify_object(expected)?
+        }
+        Err(error) => return Err(error.into()),
+    }
+    sync_candidate_parent(expected)
+}
+
 pub(super) fn publish_metadata_new(
     expected: &crate::model::ObjectRef,
     bytes: &[u8],

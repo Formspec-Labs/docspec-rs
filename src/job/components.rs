@@ -80,6 +80,13 @@ impl KeyKind {
             Self::FixedBinary(width) => DataType::FixedSizeBinary(width as i32),
         }
     }
+    fn output_schema(self) -> Schema {
+        let out_type = self.output_type();
+        Schema::new(vec![
+            Field::new("node", out_type.clone(), false),
+            Field::new("component", out_type, false),
+        ])
+    }
 }
 
 fn endpoint_bytes(array: &dyn Array, row: usize) -> Result<&[u8]> {
@@ -353,11 +360,7 @@ impl Graph {
         self.minimum.shrink_to_fit();
         let _ = self.memory.resize(self.storage_bytes());
 
-        let out_type = self.kind.output_type();
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("node", out_type.clone(), false),
-            Field::new("component", out_type, false),
-        ]));
+        let schema = Arc::new(self.kind.output_schema());
         let output_schema = schema.clone();
         let batches = stream::try_unfold(
             (self, 0usize, None::<OwnedSemaphorePermit>),
@@ -457,11 +460,11 @@ impl Graph {
     }
 }
 
-pub(super) async fn compute(
+async fn prepare(
     job: &Job,
     name: &str,
     settings: &ComponentsSettings,
-) -> Result<(StepStorage, usize, usize)> {
+) -> Result<(datafusion::dataframe::DataFrame, KeyKind)> {
     if settings.node_limit == 0
         || settings.left.is_empty()
         || settings.right.is_empty()
@@ -477,7 +480,35 @@ pub(super) async fn compute(
         frame.schema().field(0).data_type(),
         frame.schema().field(1).data_type(),
     )?;
-    let mut stream = frame.execute_stream().await?;
+    Ok((frame, kind))
+}
+
+pub(super) async fn describe(
+    job: &Job,
+    name: &str,
+    settings: &ComponentsSettings,
+) -> Result<Schema> {
+    let (_, kind) = prepare(job, name, settings).await?;
+    Ok(kind.output_schema())
+}
+
+pub(super) async fn compute(
+    job: &Job,
+    name: &str,
+    settings: &ComponentsSettings,
+) -> Result<(StepStorage, usize, usize)> {
+    let stream = compute_stream(job, name, settings).await?;
+    let schema = stream.schema();
+    materialized::retain(&job.context, &job.budget, name, schema, stream).await
+}
+
+pub(super) async fn compute_stream(
+    job: &Job,
+    name: &str,
+    settings: &ComponentsSettings,
+) -> Result<SendableRecordBatchStream> {
+    let (frame, kind) = prepare(job, name, settings).await?;
+    let mut stream = super::plan::execute_stream(frame).await?;
     let mut graph = Graph::new(&job.budget, kind, settings.node_limit)?;
     while let Some(batch) = stream.try_next().await? {
         let left_col = batch.column(0).as_ref();
@@ -489,7 +520,5 @@ pub(super) async fn compute(
         }
     }
     drop(stream);
-    let stream = graph.output();
-    let schema = stream.schema();
-    materialized::retain(&job.context, &job.budget, name, schema, stream).await
+    Ok(graph.output())
 }

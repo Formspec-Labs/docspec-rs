@@ -51,7 +51,7 @@ pub enum JobInput {
     },
 }
 impl JobInput {
-    fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Parquet { name, .. }
             | Self::JsonLines { name, .. }
@@ -107,7 +107,7 @@ pub enum JobStep {
     Components(ComponentsStep),
 }
 impl JobStep {
-    fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Sql(step) => &step.name,
             #[cfg(feature = "substrait")]
@@ -115,7 +115,7 @@ impl JobStep {
             Self::Components(step) => &step.name,
         }
     }
-    fn release_after(&self) -> &[String] {
+    pub(crate) fn release_after(&self) -> &[String] {
         match self {
             Self::Sql(step) => &step.release_after,
             #[cfg(feature = "substrait")]
@@ -293,12 +293,7 @@ impl JobSpec {
         }
     }
 
-    async fn execute(
-        &self,
-        limits: Limits,
-        result: &mut JobResult,
-        connections: Connections,
-    ) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let mut names = BTreeSet::new();
         for name in self
             .inputs
@@ -314,21 +309,6 @@ impl JobSpec {
             }
         }
         TableOperation::validate_all(&self.table_operations, names)?;
-        if connections.catalog.is_some() && self.catalog_root.is_some() {
-            return Err(Error::refusal(
-                "invalid_spec",
-                "injected and local catalog authority cannot be combined",
-            ));
-        }
-        if !self.table_operations.is_empty()
-            && connections.catalog.is_none()
-            && self.catalog_root.is_none()
-        {
-            return Err(Error::refusal(
-                "invalid_spec",
-                "table operations require an explicit catalog",
-            ));
-        }
         let mut names = BTreeSet::new();
         let mut paths = BTreeSet::new();
         for output in &self.outputs {
@@ -365,6 +345,31 @@ impl JobSpec {
                     ));
                 }
             }
+        }
+        Ok(())
+    }
+
+    async fn execute(
+        &self,
+        limits: Limits,
+        result: &mut JobResult,
+        connections: Connections,
+    ) -> Result<()> {
+        self.validate()?;
+        if connections.catalog.is_some() && self.catalog_root.is_some() {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "injected and local catalog authority cannot be combined",
+            ));
+        }
+        if !self.table_operations.is_empty()
+            && connections.catalog.is_none()
+            && self.catalog_root.is_none()
+        {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "table operations require an explicit catalog",
+            ));
         }
         #[cfg(feature = "remote")]
         let job = if let Some(remote) = connections.remote {
@@ -568,6 +573,8 @@ impl JobSpec {
                 name: output.name.clone(),
                 file,
             });
+            job.register_completed_output(&output.name, &output.path)
+                .await?;
 
             let remaining_outputs_sql = self.outputs[output_index + 1..]
                 .iter()

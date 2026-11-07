@@ -14,6 +14,13 @@ use std::path::PathBuf;
 #[derive(Debug, Default)]
 pub(in crate::engine) struct TestHooks {
     #[cfg(test)]
+    pub(in crate::engine) job_stop_after: tokio::sync::Mutex<Option<String>>,
+    #[cfg(test)]
+    pub(in crate::engine) job_admission_rows:
+        tokio::sync::Mutex<Option<std::sync::Weak<crate::catalog::SnapshotRows>>>,
+    #[cfg(test)]
+    pub(in crate::engine) job_admission_read_alive_during_work: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
     pub(in crate::engine) release_decodes: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(in crate::engine) initial_build_queries: std::sync::atomic::AtomicUsize,

@@ -6,8 +6,8 @@ use docspec::{
     Engine,
     budget::{Budget, Limits},
     engine::{
-        ManagedBuildCommand, NativeVersionRead, read_evidence, read_group, read_receipts,
-        verify_input_coverage, verify_release_at,
+        ManagedBuildCommand, ManagedJobCommand, NativeVersionRead, read_evidence, read_group,
+        read_receipts, verify_input_coverage, verify_release_at,
     },
     evidence::EvidenceSpec,
     export::ExportSpec,
@@ -125,8 +125,12 @@ enum Command {
     Job(SpecArg),
     /// Prepare a calculation using schemas only, with optional Substrait output.
     JobPlan(SpecArg),
+    /// Infer every schema in one complete job from named declarations only.
+    PrepareJob(SpecArg),
     /// Prepare, qualify, select or reconcile a protected local Build or Update.
     ManagedBuild(SpecArg),
+    /// Execute, qualify, select or reconcile one retained complete native job.
+    ManagedJob(SpecArg),
     /// Stream an exact protected source version as Arrow IPC.
     ReadVersion(SpecArg),
     /// Upload one known local file with a create-only single PUT.
@@ -554,7 +558,12 @@ async fn async_main() -> anyhow::Result<()> {
     check_startup(&cli)?;
     if matches!(
         &cli.command,
-        Command::Job(_) | Command::JobPlan(_) | Command::ManagedBuild(_) | Command::ReadVersion(_)
+        Command::Job(_)
+            | Command::JobPlan(_)
+            | Command::PrepareJob(_)
+            | Command::ManagedBuild(_)
+            | Command::ManagedJob(_)
+            | Command::ReadVersion(_)
     ) && cli.limits.is_none()
     {
         return Err(docspec::Error::refusal(
@@ -600,6 +609,21 @@ async fn async_main() -> anyhow::Result<()> {
                 Err(error) => {
                     print_json(&serde_json::json!({
                         "status": "failed",
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
+        }
+        Command::PrepareJob(SpecArg { spec }) => {
+            let spec: docspec::job::PrepareJobSpec = read_json(spec)?;
+            match spec.prepare(limits).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "profile": "urn:docspec:job:schema-only:1",
+                        "execution": "not_run",
                         "error": {"code": error.code(), "message": error.message()},
                     }))?;
                     return Err(error.into());
@@ -772,6 +796,44 @@ async fn execute_engine_command(
         }
         Command::Plan(SpecArg { spec }) => {
             print_json(&engine.plan(&read_json::<RunSpec>(spec)?).await?)?
+        }
+        Command::ManagedJob(SpecArg { spec }) => {
+            use std::io::Read as _;
+            let file = File::open(spec)?;
+            let size = file.metadata()?.len();
+            anyhow::ensure!(
+                size <= engine.limits().max_metadata_bytes as u64,
+                "managed job metadata exceeds host allowance"
+            );
+            let mut bytes = Vec::with_capacity(size as usize);
+            file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.len() as u64 == size,
+                "managed job metadata size changed"
+            );
+            #[derive(serde::Deserialize)]
+            struct Identity {
+                dataset: Id,
+                operation: Id,
+            }
+            let identity: Identity = serde_json::from_slice(&bytes)?;
+            match engine.managed_job_bytes(bytes).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    let completed = engine
+                        .managed_job(ManagedJobCommand::Inspect {
+                            dataset: identity.dataset,
+                            operation: identity.operation,
+                        })
+                        .await
+                        .ok();
+                    print_json(
+                        &serde_json::json!({"status":"failed","completed":completed,"error":{"code":error.code(),"message":error.message()}}),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
         }
         Command::ManagedBuild(SpecArg { spec }) => {
             let request = read_json::<ManagedBuildCommand>(spec)?;

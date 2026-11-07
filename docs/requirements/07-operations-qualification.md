@@ -10,6 +10,27 @@ Start the native Comments fixture and measurement design while architecture choi
 
 The [research acceptance map](RESEARCH.md) sets the first milestone: a recoverable fixed-schema Comments path from selected input through independent publication readback. Exercise phase reuse and late failures before broader incremental and schema features. These cases derive from historical practitioner incidents; do not label them current defects or claim the new architecture's performance from interview timings.
 
+## Whole-job preparation boundary
+
+Schema preparation of a captured whole `JobSpec` must account for every named input,
+step, export and report, including private members. Bind exact job bytes and named
+declared Arrow IPC schema bytes or exact tagged native schema artifacts. Where
+an Iceberg declaration and job input both carry native schema IDs, refuse a
+mismatch before schema-only registration; this comparison is not input admission.
+Use native validation and schema-only providers,
+with zero source payload reads, graph execution, materialization or row export.
+Return inferred schemas separately from observed input admission, execution and
+qualification; unsupported facets refuse. Reject table operations in the schema-only
+profile. Preserve native field order, recursive types and metadata through a
+maintained IPC reader rather than a parallel type language.
+
+Qualify an independently authored two-output job, missing/duplicate/wrong-name
+schemas, private member removal under a pinned artifact, invalid query/function/
+lifetime/export/component settings, mutation attempts and metadata capacity. A
+scan tripwire must exercise the shared provider. Retained whole-job execution
+requires separately qualified durable completion/reopen hooks and custody; ordinary
+`JobSpec::run` does not supply them.
+
 ## Early decision and measurement work
 
 Record actual consumers and required data/evidence formats before format freeze. Set workload distributions and product targets for acknowledgement delay, change-to-release freshness, backfill lag, recovery time and failure-domain loss tolerance, resource/cost limits, disclosure policy, and independent retention windows. Acknowledged work survives worker loss; broader disaster guarantees must be explicit.
@@ -163,3 +184,60 @@ The lifecycle comparison qualifies the assembled design. A claim about Rust-spec
 Actual consumers, operating targets, failure domains, disclosure, and retention durations remain explicit inputs. Draft fixtures and interfaces may proceed without invented numbers. Consumer requirements precede format freeze; relevant targets and probe evidence precede component/mechanism selection; full qualification precedes production claims.
 
 General incremental SQL, automatic failover, universal indexes, and orphan sweeping require a demonstrated need and explicit scope decision. Existing libraries or services are candidates, not mandatory dependencies.
+# Whole-job retained phase and native report qualification
+
+A whole-job candidate is distinct from a single-source `VersionRef`. It binds the
+entire original request, exact input selectors and member identities, every named
+intermediate/export/report, native Arrow schemas, original SQL bytes and maintained
+`JobResult`. Unknown submissions reconcile those original bytes without caller
+artifact reopening. Durable expensive phase seals precede release of dependencies;
+retry reopens completed phases and does not wrap ordinary `JobSpec::run`.
+
+Counter acceptance consumes native-retained typed report completion. Required
+names, fields, types and SQL digests must equal the admitted conditional policy.
+Exactly one complete aggregate row must contain a non-null integer zero in every
+declared blocking column. Nullable schema fields may hold actual zero; missing,
+null, empty, multiple, incomplete or nonzero results refuse selection while
+preserving completed calculation. Metadata reports may contain positive or
+multiple rows. External DCC acceptance remains a separate supported route.
+
+Raw snapshot selectors do not grant durable custody. Producer prerequisites must
+be native-owned decisions over exact selected input interpretation and original
+definitions; caller-computed versions or passed booleans do not establish that
+authority. Explicit native retirement ends each recovery/availability promise;
+audit descriptors alone must not extend payload lifetime.
+
+Retained dependency qualification includes scalar, EXISTS and IN expression
+subqueries, caller-alias collisions, unchanged-input reuse and report-only
+changes. Material completion preserves its originating processor/runtime tuple;
+unqualified cross-runtime reuse refuses rather than relabeling old exports.
+Each completed input member survives a later member failure without duplicate
+custody copies. Combined retained/native-spill tests require actual successful
+spilling as well as a constrained refusal, and disclose native post-write quota
+overshoot. A live detached disk owner prevents a new full disk allowance. Process
+death and cold reopen must leave no scratch aliases that outlive durable native
+objects. Per-footer and held-cache metadata admission remain distinct from
+measured aggregate process memory. Result availability currently promises replay
+of admitted inputs and materialized steps as well as completed outputs/reports;
+phase retirement cannot free those bytes while another promise remains active.
+
+State the public consumer boundary for resource evidence. Maintained JobSpec and
+managed consumers own native scalar planning and stream admission; a raw returned
+DataFrame's direct native methods do not inherit cumulative planning ownership.
+Qualify the exact guarded kernels and element types, including nullable argument
+backing values and nested cardinality. Unsupported shapes must refuse before
+kernel allocation rather than extrapolating from flat-value buffer sizes.
+Reserve conservative literal estimates lazily before native invocation and hold
+cumulative charges through the supported consumer lifetime. A context with no
+guarded expansion must not reserve its entire possible literal allowance.
+End obsolete admission snapshots before computation and completed computation
+providers before final metadata sealing. Preserve independent admission for every
+surviving report, schema and witness; releasing one owner must not erase another
+representation's charge or end native disk/protection obligations.
+Known-size lifecycle strings must not retain avoidable builder-growth capacity
+that defeats native batch admission. Private scratch row groups need not match
+compute batches. Export metadata-unit estimates may grow lazily before native
+writes, with unchanged ceilings and held ownership through finish; they remain
+conservative estimates rather than a measured universal native-memory bound.
+For exact immutable local files, metadata transport estimates may use the proven
+file-size bound while preserving decoded footer, page-index and cache charges.

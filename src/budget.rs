@@ -22,6 +22,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod array_admission;
 mod distinct;
 pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
+mod metadata_cache;
 mod portable_aggregates;
 mod schema_metadata;
 mod scratch;
@@ -70,6 +71,14 @@ pub struct Budget {
     runtime: Arc<RuntimeEnv>,
     retention_pool: Arc<dyn MemoryPool>,
     scratch_writes: Arc<std::sync::Mutex<()>>,
+    retained_files: Option<Arc<std::sync::Mutex<RetainedFiles>>>,
+    retained_existing_bytes: u64,
+}
+
+#[derive(Debug)]
+struct RetainedFiles {
+    files: Vec<datafusion::execution::disk_manager::RefCountedTempFile>,
+    memory: OwnedSemaphorePermit,
 }
 impl Budget {
     /// Creates a shared pool after validating representable limits.
@@ -102,24 +111,109 @@ impl Budget {
             ));
         }
         // The other half belongs to the shared DataFusion memory pool.
+        let bytes = Arc::new(Semaphore::new(limits.memory_bytes / 2));
+        let cache =
+            metadata_cache::AdmittedMetadataCache::new(limits.max_metadata_bytes, bytes.clone());
+        let cache = datafusion::execution::cache::cache_manager::CacheManagerConfig::default()
+            .with_file_metadata_cache(Some(Arc::new(cache)))
+            .with_metadata_cache_limit(limits.max_metadata_bytes);
         let mut runtime = RuntimeEnvBuilder::new()
             .with_memory_pool(Arc::new(FairSpillPool::new(limits.memory_bytes / 2)))
+            .with_cache_manager(cache)
             .with_max_temp_directory_size(limits.scratch_bytes);
         if let Some(scratch) = scratch {
             runtime = runtime.with_temp_file_path(scratch);
         }
         Ok(Self {
-            bytes: Arc::new(Semaphore::new(limits.memory_bytes / 2)),
+            bytes,
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
             retention_pool: Arc::new(GreedyMemoryPool::new(limits.memory_bytes / 2 / 4)),
             scratch_writes: Arc::default(),
+            retained_files: None,
+            retained_existing_bytes: 0,
             limits,
         })
     }
 
     pub(crate) fn runtime_env(&self) -> &RuntimeEnv {
         &self.runtime
+    }
+
+    /// Shares memory and execution admission while charging one retained operation's disk.
+    pub(crate) fn with_retained_disk(&self, bytes: u64) -> Result<Self> {
+        if bytes > self.limits.scratch_bytes {
+            return Err(Error::refusal(
+                "disk_capacity",
+                "retained operation exceeds its disk allowance",
+            ));
+        }
+        use datafusion::execution::disk_manager::{DiskManager, DiskManagerMode};
+        let paths = self.runtime.disk_manager.temp_dir_paths();
+        let mode = if paths.is_empty() {
+            DiskManagerMode::OsTmpDirectory
+        } else {
+            DiskManagerMode::Directories(paths)
+        };
+        // The host admits this retained operation exclusively against other disk
+        // work. Reuse its memory/cache/store owners, with one native disk counter
+        // for new retained files and spills; cold retained files reduce the cap.
+        let runtime = RuntimeEnvBuilder::from_runtime_env(&self.runtime)
+            .with_disk_manager_builder(
+                DiskManager::builder()
+                    .with_mode(mode)
+                    .with_max_temp_directory_size(self.limits.scratch_bytes - bytes),
+            )
+            .build_arc()?;
+        let mut budget = self.clone();
+        budget.runtime = runtime;
+        budget.retained_existing_bytes = bytes;
+        budget.retained_files = Some(Arc::new(std::sync::Mutex::new(RetainedFiles {
+            files: Vec::new(),
+            memory: self.reserve(0)?,
+        })));
+        Ok(budget)
+    }
+
+    pub(crate) fn retained_operation_disk_bytes(&self) -> u64 {
+        self.retained_existing_bytes
+            .saturating_add(self.runtime.disk_manager.used_disk_space())
+    }
+
+    pub(crate) fn retain_temporary(
+        &self,
+        file: datafusion::execution::disk_manager::RefCountedTempFile,
+    ) -> Result<()> {
+        if let Some(files) = &self.retained_files {
+            if self.retained_operation_disk_bytes() > self.limits.scratch_bytes {
+                return Err(Error::refusal(
+                    "disk_capacity",
+                    "retained files and native spill exceed the operation allowance",
+                ));
+            }
+            let mut files = files
+                .lock()
+                .map_err(|_| Error::refusal("worker", "retained file admission is poisoned"))?;
+            let charge = size_of_val(&file).saturating_mul(2).saturating_add(128);
+            if files.files.len().saturating_add(1).saturating_mul(charge)
+                > self.limits.max_metadata_bytes
+            {
+                return Err(Error::refusal(
+                    "metadata_capacity",
+                    "retained file handles exceed metadata allowance",
+                ));
+            }
+            files.memory.merge(self.reserve(charge)?);
+            // The open native handle retains its disk charge. The durable hard
+            // link owns the bytes; scratch must not become a second crash root.
+            std::fs::remove_file(file.path())?;
+            files.files.push(file);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn tracks_retained_files(&self) -> bool {
+        self.retained_files.is_some()
     }
 
     pub(crate) fn retention_pool(&self) -> &Arc<dyn MemoryPool> {
@@ -176,6 +270,15 @@ impl Budget {
             .sort_spill_reservation_bytes
             .min((self.limits.memory_bytes / 2 / self.limits.compute_threads / 16).max(1));
         let config = config.with_sort_spill_reservation_bytes(sort_spill_bytes);
+        // The initial retained profile admits footer/page-index metadata before
+        // native inference. Optional Bloom headers/bitsets need a separate
+        // bounded admission path; disabling this pruning preserves row results
+        // and accepts the native offset-only Bloom metadata form unchanged.
+        let config = if self.tracks_retained_files() {
+            config.set_bool("datafusion.execution.parquet.bloom_filter_on_read", false)
+        } else {
+            config
+        };
         SessionContext::new_with_state(
             SessionStateBuilder::new()
                 .with_config(config)
@@ -296,6 +399,34 @@ impl Drop for WorkspaceLock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_profile_uses_native_bloom_read_policy_without_changing_the_host() {
+        let host = Budget::new(Limits::default()).unwrap();
+        assert!(
+            host.context()
+                .copied_table_options()
+                .parquet
+                .global
+                .bloom_filter_on_read
+        );
+        let retained = host.with_retained_disk(0).unwrap();
+        assert!(
+            !retained
+                .context()
+                .copied_table_options()
+                .parquet
+                .global
+                .bloom_filter_on_read
+        );
+        assert!(
+            host.context()
+                .copied_table_options()
+                .parquet
+                .global
+                .bloom_filter_on_read
+        );
+    }
 
     #[test]
     fn sort_spill_headroom_scales_to_native_pool_and_partitions() {

@@ -11,7 +11,7 @@ use crate::{
     storage,
 };
 use arrow::{
-    array::{Array, Int64Array, StringArray},
+    array::{Array, Int64Array, StringArray, builder::StringBuilder},
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
@@ -550,8 +550,11 @@ impl Lifecycle {
             .iter()
             .map(|(_, v)| serde_json::to_string(v))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let bytes: usize = values.iter().map(String::len).sum::<usize>()
-            + changes.iter().map(|(k, _)| k.len()).sum::<usize>();
+        let value_bytes = values.iter().map(String::len).sum::<usize>();
+        let key_bytes = changes.iter().map(|(k, _)| k.len()).sum::<usize>();
+        let bytes = value_bytes.checked_add(key_bytes).ok_or_else(|| {
+            Error::refusal("metadata_capacity", "lifecycle byte accounting overflow")
+        })?;
         if bytes > self.budget.limits.max_metadata_bytes {
             return Err(Error::refusal(
                 "metadata_capacity",
@@ -561,16 +564,20 @@ impl Lifecycle {
         let schema = Arc::new(iceberg::arrow::schema_to_arrow_schema(
             view.table.metadata().current_schema(),
         )?);
+        // Serialized lengths are already known. Exact initial capacities avoid
+        // builder growth retaining unused bytes across native batch admission.
+        let mut keys = StringBuilder::with_capacity(changes.len(), key_bytes);
+        let mut json_values = StringBuilder::with_capacity(values.len(), value_bytes);
+        for ((key, _), value) in changes.iter().zip(&values) {
+            keys.append_value(key);
+            json_values.append_value(value);
+        }
         let batch = RecordBatch::try_new(
             schema,
             vec![
-                Arc::new(StringArray::from(
-                    changes.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
-                )),
+                Arc::new(keys.finish()),
                 Arc::new(Int64Array::from(vec![revision; changes.len()])),
-                Arc::new(StringArray::from(
-                    values.iter().map(String::as_str).collect::<Vec<_>>(),
-                )),
+                Arc::new(json_values.finish()),
             ],
         )?;
         #[cfg(any(test, feature = "test-util"))]

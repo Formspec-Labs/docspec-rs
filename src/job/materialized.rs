@@ -128,8 +128,9 @@ pub(super) async fn materialize(
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = job.sql(sql).await?;
-    let schema = crate::export::portable_schema(frame.schema().as_arrow());
-    let stream = frame.execute_stream().await?;
+    let schema =
+        crate::export::portable_schema(&super::plan::inferred_schema(&frame, &job.budget)?);
+    let stream = super::plan::execute_stream(frame).await?;
     retain(&job.context, &job.budget, name, schema, stream).await
 }
 
@@ -172,7 +173,8 @@ pub(super) async fn retain(
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
                 .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-                .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+                // Compute batches need not become individual physical groups.
+                // Keep the native default row ceiling and the byte ceiling.
                 .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
@@ -220,24 +222,7 @@ pub(super) async fn retain(
         let file = file.expect("spill owns temporary file");
         // A frame from the job's own catalog would retain this table and form
         // a cycle. A fresh context shares its runtime, not its catalog.
-        let reader = budget.context();
-        // This private table advertises the already normalized spill schema.
-        // Keep the native reader in that representation instead of changing
-        // Utf8 fields back to views underneath the streaming table.
-        reader
-            .state_ref()
-            .write()
-            .config_mut()
-            .options_mut()
-            .execution
-            .parquet
-            .schema_force_view_types = false;
-        let frame = reader
-            .read_parquet(
-                file.path().to_string_lossy().as_ref(),
-                ParquetReadOptions::default().file_extension(""),
-            )
-            .await?;
+        let frame = read_retained(budget, file.path()).await?;
         (
             StepStorage::Scratch,
             StepData::Scratch {
@@ -275,6 +260,40 @@ pub(super) async fn retain(
         pool_after,
     );
     Ok((storage, rows, bytes))
+}
+
+pub(super) async fn read_retained(
+    budget: &Budget,
+    path: &std::path::Path,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
+    let reader = budget.context();
+    // Private materializations advertise their already normalized portable schema.
+    reader
+        .state_ref()
+        .write()
+        .config_mut()
+        .options_mut()
+        .execution
+        .parquet
+        .schema_force_view_types = false;
+    let frame = reader
+        .read_parquet(
+            path.to_string_lossy().as_ref(),
+            ParquetReadOptions::default().file_extension(""),
+        )
+        .await?;
+    let datafusion::logical_expr::LogicalPlan::TableScan(scan) = frame.logical_plan() else {
+        return Err(Error::refusal(
+            "invalid_spec",
+            "retained Parquet did not produce a native file scan",
+        ));
+    };
+    let provider = datafusion::datasource::source_as_provider(&scan.source)?;
+    Ok(reader.read_table(Arc::new(super::fitting::FittedTable {
+        provider,
+        metadata_memory: Some(memory),
+    }))?)
 }
 
 #[cfg(test)]

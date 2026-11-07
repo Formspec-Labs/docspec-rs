@@ -20,6 +20,30 @@ pub(super) fn write<W: Write + Send>(
     delta: bool,
     flush: bool,
 ) -> Result<()> {
+    write_bounded(
+        writer,
+        batch,
+        budget,
+        writer_memory,
+        base_reserved,
+        delta,
+        flush,
+        None,
+    )
+}
+
+/// Bounds cumulative footer state before each native write can flush row groups.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write_bounded<W: Write + Send>(
+    writer: &mut ArrowWriter<W>,
+    batch: &RecordBatch,
+    budget: &Budget,
+    writer_memory: &mut tokio::sync::OwnedSemaphorePermit,
+    base_reserved: usize,
+    delta: bool,
+    flush: bool,
+    metadata: Option<(usize, usize, usize)>,
+) -> Result<()> {
     let input = batch.get_array_memory_size();
     let mut offset = 0;
     let mut target = batch.num_rows();
@@ -51,6 +75,24 @@ pub(super) fn write<W: Write + Send>(
             }
             Err(error) => return Err(error),
         };
+        if let Some((unit, limit, row_group_rows)) = metadata {
+            let possible = writer
+                .flushed_row_groups()
+                .len()
+                .saturating_add(
+                    writer
+                        .in_progress_rows()
+                        .saturating_add(take)
+                        .div_ceil(row_group_rows),
+                )
+                .saturating_add(1);
+            if possible.saturating_mul(unit) > limit {
+                return Err(crate::Error::refusal(
+                    "metadata_capacity",
+                    "retained row groups exceed footer allowance",
+                ));
+            }
+        }
         writer.write(&piece)?;
         if flush && writer.memory_size() > budget.limits.max_batch_bytes {
             writer.flush()?;

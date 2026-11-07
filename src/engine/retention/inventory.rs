@@ -417,7 +417,7 @@ impl Engine {
                 {
                     continue;
                 }
-                inventory.record(key, json, &rows, &origin)?;
+                inventory.record(key, json, &rows, &origin, Some(budget))?;
                 inventory
                     .expand(&self.inner.objects, budget, &self.inner.root)
                     .await?;
@@ -507,7 +507,7 @@ pub(super) fn reference_roots(
     }
     let mut inventory = Inventory::collecting(limit)?;
     inventory.shallow = true;
-    inventory.record(key, json, rows, origin)?;
+    inventory.record(key, json, rows, origin, None)?;
     inventory.into_references()
 }
 
