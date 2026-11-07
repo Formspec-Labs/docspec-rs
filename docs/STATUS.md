@@ -1,5 +1,20 @@
 # Implementation and qualification status
 
+## Native producer proof and model prerequisite in progress
+
+The untested v3 increment captures exact original producer records and the
+adopted definition with proof admission, then checks their original selectors,
+registered facts and native append ancestry before copying payloads. Retained
+native population reports use the existing counter evaluator. A proof can be
+accepted but cannot select the model.
+
+The model admission binds the exact accepted proof and complete named native
+input scope. It verifies its adopted file member pins before opening files,
+reuses the proof's exact input custody and records the inherited evidence under
+the receiving operation and result. A later retry uses that original grant.
+V1 and v2 completed witnesses remain unchanged. Native focused, DDK consumer,
+application, installed and full repository checks are pending for this source.
+
 ## Guarded producer definition adoption
 
 The local authority action adopts exact producer definition metadata. It

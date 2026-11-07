@@ -218,6 +218,7 @@ impl Engine {
             .job_record::<Decision>(dataset, &format!("job-policy/{operation}/{policy_id}"))
             .await?
             .ok_or_else(mismatch)?;
+        producer::check_policy(&admitted, &decision, policy_id)?;
         let budget = &self.inner.lifecycle.budget;
         let policy_bytes = witness_bytes(&decision.policy, budget)?;
         let policy: CounterPolicy = serde_json::from_slice(&policy_bytes.value)?;
@@ -229,6 +230,7 @@ impl Engine {
         if manifest["execution"] != "completed" || manifest["request_digest"] != digest {
             return Err(mismatch());
         }
+        producer::check_candidate_evidence(&admitted, &manifest, budget)?;
         let view_set_digest = manifest["view_set_digest"]
             .as_str()
             .ok_or_else(mismatch)?
@@ -327,7 +329,7 @@ impl Engine {
         let authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, authority)| authority);
-        producer::require_unbound(&authority)?;
+        producer::check_decision_authority(&authority, &admitted, &view, &rows, budget)?;
         if rows
             .get_record::<Id>(&active_key)?
             .is_none_or(|(_, _, active)| active != *policy_id)
@@ -382,6 +384,7 @@ impl Engine {
             }
             return Err(mismatch());
         }
+        producer::check_selection(&admitted)?;
         let accepted_key = format!("job-accepted/{operation}/{policy_id}");
         let accepted = self
             .job_record::<Accepted>(dataset, &accepted_key)
@@ -400,6 +403,7 @@ impl Engine {
             .job_record::<Decision>(dataset, &format!("job-policy/{operation}/{policy_id}"))
             .await?
             .ok_or_else(mismatch)?;
+        producer::check_policy(&admitted, &decision, policy_id)?;
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
@@ -412,7 +416,13 @@ impl Engine {
         let mut authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, authority)| authority);
-        producer::require_unbound(&authority)?;
+        producer::check_decision_authority(
+            &authority,
+            &admitted,
+            &view,
+            &rows,
+            &self.inner.lifecycle.budget,
+        )?;
         if rows
             .get_record::<Id>(&active_key)?
             .is_none_or(|(_, _, active)| active != *policy_id)
@@ -479,6 +489,12 @@ impl Engine {
                 return Err(mismatch());
             }
             return self.job_status(dataset, operation, Some(policy_id)).await;
+        }
+        if admitted.producer.is_some() {
+            return Err(Error::refusal(
+                "producer_policy_mismatch",
+                "adopted proof and model policies are fixed by the adopted definition",
+            ));
         }
         if self
             .job_record::<Selected>(dataset, &format!("job-selected/{operation}"))
@@ -581,6 +597,54 @@ pub(super) fn validate_retained_acceptance(accepted: &Accepted) -> Result<()> {
         &accepted.body.candidate,
         &accepted.body.policy_id,
     )
+}
+
+pub(super) fn prerequisite_policy<'a>(
+    accepted: &'a Accepted,
+    proof: &Admission,
+    prerequisite: &JobPrerequisite,
+    view_set_digest: &str,
+    generation: &JobInputRecordRef,
+) -> Result<&'a ObjectRef> {
+    validate_grant_acceptance(accepted, prerequisite, &proof.request_digest, generation)?;
+    if accepted.body.policy_id != proof.request.policy_id
+        || accepted.body.policy_sha256 != proof.request.policy.sha256
+        || accepted.body.view_set_digest != view_set_digest
+        || accepted.policy.reference != proof.initial_policy.reference
+    {
+        return Err(mismatch());
+    }
+    Ok(&accepted.policy.reference)
+}
+
+pub(super) fn validate_grant_acceptance(
+    accepted: &Accepted,
+    prerequisite: &JobPrerequisite,
+    proof_digest: &str,
+    generation: &JobInputRecordRef,
+) -> Result<()> {
+    validate_accepted(
+        accepted,
+        &prerequisite.candidate.dataset,
+        &prerequisite.candidate.operation,
+        proof_digest,
+        &prerequisite.candidate,
+        &accepted.body.policy_id,
+    )?;
+    if accepted.identity != prerequisite.accepted_qualification
+        || accepted.native_record.table != generation.table
+        || accepted.native_record.key != generation.key
+        || generation.key
+            != format!(
+                "job-accepted/{}/{}",
+                prerequisite.candidate.operation, accepted.body.policy_id
+            )
+        || accepted.native_record.revision != generation.revision
+        || generation.revision <= 0
+    {
+        return Err(mismatch());
+    }
+    Ok(())
 }
 
 fn validate_counter_schema(schema: &Schema) -> Result<()> {

@@ -101,6 +101,14 @@ Keep new managed execution and acceptance in adopted scopes refused until exact
 static proof and accepted population prerequisite admission are wired. An
 adoption records the owner's interpretation; it does not prove writer execution,
 row equality, extraction readiness or publication.
+Before population work, capture the exact adopted definition and original
+producer record bytes with proof admission. Check original head pins, adopted
+producer facts and selected native append ancestry through existing protected
+metadata reads. Accept exact native required counters under the adopted proof
+policy. Admit the dependent model only with its exact accepted same-scope proof,
+original model file member pins and inherited native input custody. Preserve
+the grant independently of donor retirement, with proof and model evidence
+bound to each completed view set.
 Transfer same-owner custody through a guarded receiving operation, binding the
 exact lifecycle table incarnation and original input generation. Commit inherited
 objects and original-copy provenance as roots before later seals. Keep that new

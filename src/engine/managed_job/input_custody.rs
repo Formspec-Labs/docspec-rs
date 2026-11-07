@@ -267,7 +267,7 @@ impl Engine {
         })
     }
 
-    fn check_custody_object(
+    pub(super) fn check_custody_object(
         &self,
         rows: &SnapshotRows,
         view: &View,
@@ -290,6 +290,25 @@ impl Engine {
             rows.reserve_decoded(&self.inner.lifecycle.budget, &[&protection, &unavailable])?;
         self.check_object_owner(rows, dataset, object)?;
         super::super::retention::owners::available(rows, view, object)
+    }
+
+    pub(super) fn check_job_evidence_object(
+        &self,
+        rows: &SnapshotRows,
+        view: &View,
+        object: &ObjectRef,
+    ) -> Result<()> {
+        let owner = self.inner.root.join("objects").join(object.owner.as_str());
+        let relative = Path::new(&object.path)
+            .strip_prefix(owner)
+            .map_err(|_| mismatch())?;
+        let origin = relative
+            .components()
+            .next()
+            .and_then(|component| component.as_os_str().to_str())
+            .and_then(|attempt| attempt.strip_prefix("job-"))
+            .ok_or_else(mismatch)?;
+        self.check_custody_object(rows, view, object, &Id::new(origin)?)
     }
 
     pub(super) fn custody_reference(
@@ -369,21 +388,27 @@ impl Engine {
 }
 
 pub(super) fn inherited_bytes(admitted: &Admission) -> Result<u64> {
-    reference_bytes(&admitted.directory, admitted.input_grants.values())
+    reference_bytes(
+        &admitted.directory,
+        admitted.input_grants.values(),
+        producer::inherited_objects(admitted),
+    )
 }
 
 fn reference_bytes<'a>(
     directory: &Path,
     inputs: impl Iterator<Item = &'a execution::InputAdmission>,
+    evidence: &[ObjectRef],
 ) -> Result<u64> {
     let mut unique = BTreeMap::<String, ObjectRef>::new();
-    for input in inputs {
-        for object in input_objects(input) {
-            if let Some(old) = unique.insert(object.path.clone(), object.clone())
-                && old != object
-            {
-                return Err(mismatch());
-            }
+    for object in inputs
+        .flat_map(input_objects)
+        .chain(evidence.iter().cloned())
+    {
+        if let Some(old) = unique.insert(object.path.clone(), object.clone())
+            && old != object
+        {
+            return Err(mismatch());
         }
     }
     unique
@@ -463,28 +488,38 @@ mod tests {
         let original = input("/retained/old/object", 12);
         let alias = original.clone();
         assert_eq!(
-            reference_bytes(directory, [&original, &alias].into_iter()).unwrap(),
+            reference_bytes(directory, [&original, &alias].into_iter(), &[]).unwrap(),
             12
         );
         let distinct = input("/retained/old/another", 12);
         assert_eq!(
-            reference_bytes(directory, [&original, &distinct].into_iter()).unwrap(),
+            reference_bytes(directory, [&original, &distinct].into_iter(), &[]).unwrap(),
             24
         );
         let conflict = input("/retained/old/object", 13);
         assert_eq!(
-            reference_bytes(directory, [&original, &conflict].into_iter())
+            reference_bytes(directory, [&original, &conflict].into_iter(), &[])
                 .unwrap_err()
                 .code(),
             mismatch().code()
         );
         let huge = input("/retained/old/huge", u64::MAX);
-        assert!(reference_bytes(directory, [&original, &huge].into_iter()).is_err());
+        assert!(reference_bytes(directory, [&original, &huge].into_iter(), &[]).is_err());
         let own = input("/retained/current/member", 12);
         assert_eq!(
-            reference_bytes(directory, [&original, &own].into_iter()).unwrap(),
+            reference_bytes(directory, [&original, &own].into_iter(), &[]).unwrap(),
             12,
             "owned directory census already charges current files"
+        );
+        assert_eq!(
+            reference_bytes(
+                directory,
+                [&original].into_iter(),
+                &input_objects(&original)
+            )
+            .unwrap(),
+            12,
+            "proof evidence and custody share the same physical metadata charge"
         );
     }
 }

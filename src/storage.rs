@@ -25,6 +25,7 @@ pub(crate) use partitioning::{
 mod pinned;
 #[cfg(test)]
 pub(crate) use pinned::pin;
+pub(crate) use pinned::read_retained_snapshot_metadata;
 #[doc(inline)]
 pub use pinned::{NativeTableSnapshot, open_pin, open_pin_with_io, open_snapshot_with_io};
 pub(crate) use pinned::{

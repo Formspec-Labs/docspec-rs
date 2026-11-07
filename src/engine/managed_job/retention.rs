@@ -52,6 +52,9 @@ pub(in crate::engine) fn record_roots(
             }
             objects.extend(input_custody::input_objects(input));
         }
+        objects.extend(producer::retention::admission_roots(&admitted, budget)?);
+    } else if key.starts_with("job-producer-static/") {
+        objects.extend(producer::retention::static_roots(key, json, table, budget)?);
     } else if key.starts_with("job-snapshot-member/") {
         let member: snapshots::SnapshotMember = serde_json::from_str(json)?;
         if key
@@ -126,28 +129,29 @@ pub(in crate::engine) fn record_roots(
         }
         let bytes = witness_bytes(&completed.manifest, budget)?;
         let document: serde_json::Value = serde_json::from_slice(&bytes.value)?;
-        fields(
-            &document,
-            &[
-                "profile",
-                "dataset",
-                "operation",
-                "request_digest",
-                "job",
-                "admitted_request",
-                "inputs",
-                "steps",
-                "outputs",
-                "reports",
-                "view_set",
-                "view_set_digest",
-                "schemas",
-                "evaluator",
-                "runtime",
-                "execution",
-                "result",
-            ],
-        )?;
+        let mut manifest_fields = vec![
+            "profile",
+            "dataset",
+            "operation",
+            "request_digest",
+            "job",
+            "admitted_request",
+            "inputs",
+            "steps",
+            "outputs",
+            "reports",
+            "view_set",
+            "view_set_digest",
+            "schemas",
+            "evaluator",
+            "runtime",
+            "execution",
+            "result",
+        ];
+        if document["profile"] == PRODUCER_PROFILE {
+            manifest_fields.extend(["producer_evidence", "producer_evidence_witness"]);
+        }
+        fields(&document, &manifest_fields)?;
         if !document["profile"].as_str().is_some_and(known_job_profile)
             || document["execution"] != "completed"
             || document["operation"] != operation
@@ -156,12 +160,18 @@ pub(in crate::engine) fn record_roots(
             return Err(mismatch());
         }
         objects.push(completed.manifest.reference);
-        let view: JobArtifactWitness = serde_json::from_value(document["view_set"].clone())?;
-        let _verified = witness_bytes(&view, budget)?;
-        if document["view_set_digest"] != view.reference.digest {
-            return Err(mismatch());
-        }
-        objects.push(view.reference);
+        let view_reference = if document["profile"] == PRODUCER_PROFILE {
+            // Producer root validation below also verifies the exact view bytes.
+            serde_json::from_value(document["view_set"]["reference"].clone())?
+        } else {
+            let view: JobArtifactWitness = serde_json::from_value(document["view_set"].clone())?;
+            let _verified = witness_bytes(&view, budget)?;
+            if document["view_set_digest"] != view.reference.digest {
+                return Err(mismatch());
+            }
+            view.reference
+        };
+        objects.push(view_reference);
         let original: JobArtifactWitness =
             serde_json::from_value(document["admitted_request"].clone())?;
         let request_bytes = witness_bytes(&original, budget)?;
@@ -172,6 +182,16 @@ pub(in crate::engine) fn record_roots(
         if document["profile"] != completion_profile(&request) {
             return Err(mismatch());
         }
+        if request.producer_adoption.is_some()
+            && (request.dataset != completed.candidate.dataset
+                || request.operation != completed.candidate.operation
+                || document["request_digest"] != json_identity(&request)?)
+        {
+            return Err(mismatch());
+        }
+        objects.extend(producer::retention::completion_roots(
+            &document, &request, budget,
+        )?);
         objects.push(original.reference);
         let mut admitted_inputs_read = BTreeSet::new();
         for input in document["inputs"].as_array().ok_or_else(mismatch)? {

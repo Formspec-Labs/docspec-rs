@@ -152,6 +152,40 @@ pub(super) fn selection(input: &JobInput) -> Result<crate::storage::NativeTableS
 }
 
 impl Engine {
+    pub(super) async fn producer_snapshot_metadata(
+        &self,
+        admitted: &Admission,
+        input: &JobInput,
+        budget: &Budget,
+    ) -> Result<Held<(SnapshotObject, iceberg::spec::TableMetadata)>> {
+        let inherited = admitted.input_grants.get(input.name());
+        let plan = if inherited.is_none() {
+            Some(self.job_snapshot_plan(admitted, input, budget).await?)
+        } else {
+            None
+        };
+        let objects = if let Some(inherited) = inherited {
+            let custody = inherited.snapshot_custody.as_ref().ok_or_else(mismatch)?;
+            custody.validate(input)?;
+            custody.objects.as_slice()
+        } else {
+            &plan.as_ref().ok_or_else(mismatch)?.metadata
+        };
+        let selected = selection(input)?;
+        let object = objects
+            .iter()
+            .find(|object| object.role == "metadata" && object.uri == selected.metadata_location)
+            .ok_or_else(mismatch)?;
+        let mut memory = self.request_memory(object)?;
+        let (metadata, decoded) =
+            crate::storage::read_retained_snapshot_metadata(&object.retained, budget).await?;
+        memory.merge(decoded);
+        Ok(Held {
+            value: (object.clone(), metadata),
+            _memory: memory,
+        })
+    }
+
     pub(super) async fn plan_job_snapshots(
         &self,
         admitted: &Admission,

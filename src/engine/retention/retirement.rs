@@ -21,6 +21,7 @@ pub(in crate::engine) fn completion_key(key: &str) -> bool {
         || key.starts_with("job-member/")
         || key.starts_with("job-snapshot-member/")
         || key.starts_with("job-snapshot-plan/")
+        || key.starts_with("job-producer-static/")
         || key.starts_with("job-material/")
         || key.starts_with("job-input/")
         || key.starts_with("job-input-material/")

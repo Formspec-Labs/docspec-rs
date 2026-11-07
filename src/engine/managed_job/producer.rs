@@ -3,6 +3,14 @@
 use super::*;
 use crate::catalog::SnapshotRows;
 
+mod admission;
+pub(super) use admission::ProducerAdmission;
+mod evidence;
+pub(super) use evidence::{ProducerEvidence, Role};
+mod prerequisite;
+pub(super) mod retention;
+mod static_proof;
+
 const SCHEME: &str = "urn:docspec:whole-job-producer-adoption";
 const PROFILE: &str = "urn:docspec:whole-job-producer-definition:1";
 const CURRENT: &str = "job-producer-definition";
@@ -65,17 +73,28 @@ impl JobPolicy {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OriginalLocation {
-    namespace: String,
-    key: String,
+/// Original producer record address, independent of its local transport path.
+pub struct JobProducerRecordLocation {
+    pub namespace: String,
+    pub key: String,
+}
+
+/// Exact original producer record bytes supplied to the proof operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobProducerRecord {
+    pub source: JobProducerRecordLocation,
+    pub sha256: String,
+    pub size: u64,
+    pub path: PathBuf,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordPin {
-    source: OriginalLocation,
+    source: JobProducerRecordLocation,
     sha256: String,
     size: u64,
 }
@@ -90,13 +109,13 @@ impl RecordPin {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum NativeSelector {
     NativeTable {
         metadata_location: String,
         table_uuid: uuid::Uuid,
-        snapshot: i64,
+        snapshot: Option<i64>,
         schema_id: i32,
     },
 }
@@ -191,7 +210,7 @@ impl Input {
         !self.name.trim().is_empty()
             && !metadata_location.trim().is_empty()
             && !table_uuid.is_nil()
-            && *snapshot > 0
+            && snapshot.is_some_and(|snapshot| snapshot > 0)
             && *schema_id >= 0
             && self.metadata.valid()
             && !self.record_namespace.trim().is_empty()
@@ -303,12 +322,178 @@ struct AdoptionDecision {
     request: JobProducerAdoption,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CurrentDefinition {
     reference: JobProducerAdoptionRef,
     size: u64,
     bytes_base64: String,
+}
+
+fn decode_definition(active: &CurrentDefinition, budget: &Budget) -> Result<Held<Definition>> {
+    let size = usize::try_from(active.size).map_err(|_| capacity())?;
+    if size > budget.limits.max_metadata_bytes
+        || active.bytes_base64.len() != size.div_ceil(3).saturating_mul(4)
+    {
+        return Err(mismatch());
+    }
+    let memory = budget.reserve(size.saturating_mul(32))?;
+    let bytes = STANDARD
+        .decode(&active.bytes_base64)
+        .map_err(|_| mismatch())?;
+    if bytes.len() != size || sha256(&bytes) != active.reference.definition_sha256 {
+        return Err(mismatch());
+    }
+    let value: Definition = serde_json::from_slice(&bytes)?;
+    value.validate()?;
+    Ok(Held {
+        value,
+        _memory: memory,
+    })
+}
+
+impl Engine {
+    pub(super) async fn seal_job_producer_evidence(
+        &self,
+        admitted: &Admission,
+        spec: &JobSpec,
+        budget: &Budget,
+    ) -> Result<Option<Held<(ProducerEvidence, JobArtifactWitness)>>> {
+        match &admitted.producer {
+            Some(producer) => match &producer.binding {
+                admission::Binding::Proof(proof) => self
+                    .seal_static_proof(admitted, spec, proof, budget)
+                    .await
+                    .map(Some),
+                admission::Binding::Model(grant) => self
+                    .seal_model_grant(admitted, grant, budget)
+                    .await
+                    .map(Some),
+            },
+            None if admitted.request.producer_adoption.is_none() => Ok(None),
+            None => Err(mismatch()),
+        }
+    }
+}
+
+pub(super) fn inherited_objects(admitted: &Admission) -> &[ObjectRef] {
+    match admitted.producer.as_ref().map(|producer| &producer.binding) {
+        Some(admission::Binding::Model(grant)) => &grant.objects,
+        _ => &[],
+    }
+}
+
+pub(super) fn check_input_schema(
+    admitted: &Admission,
+    input: &JobInput,
+    digest: &str,
+) -> Result<()> {
+    if let Some(admission::Binding::Model(grant)) =
+        admitted.producer.as_ref().map(|producer| &producer.binding)
+        && matches!(input, JobInput::NativeTable { .. })
+        && grant.input_schemas.get(input.name()).map(String::as_str) != Some(digest)
+    {
+        return Err(Error::refusal(
+            "producer_prerequisite_mismatch",
+            "model input Arrow schema differs from the accepted proof",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_decision_authority(
+    authority: &Authority,
+    admitted: &Admission,
+    view: &View,
+    rows: &SnapshotRows,
+    budget: &Budget,
+) -> Result<()> {
+    if admitted.producer.is_none() {
+        return require_unbound(authority);
+    }
+    if authority.job_producer_adoption != admitted.request.producer_adoption
+        || authority.definition != admitted.request.definition
+    {
+        return Err(Error::refusal(
+            "stale_authority",
+            "producer adoption or definition changed before the decision",
+        ));
+    }
+    check_current(rows, view, authority, budget)
+}
+
+pub(super) fn check_selection(admitted: &Admission) -> Result<()> {
+    if admitted.producer.as_ref().map(ProducerAdmission::role) == Some(Role::Proof) {
+        return Err(Error::refusal(
+            "producer_proof_not_selectable",
+            "accepted producer proof is a prerequisite, not a model selection",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_policy(
+    admitted: &Admission,
+    decision: &Decision,
+    policy_id: &Id,
+) -> Result<()> {
+    if admitted.producer.is_some()
+        && (policy_id != &admitted.request.policy_id
+            || decision.policy_id != admitted.request.policy_id
+            || decision.policy.sha256 != admitted.request.policy.sha256)
+    {
+        return Err(Error::refusal(
+            "producer_policy_mismatch",
+            "the decision must use the exact adopted role policy",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_candidate_evidence(
+    admitted: &Admission,
+    document: &serde_json::Value,
+    budget: &Budget,
+) -> Result<()> {
+    let verified = evidence::completion_evidence(document, &admitted.request, budget)?;
+    match (&admitted.producer, verified) {
+        (None, None) => Ok(()),
+        (Some(producer), Some(verified)) => match &producer.binding {
+            admission::Binding::Proof(proof) => {
+                let body: evidence::StaticProof = serde_json::from_slice(&verified.bytes)?;
+                evidence::validate_static(
+                    &body,
+                    &verified.evidence,
+                    &admitted.request.dataset,
+                    &admitted.request.operation,
+                    &admitted.request_digest,
+                    budget,
+                )?;
+                if body.definition != proof.definition
+                    || body.records.len() != proof.records.len()
+                    || body
+                        .records
+                        .iter()
+                        .zip(&proof.records)
+                        .any(|(actual, expected)| {
+                            actual.retained != expected.reference
+                                || actual.sha256 != expected.sha256
+                        })
+                {
+                    return Err(mismatch());
+                }
+                Ok(())
+            }
+            admission::Binding::Model(grant) => {
+                let body: prerequisite::ModelGrant = serde_json::from_slice(&verified.bytes)?;
+                if &body != grant.as_ref() {
+                    return Err(mismatch());
+                }
+                body.validate(&admitted.request, &admitted.request_digest, budget)
+            }
+        },
+        _ => Err(mismatch()),
+    }
 }
 
 fn adoption_key(adoption: &Id) -> String {
@@ -427,21 +612,10 @@ pub(super) fn retention_record(
         validate_decision(&serde_json::from_str(json)?, key, table)?;
     } else if key == CURRENT {
         let active: CurrentDefinition = serde_json::from_str(json)?;
-        let size = usize::try_from(active.size).map_err(|_| capacity())?;
-        if size > budget.limits.max_metadata_bytes
-            || active.bytes_base64.len() != size.div_ceil(3).saturating_mul(4)
-            || !valid_reference(&active.reference, table)
-        {
+        if !valid_reference(&active.reference, table) {
             return Err(mismatch());
         }
-        let _memory = budget.reserve(size.saturating_mul(32))?;
-        let bytes = STANDARD
-            .decode(active.bytes_base64)
-            .map_err(|_| mismatch())?;
-        if bytes.len() != size || sha256(&bytes) != active.reference.definition_sha256 {
-            return Err(mismatch());
-        }
-        serde_json::from_slice::<Definition>(&bytes)?.validate()?;
+        let _definition = decode_definition(&active, budget)?;
     } else {
         return Ok(false);
     }

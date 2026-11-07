@@ -29,10 +29,13 @@ mod tests;
 
 const PROFILE: &str = "urn:docspec:whole-job-completion:1";
 const SNAPSHOT_PROFILE: &str = "urn:docspec:whole-job-completion:2";
+const PRODUCER_PROFILE: &str = "urn:docspec:whole-job-completion:3";
 const COUNTERS: &str = "urn:docspec:quality:native-sql-zero-counters:1";
 
 fn completion_profile(request: &ManagedJobPrepare) -> &'static str {
-    if request.snapshot_inputs.is_empty() {
+    if request.producer_adoption.is_some() {
+        PRODUCER_PROFILE
+    } else if request.snapshot_inputs.is_empty() {
         PROFILE
     } else {
         SNAPSHOT_PROFILE
@@ -40,7 +43,7 @@ fn completion_profile(request: &ManagedJobPrepare) -> &'static str {
 }
 
 fn known_job_profile(profile: &str) -> bool {
-    matches!(profile, PROFILE | SNAPSHOT_PROFILE)
+    matches!(profile, PROFILE | SNAPSHOT_PROFILE | PRODUCER_PROFILE)
 }
 
 /// An exact caller-declared local input member, verified during native admission.
@@ -94,7 +97,7 @@ pub struct JobInputCustodyRef {
 }
 
 /// A required native proof completion scoped to the main job's exact inputs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobPrerequisite {
     pub profile: String,
@@ -118,6 +121,10 @@ pub struct ManagedJobPrepare {
     pub policy: JobArtifact,
     pub expected_epoch: u64,
     pub expected_selection: Option<JobCandidateRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_adoption: Option<JobProducerAdoptionRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub producer_records: Vec<JobProducerRecord>,
     #[serde(default)]
     pub prerequisites: Vec<JobPrerequisite>,
 }
@@ -225,6 +232,8 @@ struct Admission {
     runtime: PhaseRuntime,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     input_grants: BTreeMap<String, execution::InputAdmission>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    producer: Option<producer::ProducerAdmission>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -560,6 +569,7 @@ impl Engine {
             .or_else(|| key.strip_prefix("job-member/"))
             .or_else(|| key.strip_prefix("job-snapshot-member/"))
             .or_else(|| key.strip_prefix("job-snapshot-plan/"))
+            .or_else(|| key.strip_prefix("job-producer-static/"))
             .or_else(|| key.strip_prefix("job-result/"))
         {
             let operation = operation.split('/').next().ok_or_else(mismatch)?;
@@ -665,7 +675,9 @@ impl Engine {
         if request.definition.is_empty() {
             return Err(mismatch());
         }
-        if !request.prerequisites.is_empty() {
+        if request.producer_adoption.is_none()
+            && (!request.producer_records.is_empty() || !request.prerequisites.is_empty())
+        {
             return Err(Error::refusal(
                 "unsupported_job_prerequisite",
                 "this native profile has not admitted the required producer interpretation proof",
@@ -751,7 +763,6 @@ impl Engine {
         let mut authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, value)| value);
-        producer::require_unbound(&authority)?;
         if rows.contains_key(&key) {
             return Err(Error::refusal(
                 "operation_conflict",
@@ -764,6 +775,13 @@ impl Engine {
             request.expected_epoch,
             &request.expected_selection,
         )?;
+        let producer = self
+            .prepare_producer_admission(&request, &spec, &directory, &authority, &view, &rows)
+            .await?;
+        let (producer, _producer_memory) = match producer {
+            Some(Held { value, _memory }) => (Some(value), Some(_memory)),
+            None => (None, None),
+        };
         authority.job_profile = Some(completion_profile(&request).into());
         let admitted_request =
             planned_witness(&request.dataset, &directory, "request.json", &submitted);
@@ -789,6 +807,7 @@ impl Engine {
             base_definition: authority.definition.clone(),
             runtime,
             input_grants: input_grants.value,
+            producer,
         };
         let decision = Decision {
             policy_id: request.policy_id.clone(),
@@ -931,8 +950,19 @@ fn validate_file_inventory(
 }
 
 fn read_artifact(artifact: &JobArtifact, budget: &Budget) -> Result<Held<Vec<u8>>> {
+    read_artifact_sized(artifact, None, budget)
+}
+
+fn read_artifact_sized(
+    artifact: &JobArtifact,
+    expected_size: Option<u64>,
+    budget: &Budget,
+) -> Result<Held<Vec<u8>>> {
     let file = File::open(&artifact.path)?;
     let size = file.metadata()?.len();
+    if expected_size.is_some_and(|expected| size != expected) {
+        return Err(mismatch());
+    }
     if size > budget.limits.max_metadata_bytes as u64 {
         return Err(capacity());
     }

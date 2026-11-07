@@ -83,6 +83,8 @@ fn request(
         policy,
         expected_epoch: 0,
         expected_selection: None,
+        producer_adoption: None,
+        producer_records: Vec::new(),
         prerequisites: Vec::new(),
     })
 }
@@ -367,14 +369,31 @@ async fn guarded_producer_adoption_replays_without_reopening_or_reselecting() {
             .is_none()
     );
 
-    let next = request(
+    let ManagedJobCommand::Prepare(mut next) = request(
         root.path(),
         "not-admitted",
         "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"",
         None,
-    );
+    ) else {
+        unreachable!()
+    };
     assert_eq!(
-        engine.managed_job(next).await.unwrap_err().code(),
+        engine
+            .managed_job(ManagedJobCommand::Prepare(next.clone()))
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_authority"
+    );
+    next.definition = authority.definition.clone();
+    next.expected_epoch = authority.epoch;
+    next.expected_selection = authority.job_selected.clone();
+    assert_eq!(
+        engine
+            .managed_job(ManagedJobCommand::Prepare(next))
+            .await
+            .unwrap_err()
+            .code(),
         "unsupported_job_prerequisite"
     );
     assert!(
@@ -489,8 +508,326 @@ async fn snapshot_request(root: &Path, operation: &str) -> ManagedJobCommand {
         policy,
         expected_epoch: 0,
         expected_selection: None,
+        producer_adoption: None,
+        producer_records: Vec::new(),
         prerequisites: Vec::new(),
     })
+}
+
+struct ProducerFixture {
+    adoption_request: JobProducerAdoption,
+    definition: serde_json::Value,
+    proof: ManagedJobPrepare,
+    model: ManagedJobPrepare,
+}
+
+async fn producer_fixture(root: &Path, engine: &Engine) -> ProducerFixture {
+    let ManagedJobCommand::Prepare(mut proof) = snapshot_request(root, "producer-proof").await
+    else {
+        unreachable!()
+    };
+    let mut job: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&proof.job.path).unwrap()).unwrap();
+    let mut selector = job["inputs"][0].clone();
+    selector.as_object_mut().unwrap().remove("name");
+    let original = artifact(
+        root.join("original-producer-record.json"),
+        &json!({
+            "version":1,"input":"raw","selector":selector,
+            "job":"jobs/build.py","commit":"b".repeat(40),"lockfile_digest":"e".repeat(64)
+        }),
+    );
+    let source = JobProducerRecordLocation {
+        namespace: "fixture-records".into(),
+        key: "head.json".into(),
+    };
+    let size = std::fs::metadata(&original.path).unwrap().len();
+    proof.producer_records = vec![JobProducerRecord {
+        source: source.clone(),
+        sha256: original.sha256.clone(),
+        size,
+        path: original.path,
+    }];
+    let mut model = proof.clone();
+    model.operation = Id::new("producer-model").unwrap();
+    model.producer_records.clear();
+    job["queries"][1]["sql"] = json!("SELECT id,amount FROM raw ORDER BY occurrence DESC");
+    model.job = artifact(root.join("model-job.json"), &job);
+    let mut policy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&proof.policy.path).unwrap()).unwrap();
+    policy["job_sha256"] = json!(model.job.sha256);
+    model.policy = artifact(root.join("model-policy.json"), &policy);
+    let mut definition = producer_definition(&proof.definition);
+    definition["inputs"][0]["selector"] = selector;
+    definition["inputs"][0]["metadata"] = json!({
+        "sha256":proof.snapshot_inputs[0].metadata_sha256,
+        "size":proof.snapshot_inputs[0].metadata_size
+    });
+    definition["inputs"][0]["head_record"] =
+        json!({"source":source,"sha256":original.sha256,"size":size});
+    definition["proof"] = json!({
+        "job_sha256":proof.job.sha256,"policy_id":proof.policy_id,"policy_sha256":proof.policy.sha256
+    });
+    definition["model"] = json!({
+        "job_sha256":model.job.sha256,"policy_id":model.policy_id,"policy_sha256":model.policy.sha256
+    });
+    let adoption_request = JobProducerAdoption {
+        dataset: proof.dataset.clone(),
+        adoption: Id::new("producer-definition").unwrap(),
+        reason: "adopt fixture's original producer definition".into(),
+        expected_definition: String::new(),
+        expected_epoch: 0,
+        expected_selection: None,
+        expected_adoption: None,
+        definition: artifact(root.join("adopted-producer-definition.json"), &definition),
+    };
+    let adoption = engine
+        .adopt_job_producer_definition(&adoption_request)
+        .await
+        .unwrap();
+    proof.producer_adoption = Some(adoption.clone());
+    model.producer_adoption = Some(adoption);
+    ProducerFixture {
+        adoption_request,
+        definition,
+        proof,
+        model,
+    }
+}
+
+#[tokio::test]
+async fn producer_proof_preseal_retry_keeps_original_definition_after_adoption_moves() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let mut fixture = producer_fixture(root.path(), &engine).await;
+    *engine.inner.job_stop_after.lock().await = Some("job-grant/producer-proof".into());
+    let request = ManagedJobCommand::Prepare(fixture.proof.clone());
+    assert_eq!(
+        engine
+            .managed_job(request.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    assert!(
+        engine
+            .job_record::<serde_json::Value>(
+                &fixture.proof.dataset,
+                "job-producer-static/producer-proof"
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    fixture.definition["definition"] = json!("successor-interpretation");
+    let mut next = fixture.adoption_request.clone();
+    next.adoption = Id::new("successor-adoption").unwrap();
+    next.expected_definition = fixture.proof.definition.clone();
+    next.expected_adoption = fixture.proof.producer_adoption.clone();
+    next.definition = artifact(
+        root.path().join("successor-definition.json"),
+        &fixture.definition,
+    );
+    engine.adopt_job_producer_definition(&next).await.unwrap();
+    for path in [
+        &fixture.adoption_request.definition.path,
+        &fixture.proof.job.path,
+        &fixture.proof.policy.path,
+        &fixture.proof.producer_records[0].path,
+    ] {
+        std::fs::remove_file(path).unwrap();
+    }
+    drop(engine);
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let completed = engine.managed_job(request).await.unwrap();
+    assert_eq!(
+        completed.completed_reports[0]["data"],
+        json!([{"invalid_rows":0}])
+    );
+    let manifest = witness_bytes(
+        completed.completion_manifest.as_ref().unwrap(),
+        &engine.inner.lifecycle.budget,
+    )
+    .unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest.value).unwrap();
+    assert_eq!(
+        manifest["producer_evidence"]["adoption"],
+        serde_json::to_value(&fixture.proof.producer_adoption).unwrap()
+    );
+    assert_eq!(
+        engine
+            .managed_job(action(&completed, "accept"))
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_authority"
+    );
+}
+
+async fn retire_producer_fixture_job(
+    engine: &Engine,
+    request: &ManagedJobPrepare,
+    availability: bool,
+) {
+    let records = engine.inspect(&request.dataset).await.unwrap();
+    let input_prefix = format!("job-input/{}/", request.operation);
+    let keys = records
+        .iter()
+        .filter(|(key, value)| {
+            super::super::retention::retirement::completion_key(key)
+                && (key.starts_with(&input_prefix)
+                    || value["operation"] == request.operation.as_str())
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    if !keys.is_empty() {
+        let phases = engine
+            .plan_phase_retirement(
+                &request.dataset,
+                &Id::new(format!("{}-phases", request.operation)).unwrap(),
+                &keys,
+                "end fixture phase recovery",
+            )
+            .await
+            .unwrap();
+        engine.retire_phases(&phases).await.unwrap();
+    }
+    let recovery = engine
+        .plan_operation_retirement(
+            &request.dataset,
+            &Id::new(format!("{}-recovery", request.operation)).unwrap(),
+            &request.operation,
+            "end fixture operation recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&recovery).await.unwrap();
+    if availability {
+        retire_producer_fixture_result(engine, request).await;
+    }
+}
+
+async fn retire_producer_fixture_result(engine: &Engine, request: &ManagedJobPrepare) {
+    let plan = engine
+        .plan_availability_retirement(
+            &request.dataset,
+            &Id::new(format!("{}-availability", request.operation)).unwrap(),
+            &request.operation,
+            "end fixture result availability",
+        )
+        .await
+        .unwrap();
+    engine.retire_availability(&plan).await.unwrap();
+}
+
+#[tokio::test]
+async fn producer_model_grant_survives_donor_retirement_before_model_work() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let mut fixture = producer_fixture(root.path(), &engine).await;
+    let proof = engine
+        .managed_job(ManagedJobCommand::Prepare(fixture.proof.clone()))
+        .await
+        .unwrap();
+    let proof = engine.managed_job(action(&proof, "accept")).await.unwrap();
+    fixture.model.snapshot_inputs[0].reuse_from = Some(proof.input_custody[0].clone());
+    fixture.model.prerequisites = vec![JobPrerequisite {
+        profile: "urn:docspec:whole-job-producer-prerequisite:1".into(),
+        candidate: proof.candidate.clone().unwrap(),
+        accepted_qualification: proof.accepted_qualification.as_ref().unwrap()["identity"]
+            .as_str()
+            .unwrap()
+            .into(),
+        inputs: vec!["raw".into()],
+    }];
+    let request = ManagedJobCommand::Prepare(fixture.model.clone());
+    *engine.inner.job_stop_after.lock().await = Some("job-grant/producer-model".into());
+    assert_eq!(
+        engine
+            .managed_job(request.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let rows = engine.inspect(&fixture.model.dataset).await.unwrap();
+    assert!(!rows.contains_key("job-input/producer-model/0"));
+    let admitted: Admission =
+        serde_json::from_value(rows["job-operation/producer-model"].clone()).unwrap();
+    let retained = producer::inherited_objects(&admitted).to_vec();
+    assert!(
+        retained
+            .iter()
+            .any(|object| object.path.ends_with("/producer-static.json"))
+    );
+    assert!(retained.contains(&proof.candidate.as_ref().unwrap().manifest));
+    retire_producer_fixture_job(&engine, &fixture.proof, true).await;
+    assert!(
+        engine
+            .inspect_retention(&retained)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some())
+    );
+    drop(engine);
+    std::fs::remove_dir_all(root.path().join("producer")).unwrap();
+    for path in [
+        &fixture.adoption_request.definition.path,
+        &fixture.proof.producer_records[0].path,
+        &fixture.proof.job.path,
+        &fixture.proof.policy.path,
+        &fixture.model.job.path,
+        &fixture.model.policy.path,
+    ] {
+        std::fs::remove_file(path).unwrap();
+    }
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let model = engine.managed_job(request).await.unwrap();
+    assert_eq!(
+        model.completed_reports[1]["data"],
+        json!([{"id":2,"amount":null},{"id":1,"amount":7},{"id":1,"amount":7}])
+    );
+    engine.managed_job(action(&model, "accept")).await.unwrap();
+    assert!(
+        !std::fs::read_dir(&admitted.directory)
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("snapshot-"))
+    );
+    retire_producer_fixture_job(&engine, &fixture.model, false).await;
+    assert!(
+        engine
+            .inspect_retention(&retained)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some())
+    );
+    retire_producer_fixture_result(&engine, &fixture.model).await;
+    assert!(
+        engine
+            .inspect_retention(&retained)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_none())
+    );
 }
 
 #[tokio::test]

@@ -53,6 +53,8 @@ struct ViewDocument<'a> {
     steps: &'a [serde_json::Value],
     outputs: &'a [serde_json::Value],
     reports: &'a [serde_json::Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    producer_evidence: Option<&'a producer::ProducerEvidence>,
 }
 #[derive(Serialize)]
 struct JobIdentity<'a> {
@@ -79,6 +81,10 @@ struct CompletionDocument<'a> {
     runtime: &'a PhaseRuntime,
     execution: &'static str,
     result: &'a JobResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    producer_evidence: Option<&'a producer::ProducerEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    producer_evidence_witness: Option<&'a JobArtifactWitness>,
 }
 
 impl Engine {
@@ -119,7 +125,6 @@ impl Engine {
         let job_bytes = witness_bytes(&admitted.job, &budget)?;
         let spec: JobSpec = serde_json::from_slice(&job_bytes.value)?;
         spec.validate()?;
-        let job = Job::from_budget(budget.clone())?;
         let mut inputs = Vec::new();
         let mut schemas = BTreeMap::new();
         let mut schema_memory = Vec::new();
@@ -139,6 +144,10 @@ impl Engine {
         let mut admission_memory = Vec::new();
         let mut input_view_memory = Vec::new();
         self.plan_job_snapshots(admitted, &spec, &budget).await?;
+        let producer_evidence = self
+            .seal_job_producer_evidence(admitted, &spec, &budget)
+            .await?;
+        let job = Job::from_budget(budget.clone())?;
         for (index, input) in spec.inputs.iter().enumerate() {
             let key = format!("job-input/{}/{index}", request.operation);
             if let Some(saved) = self
@@ -347,6 +356,7 @@ impl Engine {
                 &mut schema_memory,
                 &bytes.bytes,
             )?;
+            producer::check_input_schema(admitted, input, &schema_sha256)?;
             let material = if let Some(custody) = &saved.snapshot_custody {
                 input_custody::material_identity(input, custody)?
             } else {
@@ -679,10 +689,10 @@ impl Engine {
         drop(job);
         let view_reports = reports.iter().map(|report| serde_json::json!({"name":report["name"],"sql_sha256":report["sql_sha256"],"schema_sha256":report["schema_sha256"],"rows":report["rows"],"completion":report["completion"],"dependencies":report["dependencies"]})).collect::<Vec<_>>();
         let view_document = ViewDocument {
-            profile: if request.snapshot_inputs.is_empty() {
-                "urn:docspec:whole-job-view-set:1"
-            } else {
-                "urn:docspec:whole-job-view-set:2"
+            profile: match completion_profile(request) {
+                PRODUCER_PROFILE => "urn:docspec:whole-job-view-set:3",
+                SNAPSHOT_PROFILE => "urn:docspec:whole-job-view-set:2",
+                _ => "urn:docspec:whole-job-view-set:1",
             },
             dataset: &request.dataset,
             operation: &request.operation,
@@ -691,6 +701,7 @@ impl Engine {
             steps: &steps,
             outputs: &outputs,
             reports: &view_reports,
+            producer_evidence: producer_evidence.as_ref().map(|evidence| &evidence.0),
         };
         let view_bytes = encode_metadata(&view_document, &budget)?;
         let view_set = self
@@ -724,6 +735,8 @@ impl Engine {
             runtime: &admitted.runtime,
             execution: "completed",
             result: &result,
+            producer_evidence: producer_evidence.as_ref().map(|evidence| &evidence.0),
+            producer_evidence_witness: producer_evidence.as_ref().map(|evidence| &evidence.1),
         };
         let manifest_bytes = encode_metadata(&manifest_document, &budget)?;
         let manifest = self

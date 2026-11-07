@@ -301,6 +301,16 @@ async fn read_metadata(
         .await
 }
 
+/// Reads exact protected local metadata through the maintained bounded decoder.
+pub(crate) async fn read_retained_snapshot_metadata(
+    retained: &ObjectRef,
+    budget: &Budget,
+) -> Result<(TableMetadata, tokio::sync::OwnedSemaphorePermit)> {
+    let file_io = FileIO::new_with_fs();
+    let reader = MetadataReader::Native(file_io.new_input(&retained.path)?);
+    read_metadata(Some(retained.clone()), reader, budget).await
+}
+
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], limit: usize) -> Result<T> {
     Ok(decode_inner(bytes, limit, None)?.0)
 }
