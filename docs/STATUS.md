@@ -1,5 +1,44 @@
 # Implementation and qualification status
 
+## Explicit S3 snapshot source for local retained jobs
+
+`docspec --snapshot-source CONFIG managed-job --spec REQUEST` connects the
+local workspace to one configured S3 source for selected Iceberg snapshots.
+The configuration supplies the bucket and key prefix, endpoint, signing
+region, addressing mode, and environment-variable names for credentials.
+Session credentials are supported. The local workspace continues to own the
+operation, its admitted source placement, and the retained member copies.
+
+Native admission checks the original metadata location and each discovered
+member against that source scope. Range reads check the returned extent and
+object size before copying fragments into the admitted destination. The reader
+refuses redirects and discards HTTP error bodies before collection. Retained
+copies preserve original URIs and byte identities. Once the necessary
+members are sealed, the operation can reopen them or grant reuse from local
+custody with the source unavailable.
+
+Implementation `255c18489d224d095d4bd1d1edbdef5f5538bb3e` matches all 11
+paths in frozen source 05, SHA-256
+`eddcacf5b363a3e0d158e1523509015b79c764a217c96073c68c7dcb18b88c70`.
+Source 03 stopped at a test-fixture Clippy lint before running tests. Source
+04 passed strict Clippy, five reader tests, and three managed S3 tests.
+Its recovery fixture initiated host shutdown before the member seals and
+observed zero seals. Source 05 changes that fixture to wait for the owned
+attempt to reach the planted missing-manifest refusal after caller
+cancellation, then shuts down the host. This exercises continuation after
+caller cancellation and a later cold retry. Shutdown quiescence is a
+separate boundary.
+
+Source 05 passed strict Clippy, the repaired S3 recovery test, five local
+snapshot tests, three same-owner custody tests, and one existing remote
+metadata test. The earlier eight passes retain their source 04 attribution.
+The 230.65-second run recorded 45 resource samples, with peak process-family
+resident memory of 4,247,158,784 bytes and peak net owned disk allocation
+growth of 172,937,216 bytes. The focused closeout SHA-256 is
+`864bfa21b5c4bedd15ce36872c47c4b0ccca2e81e02b70a68fe63d43bdcbb0b8`.
+Public CLI configuration, installed S3 consumer verification, the full
+repository gate, and production corpus admission remain pending.
+
 ## Protected source snapshot observation
 
 A local SQL job with a protected `VersionRef` input reports the physical
