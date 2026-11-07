@@ -5,6 +5,9 @@ use super::*;
 use arrow::{datatypes::Field, ipc::convert::try_schema_from_ipc_buffer};
 use serde_json::json;
 
+#[cfg(feature = "remote")]
+mod s3_source;
+
 async fn select_publication_fixture(
     engine: &Engine,
     root: &Path,

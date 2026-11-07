@@ -1,9 +1,36 @@
 //! Retains exact selected native read closures through ordinary job member seals.
 // Rust guideline compliant 2026-02-21
 use super::*;
-use iceberg::{io::FileIO, spec::DataContentType};
+use iceberg::{
+    io::{FileIO, FileRead, InputFile},
+    spec::DataContentType,
+};
 
 const CUSTODY: &str = "urn:docspec:whole-job-snapshot-custody:2";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SnapshotSourcePlacement {
+    prefix: String,
+    connection: String,
+}
+
+#[derive(Clone, Copy)]
+struct MemberCopy<'a> {
+    uri: &'a str,
+    role: &'a str,
+    size: u64,
+    sha: Option<&'a str>,
+}
+
+enum SnapshotReader {
+    Local {
+        input: InputFile,
+        reader: Box<dyn FileRead>,
+    },
+    #[cfg(feature = "remote")]
+    S3(Arc<crate::storage::remote::SnapshotSource>),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,6 +179,68 @@ pub(super) fn selection(input: &JobInput) -> Result<crate::storage::NativeTableS
 }
 
 impl Engine {
+    pub(super) fn admit_snapshot_source(
+        &self,
+        spec: &JobSpec,
+        grants: &BTreeMap<String, execution::InputAdmission>,
+    ) -> Result<Option<SnapshotSourcePlacement>> {
+        let mut original = spec.inputs.iter().filter_map(|input| match input {
+            JobInput::NativeTable {
+                name,
+                metadata_location,
+                ..
+            } if !grants.contains_key(name) && storage::is_remote_uri(metadata_location) => {
+                Some(metadata_location.as_str())
+            }
+            _ => None,
+        });
+        let Some(first) = original.next() else {
+            return Ok(None);
+        };
+        #[cfg(feature = "remote")]
+        {
+            let source = self
+                .snapshot_source
+                .as_ref()
+                .ok_or_else(source_unavailable)?;
+            let placement = SnapshotSourcePlacement {
+                prefix: source.prefix(),
+                connection: source.placement.clone(),
+            };
+            for uri in std::iter::once(first).chain(original) {
+                check_member_scope(Some(&placement), true, uri)?;
+            }
+            Ok(Some(placement))
+        }
+        #[cfg(not(feature = "remote"))]
+        {
+            let _ = (first, original);
+            Err(source_unavailable())
+        }
+    }
+
+    #[cfg(feature = "remote")]
+    fn snapshot_source_for(
+        &self,
+        admitted: &Admission,
+    ) -> Result<&Arc<crate::storage::remote::SnapshotSource>> {
+        let placement = admitted
+            .snapshot_source
+            .as_ref()
+            .ok_or_else(source_unavailable)?;
+        let source = self
+            .snapshot_source
+            .as_ref()
+            .ok_or_else(source_unavailable)?;
+        if placement.prefix != source.prefix() || placement.connection != source.placement {
+            return Err(Error::refusal(
+                "snapshot_source_placement",
+                "configured S3 snapshot source differs from its admitted placement",
+            ));
+        }
+        Ok(source)
+    }
+
     pub(super) async fn producer_snapshot_metadata(
         &self,
         admitted: &Admission,
@@ -332,14 +421,18 @@ impl Engine {
             ));
         }
         let mut objects = plan.metadata.clone();
+        let remote = storage::is_remote_uri(&selection(input)?.metadata_location);
         for payload in &plan.payloads {
             objects.push(
                 self.snapshot_member(
                     admitted,
-                    &payload.uri,
-                    &payload.role,
-                    payload.size,
-                    None,
+                    remote,
+                    MemberCopy {
+                        uri: &payload.uri,
+                        role: &payload.role,
+                        size: payload.size,
+                        sha: None,
+                    },
                     budget,
                 )
                 .await?,
@@ -370,16 +463,20 @@ impl Engine {
         // Bound cumulative native manifest decoding and the closure/path vectors.
         let memory = budget.reserve(budget.limits.max_metadata_bytes.saturating_mul(4))?;
         let selected = selection(input)?;
+        let remote = storage::is_remote_uri(&selected.metadata_location);
         if binding.metadata_size > budget.limits.max_metadata_bytes as u64 {
             return Err(capacity());
         }
         let metadata = self
             .snapshot_member(
                 admitted,
-                &selected.metadata_location,
-                "metadata",
-                binding.metadata_size,
-                Some(&binding.metadata_sha256),
+                remote,
+                MemberCopy {
+                    uri: &selected.metadata_location,
+                    role: "metadata",
+                    size: binding.metadata_size,
+                    sha: Some(&binding.metadata_sha256),
+                },
                 budget,
             )
             .await?;
@@ -399,6 +496,7 @@ impl Engine {
             let list = self
                 .snapshot_metadata(
                     admitted,
+                    remote,
                     snapshot.manifest_list(),
                     "manifest_list",
                     &mut metadata_bytes,
@@ -426,6 +524,7 @@ impl Engine {
                 let manifest = self
                     .snapshot_metadata(
                         admitted,
+                        remote,
                         &entry.manifest_path,
                         "manifest",
                         &mut metadata_bytes,
@@ -458,6 +557,11 @@ impl Engine {
                     if objects.iter().any(|object| object.uri == file.file_path()) {
                         return Err(mismatch());
                     }
+                    check_member_scope(
+                        admitted.snapshot_source.as_ref(),
+                        remote,
+                        file.file_path(),
+                    )?;
                     let payload = Payload {
                         uri: file.file_path().into(),
                         role: role.into(),
@@ -501,6 +605,7 @@ impl Engine {
     async fn snapshot_metadata(
         &self,
         admitted: &Admission,
+        remote: bool,
         uri: &str,
         role: &str,
         total: &mut u64,
@@ -520,25 +625,41 @@ impl Engine {
             }
             saved.object.size
         } else {
-            source_io(uri)?.new_input(uri)?.metadata().await?.size
+            check_member_scope(admitted.snapshot_source.as_ref(), remote, uri)?;
+            self.snapshot_source_size(admitted, uri, remote, budget)
+                .await?
         };
         *total = total
             .checked_add(size)
             .filter(|total| *total <= budget.limits.max_metadata_bytes as u64)
             .ok_or_else(capacity)?;
-        self.snapshot_member(admitted, uri, role, size, None, budget)
-            .await
+        self.snapshot_member(
+            admitted,
+            remote,
+            MemberCopy {
+                uri,
+                role,
+                size,
+                sha: None,
+            },
+            budget,
+        )
+        .await
     }
 
     async fn snapshot_member(
         &self,
         admitted: &Admission,
-        uri: &str,
-        role: &str,
-        size: u64,
-        expected_sha: Option<&str>,
+        remote: bool,
+        member: MemberCopy<'_>,
         budget: &Budget,
     ) -> Result<SnapshotObject> {
+        let MemberCopy {
+            uri,
+            role,
+            size,
+            sha: expected_sha,
+        } = member;
         let request = &admitted.request;
         let key = format!(
             "job-snapshot-member/{}/{}",
@@ -563,7 +684,8 @@ impl Engine {
         let path = admitted
             .directory
             .join(format!("snapshot-{}", sha256(uri.as_bytes())));
-        let object = copy_native(admitted, uri, role, size, expected_sha, &path, budget).await?;
+        check_member_scope(admitted.snapshot_source.as_ref(), remote, uri)?;
+        let object = copy_native(self, admitted, remote, member, &path, budget).await?;
         self.commit_job_record(
             &request.dataset,
             &key,
@@ -591,35 +713,122 @@ fn paths(objects: &[SnapshotObject]) -> Result<BTreeMap<String, String>> {
     Ok(result)
 }
 
-fn source_io(uri: &str) -> Result<FileIO> {
-    if !uri.contains("://") && !Path::new(uri).is_absolute() {
-        return Err(mismatch());
+fn source_unavailable() -> Error {
+    Error::refusal(
+        "snapshot_source_unavailable",
+        "S3 snapshot input requires its admitted source configuration",
+    )
+}
+
+fn check_member_scope(
+    placement: Option<&SnapshotSourcePlacement>,
+    remote: bool,
+    uri: &str,
+) -> Result<()> {
+    if remote {
+        let placement = placement.ok_or_else(source_unavailable)?;
+        #[cfg(feature = "remote")]
+        return storage::remote::SnapshotSource::check_scope(&placement.prefix, uri).map_err(
+            |_| {
+                Error::refusal(
+                    "snapshot_source_scope",
+                    "snapshot member is outside its admitted S3 source scope",
+                )
+            },
+        );
+        #[cfg(not(feature = "remote"))]
+        {
+            let _ = placement;
+            return Err(source_unavailable());
+        }
     }
-    Ok(crate::storage::Objects::try_for_path(uri)?.file_io())
+    if Path::new(uri).is_absolute() || uri.starts_with("file://") {
+        Ok(())
+    } else {
+        Err(Error::refusal(
+            "snapshot_source_scope",
+            "local snapshot member requires an exact local location",
+        ))
+    }
+}
+
+impl SnapshotReader {
+    async fn size(&self, uri: &str, budget: &Budget) -> Result<u64> {
+        #[cfg(not(feature = "remote"))]
+        let _ = (uri, budget);
+        match self {
+            Self::Local { input, .. } => Ok(input.metadata().await?.size),
+            #[cfg(feature = "remote")]
+            Self::S3(source) => source.size(uri, budget).await,
+        }
+    }
+}
+
+impl Engine {
+    async fn snapshot_source_size(
+        &self,
+        admitted: &Admission,
+        uri: &str,
+        remote: bool,
+        budget: &Budget,
+    ) -> Result<u64> {
+        #[cfg(not(feature = "remote"))]
+        let _ = (admitted, budget);
+        if remote {
+            #[cfg(feature = "remote")]
+            return self.snapshot_source_for(admitted)?.size(uri, budget).await;
+            #[cfg(not(feature = "remote"))]
+            return Err(source_unavailable());
+        }
+        Ok(FileIO::new_with_fs().new_input(uri)?.metadata().await?.size)
+    }
 }
 
 async fn copy_native(
+    engine: &Engine,
     admitted: &Admission,
-    uri: &str,
-    role: &str,
-    size: u64,
-    expected_sha: Option<&str>,
+    remote: bool,
+    member: MemberCopy<'_>,
     path: &Path,
     budget: &Budget,
 ) -> Result<SnapshotObject> {
+    #[cfg(not(feature = "remote"))]
+    let _ = engine;
+    let MemberCopy {
+        uri,
+        role,
+        size,
+        sha: expected_sha,
+    } = member;
     let present = path.try_exists()?;
     if present && std::fs::symlink_metadata(path)?.file_type().is_symlink() {
         return Err(mismatch());
     }
-    let input = if present {
-        FileIO::new_with_fs().new_input(path.to_string_lossy())?
+    let reader = if !present && remote {
+        #[cfg(feature = "remote")]
+        {
+            let source = engine.snapshot_source_for(admitted)?;
+            if source.size(uri, budget).await? != size {
+                return Err(mismatch());
+            }
+            SnapshotReader::S3(source.clone())
+        }
+        #[cfg(not(feature = "remote"))]
+        return Err(source_unavailable());
     } else {
-        source_io(uri)?.new_input(uri)?
+        let input = if present {
+            FileIO::new_with_fs().new_input(path.to_string_lossy())?
+        } else {
+            FileIO::new_with_fs().new_input(uri)?
+        };
+        if input.metadata().await?.size != size {
+            return Err(mismatch());
+        }
+        SnapshotReader::Local {
+            reader: input.reader().await?,
+            input,
+        }
     };
-    if input.metadata().await?.size != size {
-        return Err(mismatch());
-    }
-    let reader = input.reader().await?;
     let temporary = if present {
         None
     } else {
@@ -634,27 +843,49 @@ async fn copy_native(
         .as_ref()
         .map(|file| budget.scratch_writer(file))
         .transpose()?;
-    let chunk = budget.limits.max_batch_bytes.min(64 << 10) as u64;
+    let chunk = budget
+        .limits
+        .max_batch_bytes
+        .min(storage::SNAPSHOT_MEMBER_CHUNK_BYTES) as u64;
     let _memory = budget.reserve(chunk as usize)?;
+    #[cfg(feature = "remote")]
+    let mut destination = match &reader {
+        SnapshotReader::S3(_) => vec![0; chunk as usize],
+        SnapshotReader::Local { .. } => Vec::new(),
+    };
     let mut sha = Sha256::new();
     let mut digest = blake3::Hasher::new();
     let mut start = 0;
     while start < size {
         let end = start.saturating_add(chunk).min(size);
-        let bytes = reader.read(start..end).await?;
+        let local;
+        let bytes: &[u8] = match &reader {
+            SnapshotReader::Local { reader, .. } => {
+                local = reader.read(start..end).await?;
+                &local
+            }
+            #[cfg(feature = "remote")]
+            SnapshotReader::S3(source) => {
+                let slice = &mut destination[..(end - start) as usize];
+                source
+                    .read_range(uri, size, start..end, slice, budget)
+                    .await?;
+                slice
+            }
+        };
         if bytes.len() as u64 != end - start {
             return Err(mismatch());
         }
         if let Some(output) = &mut output {
-            output.write_all(&bytes)?;
+            output.write_all(bytes)?;
         }
-        sha.update(&bytes);
-        digest.update(&bytes);
+        sha.update(bytes);
+        digest.update(bytes);
         start = end;
     }
     let sha256 = format!("{:x}", sha.finalize());
     if expected_sha.is_some_and(|expected| expected != sha256)
-        || input.metadata().await?.size != size
+        || reader.size(uri, budget).await? != size
     {
         return Err(mismatch());
     }

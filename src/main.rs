@@ -44,6 +44,9 @@ struct Cli {
     /// Explicit remote JSON configuration; requires the remote feature.
     #[arg(long, global = true)]
     remote: Option<PathBuf>,
+    /// Read-only S3 source configuration for a local managed job.
+    #[arg(long, global = true, conflicts_with = "remote")]
+    snapshot_source: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -727,7 +730,11 @@ async fn async_main() -> anyhow::Result<()> {
             write_stream(output, stream).await?;
         }
         command => {
-            let engine = open_engine(&cli.workspace, limits, cli.remote.as_deref()).await?;
+            let engine = if let Some(path) = &cli.snapshot_source {
+                open_snapshot_source_engine(&cli.workspace, path, limits).await?
+            } else {
+                open_engine(&cli.workspace, limits, cli.remote.as_deref()).await?
+            };
             execute_engine_command(&cli.workspace, cli.remote.is_some(), engine, command).await?;
         }
     }
@@ -1429,6 +1436,20 @@ async fn serve_http(
 }
 
 fn check_startup(cli: &Cli) -> docspec::Result<()> {
+    if cli.snapshot_source.is_some() {
+        #[cfg(not(feature = "remote"))]
+        return Err(docspec::Error::refusal(
+            "remote_feature",
+            "snapshot sources require the remote feature",
+        ));
+        #[cfg(feature = "remote")]
+        if !matches!(&cli.command, Command::ManagedJob(_)) {
+            return Err(docspec::Error::refusal(
+                "snapshot_source_config",
+                "snapshot source configuration requires a local managed job",
+            ));
+        }
+    }
     #[cfg(feature = "remote")]
     if matches!(&cli.command, Command::RestoreRemote { .. }) && cli.remote.is_none() {
         return Err(docspec::Error::refusal(
@@ -1523,6 +1544,29 @@ async fn open_engine(
         }
     }
     Ok(Engine::open(workspace, limits).await?)
+}
+
+async fn open_snapshot_source_engine(
+    workspace: &std::path::Path,
+    path: &std::path::Path,
+    limits: Limits,
+) -> anyhow::Result<Engine> {
+    #[cfg(feature = "remote")]
+    {
+        let config: storage::remote::SnapshotSourceConfig =
+            read_json(path.to_owned()).map_err(|_| {
+                docspec::Error::refusal(
+                    "snapshot_source_config",
+                    "snapshot source configuration is unavailable, oversized or invalid",
+                )
+            })?;
+        Ok(Engine::open_with_snapshot_source(workspace, config, limits).await?)
+    }
+    #[cfg(not(feature = "remote"))]
+    {
+        let _ = (workspace, path, limits);
+        anyhow::bail!("remote_feature: snapshot sources require the remote feature");
+    }
 }
 
 async fn write_stream(

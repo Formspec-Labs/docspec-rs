@@ -114,6 +114,8 @@ mod write;
 #[derive(Clone, Debug)]
 pub struct Engine {
     inner: Arc<Inner>,
+    #[cfg(feature = "remote")]
+    snapshot_source: Option<Arc<storage::remote::SnapshotSource>>,
 }
 
 type JobOperationLocks = BTreeMap<(Id, Id), std::sync::Weak<Mutex<()>>>;
@@ -281,6 +283,24 @@ impl Engine {
                 result
             })
             .await?
+    }
+
+    /// Opens a local workspace with one scoped, read-only S3 snapshot source.
+    ///
+    /// Managed operations retain their admitted bytes in the local workspace.
+    ///
+    /// # Errors
+    /// Refuses invalid source configuration, unavailable secrets or local host failures.
+    #[cfg(feature = "remote")]
+    pub async fn open_with_snapshot_source(
+        root: impl AsRef<Path>,
+        source: storage::remote::SnapshotSourceConfig,
+        limits: Limits,
+    ) -> Result<Self> {
+        let source = storage::remote::snapshot_source(source)?;
+        let mut engine = Self::open(root, limits).await?;
+        engine.snapshot_source = Some(Arc::new(source));
+        Ok(engine)
     }
 
     /// Opens a workspace using an injected maintained catalog.
@@ -535,6 +555,8 @@ impl Engine {
                 job_runtime_sha256: std::sync::OnceLock::new(),
                 job_operations: Mutex::new(BTreeMap::new()),
             }),
+            #[cfg(feature = "remote")]
+            snapshot_source: None,
         })
     }
 

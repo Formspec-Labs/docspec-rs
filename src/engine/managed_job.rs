@@ -234,6 +234,8 @@ struct Admission {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     input_grants: BTreeMap<String, execution::InputAdmission>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    snapshot_source: Option<snapshots::SnapshotSourcePlacement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     producer: Option<producer::ProducerAdmission>,
 }
 
@@ -797,6 +799,11 @@ impl Engine {
         let input_grants = self
             .prepare_input_grants(&request, &spec, &view, &rows)
             .await?;
+        let snapshot_source = self.admit_snapshot_source(&spec, &input_grants.value)?;
+        let _source_memory = snapshot_source
+            .as_ref()
+            .map(|placement| self.request_memory(placement))
+            .transpose()?;
         let saved = Admission {
             request: request.clone(),
             request_digest: digest,
@@ -808,6 +815,7 @@ impl Engine {
             base_definition: authority.definition.clone(),
             runtime,
             input_grants: input_grants.value,
+            snapshot_source,
             producer,
         };
         let decision = Decision {
