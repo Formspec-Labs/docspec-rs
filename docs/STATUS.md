@@ -1,9 +1,9 @@
 # Implementation and qualification status
 
-## Producer definition adoption in progress
+## Guarded producer definition adoption
 
-An unexecuted follow-on adds a local authority action for exact producer
-definition metadata. It guards the existing definition, epoch, selection and
+The local authority action adopts exact producer definition metadata. It
+guards the existing definition, epoch, selection and
 adoption, then changes the definition and adoption atomically while preserving
 the selected result. A historical action retry reads its original immutable
 decision and never reinstalls an earlier adoption. Current definition bytes live
@@ -15,20 +15,32 @@ The definition requires an explicit complete model file-input inventory, with
 ordered member keys, SHA-256 and size; adopting it opens no input files. The
 exact JobSpec remains the owner of file kind, schema and path interpretation.
 
-No producer definition has been adopted for application data. These source
-changes have not yet passed focused native execution. The initial cold
-recovery test refused a compacted read of 46 lifecycle records: the rows
+Implementation commit `bcab60c671024ecacc473ac2f95fa077632e144e` matches the
+24-file source 07 capture. Strict Clippy and eight focused native tests
+passed on that source. The original adoption fixture passed at the unchanged
+128 KiB batch limit through a lost response, caller-file removal, replacement
+adoption, compaction and cold replay. Historical selection stayed intact.
+Separate controls confirmed the oversized-record and ordinary query refusals,
+three custody-reuse cases, required-counter refusal and cold compaction.
+
+The initial source 04 cold recovery test refused a compacted read of 46
+lifecycle records. The source 06 diagnostic measured that the rows
 referenced 147,860 bytes of key, revision and value data against a 128 KiB
 batch limit, and the native string buffers allocated more. The narrow repair
 requests one-record native batches on a cold lifecycle read when the metadata
 allowance exceeds half the batch limit. Existing byte guards and warm cache
 behavior stay in place. This row-count policy is not an allocator bound.
-Static producer verification, population prerequisites and publication intent
-remain unfinished.
+The focused run took 164.10 seconds, with a sampled peak of 4,280,188,928
+bytes of process-family memory and 181,747,712 bytes of net task-owned disk
+allocation growth. The prior refusal and diagnostic remain separate evidence.
+
+No application producer definition was adopted. Static producer verification,
+population prerequisites and publication intent remain unfinished. No new
+distribution binary or full repository gate was run for this checkpoint.
 
 ## Native snapshot custody in progress
 
-The next uncommitted increment introduces explicit version 2 snapshot-custody
+The same implementation introduces explicit version 2 snapshot-custody
 requests and receipts. It retains selected native read closures under existing
 operation protection and per-member seals, preserving original URI identities
 through read-only maintained Iceberg I/O. File-only version 1 requests remain
