@@ -40,7 +40,9 @@ pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
 #[doc(inline)]
-pub use native::{NativeInputObservation, NativeVersionObservation};
+pub use native::{
+    NativeInputObservation, NativeVersionObservation, NativeVersionSnapshotObservation,
+};
 #[doc(inline)]
 pub use plan::JobPlanSpec;
 #[doc(inline)]

@@ -254,6 +254,15 @@ pub struct NativeReadReceipt {
     pub ipc_sha256: String,
 }
 
+pub(crate) struct ProtectedSourceTable {
+    pub table: iceberg::table::Table,
+    pub memory: tokio::sync::OwnedSemaphorePermit,
+    pub schema_id: i32,
+    pub rows: u64,
+    pub metadata_sha256: sha2::digest::Output<Sha256>,
+    pub metadata_size: u64,
+}
+
 pub(super) fn initial_policy_key(operation: &Id) -> String {
     format!("managed-quality-policy/{operation}")
 }
@@ -1196,12 +1205,7 @@ impl Engine {
         &self,
         version: &VersionRef,
         budget: &Budget,
-    ) -> Result<(
-        iceberg::table::Table,
-        tokio::sync::OwnedSemaphorePermit,
-        i32,
-        u64,
-    )> {
+    ) -> Result<ProtectedSourceTable> {
         if self.inner.objects.is_remote() || !self.inner.owned_catalog {
             return Err(Error::refusal(
                 "unsupported_backend",
@@ -1214,14 +1218,16 @@ impl Engine {
         let pin = self
             .representation_pin(&view, &release.id, "source", canonical)
             .await?;
-        let (table, memory) = storage::open_pin_admitted(
-            &pin,
-            #[cfg(feature = "remote")]
-            None,
-            budget,
-        )
-        .await?;
-        Ok((table, memory, canonical.schema_id, pin.rows))
+        let (table, memory, metadata_sha256) =
+            storage::open_local_pin_observed(&pin, budget).await?;
+        Ok(ProtectedSourceTable {
+            table,
+            memory,
+            schema_id: canonical.schema_id,
+            rows: pin.rows,
+            metadata_sha256,
+            metadata_size: pin.metadata.bytes,
+        })
     }
 
     async fn exact_source_release(&self, version: &VersionRef) -> Result<ReleasePin> {

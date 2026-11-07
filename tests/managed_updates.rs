@@ -13,11 +13,13 @@ use docspec::{
     Engine,
     budget::Limits,
     engine::ManagedBuildCommand,
-    model::{Id, InputSpec, RunSpec, UpdateSpec, VersionRef},
+    job::{JobInput, JobSpec, SqlQuery},
+    model::{Id, InputSpec, ReleasePin, RunSpec, UpdateSpec, VersionRef},
     storage,
 };
 use parquet::arrow::ArrowWriter;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 fn id(value: &str) -> Id {
@@ -128,6 +130,145 @@ async fn rows(engine: &Engine, version: &VersionRef) -> BTreeMap<String, Option<
         }
     }
     rows
+}
+
+#[tokio::test]
+async fn protected_version_observes_pending_and_compacted_source_without_payload() {
+    let root = TempDir::new().unwrap();
+    let (engine, selected) = fixture(root.path()).await;
+    let source = input(&root.path().join("import.parquet"), &[("I", None)], false);
+    let build = RunSpec {
+        dataset: id("imports"),
+        operation: id("import"),
+        base: None,
+        relationship: None,
+        definition: "v1".into(),
+        input: source.path,
+        expected_digest: source.digest,
+        sql: "SELECT * FROM input".into(),
+        partition_by: Vec::new(),
+    };
+    let mut policy = policy(&selected);
+    policy["expected_selection"] = Value::Null;
+    let prepared = managed(
+        &engine,
+        json!({"action":"prepare", "build":build, "policy":policy}),
+    )
+    .await
+    .unwrap();
+    let pending: VersionRef = serde_json::from_value(prepared["candidate"].clone()).unwrap();
+    assert_eq!(prepared["selection"], "pending");
+    assert_eq!(
+        rows(&engine, &pending).await,
+        BTreeMap::from([("I".into(), None)])
+    );
+    let records = engine.inspect(&pending.dataset).await.unwrap();
+    let candidate: ReleasePin = serde_json::from_value(records["readback/import"].clone()).unwrap();
+    let pending_pin = &candidate.dataset.groups["source"];
+    let selected_release = engine
+        .release(&selected.dataset, &selected.version)
+        .await
+        .unwrap();
+    let logical_pin = &selected_release.dataset.groups["source"];
+    let compaction = engine
+        .compact(&super::compaction::request(&selected_release, "rewrite"))
+        .await
+        .unwrap();
+    let replacement = &compaction.replacement;
+    assert_ne!(replacement.metadata, logical_pin.metadata);
+    assert_eq!(
+        engine
+            .latest(&selected.dataset)
+            .await
+            .unwrap()
+            .version_ref(),
+        selected
+    );
+    drop(engine);
+
+    let data = pending_pin
+        .objects
+        .iter()
+        .find(|object| object.path.ends_with(".parquet"))
+        .unwrap();
+    let hidden = root.path().join("hidden.parquet");
+    std::fs::rename(&data.path, &hidden).unwrap();
+    let workspace = root.path().join("host");
+    let mut job = JobSpec {
+        scratch: root.path().join("scratch"),
+        catalog_root: None,
+        table_operations: Vec::new(),
+        inputs: vec![
+            JobInput::Version {
+                name: "pending".into(),
+                workspace: workspace.clone(),
+                version: pending.clone(),
+            },
+            JobInput::Version {
+                name: "selected".into(),
+                workspace,
+                version: selected.clone(),
+            },
+        ],
+        steps: Vec::new(),
+        outputs: Vec::new(),
+        queries: Vec::new(),
+    };
+    let result = job.run(limits()).await.unwrap();
+    assert_eq!(result.native_versions.len(), 2);
+    for (observation, (name, version, canonical_schema, pin)) in
+        result.native_versions.iter().zip([
+            ("pending", &pending, pending_pin.schema_id, pending_pin),
+            ("selected", &selected, logical_pin.schema_id, replacement),
+        ])
+    {
+        let bytes = std::fs::read(&pin.metadata.path).unwrap();
+        let native: Value = serde_json::from_slice(&bytes).unwrap();
+        let physical = observation.physical_snapshot.as_ref().unwrap();
+        assert_eq!(observation.name, name);
+        assert_eq!(&observation.version, version);
+        assert_eq!(observation.schema_id, canonical_schema);
+        assert_eq!(physical.selector.metadata_location, pin.metadata.path);
+        assert_eq!(json!(physical.selector.table_uuid), native["table-uuid"]);
+        assert_eq!(
+            json!(physical.selector.snapshot),
+            native["current-snapshot-id"]
+        );
+        assert_eq!(
+            json!(physical.selector.schema_id),
+            native["current-schema-id"]
+        );
+        assert_eq!(physical.metadata_size, bytes.len() as u64);
+        assert_eq!(
+            physical.metadata_sha256,
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+        let field = observation.schema.field_with_name("amount_cents").unwrap();
+        assert_eq!(field.data_type(), &DataType::Int64);
+        assert!(field.is_nullable());
+        assert_eq!(field.metadata()["PARQUET:field_id"], "2");
+    }
+    let complete = serde_json::to_value(&result.native_versions).unwrap();
+    job.queries.push(SqlQuery {
+        name: "late_failure".into(),
+        sql: "SELECT missing_observation_column".into(),
+    });
+    let failure = job.run(limits()).await.unwrap_err();
+    assert!(
+        failure
+            .error
+            .to_string()
+            .contains("missing_observation_column")
+    );
+    assert_eq!(failure.report()["completed"]["native_versions"], complete);
+    std::fs::rename(hidden, &data.path).unwrap();
+    let JobInput::Version { version, .. } = &mut job.inputs[0] else {
+        unreachable!()
+    };
+    version.manifest.digest = "0".repeat(64);
+    let refusal = job.run(limits()).await.unwrap_err();
+    assert_eq!(refusal.error.code(), "release_mismatch");
+    assert!(refusal.completed.native_versions.is_empty());
 }
 
 fn update(root: &Path, operation: &str, replacements: &[(&str, Option<i64>)]) -> UpdateSpec {

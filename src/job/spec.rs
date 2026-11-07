@@ -421,16 +421,23 @@ impl JobSpec {
                             entry.insert(host)
                         }
                     };
-                    let (table, memory, schema_id, rows) =
-                        host.protected_source_table(version, &job.budget).await?;
-                    let observation = super::NativeInputObservation::from_table(name, &table);
-                    let provider = crate::query::table(table, job.budget.clone(), Some(rows))?;
+                    let source = host.protected_source_table(version, &job.budget).await?;
+                    let physical_snapshot = super::NativeVersionSnapshotObservation::from_table(
+                        &source.table,
+                        source.metadata_sha256,
+                        source.metadata_size,
+                        &job.budget,
+                    )?;
+                    let observation =
+                        super::NativeInputObservation::from_table(name, &source.table);
+                    let provider =
+                        crate::query::table(source.table, job.budget.clone(), Some(source.rows))?;
                     let schema = provider.schema().as_ref().clone();
                     job.context.register_table(
                         name.as_str(),
                         Arc::new(super::native::AdmittedTable {
                             provider,
-                            memory: Arc::new(memory),
+                            memory: Arc::new(source.memory),
                             observation,
                         }),
                     )?;
@@ -439,8 +446,9 @@ impl JobSpec {
                         .push(super::NativeVersionObservation {
                             name: name.clone(),
                             version: version.clone(),
-                            schema_id,
+                            schema_id: source.schema_id,
                             schema,
+                            physical_snapshot: Some(physical_snapshot),
                         });
                 }
             }

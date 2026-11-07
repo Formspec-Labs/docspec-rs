@@ -11,6 +11,7 @@ use iceberg::{
     spec::{DataFile, TableMetadata},
     table::Table,
 };
+use sha2::{Digest, Sha256, digest::Output};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
@@ -55,6 +56,19 @@ pub(crate) async fn open_pin_admitted(
         )
         .await;
     }
+    let (io, reader) = local_pin_reader(pin)?;
+    open_with_reader_admitted(pin, io, reader, budget).await
+}
+
+pub(crate) async fn open_local_pin_observed(
+    pin: &TablePin,
+    budget: &Budget,
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit, Output<Sha256>)> {
+    let (io, reader) = local_pin_reader(pin)?;
+    open_with_reader(pin, io, reader, budget, |bytes| Sha256::digest(bytes)).await
+}
+
+fn local_pin_reader(pin: &TablePin) -> Result<(FileIO, MetadataReader)> {
     if super::object_io::is_remote_uri(&pin.metadata.path)
         || pin
             .objects
@@ -65,7 +79,7 @@ pub(crate) async fn open_pin_admitted(
     }
     let io = FileIO::new_with_fs();
     let input = io.new_input(&pin.metadata.path)?;
-    open_with_reader_admitted(pin, io, MetadataReader::Native(input), budget).await
+    Ok((io, MetadataReader::Native(input)))
 }
 
 /// Opens exact pinned metadata through the supplied native object I/O.
@@ -170,7 +184,7 @@ async fn open_snapshot_reader(
     reader: MetadataReader,
     budget: &Budget,
 ) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
-    let (metadata, memory) = read_metadata(None, reader, budget).await?;
+    let (metadata, memory, ()) = read_metadata(None, reader, budget, |_| ()).await?;
     if metadata.uuid() != selection.table_uuid
         || metadata.current_snapshot_id() != selection.snapshot
         || metadata.current_schema_id() != selection.schema_id
@@ -192,7 +206,19 @@ async fn open_with_reader_admitted(
     reader: MetadataReader,
     budget: &Budget,
 ) -> Result<(Table, tokio::sync::OwnedSemaphorePermit)> {
-    let (metadata, memory) = read_metadata(Some(pin.metadata.clone()), reader, budget).await?;
+    let (table, memory, ()) = open_with_reader(pin, file_io, reader, budget, |_| ()).await?;
+    Ok((table, memory))
+}
+
+async fn open_with_reader<T: Send + 'static>(
+    pin: &TablePin,
+    file_io: FileIO,
+    reader: MetadataReader,
+    budget: &Budget,
+    observe: fn(&[u8]) -> T,
+) -> Result<(Table, tokio::sync::OwnedSemaphorePermit, T)> {
+    let (metadata, memory, observation) =
+        read_metadata(Some(pin.metadata.clone()), reader, budget, observe).await?;
     if metadata.current_snapshot_id() != pin.snapshot
         || metadata.current_schema_id() != pin.schema_id
     {
@@ -204,6 +230,7 @@ async fn open_with_reader_admitted(
     Ok((
         build_table(metadata, &pin.metadata.path, &pin.table, file_io)?,
         memory,
+        observation,
     ))
 }
 fn build_table(metadata: TableMetadata, path: &str, name: &str, file_io: FileIO) -> Result<Table> {
@@ -216,11 +243,12 @@ fn build_table(metadata: TableMetadata, path: &str, name: &str, file_io: FileIO)
         .readonly(true)
         .build()?)
 }
-async fn read_metadata(
+async fn read_metadata<T: Send + 'static>(
     expected: Option<ObjectRef>,
     reader: MetadataReader,
     budget: &Budget,
-) -> Result<(TableMetadata, tokio::sync::OwnedSemaphorePermit)> {
+    observe: fn(&[u8]) -> T,
+) -> Result<(TableMetadata, tokio::sync::OwnedSemaphorePermit, T)> {
     let limit = budget.limits.max_metadata_bytes;
     let size = expected
         .as_ref()
@@ -295,8 +323,10 @@ async fn read_metadata(
             let decoded = decoded.ok_or_else(|| {
                 Error::refusal("invalid_metadata", "missing decoded-byte admission")
             })?;
+            let observation = observe(&bytes);
+            drop(bytes);
             drop(serialized);
-            Ok((metadata, decoded))
+            Ok((metadata, decoded, observation))
         })
         .await
 }
@@ -308,7 +338,9 @@ pub(crate) async fn read_retained_snapshot_metadata(
 ) -> Result<(TableMetadata, tokio::sync::OwnedSemaphorePermit)> {
     let file_io = FileIO::new_with_fs();
     let reader = MetadataReader::Native(file_io.new_input(&retained.path)?);
-    read_metadata(Some(retained.clone()), reader, budget).await
+    let (metadata, memory, ()) =
+        read_metadata(Some(retained.clone()), reader, budget, |_| ()).await?;
+    Ok((metadata, memory))
 }
 
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], limit: usize) -> Result<T> {
@@ -945,5 +977,33 @@ mod tests {
                 .metadata(),
             &metadata
         );
+    }
+
+    #[tokio::test]
+    async fn observed_local_metadata_pins_exact_plain_and_gzip_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata = metadata();
+        let json = serde_json::to_vec(&metadata).unwrap();
+        let io = FileIO::new_with_fs();
+        for (name, bytes) in [("plain", json.clone()), ("gzip", gzip(&json))] {
+            let path = directory.path().join(name);
+            let pin = store(&io, path.to_str().unwrap(), &bytes, &metadata).await;
+            let budget = budget(json.len().max(bytes.len()));
+            let (table, memory, stored_sha256) =
+                open_local_pin_observed(&pin, &budget).await.unwrap();
+            assert_eq!(table.metadata(), &metadata);
+            assert_eq!(table.metadata().current_snapshot_id(), None);
+            assert_eq!(table.metadata_location(), path.to_str());
+            assert_eq!(stored_sha256, Sha256::digest(&bytes));
+            if name == "gzip" {
+                assert_ne!(stored_sha256, Sha256::digest(&json));
+            }
+            drop((table, memory));
+            let mut changed = bytes;
+            changed[0] ^= 1;
+            std::fs::write(&path, changed).unwrap();
+            let error = open_local_pin_observed(&pin, &budget).await.unwrap_err();
+            assert_eq!(error.code(), "corrupt_object");
+        }
     }
 }
