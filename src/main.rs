@@ -131,6 +131,8 @@ enum Command {
     ManagedBuild(SpecArg),
     /// Execute, qualify, select or reconcile one retained complete native job.
     ManagedJob(SpecArg),
+    /// Adopt exact producer-definition metadata under the local dataset authority.
+    AdoptJobProducerDefinition(SpecArg),
     /// Stream an exact protected source version as Arrow IPC.
     ReadVersion(SpecArg),
     /// Upload one known local file with a create-only single PUT.
@@ -563,6 +565,7 @@ async fn async_main() -> anyhow::Result<()> {
             | Command::PrepareJob(_)
             | Command::ManagedBuild(_)
             | Command::ManagedJob(_)
+            | Command::AdoptJobProducerDefinition(_)
             | Command::ReadVersion(_)
     ) && cli.limits.is_none()
     {
@@ -798,19 +801,7 @@ async fn execute_engine_command(
             print_json(&engine.plan(&read_json::<RunSpec>(spec)?).await?)?
         }
         Command::ManagedJob(SpecArg { spec }) => {
-            use std::io::Read as _;
-            let file = File::open(spec)?;
-            let size = file.metadata()?.len();
-            anyhow::ensure!(
-                size <= engine.limits().max_metadata_bytes as u64,
-                "managed job metadata exceeds host allowance"
-            );
-            let mut bytes = Vec::with_capacity(size as usize);
-            file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
-            anyhow::ensure!(
-                bytes.len() as u64 == size,
-                "managed job metadata size changed"
-            );
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
             #[derive(serde::Deserialize)]
             struct Identity {
                 dataset: Id,
@@ -833,6 +824,11 @@ async fn execute_engine_command(
                     return Err(error.into());
                 }
             }
+            engine.shutdown().await?;
+        }
+        Command::AdoptJobProducerDefinition(SpecArg { spec }) => {
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
+            print_json(&engine.adopt_job_producer_definition_bytes(bytes).await?)?;
             engine.shutdown().await?;
         }
         Command::ManagedBuild(SpecArg { spec }) => {
@@ -1519,6 +1515,23 @@ fn read_json<T: serde::de::DeserializeOwned>(path: PathBuf) -> anyhow::Result<T>
         "metadata input exceeds 32 MiB"
     );
     Ok(serde_json::from_reader(BufReader::new(file))?)
+}
+
+fn read_job_metadata(path: PathBuf, limit: usize) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let file = File::open(path)?;
+    let size = file.metadata()?.len();
+    anyhow::ensure!(
+        size <= limit as u64,
+        "managed job metadata exceeds host allowance"
+    );
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 == size,
+        "managed job metadata size changed"
+    );
+    Ok(bytes)
 }
 
 fn print_json(value: &impl serde::Serialize) -> anyhow::Result<()> {

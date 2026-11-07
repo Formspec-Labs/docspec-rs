@@ -41,6 +41,37 @@ Before staging payloads, look up qualified results using known immutable input i
 
 Expose one supported inspection/resume path over these results. It reports the identities actually consumed, reusable phases, required reruns and reasons, next action, and resource preconditions. A lost response reconciles its exact phase commit. An old running marker is an observation requiring reconciliation, not proof of completion or permission to delete its outputs.
 
+For retained native inputs, bind the original metadata digest and exact native
+UUID, snapshot and schema selection. Preserve original metadata/manifest/data/delete
+bytes and URI identities through the maintained reader. A selected-snapshot custody
+promise covers only its admitted read closure; older metadata references do not
+promise every historical payload remains available. Metadata-only inventory,
+complete transfer, original producer interpretation and accepted population checks
+remain separate evidence. Retire new member/plan roots through the existing phase,
+operation and result scopes; a control record must not make its payload permanent.
+Same-owner custody reuse checks the exact native lifecycle UUID, request, input
+ordinal and generation, typed admission digest, availability and removal state in
+the same view that commits its receiving root. After this guarded transfer, retry
+uses the receiving grant without reopening the donor. Original-copy provenance
+and its immutable artifacts remain protected by each still-live result promise.
+This proves custody only; original producer and population qualification remain
+separate requirements.
+
+Producer interpretation authority must be an explicit guarded native decision,
+not a flag supplied by the computation request. Bind the exact independent
+definition bytes, historical producer facts, original record locations, full
+proof/model JobSpecs, both required policies and the complete ordered model file
+member byte inventory. A JobSpec pins file interpretation and paths, not the
+contents of those paths. Updating this authority must
+guard the original definition, epoch, selection and prior adoption, preserve
+current selection and reconcile the original action after a lost response.
+Historical audit identities confer neither current authority nor payload
+retention. A proof admission must durably capture its original adopted byte
+witness before the active definition can change; later static completion,
+population acceptance and dependent model admission require their exact scope.
+Keep unsupported prerequisites and adopted execution fail-closed until those
+owners are implemented and independently exercised.
+
 ## Managed external qualification
 
 A local managed source-only Build or based Update retains its admitted quality

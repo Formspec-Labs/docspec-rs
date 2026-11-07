@@ -83,6 +83,31 @@ spill layout independent of compute-batch rows and preserve native byte limits.
 Qualify these boundaries with tiny successor, interruption, actual-spill and
 footer/cache lifetime probes before the complete repository gate.
 
+Extend retained input admission to exact native snapshots through selected-read
+closure custody. Preserve original metadata, manifest, data and supported delete
+URIs; use maintained native I/O over protected exact copies rather than rewriting
+metadata or exporting rows. Seal useful members before later transfers and reuse
+them before reopening original objects. Version native custody receipts explicitly
+so file-only readers cannot silently accept stronger claims. Keep historical
+metadata for interpretation and ancestry without promising historical payloads.
+Native producer-definition adoption and accepted population prerequisites must
+precede application model execution; hashes and custody alone do not prove them.
+First adopt exact independently established definition metadata through the
+existing local dataset authority. Guard the current definition, epoch, selection
+and adoption; change definition and adoption in the same commit without selecting.
+Retain one current byte witness and immutable action identity, so lost-response
+retries return history without reopening artifacts or restoring an old adoption.
+Keep new managed execution and acceptance in adopted scopes refused until exact
+static proof and accepted population prerequisite admission are wired. An
+adoption records the owner's interpretation; it does not prove writer execution,
+row equality, extraction readiness or publication.
+Transfer same-owner custody through a guarded receiving operation, binding the
+exact lifecycle table incarnation and original input generation. Commit inherited
+objects and original-copy provenance as roots before later seals. Keep that new
+root independent of donor retirement, and retain provenance under independent
+result availability. Use source-only material keys; physical copy locations and
+custody-reference history must not invalidate computation.
+
 Record completion at useful boundaries: admission/transfer, processing, evidence
 preparation, validation, export/upload and independent readback. Each completion
 binds exact inputs, material dependencies, outputs, verification and retention

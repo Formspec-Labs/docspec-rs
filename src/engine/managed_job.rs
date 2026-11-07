@@ -19,13 +19,29 @@ use std::{
 };
 
 mod execution;
+mod input_custody;
+pub(super) mod producer;
 mod qualification;
 pub(in crate::engine) mod retention;
+mod snapshots;
 #[cfg(test)]
 mod tests;
 
 const PROFILE: &str = "urn:docspec:whole-job-completion:1";
+const SNAPSHOT_PROFILE: &str = "urn:docspec:whole-job-completion:2";
 const COUNTERS: &str = "urn:docspec:quality:native-sql-zero-counters:1";
+
+fn completion_profile(request: &ManagedJobPrepare) -> &'static str {
+    if request.snapshot_inputs.is_empty() {
+        PROFILE
+    } else {
+        SNAPSHOT_PROFILE
+    }
+}
+
+fn known_job_profile(profile: &str) -> bool {
+    matches!(profile, PROFILE | SNAPSHOT_PROFILE)
+}
 
 /// An exact caller-declared local input member, verified during native admission.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +58,39 @@ pub struct JobFileMember {
 pub struct JobFileInput {
     pub name: String,
     pub members: Vec<JobFileMember>,
+}
+
+/// Exact original metadata bytes selecting one native snapshot to retain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobSnapshotInput {
+    pub name: String,
+    pub metadata_sha256: String,
+    pub metadata_size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse_from: Option<JobInputCustodyRef>,
+}
+
+/// Native typed-admission identity, returned without requiring client canonicalization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobInputAdmissionDigest {
+    pub algorithm: String,
+    pub value: String,
+}
+
+/// References sealed native custody; it grants no producer or population qualification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobInputCustodyRef {
+    pub scheme: String,
+    pub scheme_version: String,
+    pub dataset: Id,
+    pub operation: Id,
+    pub request_digest: String,
+    pub input: String,
+    pub native_record: JobInputRecordRef,
+    pub admission_digest: JobInputAdmissionDigest,
 }
 
 /// A required native proof completion scoped to the main job's exact inputs.
@@ -63,6 +112,8 @@ pub struct ManagedJobPrepare {
     pub definition: String,
     pub job: JobArtifact,
     pub file_inputs: Vec<JobFileInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snapshot_inputs: Vec<JobSnapshotInput>,
     pub policy_id: Id,
     pub policy: JobArtifact,
     pub expected_epoch: u64,
@@ -154,6 +205,8 @@ pub struct ManagedJobReceipt {
     pub admitted_request: JobArtifactWitness,
     pub policy: JobArtifactWitness,
     pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub input_custody: Vec<JobInputCustodyRef>,
     #[serde(skip)]
     _memory: Option<tokio::sync::OwnedSemaphorePermit>,
 }
@@ -170,6 +223,8 @@ struct Admission {
     protection: Id,
     base_definition: String,
     runtime: PhaseRuntime,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    input_grants: BTreeMap<String, execution::InputAdmission>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -503,6 +558,8 @@ impl Engine {
             .strip_prefix("job-phase/")
             .or_else(|| key.strip_prefix("job-input/"))
             .or_else(|| key.strip_prefix("job-member/"))
+            .or_else(|| key.strip_prefix("job-snapshot-member/"))
+            .or_else(|| key.strip_prefix("job-snapshot-plan/"))
             .or_else(|| key.strip_prefix("job-result/"))
         {
             let operation = operation.split('/').next().ok_or_else(mismatch)?;
@@ -648,7 +705,7 @@ impl Engine {
                 "retained Substrait artifact admission is outside this initial whole-job profile",
             ));
         }
-        validate_file_inventory(&spec, &request.file_inputs)?;
+        validate_file_inventory(&spec, &request.file_inputs, &request.snapshot_inputs)?;
         let policy_bytes = read_artifact(&request.policy, budget)?;
         let policy: qualification::CounterPolicy = serde_json::from_slice(&policy_bytes.value)?;
         policy.validate(&request.policy_id, &request.job.sha256, &spec)?;
@@ -694,6 +751,7 @@ impl Engine {
         let mut authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, value)| value);
+        producer::require_unbound(&authority)?;
         if rows.contains_key(&key) {
             return Err(Error::refusal(
                 "operation_conflict",
@@ -706,7 +764,7 @@ impl Engine {
             request.expected_epoch,
             &request.expected_selection,
         )?;
-        authority.job_profile = Some(PROFILE.into());
+        authority.job_profile = Some(completion_profile(&request).into());
         let admitted_request =
             planned_witness(&request.dataset, &directory, "request.json", &submitted);
         let job = planned_witness(&request.dataset, &directory, "job.json", &job_bytes.value);
@@ -716,6 +774,10 @@ impl Engine {
             "policy-initial.json",
             &policy_bytes.value,
         );
+        // Eligibility and this receiving root use the same locked native view.
+        let input_grants = self
+            .prepare_input_grants(&request, &spec, &view, &rows)
+            .await?;
         let saved = Admission {
             request: request.clone(),
             request_digest: digest,
@@ -726,6 +788,7 @@ impl Engine {
             protection: protection.clone(),
             base_definition: authority.definition.clone(),
             runtime,
+            input_grants: input_grants.value,
         };
         let decision = Decision {
             policy_id: request.policy_id.clone(),
@@ -775,6 +838,8 @@ impl Engine {
                 return Err(error);
             }
         }
+        self.job_phase_sealed(&format!("job-grant/{}", request.operation))
+            .await?;
         self.run_job_attempt(&saved).await?;
         self.job_status(&request.dataset, &request.operation, None)
             .await
@@ -792,7 +857,7 @@ fn check_authority(
         || authority
             .job_profile
             .as_deref()
-            .is_some_and(|profile| profile != PROFILE)
+            .is_some_and(|profile| !known_job_profile(profile))
         || (!authority.definition.is_empty() && authority.definition != definition)
         || authority.epoch != epoch
         || &authority.job_selected != expected
@@ -805,21 +870,25 @@ fn check_authority(
     Ok(())
 }
 
-fn validate_file_inventory(spec: &JobSpec, supplied: &[JobFileInput]) -> Result<()> {
+fn validate_file_inventory(
+    spec: &JobSpec,
+    supplied: &[JobFileInput],
+    snapshots: &[JobSnapshotInput],
+) -> Result<()> {
     let expected: BTreeMap<_, Vec<Option<String>>> = spec
         .inputs
         .iter()
-        .map(|input| match input {
-            JobInput::Parquet { name, .. } => Ok((name.as_str(), vec![None])),
-            JobInput::JsonLines { name, files, .. } => Ok((
+        .filter_map(|input| match input {
+            JobInput::Parquet { name, .. } => Some(Ok((name.as_str(), vec![None]))),
+            JobInput::JsonLines { name, files, .. } => Some(Ok((
                 name.as_str(),
                 files.iter().map(|file| Some(file.key.clone())).collect(),
-            )),
-            // A raw selector alone grants no durable custody. Add producer-backed grants here before expanding support.
-            _ => Err(Error::refusal(
+            ))),
+            JobInput::NativeTable { .. } => None,
+            _ => Some(Err(Error::refusal(
                 "unsupported_job_custody",
-                "raw native selectors need a native owner grant before retained execution",
-            )),
+                "this selector has no qualified retained input admission",
+            ))),
         })
         .collect::<Result<_>>()?;
     if supplied.len() != expected.len() {
@@ -843,6 +912,20 @@ fn validate_file_inventory(spec: &JobSpec, supplied: &[JobFileInput]) -> Result<
         {
             return Err(mismatch());
         }
+    }
+    let expected: BTreeSet<_> = spec
+        .inputs
+        .iter()
+        .filter_map(|input| matches!(input, JobInput::NativeTable { .. }).then_some(input.name()))
+        .collect();
+    if snapshots.len() != expected.len()
+        || snapshots.iter().any(|input| {
+            !expected.contains(input.name.as_str())
+                || !names.insert(input.name.as_str())
+                || !valid_sha256(&input.metadata_sha256)
+        })
+    {
+        return Err(mismatch());
     }
     Ok(())
 }

@@ -399,7 +399,11 @@ pub(super) fn check_covered<'a>(
     Ok(())
 }
 
-pub(super) fn available(rows: &SnapshotRows, view: &View, object: &ObjectRef) -> Result<()> {
+pub(in crate::engine) fn available(
+    rows: &SnapshotRows,
+    view: &View,
+    object: &ObjectRef,
+) -> Result<()> {
     if let Some((revision, _, unavailable)) =
         rows.get_record::<UnavailableObject>(&unavailable_key(&object.path))?
     {
@@ -743,7 +747,7 @@ impl Engine {
         Ok(reference(&key, &grant))
     }
 
-    pub(super) fn check_object_owner(
+    pub(in crate::engine) fn check_object_owner(
         &self,
         rows: &SnapshotRows,
         owner: &Id,

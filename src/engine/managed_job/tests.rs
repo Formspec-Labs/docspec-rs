@@ -78,6 +78,7 @@ fn request(
         definition: "independent-job-v1".into(),
         job,
         file_inputs: vec![binding],
+        snapshot_inputs: Vec::new(),
         policy_id: Id::new("policy-one").unwrap(),
         policy,
         expected_epoch: 0,
@@ -97,6 +98,1001 @@ fn action(receipt: &ManagedJobReceipt, action: &str) -> ManagedJobCommand {
             .remove("accepted_qualification");
     }
     serde_json::from_value(value).unwrap()
+}
+
+pub(super) fn producer_definition(name: &str) -> serde_json::Value {
+    let pin = json!({"sha256":"a".repeat(64),"size":17});
+    json!({
+        "profile":"urn:docspec:whole-job-producer-definition:1",
+        "definition":name,
+        "repository":{"identity":"fixture-repository","head":"a".repeat(40)},
+        "interpretation":{"model":pin,"compatibility_registry":pin},
+        "proof":{"job_sha256":"1".repeat(64),"policy_id":"proof","policy_sha256":"2".repeat(64)},
+        "model":{"job_sha256":"3".repeat(64),"policy_id":"model","policy_sha256":"4".repeat(64)},
+        "model_file_inputs":[],
+        "inputs":[{
+            "name":"raw","selector":{"kind":"native_table","metadata_location":"file:///original/metadata.json",
+                "table_uuid":"d9fdc74e-23c3-49a0-ae9c-dd71f9c0abb2","snapshot":31,"schema_id":0},
+            "metadata":pin,"record_namespace":"fixture-records",
+            "head_record":{"source":{"namespace":"fixture-records","key":"producer-31.json"},"sha256":"5".repeat(64),"size":29},
+            "import_anchors":[],"daily_jobs":[],"import_jobs":[],"expected_versions":{"parser":"v1"}
+        }],
+        "producers":[{
+            "input":"raw","commit":"b".repeat(40),"job":"jobs/build.py","job_blob":"c".repeat(40),
+            "source_files":[{"path":"jobs/parse.py","blob":"d".repeat(40),"bytes":pin}],
+            "algorithm":"fixture-version-1","versions":{"parser":"v1"}
+        }]
+    })
+}
+
+#[tokio::test]
+async fn guarded_producer_adoption_replays_without_reopening_or_reselecting() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":10}\n{\"id\":2,\"amount\":null}\n",
+    )
+    .unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let original = request(
+        root.path(),
+        "prior-model",
+        "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"",
+        None,
+    );
+    let completed = engine.managed_job(original.clone()).await.unwrap();
+    let accepted = engine
+        .managed_job(action(&completed, "accept"))
+        .await
+        .unwrap();
+    let selected = engine
+        .managed_job(action(&accepted, "select"))
+        .await
+        .unwrap();
+    assert_eq!(selected.selection, "selected");
+    let dataset = selected.dataset.clone();
+    let mut pending = Vec::new();
+    for operation in ["prior-unaccepted", "prior-accepted"] {
+        let ManagedJobCommand::Prepare(mut prepared) = request(
+            root.path(),
+            operation,
+            "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"",
+            None,
+        ) else {
+            unreachable!()
+        };
+        prepared.expected_selection = selected.candidate.clone();
+        pending.push(
+            engine
+                .managed_job(ManagedJobCommand::Prepare(prepared))
+                .await
+                .unwrap(),
+        );
+    }
+    let prior_accepted = engine
+        .managed_job(action(&pending[1], "accept"))
+        .await
+        .unwrap();
+    let mut requalification_policy: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.path().join("policy-prior-accepted.json")).unwrap(),
+    )
+    .unwrap();
+    requalification_policy["id"] = json!("new-policy");
+    let new_policy = artifact(root.path().join("new-policy.json"), &requalification_policy);
+    let before = engine
+        .job_record::<Authority>(&dataset, "authority")
+        .await
+        .unwrap()
+        .unwrap();
+    let definition = producer_definition("adopted-v1");
+    let first = JobProducerAdoption {
+        dataset: dataset.clone(),
+        adoption: Id::new("first-definition").unwrap(),
+        reason: "Adopt the authored fixture interpretation".into(),
+        expected_definition: before.definition.clone(),
+        expected_epoch: before.epoch,
+        expected_selection: selected.candidate.clone(),
+        expected_adoption: None,
+        definition: artifact(root.path().join("definition-first.json"), &definition),
+    };
+    let first_bytes = std::fs::read(&first.definition.path).unwrap();
+    for field in ["definition", "epoch", "selection"] {
+        let mut stale = first.clone();
+        stale.definition.path = root.path().join("not-opened.json");
+        match field {
+            "definition" => stale.expected_definition = "wrong".into(),
+            "epoch" => stale.expected_epoch += 1,
+            "selection" => stale.expected_selection = None,
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            engine
+                .adopt_job_producer_definition(&stale)
+                .await
+                .unwrap_err()
+                .code(),
+            "stale_authority"
+        );
+    }
+    *engine.inner.job_stop_after.lock().await =
+        Some("job-producer-adoption/first-definition".into());
+    assert_eq!(
+        engine
+            .adopt_job_producer_definition(&first)
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    std::fs::remove_file(&first.definition.path).unwrap();
+    let first_ref = engine.adopt_job_producer_definition(&first).await.unwrap();
+    assert_eq!(first_ref.definition_sha256, first.definition.sha256);
+    let view = engine.inner.lifecycle.open(&dataset).await.unwrap();
+    assert_eq!(
+        first_ref.native_record.table_uuid,
+        view.table.metadata().uuid().to_string()
+    );
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    let (_, _, active): (_, _, serde_json::Value) =
+        rows.get_record("job-producer-definition").unwrap().unwrap();
+    assert_eq!(
+        rows.revision("job-producer-definition"),
+        Some(first_ref.native_record.revision)
+    );
+    assert_eq!(
+        rows.revision("authority"),
+        Some(first_ref.native_record.revision)
+    );
+    assert_eq!(
+        STANDARD
+            .decode(active["bytes_base64"].as_str().unwrap())
+            .unwrap(),
+        first_bytes
+    );
+    drop(rows);
+    drop(view);
+    drop(before);
+
+    let mut second = first.clone();
+    second.adoption = Id::new("second-definition").unwrap();
+    second.expected_definition = "adopted-v1".into();
+    let mut invalid = producer_definition("adopted-v2");
+    invalid["model"]["job_sha256"] = invalid["proof"]["job_sha256"].clone();
+    second.definition = artifact(root.path().join("definition-second.json"), &invalid);
+    assert_eq!(
+        engine
+            .adopt_job_producer_definition(&second)
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_authority"
+    );
+    second.expected_adoption = Some(first_ref.clone());
+    assert_eq!(
+        engine
+            .adopt_job_producer_definition(&second)
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_producer_definition"
+    );
+    second.definition = artifact(
+        root.path().join("definition-second.json"),
+        &producer_definition("adopted-v2"),
+    );
+    let second_ref = engine.adopt_job_producer_definition(&second).await.unwrap();
+    std::fs::remove_file(&second.definition.path).unwrap();
+    engine.compact_lifecycle(&dataset).await.unwrap();
+    engine.shutdown().await.unwrap();
+    drop(engine);
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.adopt_job_producer_definition(&first).await.unwrap(),
+        first_ref
+    );
+    assert_eq!(
+        engine.adopt_job_producer_definition(&second).await.unwrap(),
+        second_ref
+    );
+    let mut collision = first;
+    collision.reason = "Different decision under the same ID".into();
+    assert_eq!(
+        engine
+            .adopt_job_producer_definition(&collision)
+            .await
+            .unwrap_err()
+            .code(),
+        "managed_job_identity"
+    );
+    let authority = engine
+        .job_record::<Authority>(&dataset, "authority")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(authority.definition, "adopted-v2");
+    assert_eq!(authority.job_producer_adoption, Some(second_ref));
+    assert_eq!(authority.job_selected, selected.candidate);
+    assert_eq!(
+        engine.managed_job(original).await.unwrap().candidate,
+        selected.candidate
+    );
+    assert_eq!(
+        engine
+            .managed_job(action(&accepted, "select"))
+            .await
+            .unwrap()
+            .candidate,
+        selected.candidate
+    );
+    assert_eq!(
+        engine
+            .managed_job(action(&pending[0], "accept"))
+            .await
+            .unwrap_err()
+            .code(),
+        "unsupported_job_prerequisite"
+    );
+    assert_eq!(
+        engine
+            .managed_job(action(&prior_accepted, "select"))
+            .await
+            .unwrap_err()
+            .code(),
+        "unsupported_job_prerequisite"
+    );
+    let changed_policy = ManagedJobCommand::Requalify {
+        dataset: dataset.clone(),
+        operation: prior_accepted.operation.clone(),
+        request_digest: prior_accepted.request_digest.clone(),
+        candidate: prior_accepted.candidate.clone().unwrap(),
+        previous_policy_id: Id::new("policy-one").unwrap(),
+        policy_id: Id::new("new-policy").unwrap(),
+        policy: new_policy,
+        expected_epoch: 0,
+        expected_selection: selected.candidate.clone(),
+    };
+    assert_eq!(
+        engine.managed_job(changed_policy).await.unwrap_err().code(),
+        "unsupported_job_prerequisite"
+    );
+    assert!(
+        engine
+            .job_record::<Decision>(&dataset, "job-policy/prior-accepted/new-policy")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let next = request(
+        root.path(),
+        "not-admitted",
+        "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"",
+        None,
+    );
+    assert_eq!(
+        engine.managed_job(next).await.unwrap_err().code(),
+        "unsupported_job_prerequisite"
+    );
+    assert!(
+        engine
+            .job_record::<Admission>(&dataset, "job-operation/not-admitted")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn cold_lifecycle_reader_refuses_one_oversized_record() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = Id::new("oversized-lifecycle").unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let lifecycle = &engine.inner.lifecycle;
+    let view = lifecycle.open(&dataset).await.unwrap();
+    let original = "q".repeat(16 << 10);
+    let written = lifecycle
+        .commit(&view, vec![record("diagnostic", &original).unwrap()])
+        .await
+        .unwrap();
+    let warm = lifecycle.rows(&written).await.unwrap();
+    assert_eq!(
+        warm.get_record::<String>("diagnostic").unwrap().unwrap().2,
+        original
+    );
+    drop(warm);
+    engine.shutdown().await.unwrap();
+    drop(engine);
+
+    let smaller = Limits {
+        max_batch_bytes: 8 << 10,
+        ..limits()
+    };
+    let reopened = Engine::open(root.path(), smaller).await.unwrap();
+    let view = reopened.inner.lifecycle.open(&dataset).await.unwrap();
+    let error = reopened.inner.lifecycle.rows(&view).await.err().unwrap();
+    assert_eq!(error.code(), "oversized_batch");
+}
+
+async fn snapshot_request(root: &Path, operation: &str) -> ManagedJobCommand {
+    let native_schema = iceberg::spec::Schema::builder()
+        .with_fields([
+            Arc::new(iceberg::spec::NestedField::required(
+                1,
+                "occurrence",
+                iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
+            )),
+            Arc::new(iceberg::spec::NestedField::required(
+                2,
+                "id",
+                iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
+            )),
+            Arc::new(iceberg::spec::NestedField::optional(
+                3,
+                "amount",
+                iceberg::spec::Type::Primitive(iceberg::spec::PrimitiveType::Long),
+            )),
+        ])
+        .with_identifier_field_ids([1])
+        .build()
+        .unwrap();
+    let producer: JobSpec = serde_json::from_value(json!({
+        "scratch":root.join("producer/scratch"), "catalog_root":root.join("producer/catalog"), "inputs":[],
+        "steps":[{"name":"incoming","sql":"SELECT CAST(occurrence AS BIGINT) AS occurrence,CAST(id AS BIGINT) AS id,CAST(amount AS BIGINT) AS amount FROM (VALUES (1,1,7),(2,1,7),(3,2,NULL)) AS t(occurrence,id,amount)"}],
+        "outputs":[], "table_operations":[
+            {"kind":"create_namespace","name":"namespace","namespace":["archive"],"properties":{}},
+            {"kind":"create","name":"create","table":{"namespace":["archive"],"name":"original"},"location":root.join("producer/data"),"schema":native_schema,"format_version":2,"properties":{"gc.enabled":"true"}},
+            {"kind":"append","name":"append","table":{"namespace":["archive"],"name":"original"},"current_table":"old","work_table":"pending","sql":"SELECT * FROM incoming","identity_sql":"SELECT 'authored-three-occurrences' AS identity FROM pending LIMIT 1","layout":{"file_bytes":1048576,"row_group_rows":64,"row_group_bytes":1048576}}
+        ]
+    })).unwrap();
+    let produced = producer.run(limits()).await.unwrap();
+    let head = &produced.table_operations[2];
+    let input = json!({"kind":"native_table","name":"raw","metadata_location":head.metadata_location,"table_uuid":head.table_uuid,"snapshot":head.snapshot,"schema_id":head.schema_id});
+    let report = "SELECT COUNT(*) - 3 AS invalid_rows FROM raw";
+    let job = artifact(
+        root.join(format!("snapshot-job-{operation}.json")),
+        &json!({
+            "scratch":root.join("caller-scratch"), "inputs":[input], "steps":[], "outputs":[],
+            "queries":[{"name":"invariants","sql":report},{"name":"values","sql":"SELECT id,amount FROM raw ORDER BY occurrence"}]
+        }),
+    );
+    let schema = Schema::new(vec![Field::new("invalid_rows", DataType::Int64, false)]);
+    let schema =
+        crate::job::retained::encode_schema(&schema, &Budget::new(limits()).unwrap()).unwrap();
+    let policy = artifact(
+        root.join(format!("snapshot-policy-{operation}.json")),
+        &json!({
+            "id":"policy-one", "profile":COUNTERS,
+            "evaluator":{"id":"urn:docspec:evaluator:native-job-reports","version":"1"},
+            "semantics":{"id":"urn:docspec:semantics:complete-integer-zero-row","revision":"1"},
+            "job_sha256":job.sha256,"view_names":{"inputs":["raw"],"steps":[],"outputs":[],"reports":["invariants","values"]},
+            "required_reports":[{"name":"invariants","sql_sha256":sha256(report.as_bytes()),"schema_ipc_base64":STANDARD.encode(&schema.bytes)}]
+        }),
+    );
+    let metadata = std::fs::read(head.metadata_location.as_ref().unwrap()).unwrap();
+    ManagedJobCommand::Prepare(ManagedJobPrepare {
+        dataset: Id::new("native-job").unwrap(),
+        operation: Id::new(operation).unwrap(),
+        definition: "native-snapshot-fixture-v1".into(),
+        job,
+        file_inputs: Vec::new(),
+        snapshot_inputs: vec![JobSnapshotInput {
+            name: "raw".into(),
+            metadata_sha256: sha256(&metadata),
+            metadata_size: metadata.len() as u64,
+            reuse_from: None,
+        }],
+        policy_id: Id::new("policy-one").unwrap(),
+        policy,
+        expected_epoch: 0,
+        expected_selection: None,
+        prerequisites: Vec::new(),
+    })
+}
+
+#[tokio::test]
+async fn selected_snapshot_custody_preserves_values_and_cold_original_removal() {
+    let root = tempfile::tempdir().unwrap();
+    let command = snapshot_request(root.path(), "snapshot-cold").await;
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let complete = engine.managed_job(command.clone()).await.unwrap();
+    assert_eq!(complete.status, "completed");
+    assert_eq!(
+        complete.completed_reports[1]["data"],
+        json!([{"id":1,"amount":7},{"id":1,"amount":7},{"id":2,"amount":null}])
+    );
+    let witness = complete.completion_manifest.as_ref().unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&STANDARD.decode(&witness.bytes_base64).unwrap()).unwrap();
+    assert_eq!(manifest["profile"], SNAPSHOT_PROFILE);
+    let input = &manifest["inputs"][0];
+    assert_eq!(input["files"], json!([]));
+    let custody = &input["snapshot_custody"];
+    assert_eq!(custody["scope"], "selected_snapshot");
+    assert!(
+        custody["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|object| object["role"] == "data")
+    );
+    let schema_bytes = STANDARD
+        .decode(
+            manifest["schemas"][input["schema_sha256"].as_str().unwrap()]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+    let observed = try_schema_from_ipc_buffer(&schema_bytes).unwrap();
+    assert_eq!(
+        observed.field_with_name("id").unwrap().metadata()["PARQUET:field_id"],
+        "2"
+    );
+    assert_eq!(
+        observed.field_with_name("amount").unwrap().metadata()["PARQUET:field_id"],
+        "3"
+    );
+    let accepted = engine
+        .managed_job(action(&complete, "accept"))
+        .await
+        .unwrap();
+    drop(engine);
+    std::fs::remove_dir_all(root.path().join("producer")).unwrap();
+    if let ManagedJobCommand::Prepare(request) = &command {
+        std::fs::remove_file(&request.job.path).unwrap();
+        std::fs::remove_file(&request.policy.path).unwrap();
+    }
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let retried = engine.managed_job(command).await.unwrap();
+    assert_eq!(retried.candidate, complete.candidate);
+    assert_eq!(retried.completed_reports, complete.completed_reports);
+    let selected = engine
+        .managed_job(action(&accepted, "select"))
+        .await
+        .unwrap();
+    assert_eq!(selected.selection, "selected");
+}
+
+#[tokio::test]
+async fn selected_snapshot_custody_reopens_payload_after_input_seal_and_caller_loss() {
+    let root = tempfile::tempdir().unwrap();
+    let command = snapshot_request(root.path(), "snapshot-pending").await;
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    *engine.inner.job_stop_after.lock().await = Some("job-input/snapshot-pending/0".into());
+    assert_eq!(
+        engine
+            .managed_job(command.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let before = engine
+        .inspect(&Id::new("native-job").unwrap())
+        .await
+        .unwrap();
+    assert!(!before.contains_key("job-result/snapshot-pending"));
+    let members = before
+        .iter()
+        .filter(|(key, _)| key.starts_with("job-snapshot-member/"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    assert!(!members.is_empty());
+    drop(engine);
+    std::fs::remove_dir_all(root.path().join("producer")).unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let complete = engine.managed_job(command).await.unwrap();
+    assert_eq!(
+        complete.completed_reports[1]["data"],
+        json!([{"id":1,"amount":7},{"id":1,"amount":7},{"id":2,"amount":null}])
+    );
+    let after = engine
+        .inspect(&Id::new("native-job").unwrap())
+        .await
+        .unwrap();
+    for (key, value) in members {
+        assert_eq!(
+            after[&key], value,
+            "sealed native members are reused without original opens or copies"
+        );
+    }
+}
+
+#[tokio::test]
+async fn selected_snapshot_metadata_seals_survive_a_later_missing_manifest() {
+    let root = tempfile::tempdir().unwrap();
+    let command = snapshot_request(root.path(), "snapshot-manifest").await;
+    let ManagedJobCommand::Prepare(request) = &command else {
+        panic!()
+    };
+    let spec: JobSpec = serde_json::from_slice(&std::fs::read(&request.job.path).unwrap()).unwrap();
+    let selected = snapshots::selection(&spec.inputs[0]).unwrap();
+    let table = crate::storage::open_snapshot_with_io(
+        &selected,
+        iceberg::io::FileIO::new_with_fs(),
+        &Budget::new(limits()).unwrap(),
+    )
+    .await
+    .unwrap();
+    let snapshot = table.metadata().current_snapshot().unwrap();
+    let list_path = snapshot.manifest_list().to_owned();
+    let list = table.manifest_list_reader(snapshot).load().await.unwrap();
+    let manifest = list.entries()[0].manifest_path.clone();
+    drop(table);
+    let backup = root.path().join("manifest-backup");
+    std::fs::rename(&manifest, &backup).unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    assert!(engine.managed_job(command.clone()).await.is_err());
+    let before = engine.inspect(&request.dataset).await.unwrap();
+    assert!(
+        !before
+            .keys()
+            .any(|key| key.starts_with("job-snapshot-plan/"))
+    );
+    assert_eq!(
+        before
+            .keys()
+            .filter(|key| key.starts_with("job-snapshot-member/"))
+            .count(),
+        2
+    );
+    drop(engine);
+    std::fs::rename(&backup, &manifest).unwrap();
+    std::fs::remove_file(&selected.metadata_location).unwrap();
+    std::fs::remove_file(&list_path).unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let complete = engine.managed_job(command.clone()).await.unwrap();
+    assert_eq!(
+        complete.completed_reports[1]["data"],
+        json!([{"id":1,"amount":7},{"id":1,"amount":7},{"id":2,"amount":null}])
+    );
+    let after = engine.inspect(&request.dataset).await.unwrap();
+    for (key, value) in before
+        .iter()
+        .filter(|(key, _)| key.starts_with("job-snapshot-member/"))
+    {
+        assert_eq!(&after[key], value);
+    }
+}
+
+#[tokio::test]
+async fn selected_snapshot_custody_roots_end_at_existing_phase_and_operation_retirement() {
+    let root = tempfile::tempdir().unwrap();
+    let command = snapshot_request(root.path(), "snapshot-retire").await;
+    let ManagedJobCommand::Prepare(request) = &command else {
+        panic!()
+    };
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    *engine.inner.job_stop_after.lock().await = Some("job-input/snapshot-retire/0".into());
+    assert_eq!(
+        engine
+            .managed_job(command.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let records = engine.inspect(&request.dataset).await.unwrap();
+    let members = records
+        .iter()
+        .filter(|(key, _)| key.starts_with("job-snapshot-member/"))
+        .map(|(_, value)| {
+            serde_json::from_value::<ObjectRef>(value["object"]["retained"].clone()).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        engine
+            .inspect_retention(&members)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some())
+    );
+    engine
+        .abandon(
+            &request.dataset,
+            &request.operation,
+            "end deliberately interrupted snapshot fixture",
+        )
+        .await
+        .unwrap();
+    let keys = records
+        .keys()
+        .filter(|key| super::super::retention::retirement::completion_key(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(keys.iter().any(|key| key.starts_with("job-snapshot-plan/")));
+    assert!(
+        keys.iter()
+            .any(|key| key.starts_with("job-snapshot-member/"))
+    );
+    let phases = engine
+        .plan_phase_retirement(
+            &request.dataset,
+            &Id::new("snapshot-phases").unwrap(),
+            &keys,
+            "end input phase recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&phases).await.unwrap();
+    let operation = engine
+        .plan_operation_retirement(
+            &request.dataset,
+            &Id::new("snapshot-operation").unwrap(),
+            &request.operation,
+            "end abandoned operation recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&operation).await.unwrap();
+    assert!(
+        engine
+            .inspect_retention(&members)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_none())
+    );
+    assert_eq!(
+        engine.managed_job(command).await.unwrap_err().code(),
+        "operation_abandoned"
+    );
+}
+
+#[tokio::test]
+async fn selected_snapshot_custody_refuses_wrong_native_pins_and_original_metadata_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    let base = snapshot_request(root.path(), "pin-source").await;
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    for (index, field, value) in [
+        (
+            0,
+            "table_uuid",
+            json!("00000000-0000-4000-8000-000000000099"),
+        ),
+        (1, "schema_id", json!(999)),
+        (2, "snapshot", serde_json::Value::Null),
+    ] {
+        let ManagedJobCommand::Prepare(mut request) = base.clone() else {
+            panic!()
+        };
+        request.operation = Id::new(format!("wrong-pin-{index}")).unwrap();
+        let mut job: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&request.job.path).unwrap()).unwrap();
+        job["inputs"][0][field] = value;
+        request.job = artifact(root.path().join(format!("wrong-job-{index}.json")), &job);
+        let mut policy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&request.policy.path).unwrap()).unwrap();
+        policy["job_sha256"] = json!(request.job.sha256);
+        request.policy = artifact(
+            root.path().join(format!("wrong-policy-{index}.json")),
+            &policy,
+        );
+        assert_eq!(
+            engine
+                .managed_job(ManagedJobCommand::Prepare(request))
+                .await
+                .unwrap_err()
+                .code(),
+            "pin_mismatch"
+        );
+    }
+    let ManagedJobCommand::Prepare(mut request) = base else {
+        panic!()
+    };
+    request.operation = Id::new("wrong-metadata").unwrap();
+    request.snapshot_inputs[0].metadata_sha256 = "0".repeat(64);
+    assert_eq!(
+        engine
+            .managed_job(ManagedJobCommand::Prepare(request))
+            .await
+            .unwrap_err()
+            .code(),
+        mismatch().code()
+    );
+}
+
+#[tokio::test]
+async fn input_custody_grant_survives_donor_retirement_before_input_seal() {
+    let root = tempfile::tempdir().unwrap();
+    let original = snapshot_request(root.path(), "custody-donor").await;
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let complete = engine.managed_job(original.clone()).await.unwrap();
+    let reference = complete.input_custody[0].clone();
+    assert_eq!(reference.operation, Id::new("custody-donor").unwrap());
+    let ManagedJobCommand::Prepare(mut receiving) = original else {
+        panic!()
+    };
+    receiving.operation = Id::new("custody-receiver").unwrap();
+    receiving.snapshot_inputs[0].reuse_from = Some(reference.clone());
+    *engine.inner.job_stop_after.lock().await = Some("job-grant/custody-receiver".into());
+    let request = ManagedJobCommand::Prepare(receiving.clone());
+    assert_eq!(
+        engine
+            .managed_job(request.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let records = engine.inspect(&receiving.dataset).await.unwrap();
+    assert!(!records.contains_key("job-input/custody-receiver/0"));
+    let admitted: Admission =
+        serde_json::from_value(records["job-operation/custody-receiver"].clone()).unwrap();
+    let source_objects = input_custody::input_objects(&admitted.input_grants["raw"]);
+    let keys = records
+        .keys()
+        .filter(|key| super::super::retention::retirement::completion_key(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let phases = engine
+        .plan_phase_retirement(
+            &receiving.dataset,
+            &Id::new("donor-phases").unwrap(),
+            &keys,
+            "end donor phase recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&phases).await.unwrap();
+    let availability = engine
+        .plan_availability_retirement(
+            &receiving.dataset,
+            &Id::new("donor-availability").unwrap(),
+            &reference.operation,
+            "end donor result availability",
+        )
+        .await
+        .unwrap();
+    engine.retire_availability(&availability).await.unwrap();
+    let recovery = engine
+        .plan_operation_retirement(
+            &receiving.dataset,
+            &Id::new("donor-recovery").unwrap(),
+            &reference.operation,
+            "end donor operation recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&recovery).await.unwrap();
+    assert!(
+        engine
+            .inspect_retention(&source_objects)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some())
+    );
+    drop(engine);
+    std::fs::remove_dir_all(root.path().join("producer")).unwrap();
+    std::fs::remove_file(&receiving.job.path).unwrap();
+    std::fs::remove_file(&receiving.policy.path).unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let finished = engine.managed_job(request).await.unwrap();
+    assert_eq!(
+        finished.completed_reports[1]["data"],
+        json!([{"id":1,"amount":7},{"id":1,"amount":7},{"id":2,"amount":null}])
+    );
+    assert_eq!(finished.input_custody[0].operation, receiving.operation);
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &STANDARD
+            .decode(&finished.completion_manifest.as_ref().unwrap().bytes_base64)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest["inputs"][0]["custody_grant"]["source"],
+        serde_json::to_value(reference).unwrap()
+    );
+    assert_eq!(
+        manifest["inputs"][0]["snapshot_custody"]["objects"],
+        serde_json::to_value(
+            admitted.input_grants["raw"]
+                .snapshot_custody
+                .as_ref()
+                .unwrap()
+                .objects
+                .clone()
+        )
+        .unwrap()
+    );
+    assert!(
+        !std::fs::read_dir(&admitted.directory)
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("snapshot-")),
+        "receiving operation must not copy raw snapshot objects"
+    );
+    let records = engine.inspect(&receiving.dataset).await.unwrap();
+    let keys = records
+        .iter()
+        .filter(|(key, value)| {
+            super::super::retention::retirement::completion_key(key)
+                && (key.starts_with("job-input/custody-receiver/")
+                    || value
+                        .get("operation")
+                        .is_some_and(|value| value == "custody-receiver"))
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    let phases = engine
+        .plan_phase_retirement(
+            &receiving.dataset,
+            &Id::new("receiver-phases").unwrap(),
+            &keys,
+            "end receiving phase recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_phases(&phases).await.unwrap();
+    let recovery = engine
+        .plan_operation_retirement(
+            &receiving.dataset,
+            &Id::new("receiver-recovery").unwrap(),
+            &receiving.operation,
+            "end receiving operation recovery",
+        )
+        .await
+        .unwrap();
+    engine.retire_operation(&recovery).await.unwrap();
+    assert!(
+        engine
+            .inspect_retention(&source_objects)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_some()),
+        "result availability independently owns data and original provenance"
+    );
+    let availability = engine
+        .plan_availability_retirement(
+            &receiving.dataset,
+            &Id::new("receiver-availability").unwrap(),
+            &receiving.operation,
+            "end receiving result availability",
+        )
+        .await
+        .unwrap();
+    engine.retire_availability(&availability).await.unwrap();
+    assert!(
+        engine
+            .inspect_retention(&source_objects)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_none())
+    );
+}
+
+#[tokio::test]
+async fn input_custody_reference_refuses_changed_incarnation_and_admission_digest() {
+    let root = tempfile::tempdir().unwrap();
+    let original = snapshot_request(root.path(), "reference-donor").await;
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let complete = engine.managed_job(original.clone()).await.unwrap();
+    for index in 0..3 {
+        let ManagedJobCommand::Prepare(mut request) = original.clone() else {
+            panic!()
+        };
+        request.operation = Id::new(format!("reference-refusal-{index}")).unwrap();
+        let mut source = complete.input_custody[0].clone();
+        match index {
+            0 => source.native_record.table_uuid = "00000000-0000-4000-8000-000000000099".into(),
+            1 => source.admission_digest.value = "0".repeat(64),
+            _ => source.input = "absent".into(),
+        }
+        request.snapshot_inputs[0].reuse_from = Some(source);
+        assert_eq!(
+            engine
+                .managed_job(ManagedJobCommand::Prepare(request))
+                .await
+                .unwrap_err()
+                .code(),
+            mismatch().code()
+        );
+    }
+}
+
+#[tokio::test]
+async fn input_custody_rule_change_reuses_native_material_without_raw_copies() {
+    let root = tempfile::tempdir().unwrap();
+    let ManagedJobCommand::Prepare(mut source) =
+        snapshot_request(root.path(), "material-donor").await
+    else {
+        panic!()
+    };
+    let mut job: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&source.job.path).unwrap()).unwrap();
+    job["steps"] = json!([{"name":"material","sql":"SELECT * FROM raw","materialize":true}]);
+    source.job = artifact(root.path().join("material-job-original.json"), &job);
+    let mut policy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&source.policy.path).unwrap()).unwrap();
+    policy["job_sha256"] = json!(source.job.sha256);
+    policy["view_names"]["steps"] = json!(["material"]);
+    source.policy = artifact(root.path().join("material-policy-original.json"), &policy);
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let original = engine
+        .managed_job(ManagedJobCommand::Prepare(source.clone()))
+        .await
+        .unwrap();
+    let old_phase = engine
+        .job_record::<Phase>(&source.dataset, "job-phase/material-donor/step/0")
+        .await
+        .unwrap()
+        .unwrap();
+    let mut receiving = source;
+    receiving.operation = Id::new("material-receiver").unwrap();
+    receiving.snapshot_inputs[0].reuse_from = Some(original.input_custody[0].clone());
+    job["queries"][1]["sql"] = json!("SELECT id,amount FROM material ORDER BY occurrence");
+    receiving.job = artifact(root.path().join("material-job-new-report.json"), &job);
+    policy["job_sha256"] = json!(receiving.job.sha256);
+    receiving.policy = artifact(root.path().join("material-policy-new-report.json"), &policy);
+    std::fs::remove_dir_all(root.path().join("producer")).unwrap();
+    let current = engine
+        .managed_job(ManagedJobCommand::Prepare(receiving.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        current.completed_reports[1]["data"],
+        json!([{"id":1,"amount":7},{"id":1,"amount":7},{"id":2,"amount":null}])
+    );
+    let new_phase = engine
+        .job_record::<Phase>(&receiving.dataset, "job-phase/material-receiver/step/0")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        new_phase.object, old_phase.object,
+        "different custody references and report SQL preserve native material reuse"
+    );
+    assert_eq!(new_phase.material_identity, old_phase.material_identity);
+    assert_eq!(new_phase.origin_runtime, old_phase.origin_runtime);
+    let directory = root
+        .path()
+        .join("host/objects/native-job/job-material-receiver");
+    assert!(!std::fs::read_dir(directory).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("snapshot-")
+    }));
 }
 
 #[tokio::test]

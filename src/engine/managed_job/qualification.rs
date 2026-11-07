@@ -327,6 +327,7 @@ impl Engine {
         let authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, authority)| authority);
+        producer::require_unbound(&authority)?;
         if rows
             .get_record::<Id>(&active_key)?
             .is_none_or(|(_, _, active)| active != *policy_id)
@@ -411,6 +412,7 @@ impl Engine {
         let mut authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, authority)| authority);
+        producer::require_unbound(&authority)?;
         if rows
             .get_record::<Id>(&active_key)?
             .is_none_or(|(_, _, active)| active != *policy_id)
@@ -525,6 +527,7 @@ impl Engine {
         let authority: Authority = rows
             .get_record("authority")?
             .map_or_else(Authority::default, |(_, _, authority)| authority);
+        producer::require_unbound(&authority)?;
         check_authority(
             &authority,
             &admitted.base_definition,

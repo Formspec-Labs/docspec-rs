@@ -50,11 +50,13 @@ mod key_pruning;
 pub(crate) mod locations;
 mod managed_build;
 mod managed_job;
+pub use crate::model::{JobInputRecordRef, JobProducerAdoptionRef};
 #[doc(inline)]
 pub use managed_build::{ManagedBuildCommand, NativeReadReceipt, NativeVersionRead};
+pub use managed_job::producer::JobProducerAdoption;
 pub use managed_job::{
-    JobArtifactWitness, JobFileInput, JobFileMember, JobPrerequisite, ManagedJobCommand,
-    ManagedJobPrepare, ManagedJobReceipt,
+    JobArtifactWitness, JobFileInput, JobFileMember, JobInputAdmissionDigest, JobInputCustodyRef,
+    JobPrerequisite, JobSnapshotInput, ManagedJobCommand, ManagedJobPrepare, ManagedJobReceipt,
 };
 mod pipeline;
 mod planner;

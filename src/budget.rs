@@ -396,6 +396,33 @@ impl Drop for WorkspaceLock {
     }
 }
 
+// A counting sink bounds serialized metadata without allocating a second copy.
+pub(crate) fn metadata_size(value: &impl serde::Serialize, limit: usize) -> Result<usize> {
+    struct Counter {
+        remaining: usize,
+    }
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.remaining = self
+                .remaining
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("metadata capacity"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter { remaining: limit };
+    serde_json::to_writer(&mut counter, value).map_err(|_| {
+        Error::refusal(
+            "metadata_capacity",
+            "related-input metadata exceeds its combined allowance",
+        )
+    })?;
+    Ok(limit - counter.remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -38,6 +38,46 @@ pub(in crate::engine) fn record_roots(
         if json_identity(&original)? != admitted.request_digest {
             return Err(mismatch());
         }
+        for (name, input) in &admitted.input_grants {
+            if &input.name != name
+                || input.reuse_from.as_ref()
+                    != admitted
+                        .request
+                        .snapshot_inputs
+                        .iter()
+                        .find(|binding| &binding.name == name)
+                        .and_then(|binding| binding.reuse_from.as_ref())
+            {
+                return Err(mismatch());
+            }
+            objects.extend(input_custody::input_objects(input));
+        }
+    } else if key.starts_with("job-snapshot-member/") {
+        let member: snapshots::SnapshotMember = serde_json::from_str(json)?;
+        if key
+            != format!(
+                "job-snapshot-member/{}/{}",
+                member.operation,
+                sha256(member.object.uri.as_bytes())
+            )
+            || member.object.size != member.object.retained.bytes
+            || !valid_sha256(&member.object.sha256)
+        {
+            return Err(mismatch());
+        }
+        objects.push(member.object.retained);
+    } else if key.starts_with("job-snapshot-plan/") {
+        let plan: snapshots::SnapshotPlan = serde_json::from_str(json)?;
+        if key
+            != format!(
+                "job-snapshot-plan/{}/{}",
+                plan.operation,
+                sha256(plan.selector.name().as_bytes())
+            )
+        {
+            return Err(mismatch());
+        }
+        objects.extend(plan.metadata.into_iter().map(|object| object.retained));
     } else if key.starts_with("job-member/") {
         let member: execution::MemberCompletion = serde_json::from_str(json)?;
         if !key.starts_with(&format!("job-member/{}/", member.operation))
@@ -49,6 +89,16 @@ pub(in crate::engine) fn record_roots(
         objects.push(member.member.retained);
     } else if key.starts_with("job-input/") || key.starts_with("job-input-material/") {
         let input: execution::InputAdmission = serde_json::from_str(json)?;
+        if let Some(custody) = &input.snapshot_custody {
+            custody.validate(&input.selector)?;
+            if !input.files.is_empty() {
+                return Err(mismatch());
+            }
+            objects.extend(custody.objects.iter().map(|object| object.retained.clone()));
+        }
+        for origin in &input.provenance {
+            objects.extend(origin.objects().cloned());
+        }
         for file in input.files {
             if file.size != file.retained.bytes || !valid_sha256(&file.sha256) {
                 return Err(mismatch());
@@ -98,7 +148,7 @@ pub(in crate::engine) fn record_roots(
                 "result",
             ],
         )?;
-        if document["profile"] != PROFILE
+        if !document["profile"].as_str().is_some_and(known_job_profile)
             || document["execution"] != "completed"
             || document["operation"] != operation
             || document["dataset"] != completed.candidate.dataset.as_str()
@@ -114,20 +164,91 @@ pub(in crate::engine) fn record_roots(
         objects.push(view.reference);
         let original: JobArtifactWitness =
             serde_json::from_value(document["admitted_request"].clone())?;
+        let request_bytes = witness_bytes(&original, budget)?;
+        let ManagedJobCommand::Prepare(request) = serde_json::from_slice(&request_bytes.value)?
+        else {
+            return Err(mismatch());
+        };
+        if document["profile"] != completion_profile(&request) {
+            return Err(mismatch());
+        }
         objects.push(original.reference);
+        let mut admitted_inputs_read = BTreeSet::new();
         for input in document["inputs"].as_array().ok_or_else(mismatch)? {
-            fields(
-                input,
-                &[
-                    "name",
-                    "kind",
-                    "selector",
-                    "files",
-                    "schema_sha256",
-                    "admission",
-                ],
-            )?;
-            objects.push(serde_json::from_value(input["admission"].clone())?);
+            let snapshot = input.get("snapshot_custody");
+            let mut expected = vec![
+                "name",
+                "kind",
+                "selector",
+                "files",
+                "schema_sha256",
+                "admission",
+            ];
+            if snapshot.is_some() {
+                expected.push("snapshot_custody");
+            }
+            if input.get("custody_reference").is_some() {
+                expected.push("custody_reference");
+            }
+            if input.get("custody_grant").is_some() {
+                expected.push("custody_grant");
+            }
+            fields(input, &expected)?;
+            if let Some(snapshot) = snapshot {
+                let custody: snapshots::SnapshotCustody = serde_json::from_value(snapshot.clone())?;
+                let selector: JobInput = serde_json::from_value(input["selector"].clone())?;
+                custody.validate(&selector)?;
+                if request
+                    .snapshot_inputs
+                    .iter()
+                    .find(|binding| binding.name == selector.name())
+                    .is_none_or(|binding| {
+                        binding.metadata_sha256 != custody.metadata_sha256
+                            || binding.metadata_size != custody.metadata_size
+                    })
+                {
+                    return Err(mismatch());
+                }
+                objects.extend(custody.objects.into_iter().map(|object| object.retained));
+            } else if input["kind"] == "native_table" {
+                return Err(mismatch());
+            }
+            let admission: ObjectRef = serde_json::from_value(input["admission"].clone())?;
+            if input.get("custody_reference").is_some()
+                && admitted_inputs_read.insert(admission.path.clone())
+            {
+                // The immutable admission document retains provenance after the
+                // receiving operation and phase rows have independently retired.
+                let retained = execution::read_retained(&admission, budget)?;
+                let document: RetainedInputs = serde_json::from_slice(&retained.value)?;
+                if document.profile != "urn:docspec:whole-job-input-admission:2"
+                    || document.dataset != request.dataset
+                    || document.operation != request.operation
+                    || document.request_digest != json_identity(&request)?
+                {
+                    return Err(mismatch());
+                }
+                for saved in &document.inputs {
+                    objects.extend(input_custody::input_objects(saved));
+                }
+            }
+            if let Some(source) = request
+                .snapshot_inputs
+                .iter()
+                .find(|binding| input["name"] == binding.name)
+                .and_then(|binding| binding.reuse_from.as_ref())
+            {
+                if input["custody_grant"]["profile"]
+                    != "urn:docspec:whole-job-input-custody-grant:1"
+                    || input["custody_grant"]["source"] != serde_json::to_value(source)?
+                    || input.get("custody_reference").is_none()
+                {
+                    return Err(mismatch());
+                }
+            } else if input.get("custody_grant").is_some() {
+                return Err(mismatch());
+            }
+            objects.push(admission);
             for member in input["files"].as_array().ok_or_else(mismatch)? {
                 objects.push(serde_json::from_value(member["retained"].clone())?);
             }
@@ -196,7 +317,7 @@ pub(in crate::engine) fn record_roots(
         qualification::validate_retained_acceptance(&accepted)?;
     } else if key.starts_with("job-selected/") {
         let _: qualification::Selected = serde_json::from_str(json)?;
-    } else {
+    } else if !producer::retention_record(key, json, table, budget)? {
         return Err(mismatch());
     }
     for object in &objects {
@@ -206,6 +327,16 @@ pub(in crate::engine) fn record_roots(
         }
     }
     Ok(Some(objects))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetainedInputs {
+    profile: String,
+    dataset: Id,
+    operation: Id,
+    request_digest: String,
+    inputs: Vec<execution::InputAdmission>,
 }
 
 fn fields(value: &serde_json::Value, expected: &[&str]) -> Result<()> {
@@ -355,7 +486,10 @@ pub(in crate::engine) fn validate_selection(
     if authority.job_profile.is_none() && authority.job_selected.is_none() {
         return Ok(false);
     }
-    if authority.job_profile.as_deref() != Some(PROFILE)
+    if !authority
+        .job_profile
+        .as_deref()
+        .is_some_and(known_job_profile)
         || authority.selected.is_some()
         || authority.release.is_some()
     {

@@ -455,7 +455,7 @@ impl Lifecycle {
                 self.publish_cache_entry(cache_key, entry.clone(), reservation, rotated)?;
                 return Ok(entry);
             }
-            let batches = storage::read_batches(&view.table, &self.budget).await?;
+            let batches = storage::read_catalog_batches(&view.table, &self.budget).await?;
             futures::pin_mut!(batches);
             let mut bytes = 0_usize;
             let mut history_rows = 0_usize;

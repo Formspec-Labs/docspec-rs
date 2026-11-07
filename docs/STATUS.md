@@ -1,5 +1,75 @@
 # Implementation and qualification status
 
+## Producer definition adoption in progress
+
+An unexecuted follow-on adds a local authority action for exact producer
+definition metadata. It guards the existing definition, epoch, selection and
+adoption, then changes the definition and adoption atomically while preserving
+the selected result. A historical action retry reads its original immutable
+decision and never reinstalls an earlier adoption. Current definition bytes live
+in one replaceable native metadata row; audit paths confer no payload lifetime.
+New prepare, acceptance, selection and requalification in an adopted scope remain
+refused until native static proof and population prerequisite admission are wired.
+Historical completed results remain historical.
+The definition requires an explicit complete model file-input inventory, with
+ordered member keys, SHA-256 and size; adopting it opens no input files. The
+exact JobSpec remains the owner of file kind, schema and path interpretation.
+
+No producer definition has been adopted for application data. These source
+changes have not yet passed focused native execution. The initial cold
+recovery test refused a compacted read of 46 lifecycle records: the rows
+referenced 147,860 bytes of key, revision and value data against a 128 KiB
+batch limit, and the native string buffers allocated more. The narrow repair
+requests one-record native batches on a cold lifecycle read when the metadata
+allowance exceeds half the batch limit. Existing byte guards and warm cache
+behavior stay in place. This row-count policy is not an allocator bound.
+Static producer verification, population prerequisites and publication intent
+remain unfinished.
+
+## Native snapshot custody in progress
+
+The next uncommitted increment introduces explicit version 2 snapshot-custody
+requests and receipts. It retains selected native read closures under existing
+operation protection and per-member seals, preserving original URI identities
+through read-only maintained Iceberg I/O. File-only version 1 requests remain
+unchanged. Native `iceberg`/`version` inputs and nonempty producer prerequisites
+still refuse. Same-owner cross-operation input grants have the source09 focused
+and public-consumer evidence below. Original producer-definition authority and
+publication intent remain unfinished.
+This first custody profile also refuses native delete files before payload copies;
+preserving URI identity alone does not qualify their application by the reader.
+
+The first strict all-target/all-feature Clippy check passed on custody source 03;
+that establishes type/lint validity only. Earlier visibility/lint failures remain
+retained. Delete consumption and the required complete repository gate remain
+pending. Manifest decoding
+uses conservative admitted estimates; encoded size is not a hard bound on decoded
+Avro or whole-process memory. The retained profile disables the shallow native
+metadata cache and holds map/metadata/footer admission through native I/O owners.
+
+Frozen custody source 07 subsequently passed strict Clippy, five native snapshot
+controls and one FileIO ownership control. Six independently authored public DDK
+consumer cases passed against its immutable executable at the original 128 MiB
+memory/64 MiB scratch limits. These establish the captured local snapshot/recovery
+path; source 06's fixture-setup failures remain retained. No complete gate,
+installed profile, native delete consumption or producer prerequisite is claimed.
+
+The source09 reuse interface issues typed current-input record references and
+binds them in new completion/view witnesses. Its guarded receiving admission must
+own inherited bytes and original-copy provenance before later input seals;
+subsequent retry uses that receiving grant after donor retirement. Immutable
+native input-admission metadata carries provenance through independent result
+availability. Custody reuse supplies no producer or population qualification.
+
+Frozen custody source 09 passed strict Clippy and ten native controls: three
+reuse, one physical-charge, five snapshot and one FileIO test. Fifteen public DDK
+source-consumer cases then passed at the original 128 MiB memory / 64 MiB scratch
+limits, including same-name and renamed-input chains after removal of original
+producer and caller artifacts. Its immutable binary, source and exact outcome
+are pinned separately in the retained checkpoint. Full native gate, installed
+profile, remote input, delete, producer and publication qualification remain
+separate; retirement tests establish eligibility, not physical deletion.
+
 ## Retained local whole-job checkpoint
 
 Implementation commit `46a27657442d10ae773f48a1536136d895e95daa` matches all

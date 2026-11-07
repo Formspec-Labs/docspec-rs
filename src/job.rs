@@ -327,6 +327,45 @@ impl Job {
             .await
     }
 
+    pub(crate) async fn register_retained_snapshot(
+        &self,
+        name: &str,
+        selection: &crate::storage::NativeTableSnapshot,
+        paths: std::collections::BTreeMap<String, String>,
+        memory: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<()> {
+        let owner = std::sync::Arc::new(std::sync::Mutex::new(vec![std::sync::Arc::new(memory)]));
+        let io = crate::storage::custody::retained_io(paths, &self.budget, Some(owner.clone()))?;
+        let (table, metadata_memory) =
+            crate::storage::open_snapshot_with_io_admitted(selection, io, &self.budget).await?;
+        let table = iceberg::table::Table::builder()
+            .metadata(table.metadata_ref())
+            .metadata_location(&selection.metadata_location)
+            .identifier(iceberg::TableIdent::from_strs(["retained", "snapshot"])?)
+            .runtime(iceberg::Runtime::try_current()?)
+            .file_io(table.file_io().clone())
+            .readonly(true)
+            .disable_cache()
+            .build()?;
+        let metadata_memory = std::sync::Arc::new(metadata_memory);
+        // Native manifest tasks may retain FileIO after the outer stream drops.
+        // This shared owner contains permits only, so it cannot retain the table.
+        owner.lock().unwrap().push(metadata_memory.clone());
+        // This retained profile uses the existing serial, byte-fitted native
+        // scan rather than the upstream provider's host-wide concurrency defaults.
+        let observation = NativeInputObservation::from_table(name, &table);
+        let provider = crate::query::table(table, self.budget.clone(), None)?;
+        self.context.register_table(
+            name,
+            std::sync::Arc::new(native::AdmittedTable {
+                provider,
+                memory: metadata_memory,
+                observation,
+            }),
+        )?;
+        Ok(())
+    }
+
     pub(super) async fn register_native_table(
         &self,
         name: &str,

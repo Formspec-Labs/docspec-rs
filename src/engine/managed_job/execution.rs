@@ -15,9 +15,15 @@ pub(super) struct FileMember {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct InputAdmission {
-    name: String,
-    selector: JobInput,
+    pub(super) name: String,
+    pub(super) selector: JobInput,
     pub(super) files: Vec<FileMember>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) snapshot_custody: Option<snapshots::SnapshotCustody>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) provenance: Vec<input_custody::InputOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) reuse_from: Option<JobInputCustodyRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +95,9 @@ impl Engine {
         }
         let host_budget = &self.inner.lifecycle.budget;
         self.check_job_runtime(admitted).await?;
-        let initial = owned_bytes(&admitted.directory, host_budget.limits.max_metadata_bytes)?;
+        let initial = owned_bytes(&admitted.directory, host_budget.limits.max_metadata_bytes)?
+            .checked_add(input_custody::inherited_bytes(admitted)?)
+            .ok_or_else(capacity)?;
         let budget = host_budget.with_retained_disk(initial)?;
         *self.inner.retained_disk.lock().await = Arc::downgrade(&budget.runtime_env().disk_manager);
         std::fs::create_dir_all(&admitted.directory)?;
@@ -128,6 +136,9 @@ impl Engine {
         };
         // Establish custody of every raw member before registering any executable relation.
         let mut admissions = Vec::new();
+        let mut admission_memory = Vec::new();
+        let mut input_view_memory = Vec::new();
+        self.plan_job_snapshots(admitted, &spec, &budget).await?;
         for (index, input) in spec.inputs.iter().enumerate() {
             let key = format!("job-input/{}/{index}", request.operation);
             if let Some(saved) = self
@@ -137,7 +148,43 @@ impl Engine {
                 if serde_json::to_value(&saved.selector)? != serde_json::to_value(input)? {
                     return Err(mismatch());
                 }
-                admissions.push(saved.value);
+                retain_input_admission(
+                    &budget,
+                    &mut admissions,
+                    &mut admission_memory,
+                    saved.value,
+                )?;
+                continue;
+            }
+            if matches!(input, JobInput::NativeTable { .. }) {
+                if let Some(inherited) = admitted.input_grants.get(input.name()) {
+                    let memory = self.request_memory(inherited)?;
+                    let inherited = inherited.clone();
+                    self.commit_job_record(&request.dataset, &key, &inherited)
+                        .await?;
+                    self.job_phase_sealed(&key).await?;
+                    retain_input_admission(
+                        &budget,
+                        &mut admissions,
+                        &mut admission_memory,
+                        inherited,
+                    )?;
+                    drop(memory);
+                    continue;
+                }
+                let snapshot = self.admit_job_snapshot(admitted, input, &budget).await?;
+                let saved = InputAdmission {
+                    name: input.name().into(),
+                    selector: input.clone(),
+                    files: Vec::new(),
+                    snapshot_custody: Some(snapshot.value),
+                    provenance: vec![input_custody::InputOrigin::from_admission(admitted)],
+                    reuse_from: None,
+                };
+                self.commit_job_record(&request.dataset, &key, &saved)
+                    .await?;
+                self.job_phase_sealed(&key).await?;
+                retain_input_admission(&budget, &mut admissions, &mut admission_memory, saved)?;
                 continue;
             }
             let binding = request
@@ -158,7 +205,7 @@ impl Engine {
                 }
                 self.commit_job_record(&request.dataset, &key, &saved)
                     .await?;
-                admissions.push(saved);
+                retain_input_admission(&budget, &mut admissions, &mut admission_memory, saved)?;
                 continue;
             }
             let original = input_paths(input)?;
@@ -221,15 +268,18 @@ impl Engine {
                 name: input.name().into(),
                 selector: input.clone(),
                 files,
+                snapshot_custody: None,
+                provenance: Vec::new(),
+                reuse_from: None,
             };
             self.commit_job_record(&request.dataset, &key, &input)
                 .await?;
             self.commit_job_record(&request.dataset, &material_key, &input)
                 .await?;
-            admissions.push(input);
+            retain_input_admission(&budget, &mut admissions, &mut admission_memory, input)?;
         }
         let admission_bytes = serde_json::to_vec(
-            &serde_json::json!({"profile":"urn:docspec:whole-job-input-admission:1","dataset":request.dataset,"operation":request.operation,"request_digest":admitted.request_digest,"inputs":admissions}),
+            &serde_json::json!({"profile":if request.snapshot_inputs.is_empty() {"urn:docspec:whole-job-input-admission:1"} else {"urn:docspec:whole-job-input-admission:2"},"dataset":request.dataset,"operation":request.operation,"request_digest":admitted.request_digest,"inputs":admissions}),
         )?;
         let admission = self
             .retain_job_bytes(
@@ -240,7 +290,7 @@ impl Engine {
                 &budget,
             )
             .await?;
-        for (input, saved) in spec.inputs.iter().zip(&admissions) {
+        for (index, (input, saved)) in spec.inputs.iter().zip(&admissions).enumerate() {
             match input {
                 JobInput::Parquet { name, .. } => {
                     job.register_parquet(name, Path::new(&saved.files[0].retained.path))
@@ -258,6 +308,35 @@ impl Engine {
                         .collect(),
                     Arc::new(schema.clone()),
                 )?,
+                JobInput::NativeTable { name, .. } => {
+                    let custody = saved.snapshot_custody.as_ref().ok_or_else(mismatch)?;
+                    custody.validate(input)?;
+                    let mut memory = custody.memory(&budget)?;
+                    for object in custody.objects.iter().filter(|object| {
+                        matches!(
+                            object.role.as_str(),
+                            "data" | "position_deletes" | "equality_deletes"
+                        )
+                    }) {
+                        memory.merge(
+                            crate::storage::admit_parquet_footer(
+                                Path::new(&object.retained.path),
+                                &budget,
+                            )
+                            .await?,
+                        );
+                    }
+                    job.register_retained_snapshot(
+                        name,
+                        &snapshots::selection(input)?,
+                        custody.paths(),
+                        memory,
+                    )
+                    .await?;
+                    result
+                        .native_inputs
+                        .push(job.native_input_observation(name).await?);
+                }
                 _ => return Err(mismatch()),
             }
             let schema = job.input_schema(input.name()).await?;
@@ -268,20 +347,42 @@ impl Engine {
                 &mut schema_memory,
                 &bytes.bytes,
             )?;
-            let binding = request
-                .file_inputs
-                .iter()
-                .find(|binding| binding.name == input.name())
-                .ok_or_else(mismatch)?;
-            let identity = json_identity(&(input_identity(input, binding)?, &schema))?;
+            let material = if let Some(custody) = &saved.snapshot_custody {
+                input_custody::material_identity(input, custody)?
+            } else {
+                let binding = request
+                    .file_inputs
+                    .iter()
+                    .find(|binding| binding.name == input.name())
+                    .ok_or_else(mismatch)?;
+                input_identity(input, binding)?
+            };
+            let identity = json_identity(&(material, &schema))?;
             identities.insert(relation_key(false, input.name())?, identity);
             let kind = match input {
                 JobInput::Parquet { .. } => "parquet",
                 JobInput::JsonLines { .. } => "json_lines",
+                JobInput::NativeTable { .. } => "native_table",
                 _ => return Err(mismatch()),
             };
-            inputs.push(serde_json::json!({"name":input.name(),"kind":kind,"selector":input,"files":saved.files,"schema_sha256":schema_sha256,"admission":admission.reference}));
+            let mut view = serde_json::json!({"name":input.name(),"kind":kind,"selector":input,"files":saved.files,"schema_sha256":schema_sha256,"admission":admission.reference});
+            if let Some(custody) = &saved.snapshot_custody {
+                view["snapshot_custody"] = serde_json::to_value(custody)?;
+                view["custody_reference"] = serde_json::to_value(
+                    self.current_input_reference(admitted, index, saved).await?,
+                )?;
+                if let Some(source) = &saved.reuse_from {
+                    view["custody_grant"] = serde_json::json!({"profile":"urn:docspec:whole-job-input-custody-grant:1","source":source});
+                }
+            }
+            input_view_memory.push(self.request_memory(&view)?);
+            inputs.push(view);
         }
+        // Native providers/FileIO and the distinct input views now own their
+        // own admission. The original transfer descriptions have no consumers.
+        drop(admission);
+        drop(admissions);
+        drop(admission_memory);
         let mut steps = Vec::new();
         for (index, step) in spec.steps.iter().enumerate() {
             let key = format!("job-phase/{}/step/{index}", request.operation);
@@ -578,7 +679,11 @@ impl Engine {
         drop(job);
         let view_reports = reports.iter().map(|report| serde_json::json!({"name":report["name"],"sql_sha256":report["sql_sha256"],"schema_sha256":report["schema_sha256"],"rows":report["rows"],"completion":report["completion"],"dependencies":report["dependencies"]})).collect::<Vec<_>>();
         let view_document = ViewDocument {
-            profile: "urn:docspec:whole-job-view-set:1",
+            profile: if request.snapshot_inputs.is_empty() {
+                "urn:docspec:whole-job-view-set:1"
+            } else {
+                "urn:docspec:whole-job-view-set:2"
+            },
             dataset: &request.dataset,
             operation: &request.operation,
             request_digest: &admitted.request_digest,
@@ -598,7 +703,7 @@ impl Engine {
             )
             .await?;
         let manifest_document = CompletionDocument {
-            profile: PROFILE,
+            profile: completion_profile(request),
             dataset: &request.dataset,
             operation: &request.operation,
             request_digest: &admitted.request_digest,
@@ -684,10 +789,14 @@ impl Engine {
         let accepted: Option<qualification::Accepted> =
             rows.get_record(&accepted_key)?.map(|(_, _, value)| value);
         let partial;
+        let input_custody;
+        let input_custody_memory;
         let (candidate, view_set_digest, outputs, reports, result, completion_manifest) =
             if let Some(completed) = completed {
                 let bytes = witness_bytes(&completed.manifest, &self.inner.lifecycle.budget)?;
                 let document: serde_json::Value = serde_json::from_slice(&bytes.value)?;
+                input_custody = input_custody::completed_references(&document)?;
+                input_custody_memory = self.request_memory(&input_custody)?;
                 (
                     Some(completed.candidate.clone()),
                     document["view_set_digest"].as_str().map(str::to_owned),
@@ -703,6 +812,9 @@ impl Engine {
                     Some(completed.manifest.clone()),
                 )
             } else {
+                let references = self.partial_custody_references(&view, &rows, &admitted)?;
+                input_custody = references.value;
+                input_custody_memory = references._memory;
                 partial = self.partial_job_result(&admitted, &rows).await?;
                 (
                     None,
@@ -747,9 +859,11 @@ impl Engine {
             admitted_request: admitted.admitted_request.clone(),
             policy: decision.policy.clone(),
             result,
+            input_custody,
             _memory: None,
         };
         receipt._memory = Some(self.request_memory(&receipt)?);
+        drop(input_custody_memory);
         Ok(receipt)
     }
 
@@ -856,6 +970,18 @@ fn validate_phase(phase: &Phase, admitted: &Admission, name: &str, identity: &st
     {
         return Err(mismatch());
     }
+    Ok(())
+}
+
+fn retain_input_admission(
+    budget: &Budget,
+    admissions: &mut Vec<InputAdmission>,
+    memory: &mut Vec<tokio::sync::OwnedSemaphorePermit>,
+    input: InputAdmission,
+) -> Result<()> {
+    let size = crate::budget::metadata_size(&input, budget.limits.max_metadata_bytes)?;
+    memory.push(budget.reserve(size.saturating_mul(16))?);
+    admissions.push(input);
     Ok(())
 }
 
