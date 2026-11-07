@@ -1,6 +1,40 @@
 # Implementation and qualification status
 
-## Retained whole-job implementation — review repairs in progress
+## Retained local whole-job checkpoint
+
+Implementation commit `46a27657442d10ae773f48a1536136d895e95daa` matches all
+59 files in the frozen source 25 manifest. The complete `scripts/check` gate
+passed on that source in 849.80 seconds with Rust 1.94.0, all features and the
+pinned Python adapter environment. This verification note was added afterward;
+it was not part of the executed source snapshot.
+
+- Native suites passed 487 library, 461 integration, 15 restore, four process
+  memory, two worker-initialization and 11 example tests. Fifteen library and two
+  integration cases remained explicitly ignored. All 31 Dagster adapter tests
+  passed.
+- The installed DDK consumer passed four cases at its original 128 MiB memory
+  and 64 MiB scratch limits. The fresh synthetic Congress fixture completed on
+  its first attempt at the original 512 MiB limits, then passed native
+  acceptance, exact catalog mapping, guarded selection and its independent
+  entity-reader check.
+- The sampled aggregate owned-process RSS peaked at 2.22 GiB; free disk remained
+  above 84 GiB. Task-owned allocation growth peaked at 0.25 GiB. Four recorded
+  disappearing-test-directory races were handled by the resource observer.
+
+The immutable tested executable is `runtime/docspec-retained-job-source25` under
+`/Users/mikewolfd/Work/artifacts/ddk-replacements-20261106/native-retained-job`,
+SHA-256 `dd129fde622b56399b5ebd38626420bce2d74731e9eb685d1b15aa294afc0a9e`
+(348,767,408 bytes). The same evidence directory retains
+`source-identity-25.json`, `gate-closeout-25.json`, the complete gate log and
+metrics, the installed-consumer handoff and prior failed gates/diagnostic
+controls. Independent architecture and ETL reviews closed the exact source,
+focused regressions, consumer and terminal resource boundaries.
+
+This checkpoint covers schema-only whole-job preparation and retained local-file jobs.
+Production migration still requires native snapshot custody, authoritative
+original producer adoption and prerequisites, and immutable publication intent.
+Existing unsupported-input refusals remain in place. The implementation history
+below preserves the earlier incomplete and failed checkpoints.
 
 The development `managed-job` route seals individual input members, expensive
 materializations, exports and native report IPC, then assembles a distinct
