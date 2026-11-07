@@ -40,8 +40,44 @@ Installed SDK2 then used the same accepted candidate for two replays after
 the fixture provider stopped, one with the source configuration and one
 without it. Selection remained pending. The SDK2 replay handoff has SHA-256
 `a9883829d31905c858da0d1462583c408c6ef3a08d03a7c5e26ed3d887e94d5c`.
-Real-provider and production-corpus qualification, portable distribution,
+This local checkpoint predates the provider proof below. Portable distribution
 and external publication remain separate.
+
+## November 7, 2026 Congress provider proof
+
+Installed DDK SDK3 used the same `255c184` implementation and `e2ed2646`
+executable to prepare and accept `original-producer-proof-20261107` in two
+native calls. The proof used the eight original Iceberg snapshots in order
+and 26 original producer records under the adopted interpretation. All nine
+required `Int64` counters were zero. The seven informational history counters
+reported 44,838 appearances attributed to other retained producer versions
+and zero for the six other counters. Selection remained pending.
+
+Native custody records identify 756 objects totaling 511,829,795 bytes.
+This includes 712 data files (510,818,834 bytes), eight metadata files
+(10,931 bytes), 28 manifests (981,168 bytes), and eight manifest lists
+(18,862 bytes). The independent custody check matched the native inventory
+and file sizes using local file metadata.
+
+The original adoption failed before the lifecycle append when its 64 MiB
+metadata allowance exhausted shared reservations. The same request and
+workspace succeeded with a 32 MiB metadata allowance, the original 512 MiB
+memory setting, and the original 16 MiB batch limit. A later credential
+preflight stopped before a proof call. Both refusals remain in the closeout.
+
+The proof runner took 970.054 seconds. The watchdog ran for 971.6 seconds and
+recorded 3,320 samples, with maximum sampled resident memory of 0.255 GiB and
+physical footprint of 0.174 GiB. The owned process group was empty at closeout.
+These observations cover this proof run. Model capacity, full consumer parity,
+a fresh official-source check, selection, and publication remain unverified.
+
+The closeout SHA-256 is
+`f3dd491a4bce1d0e570ed00f937e3c8213f970e1f54bbedc32f2d7537d6a8586`.
+The terminal record SHA-256 is
+`798af876a884139d90017ef2fd1c4302d00c1c118f6054751dbd077f8ffe9223`.
+The 2,412,184-byte accepted response has SHA-256
+`f276e3f3c1ef63ae9bb2b274d8f97c87bc180fd5d5252f4b269b22d363b95262`.
+[Provider proof closeout](/Users/mikewolfd/Work/congressional-tech/.cache/archive-release/ddk-replacement-20261106/original-data-execution-01/proof-launch-01/closeout.json)
 
 ## Explicit S3 snapshot source for local retained jobs
 
