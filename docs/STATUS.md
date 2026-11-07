@@ -1,5 +1,48 @@
 # Implementation and qualification status
 
+## November 7, 2026 local qualification
+
+The maintained all-feature repository gate passed at checkpoint
+`9b2a2636414581faea36772c0e2d441fb650b245`, with implementation
+`255c18489d224d095d4bd1d1edbdef5f5538bb3e`. It recorded 1,011 Rust passes and
+31 Dagster passes, with zero failures and 17 ignored cases. The target and
+immutable DocSpec executable matched SHA-256
+`e2ed264617b878248b11436f061e73e748dfab9347c9ef9dd3e0b8a55565baa9`.
+Both independent reviews confirmed the source and executable identities,
+identical cached Python environments, and no surviving owned processes.
+The gate closeout, `full-gate-s3-source-final-01-closeout.json`, has SHA-256
+`b309e05fe6667b53404c4b6aeb90672e8365e4ba4b8ba3e419c3d2987e3bc657`.
+The terminal review has SHA-256
+`d334ed098ba70884712372d7cc69cefb841a25eeb53e54d2aeeb923979bf5afb`.
+
+Installed DDK SDK3 `0.1.0.dev6+integrated.3` qualified separately against
+that executable. DDK source `cc9c44297fb78a6b061951462cd42541e98182bf`
+produced the wheel with SHA-256
+`bd3218fb8c95e54fbbb54711ba2913fc1a5ac27ca3473757065da7d1858f4486`.
+The installed run passed 703 tests with zero failures, errors or skips.
+It covered 266 required case/profile checks across 249 distinct cases and
+13 profiles. Separate offline-core API, CLI and lock checks passed.
+The host-owned process probes used POSIX stand-ins. The qualification
+report has SHA-256
+`cc87f4f5f6b050faba37a0c7e960f045e0f29df0faaafd541de27bcead40e755`.
+The installed handoff has SHA-256
+`55f5309e14080c17352d9bc24bafd2a4766e0b267239b1ee334b2e61a0f6ca32`.
+Both independent reviews passed. The terminal review has SHA-256
+`f72cfa479f0487c84afd7f01201b1257396b04180de5d8fb2e94d7bf522db554`.
+DDK documentation commit `c86071e8d0cf829a9254b0cdeb1782ef033bd017` records
+the installed scope and evidence.
+
+The synthetic S3 fixture separately exercised five public DocSpec CLI
+calls, including a configured cold retry and offline acceptance and replay.
+Its handoff has SHA-256
+`12face71369b9ee481213746df3383919217d8a541726f8a76bab1a96a729116`.
+Installed SDK2 then used the same accepted candidate for two replays after
+the fixture provider stopped, one with the source configuration and one
+without it. Selection remained pending. The SDK2 replay handoff has SHA-256
+`a9883829d31905c858da0d1462583c408c6ef3a08d03a7c5e26ed3d887e94d5c`.
+Real-provider and production-corpus qualification, portable distribution,
+and external publication remain separate.
+
 ## Explicit S3 snapshot source for local retained jobs
 
 `docspec --snapshot-source CONFIG managed-job --spec REQUEST` connects the
@@ -36,8 +79,9 @@ The 230.65-second run recorded 45 resource samples, with peak process-family
 resident memory of 4,247,158,784 bytes and peak net owned disk allocation
 growth of 172,937,216 bytes. The focused closeout SHA-256 is
 `864bfa21b5c4bedd15ce36872c47c4b0ccca2e81e02b70a68fe63d43bdcbb0b8`.
-Public CLI configuration, installed S3 consumer verification, the full
-repository gate, and production corpus admission remain pending.
+At this focused checkpoint, public CLI configuration, installed S3 consumer
+verification, the full repository gate, and production corpus admission
+remained pending.
 
 ## Protected source snapshot observation
 
