@@ -1,9 +1,9 @@
 # Implementation and qualification status
 
-## Native producer proof and model prerequisite in progress
+## Native producer proof and model prerequisite
 
-The untested v3 increment captures exact original producer records and the
-adopted definition with proof admission, then checks their original selectors,
+Version 3 captures exact original producer records and the adopted definition
+with proof admission, then checks their original selectors,
 registered facts and native append ancestry before copying payloads. Retained
 native population reports use the existing counter evaluator. A proof can be
 accepted but cannot select the model.
@@ -12,8 +12,46 @@ The model admission binds the exact accepted proof and complete named native
 input scope. It verifies its adopted file member pins before opening files,
 reuses the proof's exact input custody and records the inherited evidence under
 the receiving operation and result. A later retry uses that original grant.
-V1 and v2 completed witnesses remain unchanged. Native focused, DDK consumer,
-application, installed and full repository checks are pending for this source.
+Version 1 and 2 completed witnesses remain unchanged.
+
+Implementation commit `1fa6cb90077cf48d244511a4e6bef940eaf180f9` matches all
+19 paths in frozen `v3-native-05`
+(`cba57a7e46982c1646b68d96ff9ff3512b4ed56c3396b28f85d0e94a5f374e9e`).
+This verification note follows the executed source snapshot.
+
+- Source 04 passed strict Clippy and five focused tests before the run stopped
+  at the adoption fixture. The passing tests covered original record membership,
+  append versus overwrite ancestry, cold proof recovery after adoption changes,
+  a model grant surviving donor retirement, and unique inherited file accounting.
+  The adoption fixture expected no current selection and reached the stale
+  authority guard before the intended prerequisite refusal. Retain that failed
+  run. Source 05 changed only those fixture assertions, with the five passing
+  test bodies and production code unchanged. Strict Clippy and the repaired
+  adoption test, three unreached custody reuse tests, and required-counter
+  refusal passed on source 05. The earlier lint refusals for source 01 and 03
+  and the unexecuted source 02 remain separate.
+- The pinned Rust 1.94 build captured the source 05 executable as
+  `docspec-producer-v3-native-05`, SHA-256
+  `cca6b5339e076cb302158831cc74b596ee46a278ba0abef58e34ee089a05b325`,
+  353,005,616 bytes. The build and capture took 46.23 seconds with a sampled
+  peak process-family resident memory of 3,073,490,944 bytes. The executable's
+  size is separate from sampled disk growth.
+- Six public DDK source-consumer tests passed against that exact binary at
+  128 MiB memory, 64 MiB scratch, and 30 seconds per native call. They exercised
+  direct original producer proof, accepted model admission, cold recovery
+  without caller or original producer files, native selection, and exact
+  refusals for unknown producer facts, an unaccepted or unrelated proof,
+  a changed file inventory, and a weaker adopted policy. The run took 129.67
+  seconds with a sampled peak process-family resident memory of 232,751,104
+  bytes. The consumer handoff SHA-256 is
+  `c68ef62bd5b2fe6abfb6aa0dc5dba4a72e7cbdf1edb5f9453ef9ddbe6340b089`.
+
+These checks establish the exercised local producer proof and model paths.
+Retirement tests establish removal eligibility. Public adapter coverage of
+daily/import ancestry and donor retirement remains separate from the native
+tests. Actual application producer adoption, remote corpus work, historical
+writer execution, installed package qualification, the full repository gate,
+and publication remain outside this checkpoint.
 
 ## Guarded producer definition adoption
 
@@ -23,9 +61,9 @@ adoption, then changes the definition and adoption atomically while preserving
 the selected result. A historical action retry reads its original immutable
 decision and never reinstalls an earlier adoption. Current definition bytes live
 in one replaceable native metadata row; audit paths confer no payload lifetime.
-New prepare, acceptance, selection and requalification in an adopted scope remain
-refused until native static proof and population prerequisite admission are wired.
-Historical completed results remain historical.
+At this adoption-only checkpoint, new prepare, acceptance, selection and
+requalification in an adopted scope refused. Version 3 above adds the scoped
+proof and model path. Historical completed results remain historical.
 The definition requires an explicit complete model file-input inventory, with
 ordered member keys, SHA-256 and size; adopting it opens no input files. The
 exact JobSpec remains the owner of file kind, schema and path interpretation.
@@ -49,9 +87,9 @@ The focused run took 164.10 seconds, with a sampled peak of 4,280,188,928
 bytes of process-family memory and 181,747,712 bytes of net task-owned disk
 allocation growth. The prior refusal and diagnostic remain separate evidence.
 
-No application producer definition was adopted. Static producer verification,
-population prerequisites and publication intent remain unfinished. No new
-distribution binary or full repository gate was run for this checkpoint.
+No application producer definition was adopted. This checkpoint covered
+adoption only. It did not run static producer verification, population
+prerequisites, publication intent, a new distribution build, or the full gate.
 
 ## Native snapshot custody in progress
 
@@ -59,10 +97,11 @@ The same implementation introduces explicit version 2 snapshot-custody
 requests and receipts. It retains selected native read closures under existing
 operation protection and per-member seals, preserving original URI identities
 through read-only maintained Iceberg I/O. File-only version 1 requests remain
-unchanged. Native `iceberg`/`version` inputs and nonempty producer prerequisites
-still refuse. Same-owner cross-operation input grants have the source09 focused
-and public-consumer evidence below. Original producer-definition authority and
-publication intent remain unfinished.
+unchanged. This custody-only checkpoint refused native `iceberg`/`version`
+inputs and producer prerequisites. Same-owner cross-operation input grants
+have the source09 focused and public-consumer evidence below. The later
+producer-definition authority and prerequisites are recorded above;
+publication intent remains unfinished.
 This first custody profile also refuses native delete files before payload copies;
 preserving URI identity alone does not qualify their application by the reader.
 
