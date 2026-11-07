@@ -162,10 +162,10 @@ pub(super) struct Accepted {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Selected {
-    request_digest: String,
+    pub(super) request_digest: String,
     pub(super) candidate: JobCandidateRef,
-    policy_id: Id,
-    accepted_qualification: String,
+    pub(super) policy_id: Id,
+    pub(super) accepted_qualification: String,
 }
 
 impl Engine {
@@ -597,6 +597,31 @@ pub(super) fn validate_retained_acceptance(accepted: &Accepted) -> Result<()> {
         &accepted.body.candidate,
         &accepted.body.policy_id,
     )
+}
+
+pub(super) fn validate_publication_acceptance(
+    accepted: &Accepted,
+    selected: &Selected,
+    generation: &JobInputRecordRef,
+    view_set_digest: &str,
+) -> Result<()> {
+    validate_accepted(
+        accepted,
+        &selected.candidate.dataset,
+        &selected.candidate.operation,
+        &selected.request_digest,
+        &selected.candidate,
+        &selected.policy_id,
+    )?;
+    if accepted.identity != selected.accepted_qualification
+        || accepted.body.view_set_digest != view_set_digest
+        || accepted.native_record.table != generation.table
+        || accepted.native_record.key != generation.key
+        || accepted.native_record.revision != generation.revision
+    {
+        return Err(mismatch());
+    }
+    Ok(())
 }
 
 pub(super) fn prerequisite_policy<'a>(

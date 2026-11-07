@@ -1,5 +1,24 @@
 # Implementation and qualification status
 
+## Local publication intent freeze and retirement
+
+The native command `job-publication-intent --spec` freezes or inspects a
+declared `local_fixture` delivery. Freeze checks the actual current whole-job
+selection, its acceptance, and the sealed output inventory together. The
+intent's own digest binds the freeze declaration. The original job request
+digest retains the computation's separate identity. The saved intent can
+replay after another selection or removal of the caller's control files.
+
+The intent directly protects the completion manifest and published outputs.
+Its exact payload generation has an independent retirement scope. A compact
+audit remains inspectable after retirement and compaction of the inline
+payload. The lifecycle budget reserves room for the exact retirement records
+when the intent commits. Fixture receipts record external authorization and
+dispatch as `not_run`.
+
+This source awaits focused execution. A real publisher destination and
+external authorization require separate owner integration and qualification.
+
 ## Native producer proof and model prerequisite
 
 Version 3 captures exact original producer records and the adopted definition

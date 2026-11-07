@@ -1,8 +1,459 @@
 //! Independent small-value and failure probes for the retained native job owner.
 // Rust guideline compliant 2026-02-21
+use super::publication::{PublicationIntentReceipt, PublicationIntentStatus};
 use super::*;
 use arrow::{datatypes::Field, ipc::convert::try_schema_from_ipc_buffer};
 use serde_json::json;
+
+async fn select_publication_fixture(
+    engine: &Engine,
+    root: &Path,
+    operation: &str,
+    previous: Option<JobCandidateRef>,
+) -> ManagedJobReceipt {
+    let ManagedJobCommand::Prepare(mut prepare) = request(
+        root,
+        operation,
+        "SELECT COUNT(*) - 2 AS invalid_rows FROM outputs.\"values\"",
+        None,
+    ) else {
+        unreachable!()
+    };
+    prepare.expected_selection = previous;
+    let mut job: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&prepare.job.path).unwrap()).unwrap();
+    let mut private = job["outputs"][0].clone();
+    private["name"] = json!("private");
+    private["path"] = json!(root.join("private.parquet"));
+    private["sql"] = json!("SELECT * FROM material WHERE id = 2");
+    job["outputs"].as_array_mut().unwrap().push(private);
+    prepare.job = artifact(prepare.job.path, &job);
+    let mut policy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&prepare.policy.path).unwrap()).unwrap();
+    policy["job_sha256"] = json!(prepare.job.sha256);
+    policy["view_names"]["outputs"] = json!(["values", "private"]);
+    prepare.policy = artifact(prepare.policy.path, &policy);
+    let completed = engine
+        .managed_job(ManagedJobCommand::Prepare(prepare))
+        .await
+        .unwrap();
+    let accepted = engine
+        .managed_job(action(&completed, "accept"))
+        .await
+        .unwrap();
+    engine
+        .managed_job(action(&accepted, "select"))
+        .await
+        .unwrap()
+}
+
+async fn publication_freeze_spec(
+    engine: &Engine,
+    root: &Path,
+    selected: &ManagedJobReceipt,
+) -> serde_json::Value {
+    let authority = engine
+        .job_record::<Authority>(&selected.dataset, "authority")
+        .await
+        .unwrap()
+        .unwrap();
+    let manifest = artifact(root.join("manifest.json"), &json!({"fixture": "complete"}));
+    let catalog = artifact(
+        root.join("catalog.json"),
+        &json!({"fixture": "authored catalog"}),
+    );
+    let outputs = selected.completed_outputs.iter().map(|output| {
+        let disposition = if output["name"] == "values" {
+            json!({"kind":"published","name":"rows.parquet","content_type":"application/octet-stream"})
+        } else {
+            json!({"kind":"private"})
+        };
+        json!({"name":output["name"],"object":output["completion"],"sha256":output["sha256"],
+               "md5":output["md5"],"rows":output["rows"],"disposition":disposition})
+    }).collect::<Vec<_>>();
+    json!({
+        "action":"freeze","dataset":selected.dataset,"operation":selected.operation,
+        "candidate":selected.candidate,"job_request_digest":selected.request_digest,
+        "policy_id":selected.policy_id,
+        "accepted_qualification":selected.accepted_qualification.as_ref().unwrap()["identity"],
+        "expected_epoch":authority.epoch,"expected_selection_revision":authority.selection_revision,
+        "scope":{"kind":"local_fixture","publisher":"fixture","bucket":"test",
+                 "release_prefix":"assets/release","pointer_key":"selected/manifest.json"},
+        "release_id":"a".repeat(64),"outputs":outputs,
+        "controls":[
+            {"name":"manifest.json","content_type":"application/json","size":std::fs::metadata(&manifest.path).unwrap().len(),"artifact":manifest},
+            {"name":"catalog.json","content_type":"application/json","size":std::fs::metadata(&catalog.path).unwrap().len(),"artifact":catalog}
+        ],
+        "expected_pointer":{"kind":"present","etag":"\"original-etag\"","bytes_base64":STANDARD.encode(b"{ \"old\": true }\n")},
+        "pointer":{"content_type":"application/json","cache_control":"no-store","bytes_base64":STANDARD.encode(b"{ \"release\": \"chosen\" }\n")}
+    })
+}
+
+async fn publication_command(
+    engine: &Engine,
+    spec: &serde_json::Value,
+) -> Result<PublicationIntentReceipt> {
+    engine
+        .job_publication_intent_bytes(serde_json::to_vec(spec)?)
+        .await
+}
+
+async fn assert_publication_replay(
+    engine: &Engine,
+    spec: &serde_json::Value,
+    saved: &PublicationIntentReceipt,
+) {
+    let actual = publication_command(engine, spec).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&actual).unwrap(),
+        serde_json::to_value(saved).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn publication_intent_replays_and_protects_only_its_live_delivery() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":10}\n{\"id\":2,\"amount\":20}\n",
+    )
+    .unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+    let missing = publication_command(
+        &engine,
+        &json!({
+            "action":"inspect","dataset":"no-such-dataset","operation":"no-intent"
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(missing.status, PublicationIntentStatus::NotFound);
+    assert!(missing.intent.is_none() && missing.payload.is_none());
+
+    let prior = select_publication_fixture(&engine, root.path(), "prior-release", None).await;
+    let prior_spec = publication_freeze_spec(&engine, root.path(), &prior).await;
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":21}\n{\"id\":2,\"amount\":22}\n",
+    )
+    .unwrap();
+    let selected = select_publication_fixture(
+        &engine,
+        root.path(),
+        "first-release",
+        prior.candidate.clone(),
+    )
+    .await;
+    assert_eq!(
+        publication_command(&engine, &prior_spec)
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_authority"
+    );
+    assert!(
+        !engine
+            .inspect(&prior.dataset)
+            .await
+            .unwrap()
+            .keys()
+            .any(|key| publication::is_record(key))
+    );
+    let spec = publication_freeze_spec(&engine, root.path(), &selected).await;
+    assert_eq!(spec["outputs"][0]["rows"], 2);
+    assert_eq!(spec["outputs"][1]["rows"], 1);
+    let inspect =
+        json!({"action":"inspect","dataset":selected.dataset,"operation":selected.operation});
+    for (path, code) in [
+        ("epoch", "stale_authority"),
+        ("acceptance", "stale_authority"),
+        ("revision", "stale_authority"),
+        ("rows", "publication_intent_mismatch"),
+        ("pointer", "publication_intent_mismatch"),
+    ] {
+        let mut changed = spec.clone();
+        match path {
+            "epoch" => changed["expected_epoch"] = json!(1),
+            "acceptance" => changed["accepted_qualification"] = json!("0".repeat(64)),
+            "revision" => changed["expected_selection_revision"] = json!(1),
+            "rows" => changed["outputs"][0]["rows"] = json!(3),
+            "pointer" => changed["scope"]["pointer_key"] = json!("assets/release/manifest.json"),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            publication_command(&engine, &changed)
+                .await
+                .unwrap_err()
+                .code(),
+            code
+        );
+        assert_eq!(
+            publication_command(&engine, &inspect).await.unwrap().status,
+            PublicationIntentStatus::NotFound
+        );
+        assert!(
+            !engine
+                .inspect(&selected.dataset)
+                .await
+                .unwrap()
+                .keys()
+                .any(|key| publication::is_record(key))
+        );
+    }
+    let mut unsupported = spec.clone();
+    unsupported["scope"]["kind"] = json!("r2");
+    assert!(publication_command(&engine, &unsupported).await.is_err());
+    assert_eq!(
+        publication_command(&engine, &inspect).await.unwrap().status,
+        PublicationIntentStatus::NotFound
+    );
+    engine
+        .inner
+        .lifecycle
+        .lose_commit_response
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let frozen = publication_command(&engine, &spec).await.unwrap();
+    assert_eq!(frozen.status, PublicationIntentStatus::Retained);
+    assert_eq!(frozen.external_authorization, "not_run");
+    assert_eq!(frozen.dispatch, "not_run");
+    let audit = frozen.intent.as_ref().unwrap();
+    assert_eq!(audit.job_request_digest, selected.request_digest);
+    assert_ne!(audit.reference.intent_digest, audit.job_request_digest);
+    assert_eq!(
+        STANDARD
+            .decode(&frozen.payload.as_ref().unwrap().pointer_bytes_base64)
+            .unwrap(),
+        b"{ \"release\": \"chosen\" }\n",
+    );
+    assert_eq!(
+        STANDARD
+            .decode(
+                frozen
+                    .payload
+                    .as_ref()
+                    .unwrap()
+                    .predecessor_bytes_base64
+                    .as_ref()
+                    .unwrap()
+            )
+            .unwrap(),
+        b"{ \"old\": true }\n",
+    );
+    let published: ObjectRef =
+        serde_json::from_value(spec["outputs"][0]["object"].clone()).unwrap();
+    let private: ObjectRef = serde_json::from_value(spec["outputs"][1]["object"].clone()).unwrap();
+    let manifest = audit.candidate.manifest.clone();
+    assert_eq!(
+        frozen.objects().collect::<Vec<_>>(),
+        [&manifest, &published]
+    );
+
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":40}\n{\"id\":2,\"amount\":50}\n",
+    )
+    .unwrap();
+    let _successor = select_publication_fixture(
+        &engine,
+        root.path(),
+        "next-release",
+        selected.candidate.clone(),
+    )
+    .await;
+    for control in spec["controls"].as_array().unwrap() {
+        std::fs::remove_file(control["artifact"]["path"].as_str().unwrap()).unwrap();
+    }
+    let mut changed = spec.clone();
+    changed["release_id"] = json!("b".repeat(64));
+    assert_eq!(
+        publication_command(&engine, &changed)
+            .await
+            .unwrap_err()
+            .code(),
+        "publication_intent_mismatch"
+    );
+    assert_publication_replay(&engine, &spec, &frozen).await;
+    assert_publication_replay(&engine, &inspect, &frozen).await;
+
+    let original: ManagedJobCommand = serde_json::from_slice(
+        &STANDARD
+            .decode(&selected.admitted_request.bytes_base64)
+            .unwrap(),
+    )
+    .unwrap();
+    let ManagedJobCommand::Prepare(original) = original else {
+        unreachable!()
+    };
+    retire_producer_fixture_job(&engine, &original, true).await;
+    engine.compact_lifecycle(&selected.dataset).await.unwrap();
+    let targets = [published, private, manifest];
+    let inspected = engine.inspect_retention(&targets).await.unwrap();
+    for protected in inspected.objects {
+        if protected.object == targets[1] {
+            assert!(protected.blocker.is_none());
+        } else {
+            let blocker = protected.blocker.unwrap();
+            assert_eq!(blocker.key, audit.reference.native_record.key);
+            assert_eq!(blocker.revision, audit.reference.native_record.revision);
+            assert!(Path::new(&protected.object.path).is_file());
+        }
+    }
+    assert_publication_replay(&engine, &spec, &frozen).await;
+    let plan = engine
+        .plan_publication_intent_retirement(
+            &selected.dataset,
+            &Id::new("retire-release").unwrap(),
+            &selected.operation,
+            "end fixture delivery",
+        )
+        .await
+        .unwrap();
+    let mut wrong = plan.clone();
+    wrong.records[0].revision += 1;
+    assert_eq!(
+        engine
+            .retire_publication_intent(&wrong)
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_retirement"
+    );
+    let retired = engine.retire_publication_intent(&plan).await.unwrap();
+    engine.compact_lifecycle(&selected.dataset).await.unwrap();
+    assert_eq!(
+        engine.retire_publication_intent(&plan).await.unwrap(),
+        retired
+    );
+    let audit_only = publication_command(&engine, &inspect).await.unwrap();
+    assert_eq!(audit_only.status, PublicationIntentStatus::Retired);
+    assert_eq!(audit_only.intent.as_ref(), Some(audit));
+    assert!(audit_only.payload.is_none());
+    assert_publication_replay(&engine, &spec, &audit_only).await;
+    assert!(
+        !engine
+            .inspect(&selected.dataset)
+            .await
+            .unwrap()
+            .contains_key(&audit.reference.native_record.key)
+    );
+    assert!(
+        engine
+            .inspect_retention(&targets)
+            .await
+            .unwrap()
+            .objects
+            .iter()
+            .all(|object| object.blocker.is_none())
+    );
+}
+
+async fn fill_publication_history(engine: &Engine, dataset: &Id, target: usize) {
+    let lifecycle = &engine.inner.lifecycle;
+    let mut view = lifecycle.open(dataset).await.unwrap();
+    let key = "job-attempt/capacity-filler";
+    let mut filler = Attempt {
+        request_digest: "f".repeat(64),
+        id: Id::new("padding").unwrap(),
+        status: "failed".into(),
+        error: Some(String::new()),
+    };
+    let base = crate::catalog::history_row_bytes(key, &serde_json::to_string(&filler).unwrap());
+    loop {
+        let rows = lifecycle.rows(&view).await.unwrap();
+        let remaining = target.checked_sub(rows.history_bytes()).unwrap();
+        if remaining < base {
+            break;
+        }
+        // Leave room for one final complete row while keeping every batch small.
+        let charge = if remaining <= (24 << 10) + base {
+            remaining
+        } else {
+            24 << 10
+        };
+        filler.error = Some("p".repeat(charge - base));
+        drop(rows);
+        view = lifecycle
+            .commit(&view, vec![record(key, &filler).unwrap()])
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn publication_intent_reserves_retirement_room_through_a_cold_open() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":10}\n{\"id\":2,\"amount\":20}\n",
+    )
+    .unwrap();
+    let mut bounds = limits();
+    bounds.max_metadata_bytes = 256 << 10;
+    let host = root.path().join("host");
+    let engine = Engine::open(host.clone(), bounds.clone()).await.unwrap();
+    let selected = select_publication_fixture(&engine, root.path(), "near-cap", None).await;
+    let mut spec = publication_freeze_spec(&engine, root.path(), &selected).await;
+    spec["expected_pointer"] = json!({"kind":"absent"});
+    fill_publication_history(
+        &engine,
+        &selected.dataset,
+        bounds.max_metadata_bytes - (48 << 10),
+    )
+    .await;
+    let frozen = publication_command(&engine, &spec).await.unwrap();
+    let lifecycle = &engine.inner.lifecycle;
+    let view = lifecycle.open(&selected.dataset).await.unwrap();
+    let rows = lifecycle.rows(&view).await.unwrap();
+    let reserve = crate::engine::retention::publication::future_bytes(
+        &rows.values,
+        &view,
+        view.revision,
+        &lifecycle.budget,
+    )
+    .unwrap();
+    assert!(reserve > 24 << 10 && reserve < 32 << 10);
+    drop(rows);
+    fill_publication_history(
+        &engine,
+        &selected.dataset,
+        bounds.max_metadata_bytes - reserve,
+    )
+    .await;
+    let view = lifecycle.open(&selected.dataset).await.unwrap();
+    let ordinary = record("job-active/extra", Id::new("a".repeat(128)).unwrap()).unwrap();
+    assert_eq!(
+        lifecycle
+            .commit(&view, vec![ordinary])
+            .await
+            .unwrap_err()
+            .code(),
+        "metadata_capacity"
+    );
+    engine.shutdown().await.unwrap();
+    drop(engine);
+
+    let engine = Engine::open(host, bounds).await.unwrap();
+    let inspect =
+        json!({"action":"inspect","dataset":selected.dataset,"operation":selected.operation});
+    assert_publication_replay(&engine, &inspect, &frozen).await;
+    let plan = engine
+        .plan_publication_intent_retirement(
+            &selected.dataset,
+            &Id::new("near-cap-retirement").unwrap(),
+            &selected.operation,
+            "end near-cap fixture delivery",
+        )
+        .await
+        .unwrap();
+    engine.retire_publication_intent(&plan).await.unwrap();
+    engine.compact_lifecycle(&selected.dataset).await.unwrap();
+    let after = publication_command(&engine, &inspect).await.unwrap();
+    assert_eq!(after.status, PublicationIntentStatus::Retired);
+    assert_eq!(after.intent, frozen.intent);
+    assert!(after.payload.is_none());
+}
 
 fn limits() -> Limits {
     Limits {

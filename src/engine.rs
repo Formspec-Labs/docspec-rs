@@ -56,6 +56,8 @@ pub use managed_build::{ManagedBuildCommand, NativeReadReceipt, NativeVersionRea
 pub use managed_job::producer::{
     JobProducerAdoption, JobProducerRecord, JobProducerRecordLocation,
 };
+#[doc(inline)]
+pub use managed_job::publication as job_publication;
 pub use managed_job::{
     JobArtifactWitness, JobFileInput, JobFileMember, JobInputAdmissionDigest, JobInputCustodyRef,
     JobPrerequisite, JobSnapshotInput, ManagedJobCommand, ManagedJobPrepare, ManagedJobReceipt,

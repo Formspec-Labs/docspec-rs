@@ -21,6 +21,7 @@ use std::{
 mod execution;
 mod input_custody;
 pub(super) mod producer;
+pub mod publication;
 mod qualification;
 pub(in crate::engine) mod retention;
 mod snapshots;
@@ -282,7 +283,7 @@ struct PhaseRuntime {
     dependency_lock_blake3: String,
 }
 
-struct Held<T> {
+pub(in crate::engine) struct Held<T> {
     value: T,
     _memory: tokio::sync::OwnedSemaphorePermit,
 }

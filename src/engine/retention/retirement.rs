@@ -59,6 +59,9 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
         }
+        RetirementScope::PublicationIntent { operation } => {
+            super::publication::scope_key(operation, key)
+        }
         RetirementScope::ExportRecovery { operation } => {
             super::export_recovery::scope_key(operation, key)
         }
@@ -82,6 +85,7 @@ pub(super) fn retained_key(key: &str) -> bool {
     completion_key(key)
         || key.starts_with("job-operation/")
         || key.starts_with("job-result/")
+        || named_key(key, crate::engine::job_publication::PAYLOAD_PREFIX)
         || named_key(key, "generation/")
         || named_key(key, "change-certificate/")
         || key.starts_with("restore-point/")
@@ -203,6 +207,7 @@ pub(super) fn validate_markers(
     }
     super::export_recovery::validate_saved(rows, view, receipt, engine)?;
     super::availability::validate_pointer(rows, view, receipt, revision)?;
+    super::publication::validate_saved(rows, view, receipt, &engine.inner.lifecycle.budget)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
     super::compaction_recovery::validate_saved(rows, view, receipt, engine)?;
     super::grants::validate_saved(rows, view, receipt, engine)?;
@@ -658,6 +663,9 @@ impl Engine {
                 ));
             }
         }
+        if let RetirementScope::PublicationIntent { operation } = &plan.scope {
+            super::publication::validate_plan(&rows, &view, plan, operation, &lifecycle.budget)?;
+        }
         if let RetirementScope::OperationRecovery { operation } = &plan.scope {
             let current = super::recovery::collect(
                 &rows,
@@ -734,6 +742,7 @@ impl Engine {
         if let RetirementScope::ResultAvailability { operation } = &plan.scope {
             records.push(super::availability::pointer_record(plan, operation)?);
         }
+        drop(rows);
         if let Err(error) = lifecycle.commit(&view, records).await {
             let after = lifecycle.open(&plan.dataset).await?;
             let rows = lifecycle.rows(&after).await?;

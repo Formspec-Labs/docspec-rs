@@ -7,6 +7,7 @@
 use crate::{
     Error, Result,
     budget::Budget,
+    engine::{job_publication, retention::publication},
     model::{Id, RemovalIntent, RemovalProgress},
     storage,
 };
@@ -489,7 +490,14 @@ impl Lifecycle {
                     }
                 }
             }
-            let reserved_future_bytes = validate_and_sum_removal_reservations(&current)?;
+            let reserved_future_bytes = validate_and_sum_removal_reservations(&current)?
+                .checked_add(publication::future_bytes(
+                    &current,
+                    view,
+                    view.revision,
+                    &self.budget,
+                )?)
+                .ok_or_else(reservation_overflow)?;
             let within_history_budget = check_history_reservation(
                 bytes,
                 reserved_future_bytes,
@@ -611,6 +619,12 @@ impl Lifecycle {
                     ));
                 }
             }
+            if job_publication::is_record(key) && previous.contains_key(key) {
+                return Err(Error::refusal(
+                    "corrupt_metadata",
+                    "publication intent records are immutable",
+                ));
+            }
             let row_bytes = history_row_bytes(key, &value);
             if let Some((_, old_value)) =
                 next_values.insert(key.clone(), (revision, Arc::from(value)))
@@ -640,6 +654,18 @@ impl Lifecycle {
             let (_, value) = &next_values[key];
             reserved_future_bytes = reserved_future_bytes
                 .checked_add(removal_reservation(&next_values, key, revision, value)?)
+                .ok_or_else(reservation_overflow)?;
+        }
+        if changes
+            .iter()
+            .any(|(key, _)| job_publication::is_record(key) || key.starts_with("retired/"))
+        {
+            let prior =
+                publication::future_bytes(&previous.values, view, view.revision, &self.budget)?;
+            let next = publication::future_bytes(&next_values, view, revision, &self.budget)?;
+            reserved_future_bytes = reserved_future_bytes
+                .checked_sub(prior)
+                .and_then(|bytes| bytes.checked_add(next))
                 .ok_or_else(reservation_overflow)?;
         }
         // Outcomes consume reserved room in the same commit that retains their result.
@@ -778,7 +804,14 @@ impl Lifecycle {
                 "lifecycle baseline compaction must retain at least one record",
             ));
         }
-        let reserved_future_bytes = validate_and_sum_removal_reservations(&next_values)?;
+        let reserved_future_bytes = validate_and_sum_removal_reservations(&next_values)?
+            .checked_add(publication::future_bytes(
+                &next_values,
+                view,
+                next_revision,
+                &self.budget,
+            )?)
+            .ok_or_else(reservation_overflow)?;
         let history_rows = next_values.len();
         let history_bytes = cache_bytes;
         check_history_reservation(
@@ -942,14 +975,14 @@ fn build_baseline_batches(
         if !keys.is_empty()
             && (keys.len() >= max_rows || current_bytes.saturating_add(row_bytes) > max_batch_bytes)
         {
-            batches.push(Ok(RecordBatch::try_new(
-                schema.clone(),
-                vec![
-                    Arc::new(StringArray::from(std::mem::take(&mut keys))),
-                    Arc::new(Int64Array::from(std::mem::take(&mut revs))),
-                    Arc::new(StringArray::from(std::mem::take(&mut vals))),
-                ],
+            batches.push(Ok(baseline_batch(
+                schema,
+                &keys,
+                std::mem::take(&mut revs),
+                &vals,
             )?));
+            keys.clear();
+            vals.clear();
             current_bytes = 256;
         }
         keys.push(key.as_str());
@@ -958,16 +991,35 @@ fn build_baseline_batches(
         current_bytes = current_bytes.saturating_add(row_bytes);
     }
     if !keys.is_empty() {
-        batches.push(Ok(RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(StringArray::from(keys)),
-                Arc::new(Int64Array::from(revs)),
-                Arc::new(StringArray::from(vals)),
-            ],
-        )?));
+        batches.push(Ok(baseline_batch(schema, &keys, revs, &vals)?));
     }
     Ok(batches)
+}
+
+fn baseline_batch(
+    schema: &Arc<Schema>,
+    keys: &[&str],
+    revisions: Vec<i64>,
+    values: &[&str],
+) -> Result<RecordBatch> {
+    // As in the ordinary append path, size the string buffers from the
+    // serialized lengths so spare allocation does not exceed batch admission.
+    let strings = |items: &[&str]| {
+        let bytes = items.iter().map(|item| item.len()).sum();
+        let mut builder = StringBuilder::with_capacity(items.len(), bytes);
+        for &item in items {
+            builder.append_value(item);
+        }
+        builder.finish()
+    };
+    Ok(RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(strings(keys)),
+            Arc::new(Int64Array::from(revisions)),
+            Arc::new(strings(values)),
+        ],
+    )?)
 }
 
 async fn replace_baseline_snapshot(
@@ -1105,7 +1157,10 @@ fn removal_reservation(
 }
 
 fn reservation_overflow() -> Error {
-    Error::refusal("metadata_capacity", "removal history reservation overflow")
+    Error::refusal(
+        "metadata_capacity",
+        "lifecycle history reservation overflow",
+    )
 }
 
 fn check_history_reservation(history: usize, reserved: usize, limit: usize) -> Result<()> {

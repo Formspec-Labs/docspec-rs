@@ -140,7 +140,7 @@ impl Engine {
         let checkpoint_plan = self
             .plan_succession_checkpoint(dataset, &view, &rows, &mut remove_keys)
             .await?;
-        let head_ref_paths: BTreeSet<String> = if let Some((_, _, authority)) =
+        let mut head_ref_paths: BTreeSet<String> = if let Some((_, _, authority)) =
             rows.get_record::<Authority>("authority")?
             && let Some(head_release) = authority.release
         {
@@ -151,6 +151,13 @@ impl Engine {
         } else {
             BTreeSet::new()
         };
+        retain_publication_payloads(
+            &rows,
+            &view,
+            &lifecycle.budget,
+            &mut head_ref_paths,
+            &mut remove_keys,
+        )?;
         prune_obsolete_protections(
             &rows,
             &view.identifier().to_string(),
@@ -722,6 +729,41 @@ fn collect_record_paths(value: &serde_json::Value, paths: &mut BTreeSet<String>)
     }
 }
 
+fn retain_publication_payloads(
+    rows: &crate::catalog::SnapshotRows,
+    view: &View,
+    budget: &crate::budget::Budget,
+    kept_record_paths: &mut BTreeSet<String>,
+    remove_keys: &mut BTreeSet<String>,
+) -> Result<()> {
+    use crate::engine::job_publication::{
+        self, INTENT_PREFIX, PAYLOAD_PREFIX, PublicationIntentStatus,
+    };
+    for (key, _, _) in rows
+        .prefix(INTENT_PREFIX)
+        .chain(rows.prefix(PAYLOAD_PREFIX))
+    {
+        if let Some(saved) = job_publication::retained_intent_record(rows, view, key, budget)? {
+            if saved.status == PublicationIntentStatus::Retired {
+                let reference = &saved
+                    .intent
+                    .as_ref()
+                    .ok_or_else(|| {
+                        Error::refusal("retention_inventory", "retired publication audit is absent")
+                    })?
+                    .reference
+                    .native_record;
+                if rows.contains_key(&reference.key) {
+                    remove_keys.insert(reference.key.clone());
+                }
+            } else {
+                kept_record_paths.extend(saved.objects().map(|object| object.path.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn prune_obsolete_protections(
     rows: &crate::catalog::SnapshotRows,
     table: &str,
@@ -732,6 +774,9 @@ fn prune_obsolete_protections(
     let index = ObsoleteLifecycleIndex::from_rows(rows)?;
     let mut kept_record_paths = head_ref_paths.clone();
     for (k, revision, json) in rows.prefix("") {
+        if crate::engine::job_publication::is_record(k) {
+            continue;
+        }
         if k.starts_with("job-") {
             let _decoded = rows.reserve_decoded(budget, &[k])?;
             if !remove_keys.contains(k) {

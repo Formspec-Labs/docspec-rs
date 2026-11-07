@@ -131,6 +131,8 @@ enum Command {
     ManagedBuild(SpecArg),
     /// Execute, qualify, select or reconcile one retained complete native job.
     ManagedJob(SpecArg),
+    /// Freeze or inspect a local fixture publication intent.
+    JobPublicationIntent(SpecArg),
     /// Adopt exact producer-definition metadata under the local dataset authority.
     AdoptJobProducerDefinition(SpecArg),
     /// Stream an exact protected source version as Arrow IPC.
@@ -309,6 +311,10 @@ enum Command {
     PlanAvailabilityRetirement(OperationRetirementArgs),
     /// End standalone availability from a saved plan; preserve dependent data and files.
     RetireAvailability(PlanArg),
+    /// Capture one exact publication payload generation for logical retirement.
+    PlanPublicationIntentRetirement(OperationRetirementArgs),
+    /// End the payload's protection and preserve its original publication audit.
+    RetirePublicationIntent(PlanArg),
     /// Capture a terminal operation's recovery records for logical retirement.
     PlanOperationRetirement(OperationRetirementArgs),
     /// End terminal operation recovery; preserve completed phases and available results.
@@ -565,6 +571,7 @@ async fn async_main() -> anyhow::Result<()> {
             | Command::PrepareJob(_)
             | Command::ManagedBuild(_)
             | Command::ManagedJob(_)
+            | Command::JobPublicationIntent(_)
             | Command::AdoptJobProducerDefinition(_)
             | Command::ReadVersion(_)
     ) && cli.limits.is_none()
@@ -826,6 +833,19 @@ async fn execute_engine_command(
             }
             engine.shutdown().await?;
         }
+        Command::JobPublicationIntent(SpecArg { spec }) => {
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
+            match engine.job_publication_intent_bytes(bytes).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(
+                        &serde_json::json!({"status":"failed","error":{"code":error.code(),"message":error.message()}}),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
+        }
         Command::AdoptJobProducerDefinition(SpecArg { spec }) => {
             let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
             print_json(&engine.adopt_job_producer_definition_bytes(bytes).await?)?;
@@ -1078,6 +1098,17 @@ async fn execute_engine_command(
         }
         Command::RetireAvailability(PlanArg { plan }) => {
             print_json(&engine.retire_availability(&read_json(plan)?).await?)?
+        }
+        Command::PlanPublicationIntentRetirement(args) => {
+            let (ds, ret, op) = args.ids()?;
+            print_json(
+                &engine
+                    .plan_publication_intent_retirement(&ds, &ret, &op, &args.reason)
+                    .await?,
+            )?;
+        }
+        Command::RetirePublicationIntent(PlanArg { plan }) => {
+            print_json(&engine.retire_publication_intent(&read_json(plan)?).await?)?
         }
         Command::PlanOperationRetirement(args) => {
             let (ds, ret, op) = args.ids()?;
@@ -1420,6 +1451,9 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
                 | Command::RestoreLocal { .. }
                 | Command::ReadEvidence(_)
                 | Command::ReadReceipts(_)
+                | Command::JobPublicationIntent(_)
+                | Command::PlanPublicationIntentRetirement(_)
+                | Command::RetirePublicationIntent(_)
         ) || matches!(
             &cli.command,
             Command::Read { group, .. }

@@ -16,6 +16,7 @@ mod export_recovery;
 mod grants;
 pub(in crate::engine) mod inventory;
 pub(super) mod owners;
+pub(crate) mod publication;
 mod recovery;
 pub(crate) mod removal;
 pub(in crate::engine) mod retirement;

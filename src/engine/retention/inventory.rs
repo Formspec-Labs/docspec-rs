@@ -349,6 +349,27 @@ impl Engine {
                     key: key.into(),
                     revision,
                 };
+                if crate::engine::job_publication::is_record(key) {
+                    if let Some(saved) = crate::engine::job_publication::retained_intent_record(
+                        &rows, &view, key, budget,
+                    )? {
+                        let reference = &saved
+                            .intent
+                            .as_ref()
+                            .ok_or_else(unknown_dependencies)?
+                            .reference
+                            .native_record;
+                        let origin = RetentionBlocker {
+                            table: reference.table.clone(),
+                            key: reference.key.clone(),
+                            revision: reference.revision,
+                        };
+                        for object in saved.objects() {
+                            inventory.object(object, &origin)?;
+                        }
+                    }
+                    continue;
+                }
                 if key.starts_with("owner-protection/") {
                     let grant: super::owners::OwnerProtection = decode(json)?;
                     super::owners::validate_grant(&view, key, revision, &grant)?;
