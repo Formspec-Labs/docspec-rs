@@ -1,5 +1,35 @@
 # Implementation and qualification status
 
+## Protected source snapshot observation
+
+A local SQL job with a protected `VersionRef` input reports the physical
+snapshot it opened in `native_versions[].physical_snapshot`. The observation
+includes the metadata location, table UUID, snapshot ID, physical schema ID,
+and the stored metadata's SHA-256 and byte length. The surrounding observation
+keeps the logical version and schema identity separate from the physical pin.
+The metadata reader calculates SHA-256 from the same bounded bytes it checks
+against the native BLAKE3 pin. A later managed operation still owns custody
+admission and producer qualification.
+
+Implementation `60d3da044915a29a74da4526b78be2f2e8089e4c` matches the seven
+paths in frozen source 02, SHA-256
+`4c907e5a52bbbd96b8d6a3a6b292933271a5d879546c4812dd9e9d006d3a6f67`.
+The review strengthened the result-admission test before execution. Strict
+all-target, all-feature Clippy and four focused tests passed on source 02.
+They checked stored plain and compressed metadata, changed-byte refusal,
+separate result allowances through partial failure, and a pending managed
+Build observed after reopening its workspace with payload temporarily absent.
+An equivalent compaction reported its own physical pin for the same logical
+version. The existing protected quality read also passed across lifecycle
+compaction.
+
+The run took 133.30 seconds. Its 26 samples recorded peak process-family
+resident memory of 4,257,120,256 bytes and peak net owned disk allocation
+growth of 164,777,984 bytes. The focused handoff SHA-256 is
+`553a04d17dda10253029dddf2e457331dc7877c0ade635611dc9c96d1fe6713f`.
+Immutable executable capture, the public adapter consumer, the application
+import comparison, and the full repository gate remain pending for this source.
+
 ## Local publication intent freeze and retirement
 
 The native command `job-publication-intent --spec` freezes or inspects a
@@ -40,10 +70,15 @@ This verification note follows the executed source snapshot.
   disk allocation growth of 186,298,368 bytes. The success handoff SHA-256 is
   `5e502e711278e91d10d900dac965f21fe2f5d912a18ff9f3df52d4ce93cacdc0`.
 
-This checkpoint exercises the native Engine JSON command and local retention.
-CLI executable, public DDK consumer and full repository verification remain
-pending. A real publisher destination and external authorization require
-separate owner integration and qualification.
+The immutable source 03 executable has SHA-256
+`2ea9c6edbb40b2ef49a101f60658ac88299b918810c34041057f44500f185697`.
+Two public DDK source-consumer cases passed against it in 33 native calls.
+They checked lost-reply and control-loss replay, exact-generation retirement,
+and cold inspection after compaction. The consumer handoff SHA-256 is
+`096af788e51b7561558180ef74e98a3b3fd9fec1c591577335a49bb46f80aad3`.
+Installed and full repository verification remain pending. A real publisher
+destination and external authorization require separate owner integration
+and qualification.
 
 ## Native producer proof and model prerequisite
 
