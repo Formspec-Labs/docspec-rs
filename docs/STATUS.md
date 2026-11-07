@@ -16,8 +16,34 @@ payload. The lifecycle budget reserves room for the exact retirement records
 when the intent commits. Fixture receipts record external authorization and
 dispatch as `not_run`.
 
-This source awaits focused execution. A real publisher destination and
-external authorization require separate owner integration and qualification.
+Implementation commit `3c3f8351f77057b2c450435332a38005b3b9caf6` matches all
+14 paths in frozen `publication-intent-native-03`
+(`684ef94c7aad79e14191a68f43acf86a59a738cfa8acc6d1df947ae4fdaa4250`).
+This verification note follows the executed source snapshot.
+
+- Source 02 passed strict Clippy and the near-cap cold reopen case. The
+  other publication case stopped during baseline compaction. The byte guard
+  reported 228,688 bytes against its 131,072-byte limit. The pinned Arrow
+  conversion started from an empty string buffer and retained spare capacity
+  as it grew. Source 03 sizes those buffers from their exact serialized
+  lengths using the same approach as ordinary lifecycle appends. The fixture,
+  batch limits and batch splitting rule stayed the same.
+- Source 03 passed strict all-target, all-feature Clippy and all four focused
+  native tests. The two publication cases exercised refusal before a stale
+  first freeze, exact inventory, lost response, replay after successor and
+  control-file loss, published and private protection, and retired audit after
+  compaction. The near-cap case used the same 256 KiB metadata and 128 KiB
+  batch limits before and after cold reopen. The existing removal reservation
+  and producer donor-retirement tests also passed.
+- The focused run took 128.46 seconds. Its 25 samples recorded a peak
+  process-family resident memory of 4,249,894,912 bytes and peak net owned
+  disk allocation growth of 186,298,368 bytes. The success handoff SHA-256 is
+  `5e502e711278e91d10d900dac965f21fe2f5d912a18ff9f3df52d4ce93cacdc0`.
+
+This checkpoint exercises the native Engine JSON command and local retention.
+CLI executable, public DDK consumer and full repository verification remain
+pending. A real publisher destination and external authorization require
+separate owner integration and qualification.
 
 ## Native producer proof and model prerequisite
 
