@@ -1,6 +1,6 @@
 ---
 id: dr-kg49
-status: open
+status: in_progress
 deps: [dr-z0vd]
 links: []
 created: 2026-11-09T19:38:50Z
@@ -18,3 +18,9 @@ Branch feat/implicit-cast-check-20261109 (built by a follow-up session, unreview
 
 Trial cases F3 and F3b fail planning with a clear diagnostic; the six real map recipes still plan; reviewed with greybeard, etl-workflow and evolutionary-refactoring; merged after step A.
 
+
+## Notes
+
+**2026-11-09T20:19:44Z**
+
+Implemented on feat/implicit-cast-check-20261109 at 3cc56c8 (local, unmerged): job-plan and prepare-job refuse implicit casts between text, numbers, dates and booleans with a new implicit_cast error; trial cases F3 and F3b now fail planning; the six data-map baseline files still plan clean. Remaining: independent review, then merge after step A (dr-z0vd).
