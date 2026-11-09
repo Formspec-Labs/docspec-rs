@@ -70,6 +70,8 @@ jobs:
           repository: civictechdc/congressional-tech
           ref: ${{ inputs.congressional_tech_ref || 'main' }}
           persist-credentials: false
+          # The lane's producer-proof tests resolve historical commits (gate 5).
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: docspec-linux-amd64-${{ github.sha }}

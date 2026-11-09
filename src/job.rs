@@ -8,6 +8,7 @@ pub(crate) mod fitting;
 mod functions;
 mod json_lines;
 mod json_many;
+mod json_strict;
 mod materialized;
 pub(crate) mod metrics;
 mod native;

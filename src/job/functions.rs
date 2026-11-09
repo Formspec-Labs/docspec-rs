@@ -88,6 +88,7 @@ impl Hash for GenericFunction {
 
 pub(super) fn register(context: &mut SessionContext, budget: &Budget) -> crate::Result<()> {
     datafusion_functions_json::register_all(context)?;
+    super::json_strict::register(context);
     super::json_many::register(context, budget);
     for kind in [
         Kind::Resolve,
