@@ -12,8 +12,12 @@
 //! target belong to different families: text, number, date/time or boolean.
 //! Null and other types (binary, interval, struct) belong to no family.
 //!
-//! It cannot see casts DataFusion's SQL planner inserts before analysis, such
-//! as those unifying a `VALUES` list, nor parameter values bound before it.
+//! Bound parameters enter the plan as literals of their supplied JSON type, so
+//! a text value compared with an integer column is refused like a text literal.
+//! The check cannot see casts DataFusion's SQL planner inserts before analysis,
+//! such as those unifying a `VALUES` list. A written cast whose input coercion
+//! changes beyond added casts (a coerced subquery or window frame inside it) is
+//! reported as added; it fails loudly, never silently.
 // Rust guideline compliant 2026-02-21
 use crate::{Error, Result};
 use arrow::datatypes::DataType;
@@ -157,6 +161,10 @@ mod tests {
     use std::sync::Arc;
 
     async fn refusal(sql: &str) -> Option<String> {
+        bound_refusal(sql, serde_json::json!({})).await
+    }
+
+    async fn bound_refusal(sql: &str, parameters: serde_json::Value) -> Option<String> {
         let root = tempfile::tempdir().unwrap();
         let job = Job::new(Limits::default(), root.path().join("scratch"))
             .unwrap()
@@ -175,7 +183,8 @@ mod tests {
         job.context
             .register_table("t", Arc::new(SchemaOnlyTable(Arc::new(schema))))
             .unwrap();
-        match job.sql(sql).await {
+        let parameters = serde_json::from_value(parameters).unwrap();
+        match job.sql_bound(sql, &parameters).await {
             Ok(_) => None,
             Err(error) => {
                 assert_eq!(error.code(), "implicit_cast", "{sql}: {error}");
@@ -201,9 +210,17 @@ mod tests {
             "SELECT code || flag FROM t",
             "SELECT 1 FROM t WHERE (SELECT max(id) FROM t) = code",
             "SELECT CAST(code || id AS DATE) FROM t",
+            "SELECT make_array(id, code) FROM t",
+            "SELECT concat(code, id) FROM t",
         ] {
             assert!(refusal(sql).await.is_some(), "{sql}");
         }
+        let text = serde_json::json!({"p": "5"});
+        assert!(
+            bound_refusal("SELECT 1 FROM t WHERE id = $p", text)
+                .await
+                .is_some()
+        );
         let message = refusal("SELECT 1 FROM t WHERE day >= 20200101")
             .await
             .unwrap();
@@ -235,8 +252,20 @@ mod tests {
             "SELECT CASE WHEN flag THEN NULL ELSE id END FROM t",
             "SELECT CAST(NULL AS VARCHAR) FROM t UNION ALL SELECT code FROM t",
             "SELECT coalesce(id, 0) + count(*) FROM t GROUP BY id",
+            "SELECT s FROM (VALUES (1, 'a')) AS v(n, s) WHERE n = 1",
+            "WITH c AS (SELECT unnest(make_array(code)) AS item FROM t) SELECT item FROM c",
         ] {
             assert_eq!(refusal(sql).await, None, "{sql}");
+        }
+        for (sql, value) in [
+            ("SELECT 1 FROM t WHERE id = $p", serde_json::json!(5)),
+            (
+                "SELECT 1 FROM t WHERE day >= CAST($p AS DATE)",
+                serde_json::json!("2020-01-01"),
+            ),
+        ] {
+            let parameters = serde_json::json!({ "p": value });
+            assert_eq!(bound_refusal(sql, parameters).await, None, "{sql}");
         }
     }
 }
