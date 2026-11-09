@@ -102,6 +102,15 @@ required-features = ["remote"]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
+# DataFusion 53.1.0's physical-plan crate as published on crates.io (sha256
+# 5edc023675791af9d5fb4cc4c24abf5f7bd3bd4dcf9e5bd90ea1eff6976dcc79), plus
+# backported upstream fixes, each a separate commit touching only this
+# directory. iceberg-datafusion 0.10.1 requires DataFusion ^53.1, so the
+# releases carrying them are not available here. Remove this patch when
+# docspec moves to a DataFusion release that contains every backport.
+[patch.crates-io]
+datafusion-physical-plan = { path = "vendor/datafusion-physical-plan" }
+
 # Avoid 60-90 GB DataFusion/Arrow incremental debug caches while retaining line-table backtraces.
 [profile.dev]
 debug = "line-tables-only"
