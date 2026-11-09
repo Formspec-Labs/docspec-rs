@@ -1010,3 +1010,71 @@ async fn json_reservation_errors_keep_file_key_line_and_resource_cause() {
         "{error}"
     );
 }
+
+/// Writes one join side: a struct `s` and a JSON text `j` holding the same field `f`, keyed by `k`.
+fn write_outer_join_side(path: &std::path::Path, keys: &[&str], fields: &[&str]) {
+    use arrow::array::{ArrayRef, StructArray};
+    use parquet::arrow::ArrowWriter;
+    let field = Arc::new(Field::new("f", DataType::Utf8, true));
+    let structs = StructArray::from(vec![(
+        field,
+        Arc::new(StringArray::from(fields.to_vec())) as ArrayRef,
+    )]);
+    let json = StringArray::from_iter_values(fields.iter().map(|f| format!(r#"{{"f":"{f}"}}"#)));
+    let batch = arrow::record_batch::RecordBatch::try_from_iter([
+        ("s", Arc::new(structs) as ArrayRef),
+        ("j", Arc::new(json) as ArrayRef),
+        ("k", Arc::new(StringArray::from(keys.to_vec())) as ArrayRef),
+    ])
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(path).unwrap(), batch.schema(), None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
+// DataFusion 53.1's `push_down_leaf_projections` refused this valid shape with "Schema contains
+// qualified field name l.__datafusion_extracted_3 and unqualified field name
+// __datafusion_extracted_3 which would be ambiguous". It needs a field read (`get_field` or a JSON
+// getter) on each side of an outer join over Parquet scans, an aliased left input, and a sub-query
+// projection whose filtered column combines both sides. The data map's rulemaking timeline view
+// hit it through `json_get_str`. DataFusion 55.2 plans and answers it.
+#[tokio::test]
+async fn reads_fields_from_both_sides_of_an_outer_join_under_a_filter() {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    for (name, keys, fields) in [
+        ("a", &["1", "2", "3"][..], &["a1", "a2", "a3"][..]),
+        ("b", &["1"][..], &["x"][..]),
+    ] {
+        let path = root.path().join(format!("{name}.parquet"));
+        write_outer_join_side(&path, keys, fields);
+        job.register_parquet(name, &path).await.unwrap();
+    }
+    for read in ["{}.s['f']", "json_get_str({}.j, 'f')"] {
+        let (right, left) = (read.replace("{}", "r"), read.replace("{}", "l"));
+        // 'x' comes from the matched right row; '2' from the left key of an unmatched row.
+        for (rid, expected) in [("x", "a1"), ("2", "a2")] {
+            let sql = format!(
+                "SELECT fr FROM (SELECT coalesce({right}, l.k) AS rid, {left} AS fr \
+                 FROM a AS l LEFT JOIN b AS r ON r.k = l.k) WHERE rid = '{rid}'"
+            );
+            let batches = match job.sql(&sql).await {
+                Ok(frame) => frame.collect().await,
+                Err(error) => panic!("{left}, rid {rid}: {error}"),
+            }
+            .unwrap_or_else(|error| panic!("{left}, rid {rid}: {error}"));
+            let found: Vec<String> = batches
+                .iter()
+                .flat_map(|batch| {
+                    let column = arrow::compute::cast(batch.column(0), &DataType::Utf8).unwrap();
+                    let column = column.as_any().downcast_ref::<StringArray>().unwrap();
+                    (0..column.len())
+                        .map(|row| column.value(row).to_owned())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            assert_eq!(found, [expected], "{left}, rid {rid}");
+        }
+    }
+}
