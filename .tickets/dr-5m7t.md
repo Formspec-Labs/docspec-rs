@@ -1,0 +1,20 @@
+---
+id: dr-5m7t
+status: open
+deps: [dr-kg49, dr-297r]
+links: []
+created: 2026-11-09T19:38:50Z
+type: task
+priority: 2
+assignee: mikewolfd
+parent: dr-dlb1
+tags: [planner, ddk]
+---
+# Expose job-plan plus an empty-input run as the catalog's SQL gate
+
+User decision 2026-11-09: a DDK recipe or job step passes only when both the sqlglot binder and DocSpec's planner pass it (DDK-CATALOG-011; DDK WP-15 item 3). The trial showed planning alone is not enough: both planners passed a job the optimizer then refused at run time, so the gate is job-plan (per recipe) or prepare-job (whole job) plus one run on empty typed inputs (0.4 s in the trial). DDK already calls job-plan and prepare-job; about 42 lines of glue on its side.
+
+## Acceptance Criteria
+
+A documented, stable CLI contract for job-plan, prepare-job and an empty-input run that DDK can call offline with a pinned binary; diagnostics are machine-readable with codes; the six data-map recipes and the trial's 14 fault cases give the expected results, recorded.
+
