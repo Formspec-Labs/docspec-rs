@@ -78,6 +78,14 @@ A SQL calculation uses `format: "sql"`, `sql`, and optional named
 `parameters`. SQL view steps accept the same parameter map. Parameter names
 match the SQL placeholders, without the leading dollar sign.
 
+`job-plan` and `prepare-job` refuse SQL that plans only because DataFusion's
+type coercion adds a cast between text, numbers, dates/times and booleans, as in
+an integer key joined to a text key or `event_date >= 20200101`. Both run and
+return wrong rows. The `implicit_cast` refusal names each cast. Casts written in
+the SQL stay allowed (`CAST`, `TRY_CAST`, `::`, `DATE '2020-01-01'`), so write
+the conversion you mean; a bare string compared with a date is refused too.
+Running a job (`docspec job`) does not apply this check.
+
 Build with the optional Cargo feature `substrait` and Protocol Buffers compiler
 to enable `calculation.save_substrait`. Set `path` and `readable_path` to new
 destinations for the binary plan and its upstream Protobuf JSON. A saved

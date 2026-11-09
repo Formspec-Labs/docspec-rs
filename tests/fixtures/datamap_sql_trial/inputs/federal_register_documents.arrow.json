@@ -1,0 +1,373 @@
+{
+ "fields": [
+  {
+   "name": "document_number",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "title",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "abstract",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "type",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "publication_date",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "effective_on",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "comments_close_on",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "signing_date",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "agencies",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "docket_ids",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "regulation_id_numbers",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "cfr_references",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "html_url",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "pdf_url",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "body_html_url",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "volume",
+   "data_type": "Int64",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "start_page",
+   "data_type": "Int64",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "end_page",
+   "data_type": "Int64",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "subtype",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "executive_order_number",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "agency_names",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "topics",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "corrections",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "action",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "correction_of",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "full_text_xml_url",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "significant",
+   "data_type": "Boolean",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "regulations_dot_gov_info",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "president",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "disposition_notes",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "executive_order_notes",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "source_present_fields",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "publication_date_typed",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "comments_close_on_typed",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "signing_date_typed",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "effective_on_typed",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "regulations_dot_gov_docket_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}

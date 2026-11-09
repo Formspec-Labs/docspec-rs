@@ -1,0 +1,98 @@
+{
+ "fields": [
+  {
+   "name": "match_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "entity_kind",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "left_scheme",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "left_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "right_scheme",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "right_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "decision",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "method",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "evidence",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "decided_at",
+   "data_type": {
+    "Timestamp": [
+     "Microsecond",
+     "UTC"
+    ]
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "decided_by",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}

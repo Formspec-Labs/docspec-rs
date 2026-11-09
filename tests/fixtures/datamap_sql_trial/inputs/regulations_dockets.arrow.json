@@ -1,0 +1,235 @@
+{
+ "fields": [
+  {
+   "name": "attributes",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "links",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "type",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "source_present_fields",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_agency_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_category",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_dk_abstract",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_docket_type",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_effective_date",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_field1",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_field2",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_generic",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_keywords",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_legacy_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_modify_date",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_object_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_organization",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_petition_nbr",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_program",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_rin",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_short_title",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_sub_type",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_sub_type2",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_title",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "links_self",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "attributes_modify_date_typed",
+   "data_type": {
+    "Timestamp": [
+     "Microsecond",
+     "UTC"
+    ]
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}

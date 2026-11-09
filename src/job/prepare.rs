@@ -237,7 +237,7 @@ impl PrepareJobSpec {
     /// names, lifetimes, SQL, functions, parameters, exports, graph types,
     /// unsupported facets and metadata exceeding the host's limits.
     pub async fn prepare(self, limits: Limits) -> Result<PreparedJob> {
-        let job = Job::from_budget(Budget::new(limits)?)?;
+        let job = Job::from_budget(Budget::new(limits)?)?.refusing_implicit_casts();
         let declaration_size = self.inputs.iter().try_fold(0usize, |size, input| {
             let artifact_descriptor = input.schema_artifact.as_ref().map_or(0, |binding| {
                 binding

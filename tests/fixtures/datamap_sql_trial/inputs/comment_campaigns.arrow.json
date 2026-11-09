@@ -1,0 +1,61 @@
+{
+ "fields": [
+  {
+   "name": "docket_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "text_fingerprint",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "comments",
+   "data_type": "Int64",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "example_comment_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "organization_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "first_posted",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "last_posted",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}

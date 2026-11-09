@@ -1,0 +1,95 @@
+{
+ "fields": [
+  {
+   "name": "rulemaking_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "rin",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "docket_ids",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "agency_organization_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "title",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "stage",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "first_action_date",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "latest_action_date",
+   "data_type": "Date32",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "cfr_parts",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}

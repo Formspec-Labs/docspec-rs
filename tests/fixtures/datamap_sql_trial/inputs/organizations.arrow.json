@@ -1,0 +1,120 @@
+{
+ "fields": [
+  {
+   "name": "organization_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "name",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "kind",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "parent_organization_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "sam_federal_org_id",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "regulations_gov_agency_code",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "federal_register_agency_slug",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "uei",
+   "data_type": "Utf8",
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "lobbying_client_ids",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "lobbying_registrant_ids",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  },
+  {
+   "name": "fec_committee_ids",
+   "data_type": {
+    "List": {
+     "name": "element",
+     "data_type": "Utf8",
+     "nullable": true,
+     "dict_id": 0,
+     "dict_is_ordered": false,
+     "metadata": {}
+    }
+   },
+   "nullable": true,
+   "dict_id": 0,
+   "dict_is_ordered": false,
+   "metadata": {}
+  }
+ ],
+ "metadata": {}
+}
