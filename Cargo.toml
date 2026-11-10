@@ -33,6 +33,11 @@ path = "tests/restore.rs"
 name = "sql_process_memory"
 path = "tests/sql_process_memory.rs"
 
+# Starts the CLI as a child process, once under a lowered open-file limit.
+[[test]]
+name = "cli_evidence"
+path = "tests/cli_evidence.rs"
+
 [features]
 test-util = []
 remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store", "dep:typetag"]

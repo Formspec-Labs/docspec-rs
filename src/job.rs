@@ -17,6 +17,8 @@ mod table_operations;
 pub mod tables;
 
 #[cfg(test)]
+mod evidence_tests;
+#[cfg(test)]
 mod slice_charge_tests;
 
 use crate::{
