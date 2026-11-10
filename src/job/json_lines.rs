@@ -151,6 +151,24 @@ impl PartitionStream for JsonPartition {
     }
 }
 
+/// Names the file and the operating-system error behind a failed `action`.
+///
+/// A bare "open failed" cannot tell a missing file from an exhausted
+/// descriptor limit; the error kind and OS code can.
+fn source_error(
+    file: &JsonLinesFile,
+    line: i64,
+    action: &str,
+    error: &std::io::Error,
+) -> DataFusionError {
+    DataFusionError::Execution(format!(
+        "{} line {line}: source {action} failed: {}: {error} ({:?})",
+        file.key,
+        file.path.display(),
+        error.kind()
+    ))
+}
+
 struct Reader {
     file: JsonLinesFile,
     input: SchemaRef,
@@ -185,16 +203,16 @@ impl Reader {
             READER_BYTES,
         )?;
         if self.reader.is_none() {
-            let mut file =
-                File::open(&self.file.path).map_err(|_| self.error(1, "source open failed"))?;
+            let mut file = File::open(&self.file.path)
+                .map_err(|error| source_error(&self.file, 1, "open", &error))?;
             let mut magic = [0; 2];
             match file.read_exact(&mut magic) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {}
-                Err(_) => return Err(self.error(1, "source read failed")),
+                Err(error) => return Err(source_error(&self.file, 1, "read", &error)),
             }
             file.rewind()
-                .map_err(|_| self.error(1, "source rewind failed"))?;
+                .map_err(|error| source_error(&self.file, 1, "rewind", &error))?;
             let source: Box<dyn Read + Send> = if magic == [0x1f, 0x8b] {
                 Box::new(MultiGzDecoder::new(file))
             } else {
@@ -213,12 +231,9 @@ impl Reader {
                     .as_mut()
                     .expect("opened reader")
                     .fill_buf()
-                    .map_err(|_| {
-                        DataFusionError::Execution(format!(
-                            "{} line {}: source read failed",
-                            self.file.key,
-                            first + offsets.len() as i64 - 1
-                        ))
+                    .map_err(|error| {
+                        let line = first + offsets.len() as i64 - 1;
+                        source_error(&self.file, line, "read", &error)
                     })?;
                 if buffer.is_empty() {
                     break;
@@ -361,6 +376,44 @@ impl Reader {
 mod reader_lifetime_tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn missing_source_reports_its_path_and_the_os_error() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("absent.jsonl");
+        let limits = crate::budget::Limits::default();
+        let budget = crate::budget::Budget::new(limits.clone()).unwrap();
+        let input = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let file = JsonLinesFile {
+            key: "accepted_versions".into(),
+            path: path.clone(),
+        };
+        let schema = provider(vec![file.clone()], input.clone(), &limits)
+            .unwrap()
+            .schema();
+        let mut reader = Reader {
+            file,
+            input,
+            schema,
+            reader: None,
+            line: 0,
+            max_line: 1 << 20,
+            batch_rows: 64,
+            max_batch_bytes: 1 << 20,
+            reservation: MemoryConsumer::new("JSON-lines missing source")
+                .register(&budget.runtime_env().memory_pool),
+        };
+        let message = reader.next().unwrap_err().to_string();
+        // ENOENT is 2 on every Unix the engine builds for.
+        assert_eq!(
+            message,
+            format!(
+                "Execution error: accepted_versions line 1: source open failed: {}: \
+                 No such file or directory (os error 2) (NotFound)",
+                path.display()
+            )
+        );
+    }
 
     #[test]
     fn gzip_reader_keeps_workspace_admitted_between_yields_and_closes_at_eof() {

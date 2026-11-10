@@ -21,6 +21,7 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod array_admission;
 mod distinct;
+mod peak_pool;
 pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
 mod metadata_cache;
 mod portable_aggregates;
@@ -29,6 +30,8 @@ mod scratch;
 mod subqueries;
 mod view_compaction;
 pub(crate) use scratch::ScratchWriter;
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) use view_compaction::without as without_retained_compaction;
 
 /// Declared limits for one workspace execution host.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,6 +72,7 @@ pub struct Budget {
     bytes: Arc<Semaphore>,
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
+    pool: Arc<peak_pool::PeakPool<FairSpillPool>>,
     retention_pool: Arc<dyn MemoryPool>,
     scratch_writes: Arc<std::sync::Mutex<()>>,
     retained_files: Option<Arc<std::sync::Mutex<RetainedFiles>>>,
@@ -117,8 +121,11 @@ impl Budget {
         let cache = datafusion::execution::cache::cache_manager::CacheManagerConfig::default()
             .with_file_metadata_cache(Some(Arc::new(cache)))
             .with_metadata_cache_limit(limits.max_metadata_bytes);
+        let pool = Arc::new(peak_pool::PeakPool::new(FairSpillPool::new(
+            limits.memory_bytes / 2,
+        )));
         let mut runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(Arc::new(FairSpillPool::new(limits.memory_bytes / 2)))
+            .with_memory_pool(pool.clone())
             .with_cache_manager(cache)
             .with_max_temp_directory_size(limits.scratch_bytes);
         if let Some(scratch) = scratch {
@@ -128,6 +135,7 @@ impl Budget {
             bytes,
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
+            pool,
             retention_pool: Arc::new(GreedyMemoryPool::new(limits.memory_bytes / 2 / 4)),
             scratch_writes: Arc::default(),
             retained_files: None,
@@ -218,6 +226,18 @@ impl Budget {
 
     pub(crate) fn retention_pool(&self) -> &Arc<dyn MemoryPool> {
         &self.retention_pool
+    }
+
+    /// Highest native pool total since [`Self::restart_pool_peak`], in charged bytes.
+    ///
+    /// It counts every consumer of the shared pool, retained results included.
+    pub(crate) fn pool_peak(&self) -> usize {
+        self.pool.peak()
+    }
+
+    /// Starts a new peak interval at the pool's current total.
+    pub(crate) fn restart_pool_peak(&self) {
+        self.pool.restart();
     }
 
     pub(crate) fn scratch_writer(
