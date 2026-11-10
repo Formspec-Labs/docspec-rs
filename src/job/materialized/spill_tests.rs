@@ -218,6 +218,47 @@ async fn the_spill_reader_asks_for_neither_statistics_nor_a_page_index() {
 }
 
 #[tokio::test]
+async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
+    // Whether a scan collects statistics is fixed in its listing table when
+    // the frame is built, so the frame `read_spill` returns is where to look.
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+    let file = job
+        .budget
+        .runtime_env()
+        .disk_manager
+        .create_tmp_file("spill under test")
+        .unwrap();
+    // The writer's defaults: this file has statistics to ask for.
+    let mut writer = ArrowWriter::try_new(
+        std::fs::File::create(file.path()).unwrap(),
+        wide_schema(),
+        None,
+    )
+    .unwrap();
+    writer.write(&wide_batch(&wide_schema(), 0, BATCH)).unwrap();
+    writer.close().unwrap();
+    let frame = read_spill(&job.budget, &file, "wide").await.unwrap();
+    let datafusion::logical_expr::LogicalPlan::TableScan(scan) = frame.logical_plan() else {
+        panic!("a spill is read back through one file scan");
+    };
+    let provider = datafusion::datasource::source_as_provider(&scan.source).unwrap();
+    let fitted = provider
+        .as_any()
+        .downcast_ref::<crate::job::fitting::FittedTable>()
+        .expect("the footer's charge stays with the scan");
+    let listing = fitted
+        .provider
+        .as_any()
+        .downcast_ref::<datafusion::datasource::listing::ListingTable>()
+        .expect("read_parquet builds a listing table");
+    assert!(
+        !listing.options().collect_stat,
+        "the scan read_spill builds would ask the spill file for statistics"
+    );
+}
+
+#[tokio::test]
 async fn a_spill_whose_footer_the_budget_cannot_hold_is_refused_by_name() {
     const ROWS: usize = 16_384;
     let root = tempfile::tempdir().unwrap();
