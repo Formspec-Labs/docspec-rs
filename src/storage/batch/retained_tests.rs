@@ -117,9 +117,13 @@ fn short_columns() -> Vec<(&'static str, ArrayRef)> {
             "inline_views",
             rows(views(|item| Some(format!("{item:012}")))),
         ),
+        // Its own pool of strings. A take of half of a pool's rows uses under
+        // half of the pool's block capacity, which view compaction copies.
         (
             "long_views",
-            rows(views(|item| Some(format!("{item:013}")))),
+            Arc::new(StringViewArray::from_iter_values(
+                (0..ROWS).map(|item| format!("{item:013}")),
+            )) as ArrayRef,
         ),
         ("list", list(text(2 * ROWS, 8))),
         ("list_of_empty_views", list(views(|_| Some(String::new())))),
@@ -306,6 +310,48 @@ fn retained_slice_of_nested_column_is_measured_and_copied_by_referenced_rows() {
     assert!(
         oversized.is_empty(),
         "slices measured or kept at their parent's size:\n{}",
+        oversized.join("\n")
+    );
+}
+
+/// Views Arrow's output coalescer copied into blocks sized for its whole input.
+///
+/// When a pushed view array uses under half of its buffers, arrow-select
+/// 58.4's `BatchCoalescer` copies its strings, allocating each output batch a
+/// block sized for every row it was pushed (coalesce/byte_view.rs:341, :162).
+/// An 8,192-row batch cut from 30,000 rows then holds 2.5 MB in a 9 MB block,
+/// and DataFusion charges the 9 MB. Joins and repartition emit through this
+/// coalescer, so their view output arrives this way.
+#[test]
+fn views_in_a_mostly_spare_block_are_copied() {
+    let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+    // Every third of 90,000 300-byte strings: a third of the buffers used.
+    let text = StringViewArray::from_iter_values((0..90_000).map(|row| format!("{row:0300}")));
+    let every_third = arrow::array::UInt32Array::from_iter_values((0..90_000).step_by(3));
+    let sparse = arrow::compute::take(&text, &every_third, None).unwrap();
+    let schema = Arc::new(arrow::datatypes::Schema::new(vec![Field::new(
+        "text",
+        DataType::Utf8View,
+        false,
+    )]));
+    let mut coalescer = arrow::compute::BatchCoalescer::new(schema.clone(), SLICE);
+    coalescer
+        .push_batch(RecordBatch::try_new(schema, vec![sparse]).unwrap())
+        .unwrap();
+    coalescer.finish_buffered_batch().unwrap();
+    let mut oversized = Vec::new();
+    while let Some(given) = coalescer.next_completed_batch() {
+        // A view and its string for each row.
+        let data = given.num_rows() * (16 + 300);
+        let charged = get_record_batch_memory_size(&given);
+        let kept = get_record_batch_memory_size(&compact_retained(given, &budget).unwrap());
+        if kept > 2 * data {
+            oversized.push(format!("charged {charged}, kept {kept} for {data}"));
+        }
+    }
+    assert!(
+        oversized.is_empty(),
+        "batches kept in their coalescer blocks:\n{}",
         oversized.join("\n")
     );
 }

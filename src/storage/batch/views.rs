@@ -130,10 +130,13 @@ fn collect<T: ByteViewType>(
             if length > 12 { length } else { 0 }
         })
         .fold(0usize, usize::saturating_add);
+    // Measure buffers by capacity, as DataFusion charges them: Arrow's output
+    // coalescer copies strings into blocks sized for its whole input, so a
+    // buffer it emits can be short in length and several times that in size.
     let upper = view
         .data_buffers()
         .iter()
-        .map(|buffer| buffer.len())
+        .map(|buffer| buffer.capacity())
         .fold(0usize, usize::saturating_add);
     if payload >= upper / 2 {
         return Ok(array);
@@ -153,7 +156,7 @@ fn collect<T: ByteViewType>(
         .data_buffers()
         .iter()
         .filter(|buffer| seen.insert(buffer.data_ptr()))
-        .map(|buffer| buffer.len())
+        .map(|buffer| buffer.capacity())
         .fold(0usize, usize::saturating_add);
     drop(seen);
     drop(metadata);
