@@ -37,6 +37,7 @@ pub fn log_step(
     duration_secs: f64,
     pool_before: usize,
     pool_after: usize,
+    pool_peak: usize,
 ) {
     let val = serde_json::json!({
         "event": "step",
@@ -50,6 +51,9 @@ pub fn log_step(
         "duration_seconds": duration_secs,
         "pool_reserved_before": pool_before,
         "pool_reserved_after": pool_after,
+        // The pool's highest total while the step ran: retained results plus
+        // the step's own operators, in charged bytes.
+        "pool_reserved_peak": pool_peak,
     });
     write_jsonl(&val);
 }
