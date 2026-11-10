@@ -227,7 +227,7 @@ pub(super) async fn retain(
         writer.close()?;
         drop(writer_memory);
         let file = file.expect("spill owns temporary file");
-        let frame = read_spill(budget, &file).await?;
+        let frame = read_spill(budget, &file, name).await?;
         (
             StepStorage::Scratch,
             StepData::Scratch {
@@ -267,16 +267,32 @@ pub(super) async fn retain(
     Ok((storage, rows, bytes))
 }
 
-/// Reads back a spill file through the handle its writer still holds.
+/// Reads back step `step`'s spill file through the handle its writer still holds.
 ///
 /// The footer is charged to the shared budget and not judged by
 /// `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
+///
+/// # Errors
+/// Refuses with `capacity`, naming the step, when the shared budget cannot
+/// hold the footer's charge.
 async fn read_spill(
     budget: &Budget,
     file: &RefCountedTempFile,
+    step: &str,
 ) -> Result<datafusion::dataframe::DataFrame> {
-    let memory = Arc::new(crate::storage::admit_spill_footer(file, budget).await?);
-    scan_retained(spill_reader(budget), file.path(), memory).await
+    let memory = crate::storage::admit_spill_footer(file, budget)
+        .await
+        .map_err(|error| match error.code() {
+            "capacity" => Error::refusal(
+                "capacity",
+                format!(
+                    "spilled step {step}: the shared budget cannot hold its file's footer: {}",
+                    error.message()
+                ),
+            ),
+            _ => error,
+        })?;
+    scan_retained(spill_reader(budget), file.path(), Arc::new(memory)).await
 }
 
 /// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
