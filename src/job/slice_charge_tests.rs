@@ -8,7 +8,10 @@
 // Rust guideline compliant 2026-02-21
 use super::*;
 use arrow::datatypes::DataType;
-use datafusion::physical_plan::{ExecutionPlan, Partitioning, collect, displayable};
+use datafusion::{
+    common::JoinType,
+    physical_plan::{ExecutionPlan, Partitioning, collect, displayable},
+};
 use std::sync::Arc;
 
 const ROWS: usize = 200_000;
@@ -22,6 +25,11 @@ const LEFT_JOIN: &str = "big LEFT JOIN mid ON big.k = mid.k";
 /// Retained steps carry no statistics, so every join builds on its left
 /// input. Returns the bytes `big` retains.
 async fn retained_job(payload: &str) -> (tempfile::TempDir, Job, usize) {
+    retained_rows(payload, ROWS).await
+}
+
+/// [`retained_job`] with `rows` rows in `big`.
+async fn retained_rows(payload: &str, rows: usize) -> (tempfile::TempDir, Job, usize) {
     let scratch = tempfile::tempdir().unwrap();
     let job = Job::new(
         Limits {
@@ -33,17 +41,17 @@ async fn retained_job(payload: &str) -> (tempfile::TempDir, Job, usize) {
         scratch.path().join("scratch"),
     )
     .unwrap();
-    let (storage, rows, retained) = job
+    let (storage, retained_rows, retained) = job
         .materialize_detailed(
             "big",
             &format!(
                 "SELECT value AS k, lpad(cast(value AS varchar), 200, 'b') AS body, \
-                 {payload} AS payload FROM generate_series(1, {ROWS}) AS t(value)"
+                 {payload} AS payload FROM generate_series(1, {rows}) AS t(value)"
             ),
         )
         .await
         .unwrap();
-    assert_eq!((storage, rows), (StepStorage::Memory, ROWS));
+    assert_eq!((storage, retained_rows), (StepStorage::Memory, rows));
     for (name, keys) in [("mid", MATCHED), ("tiny", 1)] {
         let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
         job.materialize(name, &sql).await.unwrap();
@@ -341,4 +349,268 @@ async fn round_robin_repartition_charges_sliced_join_output_once() {
             .all(|(_, waiting, retained)| *waiting < *retained / 4),
         "pool peak above the join build against retained step bytes: {charges:?}"
     );
+}
+
+/// Whether an outer join hands its build rows on as slices of one batch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Emission {
+    /// Ranges of the build batch, or what the output coalescer cuts from it
+    /// when it holds 1 to 4,096 rows: the inflation the wrap removes.
+    Sliced,
+    /// One batch the coalescer passes through whole, because it held no rows
+    /// (or over 4,096, the same `push_back` of the same batch in arrow-select
+    /// 58.4, which SQL here cannot hold deterministically: the probe's own
+    /// coalescers choose its batch sizes). The wrap must leave it alone.
+    Whole,
+}
+
+/// Rows in `big` for the shape survey: enough slices to show inflation.
+const SHAPE_ROWS: usize = 100_000;
+
+/// (case, relation after FROM with `{big}` for the input, join, join type,
+/// emission, whether the session collects the build side)
+type Shape = (
+    &'static str,
+    &'static str,
+    &'static str,
+    JoinType,
+    Emission,
+    bool,
+);
+
+fn shapes() -> [Shape; 12] {
+    use Emission::{Sliced, Whole};
+    use JoinType::{Full, Left, LeftAnti, LeftMark, LeftSemi};
+    let (hash, nested) = ("HashJoinExec", "NestedLoopJoinExec");
+    [
+        (
+            "left",
+            "{big} LEFT JOIN mid ON big.k = mid.k",
+            hash,
+            Left,
+            Sliced,
+            false,
+        ),
+        // The last probe partition to finish emits the build's unmatched rows
+        // after what it buffered; two probe partitions of 1,000 matches each
+        // make that 1,000 whichever finishes last.
+        (
+            "left, collect left",
+            "{big} LEFT JOIN (SELECT k FROM mid WHERE k % 2 = 0 \
+             UNION ALL SELECT k FROM mid WHERE k % 2 = 1) AS mid ON big.k = mid.k",
+            hash,
+            Left,
+            Sliced,
+            true,
+        ),
+        (
+            "left, none buffered",
+            "{big} LEFT JOIN absent ON big.k = absent.k",
+            hash,
+            Left,
+            Whole,
+            false,
+        ),
+        (
+            "full",
+            "{big} FULL JOIN mid ON big.k = mid.k",
+            hash,
+            Full,
+            Sliced,
+            false,
+        ),
+        (
+            "semi",
+            "{big} WHERE EXISTS (SELECT 1 FROM mid WHERE mid.k = big.k)",
+            hash,
+            LeftSemi,
+            Whole,
+            false,
+        ),
+        (
+            "anti",
+            "{big} WHERE NOT EXISTS (SELECT 1 FROM mid WHERE mid.k = big.k)",
+            hash,
+            LeftAnti,
+            Whole,
+            false,
+        ),
+        (
+            "null-aware anti",
+            "{big} WHERE big.k NOT IN (SELECT k FROM mid)",
+            hash,
+            LeftAnti,
+            Whole,
+            false,
+        ),
+        (
+            "mark",
+            "{big} WHERE EXISTS (SELECT 1 FROM mid WHERE mid.k = big.k) OR big.k < 0",
+            hash,
+            LeftMark,
+            Whole,
+            false,
+        ),
+        // Every row matches or none does, so each range of the build batch
+        // passes its filter whole and stays a zero-copy slice.
+        (
+            "nested left",
+            "{big} LEFT JOIN tiny ON big.k + tiny.k = 0",
+            nested,
+            Left,
+            Sliced,
+            false,
+        ),
+        (
+            "nested semi",
+            "{big} WHERE EXISTS (SELECT 1 FROM tiny WHERE big.k >= tiny.k)",
+            nested,
+            LeftSemi,
+            Sliced,
+            false,
+        ),
+        (
+            "nested anti",
+            "{big} WHERE NOT EXISTS (SELECT 1 FROM tiny WHERE big.k < tiny.k)",
+            nested,
+            LeftAnti,
+            Sliced,
+            false,
+        ),
+        (
+            "nested mark",
+            "{big} WHERE EXISTS (SELECT 1 FROM tiny WHERE big.k >= tiny.k) OR big.k < 0",
+            nested,
+            LeftMark,
+            Sliced,
+            false,
+        ),
+    ]
+}
+
+/// The join type of an executed hash or nested-loop join.
+fn join_type(join: &Arc<dyn ExecutionPlan>) -> Option<JoinType> {
+    use datafusion::physical_plan::joins::{HashJoinExec, NestedLoopJoinExec};
+    let join = join.as_any();
+    join.downcast_ref::<HashJoinExec>()
+        .map(|join| *join.join_type())
+        .or_else(|| {
+            join.downcast_ref::<NestedLoopJoinExec>()
+                .map(|join| *join.join_type())
+        })
+}
+
+// Two workers run the two partitions side by side: 48 queries over 100,000 rows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn outer_join_shapes_keep_their_rows_and_charge_once() {
+    let nullable_list = "CASE WHEN value % 7 = 0 THEN NULL ELSE \
+         make_array(lpad(cast(value AS varchar), 150, 'x'), \
+         CASE WHEN value % 3 = 0 THEN NULL ELSE lpad(cast(value AS varchar), 150, 'y') END) END";
+    // (payload, its SQL, the relation the joins read)
+    let payloads = [
+        ("list with nulls", nullable_list, "big"),
+        ("string view", payloads()[1].1, BIG_VIEWS),
+    ];
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
+    for (payload, column, relation) in payloads {
+        let (_scratch, job, retained) = retained_rows(column, SHAPE_ROWS).await;
+        job.materialize(
+            "absent",
+            &format!("SELECT -value AS k FROM generate_series(1, {MATCHED}) AS t(value)"),
+        )
+        .await
+        .unwrap();
+        // The same catalog, planning hash joins in CollectLeft mode.
+        let collect_left = SessionContext::new_with_state(
+            datafusion::execution::SessionStateBuilder::new_from_existing(job.context.state())
+                .build(),
+        );
+        collect_left
+            .sql("SET datafusion.optimizer.repartition_joins = false")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        for (case, from, join, expected, emission, collect) in shapes() {
+            let context = if collect { &collect_left } else { &job.context };
+            let sql = format!(
+                "SELECT j.* FROM (SELECT big.k, big.body, big.payload FROM {}) AS j \
+                 CROSS JOIN tiny",
+                from.replace("{big}", relation)
+            );
+            let (plan, rows) = execute(context, &sql).await.unwrap();
+            let (native, expected_rows) =
+                execute(&crate::budget::without_retained_compaction(context), &sql)
+                    .await
+                    .unwrap();
+            let text = displayable(plan.as_ref()).indent(true).to_string();
+            // The SQL produced the join under test, and the rule wrapped it.
+            let wraps = wraps_over(&plan, join)
+                .into_iter()
+                .filter(|wrap| join_type(wrap.children()[0]) == Some(expected))
+                .collect::<Vec<_>>();
+            if wraps.is_empty() {
+                failures.push(format!(
+                    "{payload}, {case}: no wrap over a {expected} {join}:\n{text}"
+                ));
+                continue;
+            }
+            if collect && !text.contains("mode=CollectLeft") {
+                failures.push(format!("{payload}, {case}: not collected:\n{text}"));
+            }
+            if rows != expected_rows {
+                failures.push(format!(
+                    "{payload}, {case}: {} rows differ from the native plan's {}",
+                    rows.len(),
+                    expected_rows.len()
+                ));
+            }
+            let charged = operators(&plan, "CrossJoinExec").first().map(build_charge);
+            let unguarded = operators(&native, "CrossJoinExec")
+                .first()
+                .map(build_charge);
+            let copied = wraps
+                .iter()
+                .map(|wrap| metric(wrap, "copied_batches"))
+                .sum::<usize>();
+            results.push((
+                payload, case, emission, retained, charged, unguarded, copied,
+            ));
+        }
+    }
+    eprintln!(
+        "(payload, case, emission, retained, build charged, charged without the rule, \
+         copied batches): {results:#?}"
+    );
+    for (payload, case, emission, retained, charged, unguarded, copied) in &results {
+        let (Some(charged), Some(unguarded)) = (charged, unguarded) else {
+            failures.push(format!("{payload}, {case}: no cross join build"));
+            continue;
+        };
+        // The rows the cross join holds, at most `big`, plus its own state.
+        if *charged >= 2 * retained {
+            failures.push(format!(
+                "{payload}, {case}: charged {charged} for {retained}"
+            ));
+        }
+        // Without the rule the fixture inflates, so the check above can see
+        // the rule. Not for views behind a nested-loop join: its output
+        // coalescer copies the strings of a range that uses under half of
+        // its buffers (arrow-select 58.4 coalesce/byte_view.rs), which every
+        // range of the whole build batch does.
+        let compacted_upstream = *payload == "string view" && case.starts_with("nested");
+        if *emission == Emission::Sliced && !compacted_upstream && *unguarded < 2 * retained {
+            failures.push(format!(
+                "{payload}, {case}: sliced, yet {unguarded} unguarded for {retained}"
+            ));
+        }
+        // A whole batch of text owns its buffers. Views may still share the
+        // build's and be copied by view compaction.
+        if *emission == Emission::Whole && *payload != "string view" && *copied > 0 {
+            failures.push(format!("{payload}, {case}: {copied} whole batches copied"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
