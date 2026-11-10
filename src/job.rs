@@ -148,7 +148,9 @@ impl Job {
     /// Registers a Parquet file or directory with native projection and statistics.
     ///
     /// # Errors
-    /// Returns native schema, input I/O, or registration errors.
+    /// Refuses a path where the listing finds no file (code `missing_input`).
+    /// Returns native schema, input I/O, or registration errors. Listing
+    /// failures name the input and its path.
     pub async fn register_parquet(&self, name: &str, path: &Path) -> Result<()> {
         self.context
             .register_parquet(
@@ -156,12 +158,42 @@ impl Job {
                 path.to_string_lossy().as_ref(),
                 ParquetReadOptions::default(),
             )
-            .await?;
+            .await
+            .map_err(|error| unreadable_parquet(name, path, error))?;
         let provider = self.context.table_provider(name).await?;
+        self.require_parquet_file(name, path, &provider.schema())?;
         self.context.deregister_table(name)?;
         self.context
             .register_table(name, std::sync::Arc::new(fitting::FittedTable { provider }))?;
         Ok(())
+    }
+
+    /// Refuses a Parquet input for which the listing found no file.
+    ///
+    /// The listing reads a path it cannot find, and a directory holding no
+    /// file with the suffix, as a table with no columns and no rows. A
+    /// statement then fails on an unknown column, or counts zero rows and
+    /// succeeds. A file brings its columns whether or not it has rows, so
+    /// `listed` without columns means no file. Asking the listing's own
+    /// answer keeps one authority on what it reads, and one listing.
+    fn require_parquet_file(
+        &self,
+        name: &str,
+        path: &Path,
+        listed: &arrow::datatypes::Schema,
+    ) -> Result<()> {
+        if !listed.fields().is_empty() {
+            return Ok(());
+        }
+        self.context.deregister_table(name)?;
+        Err(crate::Error::refusal(
+            "missing_input",
+            format!(
+                "Parquet input {name:?} has no file to read at {}: \
+                 the path is missing or holds no file ending in .parquet",
+                path.display()
+            ),
+        ))
     }
 
     /// Registers plain or gzip JSON lines with nullable fields and raw evidence.
@@ -379,6 +411,13 @@ impl Job {
     ) -> Result<ExportedFile> {
         export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
+}
+
+/// Puts the input's name and path ahead of a failure to list or read it.
+fn unreadable_parquet(name: &str, path: &Path, error: impl Into<crate::Error>) -> crate::Error {
+    error
+        .into()
+        .context(format_args!("Parquet input {name:?} at {}", path.display()))
 }
 
 #[cfg(test)]
