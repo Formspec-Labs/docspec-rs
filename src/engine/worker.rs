@@ -10,6 +10,12 @@ use tokio::{runtime::Handle, sync::OwnedSemaphorePermit};
 
 static CLOCK_ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+pub(super) enum DiskAdmission {
+    Shared,
+    Exclusive,
+    Metadata,
+}
+
 /// Process ownership retained after uncertain private-worker termination.
 #[derive(Debug)]
 pub(super) struct Host {
@@ -163,13 +169,60 @@ impl Engine {
         F: FnOnce(Engine) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
+        self.admit_disk_work(memory, DiskAdmission::Shared, operation)
+            .await
+    }
+
+    pub(super) async fn admit_disk_work<T, F, Fut>(
+        &self,
+        memory: OwnedSemaphorePermit,
+        disk: DiskAdmission,
+        operation: F,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Engine) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
         let (runtime, task) = self.prepare_worker_task::<F, Fut>()?;
         // Cancellation while waiting starts no work. Once admitted there is no
         // await before spawning the task that owns the complete service future.
         let guard = self.inner.maintenance.clone().read_owned().await;
+        let disk_guard = match disk {
+            DiskAdmission::Shared => (Some(self.inner.disk_work.clone().read_owned().await), None),
+            DiskAdmission::Exclusive => {
+                (None, Some(self.inner.disk_work.clone().write_owned().await))
+            }
+            DiskAdmission::Metadata => (None, None),
+        };
+        if !matches!(disk, DiskAdmission::Metadata) {
+            self.check_disk_drain(matches!(disk, DiskAdmission::Exclusive))
+                .await?;
+        }
         self.check_admission()?;
-        self.spawn_work(runtime, guard, memory, task, operation)
+        self.spawn_work(runtime, (guard, disk_guard), memory, task, operation)
             .await?
+    }
+
+    async fn check_disk_drain(&self, exclusive: bool) -> Result<()> {
+        if self.inner.retained_disk.lock().await.upgrade().is_some()
+            || (exclusive
+                && self
+                    .inner
+                    .lifecycle
+                    .budget
+                    .runtime_env()
+                    .disk_manager
+                    .spilling_progress()
+                    .active_files_count
+                    != 0)
+        {
+            return Err(Error::refusal(
+                "disk_draining",
+                "previous native disk work still owns its runtime; retry after it drains",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) async fn maintain_work<T, F, Fut>(
@@ -200,24 +253,26 @@ impl Engine {
     {
         let (runtime, task) = self.prepare_worker_task::<F, Fut>()?;
         let guard = Arc::new(self.inner.maintenance.clone().read_owned().await);
+        let disk_guard = Arc::new(self.inner.disk_work.clone().read_owned().await);
+        self.check_disk_drain(false).await?;
         self.check_admission()?;
         // Share this admission instead of reacquiring after a writer has queued.
         // The owned opening task keeps custody if its caller is canceled.
         self.spawn_work(
             runtime,
-            guard.clone(),
+            (guard.clone(), disk_guard.clone()),
             memory,
             task,
             move |engine| async move {
                 let stream = operation(engine.clone()).await?;
                 let schema = stream.schema();
                 let retained = futures::stream::unfold(
-                    (stream, guard, engine),
-                    |(mut stream, guard, engine)| async move {
+                    (stream, guard, disk_guard, engine),
+                    |(mut stream, guard, disk_guard, engine)| async move {
                         stream
                             .next()
                             .await
-                            .map(|batch| (batch, (stream, guard, engine)))
+                            .map(|batch| (batch, (stream, guard, disk_guard, engine)))
                     },
                 );
                 Ok(Box::pin(RecordBatchStreamAdapter::new(schema, retained))

@@ -135,6 +135,7 @@ pub(super) fn filter_support(
 #[derive(Debug)]
 pub(super) struct FittedTable {
     pub provider: Arc<dyn TableProvider>,
+    pub metadata_memory: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 #[async_trait::async_trait]
 impl TableProvider for FittedTable {
@@ -163,7 +164,15 @@ impl TableProvider for FittedTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        self.provider.scan(state, projection, filters, limit).await
+        let plan = self
+            .provider
+            .scan(state, projection, filters, limit)
+            .await?;
+        Ok(if let Some(memory) = &self.metadata_memory {
+            super::native::admit_metadata_plan(plan, memory.clone())
+        } else {
+            plan
+        })
     }
 }
 

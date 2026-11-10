@@ -5,6 +5,10 @@ use crate::catalog::View;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
+#[cfg(all(test, feature = "test-util"))]
+#[path = "compaction/quality_budget_tests.rs"]
+mod quality_budget_tests;
+
 pub(super) struct CheckpointCompactionPlan {
     pub(super) records: Vec<(String, serde_json::Value)>,
     pub(super) new_archive_path: String,
@@ -136,7 +140,7 @@ impl Engine {
         let checkpoint_plan = self
             .plan_succession_checkpoint(dataset, &view, &rows, &mut remove_keys)
             .await?;
-        let head_ref_paths: BTreeSet<String> = if let Some((_, _, authority)) =
+        let mut head_ref_paths: BTreeSet<String> = if let Some((_, _, authority)) =
             rows.get_record::<Authority>("authority")?
             && let Some(head_release) = authority.release
         {
@@ -147,7 +151,20 @@ impl Engine {
         } else {
             BTreeSet::new()
         };
-        prune_obsolete_protections(&rows, &head_ref_paths, &mut remove_keys)?;
+        retain_publication_payloads(
+            &rows,
+            &view,
+            &lifecycle.budget,
+            &mut head_ref_paths,
+            &mut remove_keys,
+        )?;
+        prune_obsolete_protections(
+            &rows,
+            &view.identifier().to_string(),
+            &lifecycle.budget,
+            &head_ref_paths,
+            &mut remove_keys,
+        )?;
         drop(rows);
         let upserts = checkpoint_plan
             .as_ref()
@@ -249,6 +266,7 @@ impl Engine {
             return Ok(None);
         };
         let mut protected_ops = BTreeSet::from([head_release.id.clone()]);
+        let mut ended_managed = BTreeSet::new();
         let mut protected_keys = BTreeSet::new();
         for (_, _, json) in rows.prefix("retirement/") {
             let receipt: Retirement = serde_json::from_str(json)?;
@@ -256,6 +274,7 @@ impl Engine {
                 RetirementScope::ResultAvailability { operation }
                 | RetirementScope::OperationRecovery { operation } => {
                     protected_ops.insert(operation.clone());
+                    ended_managed.insert(operation.clone());
                 }
                 _ => {}
             }
@@ -276,7 +295,21 @@ impl Engine {
             if let Some(op_str) = key.strip_prefix("availability-retired/")
                 && let Ok(op) = Id::new(op_str)
             {
-                protected_ops.insert(op);
+                protected_ops.insert(op.clone());
+                ended_managed.insert(op);
+            }
+        }
+        // Managed reconciliation promises the original request/result until an
+        // existing native recovery or availability retirement explicitly ends it.
+        for (key, _, _) in rows.prefix("managed-quality-policy/") {
+            let Some(operation) = key.strip_prefix("managed-quality-policy/") else {
+                continue;
+            };
+            if !operation.contains('/') {
+                let operation = Id::new(operation)?;
+                if !ended_managed.contains(&operation) {
+                    protected_ops.insert(operation);
+                }
             }
         }
         for (key, _, json) in rows.prefix("operation/") {
@@ -696,14 +729,85 @@ fn collect_record_paths(value: &serde_json::Value, paths: &mut BTreeSet<String>)
     }
 }
 
+fn retain_publication_payloads(
+    rows: &crate::catalog::SnapshotRows,
+    view: &View,
+    budget: &crate::budget::Budget,
+    kept_record_paths: &mut BTreeSet<String>,
+    remove_keys: &mut BTreeSet<String>,
+) -> Result<()> {
+    use crate::engine::job_publication::{
+        self, INTENT_PREFIX, PAYLOAD_PREFIX, PublicationIntentStatus,
+    };
+    for (key, _, _) in rows
+        .prefix(INTENT_PREFIX)
+        .chain(rows.prefix(PAYLOAD_PREFIX))
+    {
+        if let Some(saved) = job_publication::retained_intent_record(rows, view, key, budget)? {
+            if saved.status == PublicationIntentStatus::Retired {
+                let reference = &saved
+                    .intent
+                    .as_ref()
+                    .ok_or_else(|| {
+                        Error::refusal("retention_inventory", "retired publication audit is absent")
+                    })?
+                    .reference
+                    .native_record;
+                if rows.contains_key(&reference.key) {
+                    remove_keys.insert(reference.key.clone());
+                }
+            } else {
+                kept_record_paths.extend(saved.objects().map(|object| object.path.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn prune_obsolete_protections(
     rows: &crate::catalog::SnapshotRows,
+    table: &str,
+    budget: &crate::budget::Budget,
     head_ref_paths: &BTreeSet<String>,
     remove_keys: &mut BTreeSet<String>,
 ) -> Result<()> {
     let index = ObsoleteLifecycleIndex::from_rows(rows)?;
     let mut kept_record_paths = head_ref_paths.clone();
-    for (k, _, json) in rows.prefix("") {
+    for (k, revision, json) in rows.prefix("") {
+        if crate::engine::job_publication::is_record(k) {
+            continue;
+        }
+        if k.starts_with("job-") {
+            let _decoded = rows.reserve_decoded(budget, &[k])?;
+            if !remove_keys.contains(k) {
+                // Audit metadata never grants payload lifetime after its exact native promise ends.
+                let marker = super::retirement::marker_key(&RetainedGeneration {
+                    key: k.into(),
+                    revision,
+                });
+                if !rows.contains_key(&marker) {
+                    for object in
+                        crate::engine::managed_job::retention::record_roots(k, json, table, budget)?
+                            .ok_or_else(|| {
+                                Error::refusal("retention_inventory", "unknown whole-job record")
+                            })?
+                    {
+                        kept_record_paths.insert(object.path);
+                    }
+                }
+            }
+            continue;
+        }
+        if k.starts_with("managed-quality-") {
+            let _decoded = rows.reserve_decoded(budget, &[k])?;
+            let companions = crate::engine::managed_build::retention_companions(k, json, rows)?;
+            let companion_keys = companions.iter().map(String::as_str).collect::<Vec<_>>();
+            let _companion_decoded = rows.reserve_decoded(budget, &companion_keys)?;
+            super::inventory::quality_control_record(k, json, rows, table)?;
+            // Only native operation/result/readback roots own availability.
+            // Caller artifact paths and completed read identities are audit data.
+            continue;
+        }
         if !remove_keys.contains(k)
             && !k.starts_with("protection/")
             && !k.starts_with("reference-binding/")
@@ -733,6 +837,22 @@ fn prune_obsolete_protections(
         let Some((op_str, kind)) = protection.purpose.split_once('/') else {
             continue;
         };
+        if kind == "job" {
+            let operation_key = format!("job-operation/{op_str}");
+            if let Some(revision) = rows.revision(&operation_key) {
+                let marker = super::retirement::marker_key(&RetainedGeneration {
+                    key: operation_key,
+                    revision,
+                });
+                if rows.contains_key(&marker) {
+                    if rows.contains_key(&bkey) {
+                        remove_keys.insert(bkey);
+                    }
+                    remove_keys.insert(key.to_owned());
+                }
+            }
+            continue;
+        }
         if kind == "compaction" {
             let req_key = format!("compaction-request/{op_str}");
             let res_key = format!("compaction-result/{op_str}");

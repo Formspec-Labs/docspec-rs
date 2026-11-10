@@ -11,8 +11,13 @@ mod json_many;
 mod materialized;
 pub(crate) mod metrics;
 mod native;
+mod plan;
+mod prepare;
 mod query_result;
+pub(crate) mod retained;
 mod spec;
+#[cfg(feature = "substrait")]
+mod substrait;
 mod table_operations;
 pub mod tables;
 
@@ -30,14 +35,26 @@ use datafusion::{
     dataframe::DataFrame,
     prelude::{ParquetReadOptions, SessionContext},
 };
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub use components::ComponentsSettings;
 pub use export::{ExportProfile, ExportSettings, ExportedFile};
 pub use json_lines::JsonLinesFile;
 pub use materialized::StepStorage;
 #[doc(inline)]
-pub use native::NativeInputObservation;
+pub use native::{
+    NativeInputObservation, NativeVersionObservation, NativeVersionSnapshotObservation,
+};
+#[doc(inline)]
+pub use plan::JobPlanSpec;
+#[doc(inline)]
+pub use prepare::{
+    DeclaredInputSchema, JobArtifact, PrepareJobSpec, PreparedInput, PreparedJob, PreparedRelation,
+    SchemaArtifact, SchemaArtifactFormat,
+};
 pub use query_result::QueryResult;
 pub use spec::{
     ComponentsStep, JobFailure, JobInput, JobOutput, JobResult, JobSpec, JobStep, OutputResult,
@@ -49,23 +66,62 @@ pub use table_operations::{TableOperation, TableOperationResult};
 pub struct Job {
     context: SessionContext,
     budget: Budget,
+    relation_aliases: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
     #[cfg(feature = "remote")]
     remote: Option<crate::storage::remote::RemoteStorage>,
 }
 
 impl Job {
+    fn register_output_provider(
+        &self,
+        name: &str,
+        provider: Arc<dyn datafusion::catalog::TableProvider>,
+    ) -> Result<()> {
+        let catalog = self.context.catalog("datafusion").ok_or_else(|| {
+            crate::Error::refusal("invalid_spec", "native job catalog is missing")
+        })?;
+        if catalog.schema("outputs").is_none() {
+            catalog.register_schema(
+                "outputs",
+                Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+            )?;
+        }
+        let reference = datafusion::common::TableReference::partial("outputs", name);
+        if self.context.table_exist(reference.clone())? {
+            return Err(crate::Error::refusal(
+                "invalid_spec",
+                "named export relation already exists",
+            ));
+        }
+        self.context.register_table(reference, provider)?;
+        Ok(())
+    }
+
+    pub(crate) async fn register_completed_output(&self, name: &str, path: &Path) -> Result<()> {
+        let frame = materialized::read_retained(&self.budget, path).await?;
+        let frame = self.owned_relation_frame(name, true, frame)?;
+        self.register_output_provider(name, frame.into_view())
+    }
+
+    fn register_declared_output(&self, name: &str, schema: SchemaRef) -> Result<()> {
+        self.register_output_provider(name, Arc::new(plan::SchemaOnlyTable(schema)))
+    }
     /// Registers a reusable logical view without collecting its rows.
     ///
     /// # Errors
     /// Refuses an existing name or an invalid or volatile SQL expression.
     pub async fn register_view(&self, name: &str, sql: &str) -> Result<()> {
+        let frame = self.sql(sql).await?;
+        self.register_frame(name, frame)
+    }
+
+    fn register_frame(&self, name: &str, frame: DataFrame) -> Result<()> {
         if self.context.table_exist(name)? {
             return Err(crate::Error::refusal(
                 "invalid_spec",
-                "named step already exists",
+                "named relation already exists",
             ));
         }
-        let frame = self.sql(sql).await?;
         self.context.register_table(name, frame.into_view())?;
         Ok(())
     }
@@ -94,12 +150,17 @@ impl Job {
     /// Refuses invalid limits or an unavailable scratch directory.
     pub fn new(limits: Limits, scratch: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&scratch)?;
-        let budget = Budget::in_workspace(limits, &scratch)?;
+        Self::from_budget(Budget::in_workspace(limits, &scratch)?)
+    }
+
+    pub(crate) fn from_budget(budget: Budget) -> Result<Self> {
         let mut context = budget.context();
         functions::register(&mut context, &budget)?;
+        plan::constants::register(&context, &budget)?;
         Ok(Self {
             context,
             budget,
+            relation_aliases: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             #[cfg(feature = "remote")]
             remote: None,
         })
@@ -150,9 +211,18 @@ impl Job {
     /// # Errors
     /// Refuses a path where the listing finds no file to read (code
     /// `missing_input`).
-    /// Returns native schema, input I/O, or registration errors. Listing
-    /// failures name the input and its path.
+    /// Returns native schema, input I/O, or registration errors. Footer
+    /// admission and listing failures name the input and its path.
     pub async fn register_parquet(&self, name: &str, path: &Path) -> Result<()> {
+        let metadata_memory = if path.is_file() {
+            Some(Arc::new(
+                crate::storage::admit_parquet_footer(path, &self.budget)
+                    .await
+                    .map_err(|error| unreadable_parquet(name, path, error))?,
+            ))
+        } else {
+            None
+        };
         self.context
             .register_parquet(
                 name,
@@ -164,8 +234,13 @@ impl Job {
         let provider = self.context.table_provider(name).await?;
         self.require_parquet_file(name, path, &provider.schema())?;
         self.context.deregister_table(name)?;
-        self.context
-            .register_table(name, std::sync::Arc::new(fitting::FittedTable { provider }))?;
+        self.context.register_table(
+            name,
+            std::sync::Arc::new(fitting::FittedTable {
+                provider,
+                metadata_memory,
+            }),
+        )?;
         Ok(())
     }
 
@@ -218,10 +293,20 @@ impl Job {
 
     /// Plans read-only relational SQL in the shared job context.
     ///
+    /// The returned `DataFrame` is a native DataFusion escape hatch. Calling its
+    /// `collect` or `create_physical_plan` directly does not include this Job's
+    /// cumulative optimizer/stream ownership. `JobSpec::run`, materialization,
+    /// exports and managed commands use the maintained admitted consumer paths.
+    ///
     /// # Errors
-    /// Refuses DDL, DML and session statements before effects, or invalid functions.
+    /// Refuses DDL, DML, session statements, unbound parameters and invalid functions.
     /// Returns planning errors; execution errors propagate from the frame.
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
+        self.sql_bound(sql, &std::collections::BTreeMap::new())
+            .await
+    }
+
+    async fn sql_unbound(&self, sql: &str) -> Result<DataFrame> {
         let options = datafusion::execution::context::SQLOptions::new()
             .with_allow_ddl(false)
             .with_allow_dml(false)
@@ -308,6 +393,45 @@ impl Job {
         .await?;
         self.register_admitted_native_table(name, table, std::sync::Arc::new(memory))
             .await
+    }
+
+    pub(crate) async fn register_retained_snapshot(
+        &self,
+        name: &str,
+        selection: &crate::storage::NativeTableSnapshot,
+        paths: std::collections::BTreeMap<String, String>,
+        memory: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<()> {
+        let owner = std::sync::Arc::new(std::sync::Mutex::new(vec![std::sync::Arc::new(memory)]));
+        let io = crate::storage::custody::retained_io(paths, &self.budget, Some(owner.clone()))?;
+        let (table, metadata_memory) =
+            crate::storage::open_snapshot_with_io_admitted(selection, io, &self.budget).await?;
+        let table = iceberg::table::Table::builder()
+            .metadata(table.metadata_ref())
+            .metadata_location(&selection.metadata_location)
+            .identifier(iceberg::TableIdent::from_strs(["retained", "snapshot"])?)
+            .runtime(iceberg::Runtime::try_current()?)
+            .file_io(table.file_io().clone())
+            .readonly(true)
+            .disable_cache()
+            .build()?;
+        let metadata_memory = std::sync::Arc::new(metadata_memory);
+        // Native manifest tasks may retain FileIO after the outer stream drops.
+        // This shared owner contains permits only, so it cannot retain the table.
+        owner.lock().unwrap().push(metadata_memory.clone());
+        // This retained profile uses the existing serial, byte-fitted native
+        // scan rather than the upstream provider's host-wide concurrency defaults.
+        let observation = NativeInputObservation::from_table(name, &table);
+        let provider = crate::query::table(table, self.budget.clone(), None)?;
+        self.context.register_table(
+            name,
+            std::sync::Arc::new(native::AdmittedTable {
+                provider,
+                memory: metadata_memory,
+                observation,
+            }),
+        )?;
+        Ok(())
     }
 
     pub(super) async fn register_native_table(

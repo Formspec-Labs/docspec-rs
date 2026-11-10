@@ -40,9 +40,11 @@ path = "tests/cli_evidence.rs"
 
 [features]
 test-util = []
-remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store", "dep:typetag"]
+substrait = ["dep:datafusion-substrait", "dep:prost", "dep:substrait"]
+remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:opendal", "dep:reqwest-rest", "dep:object_store"]
 
 [dependencies]
+base64 = "=0.22.1"
 anyhow = "1"
 arrow = { version = "58", features = ["ipc", "json"] }
 arrow-schema = { version = "=58.4.0", features = ["serde"] }
@@ -52,6 +54,9 @@ blake3 = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 datafusion = "=53.1.0"
+datafusion-substrait = { version = "=53.1.0", default-features = false, optional = true }
+prost = { version = "=0.14.4", optional = true }
+substrait = { version = "=0.62.2", features = ["serde"], optional = true }
 datafusion-functions-json = "=0.53.1"
 url = "=2.5.8"
 percent-encoding = "=2.3.2"
@@ -69,7 +74,7 @@ iceberg-storage-opendal = { version = "=0.10.1", optional = true, default-featur
 object_store = { version = "=0.13.2", optional = true, default-features = false, features = ["aws"] }
 opendal = { version = "=0.57.0", optional = true, default-features = false, features = ["services-s3", "layers-timeout"] }
 # Register docspec's Iceberg storage factory (iceberg 0.10.1 uses typetag 0.2).
-typetag = { version = "0.2", optional = true }
+typetag = "0.2"
 # Unify rustls-tls on reqwest 0.12 for iceberg-catalog-rest; S3 uses a separate reqwest version.
 reqwest-rest = { package = "reqwest", version = "=0.12.28", optional = true, default-features = false, features = ["rustls-tls"] }
 mimalloc = "0.1"
@@ -102,7 +107,6 @@ name = "r2_candidate_probe"
 required-features = ["remote"]
 
 [dev-dependencies]
-base64 = "=0.22.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 

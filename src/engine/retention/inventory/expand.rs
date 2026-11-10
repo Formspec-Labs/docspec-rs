@@ -57,9 +57,22 @@ impl Inventory {
         json: &str,
         rows: &crate::catalog::SnapshotRows,
         origin: &RetentionBlocker,
+        budget: Option<&Budget>,
     ) -> Result<()> {
         // Most-specific families precede their common prefix.
-        if key == "source-fence" {
+        if key.starts_with("job-") {
+            let budget = budget.ok_or_else(unknown_dependencies)?;
+            for object in crate::engine::managed_job::retention::record_roots(
+                key,
+                json,
+                &origin.table,
+                budget,
+            )?
+            .ok_or_else(unknown_dependencies)?
+            {
+                self.object(&object, origin)?;
+            }
+        } else if key == "source-fence" {
             let fence: crate::engine::intake::SourceFence = decode(json)?;
             crate::engine::intake::validate_record(&fence)?;
             if crate::catalog::lifecycle_ident(&fence.dataset).to_string() != origin.table {
@@ -445,7 +458,20 @@ impl Inventory {
             self.release_pin(&decode(json)?, origin)?;
         } else if key == "authority" {
             let authority: Authority = decode(json)?;
-            validate_selection(rows, &authority, origin.revision, &origin.table, self.limit)?;
+            let whole_job = if authority.job_profile.is_some() || authority.job_selected.is_some() {
+                crate::engine::managed_job::retention::validate_selection(
+                    rows,
+                    &authority,
+                    origin.revision,
+                    &origin.table,
+                    budget.ok_or_else(unknown_dependencies)?,
+                )?
+            } else {
+                false
+            };
+            if !whole_job {
+                validate_selection(rows, &authority, origin.revision, &origin.table, self.limit)?;
+            }
             if let Some(release) = &authority.release {
                 // Authority adds no dependency to its exact immutable result.
                 // Its binding is inspected once through that result record.
@@ -642,6 +668,9 @@ impl Inventory {
                     }
                 }
             }
+        } else if super::quality_control_record(key, json, rows, &origin.table)? {
+            // Operation/result/readback roots own payload availability. Quality
+            // control records do not turn caller file paths into native objects.
         } else if crate::engine::backfill::continuous::validate_control_record(
             key,
             json,

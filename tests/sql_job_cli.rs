@@ -129,7 +129,8 @@ async fn later_failure_retains_identities_for_an_explicit_remaining_output_retry
 #[tokio::test]
 async fn sql_metadata_result_has_a_byte_bound() {
     let root = tempfile::tempdir().unwrap();
-    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"too_big","sql":"SELECT repeat('x',8192) AS text"}]})).unwrap();
+    let sql = format!("SELECT '{}' AS text", "x".repeat(8192));
+    let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path().join("scratch"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"too_big","sql":sql}]})).unwrap();
     let error = spec
         .run(Limits {
             max_metadata_bytes: 1024,

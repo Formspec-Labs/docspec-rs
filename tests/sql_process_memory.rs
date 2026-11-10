@@ -287,6 +287,15 @@ fn run_slice_case(case: &str) {
 /// peak while the chain ran. Run it alone, since timing shares the machine:
 /// `cargo test --all-features --test sql_process_memory -- --ignored --nocapture slice`.
 /// On 2026-11-10 each child peaked under 1.8 GiB RSS and the run took 76 s.
+///
+/// What it measures depends on the plan, and it checks only rows. While
+/// retained steps report no row counts, each join builds on its left input:
+/// `big` is the first build and its unmatched rows reach the second build as
+/// slices, the case the rule exists for. Once steps report row counts the
+/// planner swaps a join whose left input has more rows (DataFusion 53.1
+/// join_selection.rs `should_swap_join_order`), so both joins become Right
+/// joins built on `mid` and then `tiny`, no outer-join slices arise, and the
+/// on and off arms measure the same work.
 #[cfg(feature = "test-util")]
 #[test]
 #[ignore = "measurement: six children of up to 2 GiB each"]

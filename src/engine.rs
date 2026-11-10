@@ -48,6 +48,20 @@ pub use inputs::verify_input_coverage;
 mod intake;
 mod key_pruning;
 pub(crate) mod locations;
+mod managed_build;
+mod managed_job;
+pub use crate::model::{JobInputRecordRef, JobProducerAdoptionRef};
+#[doc(inline)]
+pub use managed_build::{ManagedBuildCommand, NativeReadReceipt, NativeVersionRead};
+pub use managed_job::producer::{
+    JobProducerAdoption, JobProducerRecord, JobProducerRecordLocation,
+};
+#[doc(inline)]
+pub use managed_job::publication as job_publication;
+pub use managed_job::{
+    JobArtifactWitness, JobFileInput, JobFileMember, JobInputAdmissionDigest, JobInputCustodyRef,
+    JobPrerequisite, JobSnapshotInput, ManagedJobCommand, ManagedJobPrepare, ManagedJobReceipt,
+};
 mod pipeline;
 mod planner;
 #[cfg(test)]
@@ -100,7 +114,11 @@ mod write;
 #[derive(Clone, Debug)]
 pub struct Engine {
     inner: Arc<Inner>,
+    #[cfg(feature = "remote")]
+    snapshot_source: Option<Arc<storage::remote::SnapshotSource>>,
 }
+
+type JobOperationLocks = BTreeMap<(Id, Id), std::sync::Weak<Mutex<()>>>;
 
 #[derive(Debug)]
 struct Inner {
@@ -111,11 +129,15 @@ struct Inner {
     locks: Mutex<BTreeMap<Id, Arc<Mutex<()>>>>,
     host: Arc<worker::Host>,
     maintenance: Arc<RwLock<()>>,
+    disk_work: Arc<RwLock<()>>,
+    retained_disk: Mutex<std::sync::Weak<datafusion::execution::disk_manager::DiskManager>>,
     closing: AtomicBool,
     owned_catalog: bool,
     #[cfg(feature = "remote")]
     remote_maintenance: Option<uuid::Uuid>,
     test_hooks: test_hooks::TestHooks,
+    job_runtime_sha256: std::sync::OnceLock<String>,
+    job_operations: Mutex<JobOperationLocks>,
 }
 
 // A retained value and its protection always come from the same native view.
@@ -263,6 +285,24 @@ impl Engine {
             .await?
     }
 
+    /// Opens a local workspace with one scoped, read-only S3 snapshot source.
+    ///
+    /// Managed operations retain their admitted bytes in the local workspace.
+    ///
+    /// # Errors
+    /// Refuses invalid source configuration, unavailable secrets or local host failures.
+    #[cfg(feature = "remote")]
+    pub async fn open_with_snapshot_source(
+        root: impl AsRef<Path>,
+        source: storage::remote::SnapshotSourceConfig,
+        limits: Limits,
+    ) -> Result<Self> {
+        let source = storage::remote::snapshot_source(source)?;
+        let mut engine = Self::open(root, limits).await?;
+        engine.snapshot_source = Some(Arc::new(source));
+        Ok(engine)
+    }
+
     /// Opens a workspace using an injected maintained catalog.
     ///
     /// # Errors
@@ -397,6 +437,12 @@ impl Engine {
         authority: &Authority,
         request: &OperationRequest,
     ) -> Result<()> {
+        if authority.job_profile.is_some() || authority.job_selected.is_some() {
+            return Err(Error::refusal(
+                "operation_family",
+                "whole-job authority cannot admit source operations",
+            ));
+        }
         if self.inner.retained.is_local() {
             return Ok(());
         }
@@ -458,6 +504,35 @@ impl Engine {
         let retained = locations::Location::root(&objects, &root);
         let scratch = root.join("scratch");
         std::fs::create_dir_all(&scratch)?;
+        if std::fs::symlink_metadata(&scratch)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(Error::refusal(
+                "workspace_scratch",
+                "native scratch cannot be a symbolic link",
+            ));
+        }
+        // The OS workspace lock excludes live owners. No durable record refers
+        // to scratch; reclaim only our maintained runtime's private directories,
+        // including hard-link aliases left in the publication crash window.
+        for entry in std::fs::read_dir(&scratch)? {
+            let entry = entry?;
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("datafusion-")
+            {
+                let kind = entry.file_type()?;
+                if !kind.is_dir() || kind.is_symlink() {
+                    return Err(Error::refusal(
+                        "workspace_scratch",
+                        "native scratch directory has an unexpected file type",
+                    ));
+                }
+                std::fs::remove_dir_all(entry.path())?;
+            }
+        }
         let budget = Budget::in_workspace(limits, &scratch)?;
         objects.register_query_store(budget.runtime_env())?;
         Ok(Self {
@@ -470,12 +545,18 @@ impl Engine {
                 locks: Mutex::new(BTreeMap::new()),
                 host: ownership,
                 maintenance: Arc::new(RwLock::new(())),
+                disk_work: Arc::new(RwLock::new(())),
+                retained_disk: Mutex::new(std::sync::Weak::new()),
                 closing: AtomicBool::new(false),
                 owned_catalog,
                 #[cfg(feature = "remote")]
                 remote_maintenance,
                 test_hooks: test_hooks::TestHooks::default(),
+                job_runtime_sha256: std::sync::OnceLock::new(),
+                job_operations: Mutex::new(BTreeMap::new()),
             }),
+            #[cfg(feature = "remote")]
+            snapshot_source: None,
         })
     }
 

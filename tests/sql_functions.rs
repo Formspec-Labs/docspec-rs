@@ -113,8 +113,11 @@ async fn cumulative_scalar_output_fits_without_changing_the_byte_allowance() {
         );
     }
     for sql in [
-        "SELECT json_array(repeat('x',2048)) AS value",
-        r#"SELECT json_get_many(concat('{"a":"',repeat('x',512),'"}'),'[["a"],["a"],["a"]]') AS value"#,
+        format!("SELECT json_array('{}') AS value", "x".repeat(2048)),
+        format!(
+            r#"SELECT json_get_many('{{"a":"{}"}}','[["a"],["a"],["a"]]') AS value"#,
+            "x".repeat(512)
+        ),
     ] {
         let spec: JobSpec = serde_json::from_value(json!({"scratch":root.path().join("single"),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"single","sql":sql}]})).unwrap();
         let error = spec.run(ceiling.clone()).await.unwrap_err().to_string();
@@ -316,8 +319,8 @@ async fn json_output_expansion_and_unsupported_values_refuse() {
     let mut small = limits();
     small.max_batch_bytes = 16384;
     for sql in [
-        "SELECT json_array(repeat('x',32768)) AS value",
-        "SELECT json_array(cast('NaN' AS DOUBLE)) AS value",
+        format!("SELECT json_array('{}') AS value", "x".repeat(32768)),
+        "SELECT json_array(cast('NaN' AS DOUBLE)) AS value".into(),
     ] {
         let spec:JobSpec=serde_json::from_value(json!({"scratch":root.path(),"inputs":[],"steps":[],"outputs":[],"queries":[{"name":"value","sql":sql}]})).unwrap();
         let error = spec.run(small.clone()).await.unwrap_err().to_string();

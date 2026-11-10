@@ -18,6 +18,7 @@ pub mod objects;
 mod parts;
 #[doc(inline)]
 pub use objects::RemoteObjects;
+pub(crate) use objects::SnapshotSource;
 pub(crate) use parts::{FixedPartS3, PART_BYTES};
 
 /// Startup connections sharing one resolved configuration.
@@ -144,6 +145,70 @@ pub fn remote_objects(
     secret_env: HashMap<String, String>,
 ) -> Result<RemoteObjects> {
     RemoteObjects::from_resolved(&resolve_properties(properties, secret_env)?, owned_prefix)
+}
+
+/// Explicit S3 read placement for a local managed snapshot source.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotSourceConfig {
+    /// Exact bucket and nonempty key prefix.
+    pub prefix: String,
+    /// HTTPS service root, or a path-style HTTP loopback fixture.
+    pub endpoint: String,
+    /// Provider signing region.
+    pub region: String,
+    /// Use path-style bucket addressing.
+    pub path_style: bool,
+    /// Credential property names mapped to environment-variable names.
+    pub secret_env: HashMap<String, String>,
+}
+
+pub(crate) fn snapshot_source(config: SnapshotSourceConfig) -> Result<SnapshotSource> {
+    let invalid = || {
+        Error::refusal(
+            "snapshot_source_config",
+            "invalid S3 snapshot source configuration",
+        )
+    };
+    let endpoint = reqwest_rest::Url::parse(&config.endpoint).map_err(|_| invalid())?;
+    let host = endpoint.host_str().ok_or_else(invalid)?;
+    let loopback = host == "localhost"
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if !(endpoint.scheme() == "https"
+        || endpoint.scheme() == "http" && loopback && config.path_style)
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+        || endpoint.path() != "/"
+        || config.region.is_empty()
+        || !config
+            .region
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        || !config.secret_env.contains_key("s3.access-key-id")
+        || !config.secret_env.contains_key("s3.secret-access-key")
+        || config.secret_env.keys().any(|property| {
+            !matches!(
+                property.as_str(),
+                "s3.access-key-id" | "s3.secret-access-key" | "s3.session-token"
+            )
+        })
+    {
+        return Err(invalid());
+    }
+    let properties = HashMap::from([
+        ("s3.endpoint".into(), endpoint.to_string()),
+        ("s3.region".into(), config.region),
+        ("s3.path-style-access".into(), config.path_style.to_string()),
+    ]);
+    SnapshotSource::from_resolved(
+        &resolve_properties(properties, config.secret_env)?,
+        &config.prefix,
+    )
 }
 
 // Bound metadata control requests while allowing remote connection setup.

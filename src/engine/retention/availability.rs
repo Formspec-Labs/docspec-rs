@@ -112,6 +112,11 @@ pub(super) fn collect(
     operation: &Id,
     budget: &Budget,
 ) -> Result<Vec<RetainedGeneration>> {
+    if let Some(records) = crate::engine::managed_job::retention::retirement_records(
+        rows, view, operation, true, budget,
+    )? {
+        return Ok(records);
+    }
     let limit = budget.limits.max_metadata_bytes;
     let _state = budget.reserve(limit)?;
     let op_key = format!("operation/{operation}");

@@ -13,6 +13,23 @@ mod expand;
 mod roots;
 mod strict;
 
+pub(super) fn quality_control_record(
+    key: &str,
+    json: &str,
+    rows: &crate::catalog::SnapshotRows,
+    table: &str,
+) -> Result<bool> {
+    let Some(known) = crate::engine::managed_build::retention_record(key, json, rows, table)?
+    else {
+        return Ok(false);
+    };
+    let original: serde_json::Value = serde_json::from_str(json)?;
+    if !strict::known_fields(&original, &known) {
+        return Err(invalid_inventory("unsupported managed quality fields"));
+    }
+    Ok(true)
+}
+
 pub(in crate::engine) use strict::validate_object;
 use strict::{Strict, capacity, decode, invalid_inventory, reference_bytes, unknown_dependencies};
 
@@ -332,6 +349,27 @@ impl Engine {
                     key: key.into(),
                     revision,
                 };
+                if crate::engine::job_publication::is_record(key) {
+                    if let Some(saved) = crate::engine::job_publication::retained_intent_record(
+                        &rows, &view, key, budget,
+                    )? {
+                        let reference = &saved
+                            .intent
+                            .as_ref()
+                            .ok_or_else(unknown_dependencies)?
+                            .reference
+                            .native_record;
+                        let origin = RetentionBlocker {
+                            table: reference.table.clone(),
+                            key: reference.key.clone(),
+                            revision: reference.revision,
+                        };
+                        for object in saved.objects() {
+                            inventory.object(object, &origin)?;
+                        }
+                    }
+                    continue;
+                }
                 if key.starts_with("owner-protection/") {
                     let grant: super::owners::OwnerProtection = decode(json)?;
                     super::owners::validate_grant(&view, key, revision, &grant)?;
@@ -400,7 +438,7 @@ impl Engine {
                 {
                     continue;
                 }
-                inventory.record(key, json, &rows, &origin)?;
+                inventory.record(key, json, &rows, &origin, Some(budget))?;
                 inventory
                     .expand(&self.inner.objects, budget, &self.inner.root)
                     .await?;
@@ -490,7 +528,7 @@ pub(super) fn reference_roots(
     }
     let mut inventory = Inventory::collecting(limit)?;
     inventory.shallow = true;
-    inventory.record(key, json, rows, origin)?;
+    inventory.record(key, json, rows, origin, None)?;
     inventory.into_references()
 }
 

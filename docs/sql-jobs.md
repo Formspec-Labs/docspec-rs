@@ -2,7 +2,8 @@
 
 Run `docspec --limits LIMITS.json job --spec JOB.json`, or deserialize
 `docspec::job::JobSpec` and call `run(limits)`. Both use the same bounded service.
-The CLI requires explicit host limits and opens no lifecycle workspace.
+The CLI requires explicit host limits. A protected version input opens its
+producing workspace for the job lifetime.
 
 A job declares `scratch`, `inputs`, `steps`, `outputs` and optional `queries`.
 Inputs are named Parquet paths, exact Iceberg pins, or plain/gzip JSON-lines files
@@ -52,7 +53,7 @@ correct the failed work, and retry with only unfinished output declarations,
 using the same pinned inputs and unchanged definitions for reused files.
 Existing outputs are never overwritten. `--remote CONFIG.json` supplies the
 native catalog and object connections to this same executor; embedded callers
-use `run_with_remote`. No Engine or lifecycle store is constructed. Configured
+use `run_with_remote`. Configured
 remote pin metadata uses one bounded GET; its Content-Range carries the full
 object size, checked alongside the digest, snapshot and schema. It sends no
 HEAD for this immutable metadata. Local or directly injected FileIO checks
@@ -68,6 +69,68 @@ no HEAD, GET, multipart transfer or automatic retry. A 412 returns `already_exis
 without claiming readback verification; successful creation returns `created`.
 Cancellation retains admission until the worker finishes. Whole-file memory is
 linear in file size and may refuse a file that does not fit the explicit budget.
+
+## Schema-only preparation and saved plans
+
+Run `docspec --limits LIMITS.json job-plan --spec PLAN.json` with `scratch`,
+named `inputs` containing only Arrow `schema` values, and a `calculation`.
+A SQL calculation uses `format: "sql"`, `sql`, and optional named
+`parameters`. SQL view steps accept the same parameter map. Parameter names
+match the SQL placeholders, without the leading dollar sign.
+
+Build with the optional Cargo feature `substrait` and Protocol Buffers compiler
+to enable `calculation.save_substrait`. Set `path` and `readable_path` to new
+destinations for the binary plan and its upstream Protobuf JSON. A saved
+calculation uses `format: "substrait"`, `path`, and `sha256`. To run it, give
+a job step a `name` and `substrait: {"path": "...", "sha256": "..."}`.
+
+Both formats use the bounded job context. The saved-plan profile accepts the
+pinned DataFusion 53.1 producer's Substrait 0.77 wire format with named reads,
+filters, projections, inner joins, and aggregates. The consumer validates
+functions, extension declarations, and named inputs before planning execution.
+Filters must be separate relations. Receipts distinguish native planning
+support and an unknown standalone standard validity result.
+
+## Protected exact source versions
+
+Use a `version` job input with `name`, `workspace`, and the native
+`VersionRef` as `version`. DocSpec compares the full immutable reference with
+its retained result and holds the workspace owner through execution.
+`native_versions` records the admitted version and Arrow schema with native
+field IDs. The local profile supports a single source group. Versions with
+computed or related groups require a separate mapping.
+
+Run `docspec --workspace HOST --limits LIMITS.json read-version --spec READ.json`
+with `version` and a new `receipt_path` to stream the exact version as Arrow
+IPC on standard output. The separate JSON receipt records the native version,
+schema, row count, and stream SHA-256 after a complete read.
+
+## Local Build with external quality
+
+Run `docspec --workspace HOST --limits LIMITS.json managed-build --spec ACTION.json`.
+The local profile uses an independent source-only Build with no inherited
+base. It trusts the local workspace operator to invoke the configured Data
+Contract CLI 1.2.9 evaluator. DocSpec checks the recorded evaluator build,
+raw check results, resolved rules, and protected read identity.
+
+1. Send `action: "prepare"` with a normal `RunSpec` as `build` and a
+   `policy` containing `id`, `rules_sha256`, `evaluator`, `semantics`,
+   `required_checks`, `expected_epoch`, and `expected_selection`.
+2. Read the returned candidate with `read-version` and evaluate the required
+   rules on its exact Arrow stream.
+3. Send `action: "accept"`, `dataset`, `operation`, and `evidence` with the
+   `policy_id`, `candidate`, `evaluator`, `semantics`, and per-check
+   `checks`. Supply the exact `rules`, normalized `native_report`, and
+   `native_read` artifacts as `{path, sha256}`. The normalized report refers
+   to the raw evaluator report.
+4. Send `action: "select"` with `dataset`, `operation`, and `policy_id`.
+   The native selection commit checks accepted evidence and current authority.
+
+Use `action: "inspect"` with the original dataset and operation after a lost
+response. Use `action: "requalify"` with the current `previous_policy_id`
+and a new `policy` to change rules before selection. The new policy reuses
+the same retained candidate. Ordinary jobs keep their separate execution
+and failure semantics.
 
 A step may declare `release_after: ["finished_name", ...]`. Names are checked
 before input I/O, and removed only after that successor succeeds. Unknown,

@@ -29,6 +29,10 @@ pub enum RetirementScope {
     ResultAvailability {
         operation: OperationId,
     },
+    /// Delivery protection of one exact whole-job publication payload.
+    PublicationIntent {
+        operation: OperationId,
+    },
     OperationRecovery {
         operation: OperationId,
     },

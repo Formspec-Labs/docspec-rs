@@ -18,7 +18,7 @@ async fn native_inventory(
     native_inventory_at(list_uri, manifest_uri, DATA).await
 }
 
-async fn native_inventory_at(
+pub(crate) async fn native_inventory_at(
     list_uri: &str,
     manifest_uri: &str,
     data_uri: &str,

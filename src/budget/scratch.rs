@@ -27,8 +27,9 @@ impl Write for ScratchWriter {
             .scratch_writes
             .lock()
             .map_err(|_| io::Error::other("scratch writer lock poisoned"))?;
-        let used = self.budget.runtime.disk_manager.used_disk_space();
-        if bytes.len() as u64 > self.budget.limits.scratch_bytes.saturating_sub(used) {
+        let manager = &self.budget.runtime.disk_manager;
+        let used = manager.used_disk_space();
+        if bytes.len() as u64 > manager.max_temp_directory_size().saturating_sub(used) {
             return Err(io::Error::other(
                 "scratch capacity exhausted before physical write",
             ));

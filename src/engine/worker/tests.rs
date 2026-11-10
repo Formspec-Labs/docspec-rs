@@ -7,7 +7,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use parquet::arrow::ArrowWriter;
-use std::{fs::File, time::Duration};
+use std::{fs::File, io::Write, time::Duration};
 use tokio::sync::oneshot;
 
 // Correctness fixtures fail at a lost handoff instead of hanging the test runner.
@@ -29,6 +29,142 @@ async fn within<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(HANDOFF_DEADLINE, future)
         .await
         .expect("worker handoff exceeded fixture deadline")
+}
+
+#[tokio::test]
+async fn a_detached_native_disk_owner_prevents_a_second_full_disk_allowance() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    let memory = engine.request_memory(&()).unwrap();
+    let manager = engine
+        .admit_disk_work(memory, DiskAdmission::Exclusive, |owner| async move {
+            let budget = owner.inner.lifecycle.budget.with_retained_disk(1024)?;
+            let manager = budget.runtime_env().disk_manager.clone();
+            *owner.inner.retained_disk.lock().await = Arc::downgrade(&manager);
+            let mut file = manager.create_tmp_file("detached native child")?;
+            file.inner().as_file().set_len(4096)?;
+            file.update_disk_usage()?;
+            Ok((manager, file))
+        })
+        .await
+        .unwrap();
+    for admission in [DiskAdmission::Shared, DiskAdmission::Exclusive] {
+        let memory = engine.request_memory(&()).unwrap();
+        assert_eq!(
+            engine
+                .admit_disk_work(memory, admission, |_| async { Ok(()) })
+                .await
+                .unwrap_err()
+                .code(),
+            "disk_draining"
+        );
+    }
+    let memory = engine.request_memory(&()).unwrap();
+    engine
+        .admit_disk_work(memory, DiskAdmission::Metadata, |_| async { Ok(()) })
+        .await
+        .unwrap();
+    drop(manager);
+    let memory = engine.request_memory(&()).unwrap();
+    engine
+        .admit_disk_work(memory, DiskAdmission::Exclusive, |owner| async move {
+            let budget = owner.inner.lifecycle.budget.with_retained_disk(0)?;
+            assert_eq!(
+                budget.runtime_env().disk_manager.max_temp_directory_size(),
+                owner.inner.lifecycle.budget.limits.scratch_bytes
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cold_reopen_reclaims_private_scratch_aliases_after_process_death() {
+    use std::os::unix::fs::MetadataExt;
+    const CHILD_ROOT: &str = "DOCSPEC_CRASHED_SCRATCH_FIXTURE";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let root = PathBuf::from(root);
+        let engine = Engine::open(&root, limits()).await.unwrap();
+        let budget = engine.inner.lifecycle.budget.with_retained_disk(0).unwrap();
+        for (name, acknowledge) in [("sealed", true), ("publication-window", false)] {
+            let file = budget
+                .runtime_env()
+                .disk_manager
+                .create_tmp_file("crash custody probe")
+                .unwrap();
+            let mut writer = budget.scratch_writer(&file).unwrap();
+            writer.write_all(&vec![0x5a; 1 << 20]).unwrap();
+            drop(writer);
+            std::fs::hard_link(file.path(), root.join(name)).unwrap();
+            if acknowledge {
+                budget.retain_temporary(file).unwrap();
+            } else {
+                std::mem::forget(file);
+            }
+        }
+        std::fs::write(root.join("ready"), b"sealed").unwrap();
+        loop {
+            std::thread::park();
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "engine::worker::tests::cold_reopen_reclaims_private_scratch_aliases_after_process_death", "--nocapture"])
+        .env(CHILD_ROOT, root.path()).spawn().unwrap();
+    within(async {
+        while !root.path().join("ready").exists() {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!("custody child exited early: {status}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert_eq!(
+        std::fs::metadata(root.path().join("sealed"))
+            .unwrap()
+            .nlink(),
+        1
+    );
+    assert_eq!(
+        std::fs::metadata(root.path().join("publication-window"))
+            .unwrap()
+            .nlink(),
+        2
+    );
+    child.kill().unwrap();
+    assert!(!child.wait().unwrap().success());
+    let engine = Engine::open(root.path(), limits()).await.unwrap();
+    for name in ["sealed", "publication-window"] {
+        let path = root.path().join(name);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().nlink(),
+            1,
+            "cold scratch reclamation removes every surviving alias"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+    fn scratch_files(root: &Path) -> usize {
+        std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    scratch_files(&entry.path())
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+    let files = scratch_files(&root.path().join("scratch"));
+    assert_eq!(
+        files, 0,
+        "removing the native durable path leaves no scratch disk root"
+    );
+    drop(engine);
 }
 
 #[tokio::test(flavor = "current_thread")]

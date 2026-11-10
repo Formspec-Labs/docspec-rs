@@ -16,6 +16,7 @@ mod export_recovery;
 mod grants;
 pub(in crate::engine) mod inventory;
 pub(super) mod owners;
+pub(crate) mod publication;
 mod recovery;
 pub(crate) mod removal;
 pub(in crate::engine) mod retirement;
@@ -197,6 +198,29 @@ impl Engine {
             return Ok(abandoned);
         }
         let rows = lifecycle.rows(&view).await?;
+        if let Some(abandoned) = crate::engine::managed_job::retention::abandonment(
+            &rows,
+            &view,
+            operation,
+            reason,
+            &lifecycle.budget,
+        )? {
+            let key = format!("abandoned/{operation}");
+            let _memory = rows.reserve_decoded(&lifecycle.budget, &[&key])?;
+            if let Some((_, _, old)) = rows.get_record::<Abandonment>(&key)? {
+                if old != abandoned {
+                    return Err(Error::refusal(
+                        "abandonment_conflict",
+                        "whole-job abandonment reason differs",
+                    ));
+                }
+                return Ok(old);
+            }
+            lifecycle
+                .commit(&view, vec![record(key, &abandoned)?])
+                .await?;
+            return Ok(abandoned);
+        }
         let (revision, _, admitted) = rows
             .get_record::<Operation>(&format!("operation/{operation}"))?
             .ok_or_else(|| Error::refusal("no_operation", "operation has not been admitted"))?;

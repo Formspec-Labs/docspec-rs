@@ -225,14 +225,19 @@ pub(crate) fn compact_batch_slice(
     length: usize,
     budget: &Budget,
 ) -> Result<RecordBatch> {
+    compact_views(copy_rows(batch, offset, length)?, budget)
+}
+
+/// Copies rows `[offset..offset + length]` into buffers of their own; view
+/// columns keep sharing their strings until [`compact_views`].
+fn copy_rows(batch: &RecordBatch, offset: usize, length: usize) -> Result<RecordBatch> {
     let sliced = batch.slice(offset, length);
     if sliced.num_columns() == 0 {
         return Ok(sliced);
     }
     let schema = batch.schema();
     let empty = RecordBatch::new_empty(schema.clone());
-    let compacted = arrow::compute::concat_batches(&schema, &[sliced, empty])?;
-    compact_views(compacted, budget)
+    Ok(arrow::compute::concat_batches(&schema, &[sliced, empty])?)
 }
 
 /// Bytes a compact copy of a batch's rows would hold: view payloads, slice
@@ -253,20 +258,55 @@ fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
 /// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). A join that
 /// emits build rows after its probe ends does the same with them (ct-n5ec).
 /// A batch charged at more than four times what a compact copy of its rows
-/// would hold, and by more than 1 MiB, is copied once into its own buffers;
+/// would hold, and by more than `MIN_FREED` (1 MiB), is copied once into its own buffers;
 /// others keep only view compaction, so a batch already compact comes back
-/// with the buffers it arrived with.
+/// with the buffers it arrived with. Compaction is optional: when the shared
+/// budget refuses a view copy, the batch comes back with its views as they
+/// were, in the rows already copied if the guard copied them.
 ///
 /// # Errors
-/// Refuses when the shared memory pool cannot admit a view compaction copy.
-pub(crate) fn compact_retained(batch: RecordBatch, budget: &Budget) -> Result<RecordBatch> {
+/// Returns Arrow errors from copying; a budget refusal is not an error.
+pub(crate) fn compact_retained(batch: RecordBatch, budget: &Budget) -> Result<Retained> {
     let charged = datafusion::common::utils::memory::get_record_batch_memory_size(&batch);
     let referenced = sliced_batch_bytes(&batch);
-    if charged > referenced.saturating_mul(4) && charged - referenced > 1 << 20 {
-        compact_batch_slice(&batch, 0, batch.num_rows(), budget)
+    let copied_rows =
+        charged > referenced.saturating_mul(4) && charged - referenced > views::MIN_FREED;
+    let rows = if copied_rows {
+        copy_rows(&batch, 0, batch.num_rows())?
     } else {
-        compact_views(batch, budget)
+        batch
+    };
+    match compact_views(rows.clone(), budget) {
+        Ok(batch) => {
+            let copied = copied_rows
+                || !batch
+                    .columns()
+                    .iter()
+                    .zip(rows.columns())
+                    .all(|(kept, given)| Arc::ptr_eq(kept, given));
+            Ok(Retained {
+                batch,
+                copied,
+                refused: None,
+            })
+        }
+        Err(error) if error.code() == "capacity" => Ok(Retained {
+            batch: rows,
+            copied: copied_rows,
+            refused: Some(error),
+        }),
+        Err(error) => Err(error),
     }
+}
+
+/// A batch from [`compact_retained`] and what was done to it.
+#[derive(Debug)]
+pub(crate) struct Retained {
+    pub(crate) batch: RecordBatch,
+    /// Whether the batch comes back in buffers it did not arrive with.
+    pub(crate) copied: bool,
+    /// The shared budget's refusal of a view copy; the views are as they came.
+    pub(crate) refused: Option<Error>,
 }
 
 /// Splits a multi-row `RecordBatch` containing `List<Struct>` columns into

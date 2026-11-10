@@ -1,5 +1,548 @@
 # Implementation and qualification status
 
+## November 7, 2026 local qualification
+
+The maintained all-feature repository gate passed at checkpoint
+`9b2a2636414581faea36772c0e2d441fb650b245`, with implementation
+`255c18489d224d095d4bd1d1edbdef5f5538bb3e`. It recorded 1,011 Rust passes and
+31 Dagster passes, with zero failures and 17 ignored cases. The target and
+immutable DocSpec executable matched SHA-256
+`e2ed264617b878248b11436f061e73e748dfab9347c9ef9dd3e0b8a55565baa9`.
+Both independent reviews confirmed the source and executable identities,
+identical cached Python environments, and no surviving owned processes.
+The gate closeout, `full-gate-s3-source-final-01-closeout.json`, has SHA-256
+`b309e05fe6667b53404c4b6aeb90672e8365e4ba4b8ba3e419c3d2987e3bc657`.
+The terminal review has SHA-256
+`d334ed098ba70884712372d7cc69cefb841a25eeb53e54d2aeeb923979bf5afb`.
+
+Installed DDK SDK3 `0.1.0.dev6+integrated.3` qualified separately against
+that executable. DDK source `cc9c44297fb78a6b061951462cd42541e98182bf`
+produced the wheel with SHA-256
+`bd3218fb8c95e54fbbb54711ba2913fc1a5ac27ca3473757065da7d1858f4486`.
+The installed run passed 703 tests with zero failures, errors or skips.
+It covered 266 required case/profile checks across 249 distinct cases and
+13 profiles. Separate offline-core API, CLI and lock checks passed.
+The host-owned process probes used POSIX stand-ins. The qualification
+report has SHA-256
+`cc87f4f5f6b050faba37a0c7e960f045e0f29df0faaafd541de27bcead40e755`.
+The installed handoff has SHA-256
+`55f5309e14080c17352d9bc24bafd2a4766e0b267239b1ee334b2e61a0f6ca32`.
+Both independent reviews passed. The terminal review has SHA-256
+`f72cfa479f0487c84afd7f01201b1257396b04180de5d8fb2e94d7bf522db554`.
+DDK documentation commit `c86071e8d0cf829a9254b0cdeb1782ef033bd017` records
+the installed scope and evidence.
+
+The synthetic S3 fixture separately exercised five public DocSpec CLI
+calls, including a configured cold retry and offline acceptance and replay.
+Its handoff has SHA-256
+`12face71369b9ee481213746df3383919217d8a541726f8a76bab1a96a729116`.
+Installed SDK2 then used the same accepted candidate for two replays after
+the fixture provider stopped, one with the source configuration and one
+without it. Selection remained pending. The SDK2 replay handoff has SHA-256
+`a9883829d31905c858da0d1462583c408c6ef3a08d03a7c5e26ed3d887e94d5c`.
+This local checkpoint predates the provider proof below. Portable distribution
+and external publication remain separate.
+
+## November 7, 2026 Congress provider proof
+
+Installed DDK SDK3 used the same `255c184` implementation and `e2ed2646`
+executable to prepare and accept `original-producer-proof-20261107` in two
+native calls. The proof used the eight original Iceberg snapshots in order
+and 26 original producer records under the adopted interpretation. All nine
+required `Int64` counters were zero. The seven informational history counters
+reported 44,838 appearances attributed to other retained producer versions
+and zero for the six other counters. Selection remained pending.
+
+Native custody records identify 756 objects totaling 511,829,795 bytes.
+This includes 712 data files (510,818,834 bytes), eight metadata files
+(10,931 bytes), 28 manifests (981,168 bytes), and eight manifest lists
+(18,862 bytes). The independent custody check matched the native inventory
+and file sizes using local file metadata.
+
+The original adoption failed before the lifecycle append when its 64 MiB
+metadata allowance exhausted shared reservations. The same request and
+workspace succeeded with a 32 MiB metadata allowance, the original 512 MiB
+memory setting, and the original 16 MiB batch limit. A later credential
+preflight stopped before a proof call. Both refusals remain in the closeout.
+
+The proof runner took 970.054 seconds. The watchdog ran for 971.6 seconds and
+recorded 3,320 samples, with maximum sampled resident memory of 0.255 GiB and
+physical footprint of 0.174 GiB. The owned process group was empty at closeout.
+These observations cover this proof run. Model capacity, full consumer parity,
+a fresh official-source check, selection, and publication remain unverified.
+
+The closeout SHA-256 is
+`f3dd491a4bce1d0e570ed00f937e3c8213f970e1f54bbedc32f2d7537d6a8586`.
+The terminal record SHA-256 is
+`798af876a884139d90017ef2fd1c4302d00c1c118f6054751dbd077f8ffe9223`.
+The 2,412,184-byte accepted response has SHA-256
+`f276e3f3c1ef63ae9bb2b274d8f97c87bc180fd5d5252f4b269b22d363b95262`.
+[Provider proof closeout](/Users/mikewolfd/Work/congressional-tech/.cache/archive-release/ddk-replacement-20261106/original-data-execution-01/proof-launch-01/closeout.json)
+
+## Explicit S3 snapshot source for local retained jobs
+
+`docspec --snapshot-source CONFIG managed-job --spec REQUEST` connects the
+local workspace to one configured S3 source for selected Iceberg snapshots.
+The configuration supplies the bucket and key prefix, endpoint, signing
+region, addressing mode, and environment-variable names for credentials.
+Session credentials are supported. The local workspace continues to own the
+operation, its admitted source placement, and the retained member copies.
+
+Native admission checks the original metadata location and each discovered
+member against that source scope. Range reads check the returned extent and
+object size before copying fragments into the admitted destination. The reader
+refuses redirects and discards HTTP error bodies before collection. Retained
+copies preserve original URIs and byte identities. Once the necessary
+members are sealed, the operation can reopen them or grant reuse from local
+custody with the source unavailable.
+
+Implementation `255c18489d224d095d4bd1d1edbdef5f5538bb3e` matches all 11
+paths in frozen source 05, SHA-256
+`eddcacf5b363a3e0d158e1523509015b79c764a217c96073c68c7dcb18b88c70`.
+Source 03 stopped at a test-fixture Clippy lint before running tests. Source
+04 passed strict Clippy, five reader tests, and three managed S3 tests.
+Its recovery fixture initiated host shutdown before the member seals and
+observed zero seals. Source 05 changes that fixture to wait for the owned
+attempt to reach the planted missing-manifest refusal after caller
+cancellation, then shuts down the host. This exercises continuation after
+caller cancellation and a later cold retry. Shutdown quiescence is a
+separate boundary.
+
+Source 05 passed strict Clippy, the repaired S3 recovery test, five local
+snapshot tests, three same-owner custody tests, and one existing remote
+metadata test. The earlier eight passes retain their source 04 attribution.
+The 230.65-second run recorded 45 resource samples, with peak process-family
+resident memory of 4,247,158,784 bytes and peak net owned disk allocation
+growth of 172,937,216 bytes. The focused closeout SHA-256 is
+`864bfa21b5c4bedd15ce36872c47c4b0ccca2e81e02b70a68fe63d43bdcbb0b8`.
+At this focused checkpoint, public CLI configuration, installed S3 consumer
+verification, the full repository gate, and production corpus admission
+remained pending.
+
+## Protected source snapshot observation
+
+A local SQL job with a protected `VersionRef` input reports the physical
+snapshot it opened in `native_versions[].physical_snapshot`. The observation
+includes the metadata location, table UUID, snapshot ID, physical schema ID,
+and the stored metadata's SHA-256 and byte length. The surrounding observation
+keeps the logical version and schema identity separate from the physical pin.
+The metadata reader calculates SHA-256 from the same bounded bytes it checks
+against the native BLAKE3 pin. A later managed operation still owns custody
+admission and producer qualification.
+
+Implementation `60d3da044915a29a74da4526b78be2f2e8089e4c` matches the seven
+paths in frozen source 02, SHA-256
+`4c907e5a52bbbd96b8d6a3a6b292933271a5d879546c4812dd9e9d006d3a6f67`.
+The review strengthened the result-admission test before execution. Strict
+all-target, all-feature Clippy and four focused tests passed on source 02.
+They checked stored plain and compressed metadata, changed-byte refusal,
+separate result allowances through partial failure, and a pending managed
+Build observed after reopening its workspace with payload temporarily absent.
+An equivalent compaction reported its own physical pin for the same logical
+version. The existing protected quality read also passed across lifecycle
+compaction.
+
+The run took 133.30 seconds. Its 26 samples recorded peak process-family
+resident memory of 4,257,120,256 bytes and peak net owned disk allocation
+growth of 164,777,984 bytes. The focused handoff SHA-256 is
+`553a04d17dda10253029dddf2e457331dc7877c0ade635611dc9c96d1fe6713f`.
+Immutable executable capture, the public adapter consumer, the application
+import comparison, and the full repository gate remain pending for this source.
+
+## Local publication intent freeze and retirement
+
+The native command `job-publication-intent --spec` freezes or inspects a
+declared `local_fixture` delivery. Freeze checks the actual current whole-job
+selection, its acceptance, and the sealed output inventory together. The
+intent's own digest binds the freeze declaration. The original job request
+digest retains the computation's separate identity. The saved intent can
+replay after another selection or removal of the caller's control files.
+
+The intent directly protects the completion manifest and published outputs.
+Its exact payload generation has an independent retirement scope. A compact
+audit remains inspectable after retirement and compaction of the inline
+payload. The lifecycle budget reserves room for the exact retirement records
+when the intent commits. Fixture receipts record external authorization and
+dispatch as `not_run`.
+
+Implementation commit `3c3f8351f77057b2c450435332a38005b3b9caf6` matches all
+14 paths in frozen `publication-intent-native-03`
+(`684ef94c7aad79e14191a68f43acf86a59a738cfa8acc6d1df947ae4fdaa4250`).
+This verification note follows the executed source snapshot.
+
+- Source 02 passed strict Clippy and the near-cap cold reopen case. The
+  other publication case stopped during baseline compaction. The byte guard
+  reported 228,688 bytes against its 131,072-byte limit. The pinned Arrow
+  conversion started from an empty string buffer and retained spare capacity
+  as it grew. Source 03 sizes those buffers from their exact serialized
+  lengths using the same approach as ordinary lifecycle appends. The fixture,
+  batch limits and batch splitting rule stayed the same.
+- Source 03 passed strict all-target, all-feature Clippy and all four focused
+  native tests. The two publication cases exercised refusal before a stale
+  first freeze, exact inventory, lost response, replay after successor and
+  control-file loss, published and private protection, and retired audit after
+  compaction. The near-cap case used the same 256 KiB metadata and 128 KiB
+  batch limits before and after cold reopen. The existing removal reservation
+  and producer donor-retirement tests also passed.
+- The focused run took 128.46 seconds. Its 25 samples recorded a peak
+  process-family resident memory of 4,249,894,912 bytes and peak net owned
+  disk allocation growth of 186,298,368 bytes. The success handoff SHA-256 is
+  `5e502e711278e91d10d900dac965f21fe2f5d912a18ff9f3df52d4ce93cacdc0`.
+
+The immutable source 03 executable has SHA-256
+`2ea9c6edbb40b2ef49a101f60658ac88299b918810c34041057f44500f185697`.
+Two public DDK source-consumer cases passed against it in 33 native calls.
+They checked lost-reply and control-loss replay, exact-generation retirement,
+and cold inspection after compaction. The consumer handoff SHA-256 is
+`096af788e51b7561558180ef74e98a3b3fd9fec1c591577335a49bb46f80aad3`.
+Installed and full repository verification remain pending. A real publisher
+destination and external authorization require separate owner integration
+and qualification.
+
+## Native producer proof and model prerequisite
+
+Version 3 captures exact original producer records and the adopted definition
+with proof admission, then checks their original selectors,
+registered facts and native append ancestry before copying payloads. Retained
+native population reports use the existing counter evaluator. A proof can be
+accepted but cannot select the model.
+
+The model admission binds the exact accepted proof and complete named native
+input scope. It verifies its adopted file member pins before opening files,
+reuses the proof's exact input custody and records the inherited evidence under
+the receiving operation and result. A later retry uses that original grant.
+Version 1 and 2 completed witnesses remain unchanged.
+
+Implementation commit `1fa6cb90077cf48d244511a4e6bef940eaf180f9` matches all
+19 paths in frozen `v3-native-05`
+(`cba57a7e46982c1646b68d96ff9ff3512b4ed56c3396b28f85d0e94a5f374e9e`).
+This verification note follows the executed source snapshot.
+
+- Source 04 passed strict Clippy and five focused tests before the run stopped
+  at the adoption fixture. The passing tests covered original record membership,
+  append versus overwrite ancestry, cold proof recovery after adoption changes,
+  a model grant surviving donor retirement, and unique inherited file accounting.
+  The adoption fixture expected no current selection and reached the stale
+  authority guard before the intended prerequisite refusal. Retain that failed
+  run. Source 05 changed only those fixture assertions, with the five passing
+  test bodies and production code unchanged. Strict Clippy and the repaired
+  adoption test, three unreached custody reuse tests, and required-counter
+  refusal passed on source 05. The earlier lint refusals for source 01 and 03
+  and the unexecuted source 02 remain separate.
+- The pinned Rust 1.94 build captured the source 05 executable as
+  `docspec-producer-v3-native-05`, SHA-256
+  `cca6b5339e076cb302158831cc74b596ee46a278ba0abef58e34ee089a05b325`,
+  353,005,616 bytes. The build and capture took 46.23 seconds with a sampled
+  peak process-family resident memory of 3,073,490,944 bytes. The executable's
+  size is separate from sampled disk growth.
+- Six public DDK source-consumer tests passed against that exact binary at
+  128 MiB memory, 64 MiB scratch, and 30 seconds per native call. They exercised
+  direct original producer proof, accepted model admission, cold recovery
+  without caller or original producer files, native selection, and exact
+  refusals for unknown producer facts, an unaccepted or unrelated proof,
+  a changed file inventory, and a weaker adopted policy. The run took 129.67
+  seconds with a sampled peak process-family resident memory of 232,751,104
+  bytes. The consumer handoff SHA-256 is
+  `c68ef62bd5b2fe6abfb6aa0dc5dba4a72e7cbdf1edb5f9453ef9ddbe6340b089`.
+
+These checks establish the exercised local producer proof and model paths.
+Retirement tests establish removal eligibility. Public adapter coverage of
+daily/import ancestry and donor retirement remains separate from the native
+tests. Actual application producer adoption, remote corpus work, historical
+writer execution, installed package qualification, the full repository gate,
+and publication remain outside this checkpoint.
+
+## Guarded producer definition adoption
+
+The local authority action adopts exact producer definition metadata. It
+guards the existing definition, epoch, selection and
+adoption, then changes the definition and adoption atomically while preserving
+the selected result. A historical action retry reads its original immutable
+decision and never reinstalls an earlier adoption. Current definition bytes live
+in one replaceable native metadata row; audit paths confer no payload lifetime.
+At this adoption-only checkpoint, new prepare, acceptance, selection and
+requalification in an adopted scope refused. Version 3 above adds the scoped
+proof and model path. Historical completed results remain historical.
+The definition requires an explicit complete model file-input inventory, with
+ordered member keys, SHA-256 and size; adopting it opens no input files. The
+exact JobSpec remains the owner of file kind, schema and path interpretation.
+
+Implementation commit `bcab60c671024ecacc473ac2f95fa077632e144e` matches the
+24-file source 07 capture. Strict Clippy and eight focused native tests
+passed on that source. The original adoption fixture passed at the unchanged
+128 KiB batch limit through a lost response, caller-file removal, replacement
+adoption, compaction and cold replay. Historical selection stayed intact.
+Separate controls confirmed the oversized-record and ordinary query refusals,
+three custody-reuse cases, required-counter refusal and cold compaction.
+
+The initial source 04 cold recovery test refused a compacted read of 46
+lifecycle records. The source 06 diagnostic measured that the rows
+referenced 147,860 bytes of key, revision and value data against a 128 KiB
+batch limit, and the native string buffers allocated more. The narrow repair
+requests one-record native batches on a cold lifecycle read when the metadata
+allowance exceeds half the batch limit. Existing byte guards and warm cache
+behavior stay in place. This row-count policy is not an allocator bound.
+The focused run took 164.10 seconds, with a sampled peak of 4,280,188,928
+bytes of process-family memory and 181,747,712 bytes of net task-owned disk
+allocation growth. The prior refusal and diagnostic remain separate evidence.
+
+No application producer definition was adopted. This checkpoint covered
+adoption only. It did not run static producer verification, population
+prerequisites, publication intent, a new distribution build, or the full gate.
+
+## Native snapshot custody in progress
+
+The same implementation introduces explicit version 2 snapshot-custody
+requests and receipts. It retains selected native read closures under existing
+operation protection and per-member seals, preserving original URI identities
+through read-only maintained Iceberg I/O. File-only version 1 requests remain
+unchanged. This custody-only checkpoint refused native `iceberg`/`version`
+inputs and producer prerequisites. Same-owner cross-operation input grants
+have the source09 focused and public-consumer evidence below. The later
+producer-definition authority and prerequisites are recorded above;
+publication intent remains unfinished.
+This first custody profile also refuses native delete files before payload copies;
+preserving URI identity alone does not qualify their application by the reader.
+
+The first strict all-target/all-feature Clippy check passed on custody source 03;
+that establishes type/lint validity only. Earlier visibility/lint failures remain
+retained. Delete consumption and the required complete repository gate remain
+pending. Manifest decoding
+uses conservative admitted estimates; encoded size is not a hard bound on decoded
+Avro or whole-process memory. The retained profile disables the shallow native
+metadata cache and holds map/metadata/footer admission through native I/O owners.
+
+Frozen custody source 07 subsequently passed strict Clippy, five native snapshot
+controls and one FileIO ownership control. Six independently authored public DDK
+consumer cases passed against its immutable executable at the original 128 MiB
+memory/64 MiB scratch limits. These establish the captured local snapshot/recovery
+path; source 06's fixture-setup failures remain retained. No complete gate,
+installed profile, native delete consumption or producer prerequisite is claimed.
+
+The source09 reuse interface issues typed current-input record references and
+binds them in new completion/view witnesses. Its guarded receiving admission must
+own inherited bytes and original-copy provenance before later input seals;
+subsequent retry uses that receiving grant after donor retirement. Immutable
+native input-admission metadata carries provenance through independent result
+availability. Custody reuse supplies no producer or population qualification.
+
+Frozen custody source 09 passed strict Clippy and ten native controls: three
+reuse, one physical-charge, five snapshot and one FileIO test. Fifteen public DDK
+source-consumer cases then passed at the original 128 MiB memory / 64 MiB scratch
+limits, including same-name and renamed-input chains after removal of original
+producer and caller artifacts. Its immutable binary, source and exact outcome
+are pinned separately in the retained checkpoint. Full native gate, installed
+profile, remote input, delete, producer and publication qualification remain
+separate; retirement tests establish eligibility, not physical deletion.
+
+## Retained local whole-job checkpoint
+
+Implementation commit `46a27657442d10ae773f48a1536136d895e95daa` matches all
+59 files in the frozen source 25 manifest. The complete `scripts/check` gate
+passed on that source in 849.80 seconds with Rust 1.94.0, all features and the
+pinned Python adapter environment. This verification note was added afterward;
+it was not part of the executed source snapshot.
+
+- Native suites passed 487 library, 461 integration, 15 restore, four process
+  memory, two worker-initialization and 11 example tests. Fifteen library and two
+  integration cases remained explicitly ignored. All 31 Dagster adapter tests
+  passed.
+- The installed DDK consumer passed four cases at its original 128 MiB memory
+  and 64 MiB scratch limits. The fresh synthetic Congress fixture completed on
+  its first attempt at the original 512 MiB limits, then passed native
+  acceptance, exact catalog mapping, guarded selection and its independent
+  entity-reader check.
+- The sampled aggregate owned-process RSS peaked at 2.22 GiB; free disk remained
+  above 84 GiB. Task-owned allocation growth peaked at 0.25 GiB. Four recorded
+  disappearing-test-directory races were handled by the resource observer.
+
+The immutable tested executable is `runtime/docspec-retained-job-source25` under
+`/Users/mikewolfd/Work/artifacts/ddk-replacements-20261106/native-retained-job`,
+SHA-256 `dd129fde622b56399b5ebd38626420bce2d74731e9eb685d1b15aa294afc0a9e`
+(348,767,408 bytes). The same evidence directory retains
+`source-identity-25.json`, `gate-closeout-25.json`, the complete gate log and
+metrics, the installed-consumer handoff and prior failed gates/diagnostic
+controls. Independent architecture and ETL reviews closed the exact source,
+focused regressions, consumer and terminal resource boundaries.
+
+This checkpoint covers schema-only whole-job preparation and retained local-file jobs.
+Production migration still requires native snapshot custody, authoritative
+original producer adoption and prerequisites, and immutable publication intent.
+Existing unsupported-input refusals remain in place. The implementation history
+below preserves the earlier incomplete and failed checkpoints.
+
+The development `managed-job` route seals individual input members, expensive
+materializations, exports and native report IPC, then assembles a distinct
+whole-job candidate. Completed native `JobResult` and original admitted request
+bytes support inspect/retry without reopening caller artifacts. Exact report
+acceptance and guarded selection remain separate from completed computation.
+Schema-only SQL and retained view descriptions use maintained optimized-plan
+schemas, since scalar-subquery rewrites can change native Arrow nullability.
+Ordinary materialization/export and standalone schema planning use that same
+rule. Thin scalar wrappers admit repeat/pad and integer array-size kernels at
+actual invocation, including constants introduced by native CASE/view rewrites,
+constructors or parameter binding. Native kernels remain authoritative. A
+conservative cumulative constant allowance reserves actual estimates lazily from
+the shared host budget before kernel invocation and remains owned through
+Job/planning/stream lifetimes. Empty contexts reserve no unused literal allowance;
+this does not establish a
+whole-process memory bound or arbitrary-query support. Native row batches reuse
+existing fitting admission. Current column-dependent expressions and native
+typed empty constructors retain their interpretation.
+The bounded array-repeat profile accepts flat scalar elements; nested repetition
+and nested resize elements/fill remain unsupported. Null resize lengths refuse
+because the pinned kernel can read a nonzero value beneath their null bitmap.
+Raw `Job::sql` DataFrames expose maintained DataFusion methods; direct consumers
+do not inherit the Job APIs' cumulative planning/stream ownership guarantee.
+Retained report inventory continues to describe its actual sealed IPC schema.
+An unaccepted candidate can receive a distinct policy under fresh authority;
+this does not rewrite its original request, policy, manifest or runtime origin.
+Small native and actual DDK consumer examples passed on immutable retained-job
+source 06; they do not qualify the current repair source or a release.
+
+The source 19 installed consumer exposed shared-admission exhaustion under its
+unchanged 128 MiB host limit: one unused 4 MiB scalar allowance reserved 16 MiB
+from the shared pool and prevented a
+lifecycle writer's 4 MiB metadata reservation. This was a shared-budget refusal,
+not observed process-memory exhaustion. Its failed consumer and interrupted
+full gate remain retained. The successor replaces the fixed allowance reservation
+with cumulative actual charges and adds empty-context, shared-capacity and stream
+lifetime probes; exact installed consumer and full-gate evidence remain pending.
+
+The successor source 20 passed the same installed four-case consumer without
+changing its limits. Its full gate passed the native library suite, then an
+external disk observer raced with a disappearing test directory. The interrupted
+run remains evidence rather than a passing gate. The larger synthetic Congress
+fixture retained all 17 exports and five reports but refused the final lifecycle
+seal under shared-admission pressure. Fresh admission still held an obsolete
+32 MiB lifecycle snapshot across execution. The next repair ends that authority
+read after admission and ends the SQL computation owner after its final consumer;
+sealed reports, schemas, witnesses, native disk accounting and protection keep
+their independent owners. Focused and final-gate evidence for that repair remain
+pending. Native snapshot custody, producer prerequisites and publication intent
+remain unsupported.
+
+Source 22's installed and fresh rich Congress examples passed, including the
+unchanged-limit first-attempt completion. Its full repository gate failed 20
+integration cases after the native library passed. Diagnostic-only source 23
+identified lifecycle string-builder spare capacity before identity allocation,
+an eager export metadata maximum overlapping required reader ownership, and
+private spill row groups coupled to small compute batches. The next repair
+pre-sizes known lifecycle strings, grows the existing conservative export
+metadata-unit estimate before writes, and keeps native byte bounds while using
+the native default private row-group row ceiling. Authored literal and streaming
+table-function test inputs preserve the original metadata-result and spill
+boundaries. Original limits and expected values remain in place. Diagnostic
+prints are removed from the implementation; failed gate and observations remain
+retained. Focused and full-gate execution of this repair remain pending.
+Exact local-file metadata transport also uses the smaller of the proven file
+size and the existing 2 MiB transport estimate. The native reader's in-file
+ranges justify that small-file bound; decoded footer, enclosing page-index and
+cache admission remain separate. The tiny spill fixture keeps its 4 MiB host
+limit and checks the original population, byte total and explicit integer IDs.
+
+The next focused checkpoint covers expression-subquery dependency traversal,
+per-member interrupted admission, exact originating-runtime phase attribution,
+shared retained/spill disk admission, and bounded Parquet footer/cache ownership.
+Retained disk jobs serialize against the host's existing disk work and preserve
+the shared memory pool. A live prior native disk manager blocks a new disk job;
+metadata inspection remains available. Published retained files keep accounting
+handles without scratch names. Cold reopen under the OS workspace lock reclaims
+only private DataFusion scratch directories, including publication crash aliases.
+Native spill quota checks occur after a spill write; focused evidence must report
+that chunk overshoot separately from retained-writer pre-write admission and RSS.
+
+Exact local Parquet registration checks one footer before decoding its native
+index descriptors, then checks footer plus the enclosing column/offset index
+transport span, including gaps, before DataFusion can decode indexes. The initial
+retained profile disables optional Bloom pruning through native reader settings;
+it does not parse or misclassify valid offset-only Bloom metadata. Provider/plan/stream permits retain
+reader admission; cache-entry permits cover cache residency, since native bare
+metadata Arcs may outlive eviction. The conservative decode estimates and this
+exact-file profile do not establish directory-reader or whole-process bounds.
+The existing result-availability promise conservatively retains input and
+materialized-step payloads as well as outputs/reports. Retiring phase recovery
+alone does not free bytes still rooted by result availability or selection.
+Unsealed report attempts use distinct native immutable paths, so a changed
+execution batch size cannot collide with an earlier unsealed report artifact.
+
+Original native snapshot custody, producer-definition adoption/prerequisites and
+publication intent remain unavailable. Generic local-file examples do not close
+those application migration requirements. The prior source-06 artifacts, failed
+retention-size gate and controlled path-length diagnostics remain retained under
+`native-retained-job`, `native-job-prepare` and `native-update` in the external
+November 6 replacement evidence directory. The required repaired-source gate is
+pending; no production or publication claim follows from this implementation.
+
+## Whole-job schema preparation — work in progress
+
+The `prepare-job` implementation is pending focused verification and independent
+review. It accepts an exact captured `JobSpec` artifact plus one same-name declared
+Arrow IPC schema or exact native Arrow-serde/Iceberg schema artifact per native input. It plans all steps, exports and report queries
+using shared native guards, without opening inputs or writing job destinations.
+Results distinguish inferred schemas from input admission and execution, both
+`not_run`. Standard IPC schema bytes retain native nested types and metadata for
+PyArrow readers. Nonempty table operations refuse.
+
+The small managed-quality policy change separately admits mapping revision `2`
+alongside `1`, preserving exact evidence/policy/rules equality. Focused policy tests,
+streaming-evaluator integration acceptance, independent reviews and the required
+final repository gate remain pending. No retained version-1 evidence is relabeled.
+The immutable `d96e001` runtime and its completed gate retain their earlier scope.
+
+## Managed local source Update extension — November 6, 2026
+
+The local source-only Update extension passes the required repository gate and
+both independent changed-boundary reviews on frozen source 09. `managed-build`
+accepts `prepare_update` with an existing `UpdateSpec` and qualification policy.
+It reuses native admission, preparation, protected readback, evidence acceptance
+and guarded selection, and refuses a computed, related or coupled base before
+admission. Ordinary SQL jobs retain their bounded execution behavior.
+
+Exact accepted-evidence retries resolve native completion before opening caller
+files. New acceptances retain the original resolved-rule UTF-8 bytes. Status,
+replay and selection use narrow retained-record decodes with admitted memory;
+compaction also admits the original request and applicable policy companions.
+Native checkpoint compaction preserves still-promised managed request/result
+identity until existing recovery or availability retirement ends that promise.
+Quality control records remain audit metadata and do not add payload lifetime.
+
+The complete `scripts/check` run passed with Rust 1.94.0: formatting and linting,
+457 unit tests, 447 ordinary integration tests, the 15/4/2 explicit process suites,
+11 example tests, and all 31 Dagster adapter tests. Seventeen qualification-only
+tests remain intentionally ignored. The Python gate used CPython 3.12.13, Dagster
+1.13.16 and PyArrow 26.0.1. This final uninterrupted gate completed in 1,056.37
+seconds. Five-second samples observed a peak 3,330,932,736 bytes of aggregate owned
+process RSS and at least 96,394,432,512 bytes free disk; these are observations,
+not whole-process memory guarantees for other workloads.
+
+The registered [native examples](../tests/managed_updates.rs) cover correction,
+explicit deletion, untouched rows, rule-only phase reuse, cold restart, null
+replacement versus declared coalescing, successful empty scope, computed-base
+refusal, and pending quality metadata through compaction. The actual DDK wrapper
+also qualifies exact-native evidence acceptance, missing/duplicate/failed/unknown/
+not-run and wrong-candidate refusals, caller loss, removed caller input locators,
+lost acceptance/selection responses, and historical retries after a successor.
+Its retirement case observes obsolete bulk removal while quality metadata remains
+and the selected successor stays readable. A separate low-budget compaction probe
+refuses unadmitted request/policy companion decoding before removing any keys.
+
+Source 07's five-native/six-wrapper proof and source 09's changed budget unit and
+actual-wrapper proof retain their exact tuple identities separately. Expected
+business values are independently authored small mechanism examples. Full
+SpicyRegs and congressional-tech replacement acceptance remains separate work.
+
+Source identities, review coordination and raw execution records are retained
+under `/Users/mikewolfd/Work/artifacts/ddk-replacements-20261106/native-update`.
+Those records preserve earlier failed/interrupted attempts, including the initial
+wrong-compiler runs, offline dependency miss and repaired compaction boundaries.
+
+The tested extension is local, independent and source-only. Refresh, Backfill,
+candidate recomposition, computed/related or multi-view qualification, existing
+native-table admission, retained multi-output SQL and publication remain outside
+this evidence. These are greenfield application integrations. Historical readers
+in these examples use protected native versions inside the new stack.
+
 ## Plan completion
 
 The [implementation plan](PLAN.md) is **complete for the supported v1 scope**.
@@ -4148,3 +4691,24 @@ forgery cases and shared replacement paths. See the
 Format 10 adds schema requests and distinguishes expected from selected definitions.
 Optional/default additions, durable absence interpretation, nested evolution,
 global IDs across full rebuilds and the broader R3/R7 performance gates remain open.
+# Retained whole-job implementation checkpoint (unqualified)
+
+The native `managed-job` family now has source implementation for local file
+custody, independently sealed SQL/component materializations, exports and typed
+Arrow report completions, exact zero-counter acceptance, guarded selection and
+historical reconciliation. The original complete prepare request, job and policy
+bytes remain in native lifecycle custody. Material dependencies exclude caller
+custody paths, policy and whole-job provenance; successor report-only changes can
+resolve native material completions before opening caller files.
+
+This is not a qualified runtime yet. The first type-check retained mechanical
+digest/dispatch errors, now repaired. Experimental source05 passed three native
+recovery/reuse/counter tests and the output-namespace schema-only case, including
+the caller-alias invalidation negative. Earlier alias/dependency refusals remain
+retained. Partial inspection now reports already sealed output/report facts and
+the corresponding maintained partial `JobResult`; that follow-up still needs
+focused proof and the complete repository gate. This initial family refuses raw native snapshot
+selectors without owner custody, nonempty table operations, retained Substrait
+artifacts and unsupported prerequisite profiles. Congress producer-interpretation
+adoption, population prerequisites, remote custody and publisher intent remain
+separate unfinished work. Ordinary `JobSpec::run` retains its bounded semantics.

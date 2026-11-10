@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::{any::Any, fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
+use crate::{budget::Budget, storage::NativeTableSnapshot};
+
 /// Available summary facts from one input's exact selected native metadata.
 ///
 /// These facts require no additional catalog, manifest or data reads. They
@@ -52,6 +54,66 @@ impl NativeInputObservation {
             manifest_count: None,
             planning_seconds: None,
         }
+    }
+}
+
+/// Exact native version and interpreted schema admitted by a bounded job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeVersionObservation {
+    pub name: String,
+    pub version: crate::model::VersionRef,
+    pub schema_id: i32,
+    pub schema: arrow::datatypes::Schema,
+    /// Exact physical metadata opened for this invocation, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_snapshot: Option<NativeVersionSnapshotObservation>,
+}
+
+/// Physical snapshot and stored metadata bytes observed during a protected open.
+///
+/// This observation can identify input for later admission. The source's
+/// existing availability and later admission govern object retention.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeVersionSnapshotObservation {
+    /// Selector taken from the exact metadata loaded for the protected read.
+    pub selector: NativeTableSnapshot,
+    /// SHA-256 of the stored metadata, including compression when present.
+    pub metadata_sha256: String,
+    /// Verified byte length of the stored metadata.
+    pub metadata_size: u64,
+    #[serde(skip)]
+    _memory: Option<Arc<OwnedSemaphorePermit>>,
+}
+
+impl NativeVersionSnapshotObservation {
+    pub(super) fn from_table(
+        table: &iceberg::table::Table,
+        metadata_sha256: sha2::digest::Output<sha2::Sha256>,
+        metadata_size: u64,
+        budget: &Budget,
+    ) -> crate::Result<Self> {
+        let metadata_location = table.metadata_location().ok_or_else(|| {
+            crate::Error::refusal("pin_mismatch", "opened metadata has no exact location")
+        })?;
+        // The returned descriptor owns the location and hex digest separately
+        // from the table, so the result retains its own cumulative charge.
+        let bytes = size_of::<Self>()
+            .saturating_add(metadata_location.len())
+            .saturating_add(metadata_sha256.len() * 2);
+        let memory = budget.reserve(bytes)?;
+        let metadata = table.metadata();
+        Ok(Self {
+            selector: NativeTableSnapshot {
+                metadata_location: metadata_location.to_owned(),
+                table_uuid: metadata.uuid(),
+                snapshot: metadata.current_snapshot_id(),
+                schema_id: metadata.current_schema_id(),
+            },
+            metadata_sha256: format!("{metadata_sha256:x}"),
+            metadata_size,
+            _memory: Some(Arc::new(memory)),
+        })
     }
 }
 
@@ -100,7 +162,13 @@ impl TableProvider for AdmittedTable {
 #[derive(Debug)]
 struct AdmittedPlan {
     input: Arc<dyn ExecutionPlan>,
-    memory: Arc<OwnedSemaphorePermit>,
+    memory: Arc<dyn fmt::Debug + Send + Sync>,
+}
+pub(super) fn admit_metadata_plan(
+    input: Arc<dyn ExecutionPlan>,
+    memory: Arc<dyn fmt::Debug + Send + Sync>,
+) -> Arc<dyn ExecutionPlan> {
+    Arc::new(AdmittedPlan { input, memory })
 }
 impl DisplayAs for AdmittedPlan {
     fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -160,6 +228,108 @@ impl ExecutionPlan for AdmittedPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn protected_snapshot_result_admission_survives_partial_failure() {
+        use crate::{
+            budget::Limits,
+            job::{JobFailure, JobResult},
+            model::VersionRef,
+        };
+        use iceberg::{
+            Runtime, TableIdent,
+            io::FileIO,
+            spec::{NestedField, PrimitiveType, Schema, Type},
+            table::Table,
+        };
+        use serde_json::json;
+        use sha2::{Digest, Sha256};
+        use std::path::Path;
+
+        let limits = Limits {
+            memory_bytes: 128 << 20,
+            ..Limits::default()
+        };
+        let budget = Budget::new(limits).unwrap();
+        let available = || budget.reserve(0).unwrap().semaphore().available_permits();
+        let initial = available();
+        let metadata = crate::storage::fresh_metadata(
+            Schema::builder()
+                .with_fields([
+                    NestedField::required(1, "id", Type::Primitive(PrimitiveType::Int)).into(),
+                ])
+                .build()
+                .unwrap(),
+            Path::new("memory:///table"),
+        )
+        .unwrap();
+        let table = Table::builder()
+            .metadata(metadata)
+            .metadata_location("memory:///table/metadata.json")
+            .identifier(TableIdent::from_strs(["fixture", "source"]).unwrap())
+            .file_io(FileIO::new_with_memory())
+            .runtime(Runtime::try_current().unwrap())
+            .readonly(true)
+            .build()
+            .unwrap();
+        let version: VersionRef = serde_json::from_value(json!({
+            "dataset": "source", "version": "initial", "manifest": {
+                "owner": "source", "path": "memory:///manifest.json", "digest": "0".repeat(64), "bytes": 1,
+            },
+        })).unwrap();
+        let mut completed: JobResult =
+            serde_json::from_value(json!({"steps": [], "outputs": []})).unwrap();
+        let observe = || {
+            NativeVersionSnapshotObservation::from_table(
+                &table,
+                Sha256::digest(b"stored bytes"),
+                12,
+                &budget,
+            )
+        };
+        let mut charges = Vec::new();
+        for name in ["first", "second"] {
+            let before = available();
+            let physical_snapshot = observe().unwrap();
+            let charge = before - available();
+            assert!(charge > 0);
+            charges.push(charge);
+            assert_eq!(physical_snapshot.selector.snapshot, None);
+            completed.native_versions.push(NativeVersionObservation {
+                name: name.into(),
+                version: version.clone(),
+                schema_id: 0,
+                schema: arrow::datatypes::Schema::empty(),
+                physical_snapshot: Some(physical_snapshot),
+            });
+        }
+        assert_eq!(charges[0], charges[1]);
+        let exhausted = budget.reserve(available()).unwrap();
+        assert_eq!(observe().unwrap_err().code(), "capacity");
+        drop(exhausted);
+        drop(table);
+        let mut failure = JobFailure {
+            completed,
+            error: crate::Error::refusal("fixture", "late job failure"),
+        };
+        let report = failure.report();
+        assert!(
+            report["completed"]["native_versions"][0]["physical_snapshot"]["selector"]["snapshot"]
+                .is_null()
+        );
+        let mut legacy = report["completed"]["native_versions"][0].clone();
+        drop(report);
+        legacy.as_object_mut().unwrap().remove("physical_snapshot");
+        let legacy: NativeVersionObservation = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.physical_snapshot.is_none());
+        assert_eq!(available(), initial - charges[0] - charges[1]);
+        let remaining = failure.completed.native_versions.pop().unwrap();
+        drop(failure);
+        assert_eq!(available(), initial - charges[1]);
+        drop(remaining);
+        assert_eq!(available(), initial);
+    }
+
     #[tokio::test]
     async fn metadata_admission_survives_deregister_frame_plan_and_stream() {
         use arrow::{

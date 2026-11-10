@@ -548,27 +548,8 @@ pub(super) fn invalid_relationship() -> Error {
     )
 }
 
-// A counting sink bounds serialized metadata without allocating a second copy.
-pub(super) fn metadata_size(value: &impl Serialize, limit: usize) -> Result<usize> {
-    struct Counter {
-        remaining: usize,
-    }
-    impl std::io::Write for Counter {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.remaining = self
-                .remaining
-                .checked_sub(bytes.len())
-                .ok_or_else(|| std::io::Error::other("metadata capacity"))?;
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut counter = Counter { remaining: limit };
-    serde_json::to_writer(&mut counter, value).map_err(|_| capacity())?;
-    Ok(limit - counter.remaining)
-}
+pub(super) use crate::budget::metadata_size;
+
 fn check_size(bytes: usize, limit: usize) -> Result<()> {
     if bytes > limit {
         Err(capacity())

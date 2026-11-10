@@ -1,13 +1,23 @@
 //! Declarative job execution uses the embedded SQL service directly.
 // Rust guideline compliant 2026-02-21
+#[cfg(feature = "substrait")]
+use super::substrait::SavedPlan;
 use super::{
     ComponentsSettings, ExportSettings, ExportedFile, Job, JsonLinesFile, StepStorage,
     TableOperation, TableOperationResult,
 };
-use crate::{Error, Result, budget::Limits, model::TablePin};
+use crate::{
+    Engine, Error, Result,
+    budget::Limits,
+    model::{TablePin, VersionRef},
+};
 use arrow::datatypes::Schema;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// Explicit data source, including immutable native table pins.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,13 +43,20 @@ pub enum JobInput {
         name: String,
         pin: TablePin,
     },
+    /// A complete protected source-only version in a local DocSpec workspace.
+    Version {
+        name: String,
+        workspace: PathBuf,
+        version: VersionRef,
+    },
 }
 impl JobInput {
-    fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Parquet { name, .. }
             | Self::JsonLines { name, .. }
             | Self::Iceberg { name, .. }
+            | Self::Version { name, .. }
             | Self::NativeTable { name, .. } => name,
         }
     }
@@ -51,6 +68,8 @@ impl JobInput {
 pub struct SqlStep {
     pub name: String,
     pub sql: String,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub materialize: bool,
     #[serde(default)]
@@ -67,23 +86,40 @@ pub struct ComponentsStep {
     pub release_after: Vec<String>,
 }
 
+/// One named relation decoded from a content-addressed Substrait file.
+#[cfg(feature = "substrait")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubstraitStep {
+    pub name: String,
+    pub substrait: SavedPlan,
+    #[serde(default)]
+    pub release_after: Vec<String>,
+}
+
 /// Distinct step shapes prevent mixing SQL-view and graph options.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum JobStep {
     Sql(SqlStep),
+    #[cfg(feature = "substrait")]
+    Substrait(SubstraitStep),
     Components(ComponentsStep),
 }
 impl JobStep {
-    fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::Sql(step) => &step.name,
+            #[cfg(feature = "substrait")]
+            Self::Substrait(step) => &step.name,
             Self::Components(step) => &step.name,
         }
     }
-    fn release_after(&self) -> &[String] {
+    pub(crate) fn release_after(&self) -> &[String] {
         match self {
             Self::Sql(step) => &step.release_after,
+            #[cfg(feature = "substrait")]
+            Self::Substrait(step) => &step.release_after,
             Self::Components(step) => &step.release_after,
         }
     }
@@ -145,7 +181,12 @@ pub struct JobResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native_inputs: Vec<super::NativeInputObservation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native_versions: Vec<super::NativeVersionObservation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub table_operations: Vec<TableOperationResult>,
+    #[cfg(feature = "substrait")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_plans: Vec<super::substrait::SubstraitReceipt>,
     pub steps: Vec<StepResult>,
     pub outputs: Vec<OutputResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -238,7 +279,10 @@ impl JobSpec {
     ) -> std::result::Result<JobResult, JobFailure> {
         let mut completed = JobResult {
             native_inputs: Vec::new(),
+            native_versions: Vec::new(),
             table_operations: Vec::new(),
+            #[cfg(feature = "substrait")]
+            saved_plans: Vec::new(),
             steps: Vec::new(),
             outputs: Vec::new(),
             queries: Vec::new(),
@@ -256,13 +300,7 @@ impl JobSpec {
         }
     }
 
-    async fn execute(
-        &self,
-        limits: Limits,
-        result: &mut JobResult,
-        connections: Connections,
-        running: &mut Option<Running>,
-    ) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let mut names = BTreeSet::new();
         for name in self
             .inputs
@@ -278,21 +316,6 @@ impl JobSpec {
             }
         }
         TableOperation::validate_all(&self.table_operations, names)?;
-        if connections.catalog.is_some() && self.catalog_root.is_some() {
-            return Err(Error::refusal(
-                "invalid_spec",
-                "injected and local catalog authority cannot be combined",
-            ));
-        }
-        if !self.table_operations.is_empty()
-            && connections.catalog.is_none()
-            && self.catalog_root.is_none()
-        {
-            return Err(Error::refusal(
-                "invalid_spec",
-                "table operations require an explicit catalog",
-            ));
-        }
         let mut names = BTreeSet::new();
         let mut paths = BTreeSet::new();
         for output in &self.outputs {
@@ -330,6 +353,32 @@ impl JobSpec {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn execute(
+        &self,
+        limits: Limits,
+        result: &mut JobResult,
+        connections: Connections,
+        running: &mut Option<Running>,
+    ) -> Result<()> {
+        self.validate()?;
+        if connections.catalog.is_some() && self.catalog_root.is_some() {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "injected and local catalog authority cannot be combined",
+            ));
+        }
+        if !self.table_operations.is_empty()
+            && connections.catalog.is_none()
+            && self.catalog_root.is_none()
+        {
+            return Err(Error::refusal(
+                "invalid_spec",
+                "table operations require an explicit catalog",
+            ));
+        }
         #[cfg(feature = "remote")]
         let job = if let Some(remote) = connections.remote {
             Job::with_remote(limits, self.scratch.clone(), remote)?
@@ -338,6 +387,9 @@ impl JobSpec {
         };
         #[cfg(not(feature = "remote"))]
         let job = Job::new(limits, self.scratch.clone())?;
+        // Hold each producing host's exclusive protection through all output scans.
+        let mut native_hosts = BTreeMap::new();
+        let compactions = super::metrics::Compactions::install(&job.context);
         for input in &self.inputs {
             match input {
                 JobInput::Parquet { name, path } => job.register_parquet(name, path).await?,
@@ -365,6 +417,49 @@ impl JobSpec {
                     .await?
                 }
                 JobInput::Iceberg { name, pin } => job.register_iceberg(name, pin).await?,
+                JobInput::Version {
+                    name,
+                    workspace,
+                    version,
+                } => {
+                    let root = std::fs::canonicalize(workspace)?;
+                    let host = match native_hosts.entry(root) {
+                        std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            let host = Engine::open(entry.key(), job.budget.limits.clone()).await?;
+                            entry.insert(host)
+                        }
+                    };
+                    let source = host.protected_source_table(version, &job.budget).await?;
+                    let physical_snapshot = super::NativeVersionSnapshotObservation::from_table(
+                        &source.table,
+                        source.metadata_sha256,
+                        source.metadata_size,
+                        &job.budget,
+                    )?;
+                    let observation =
+                        super::NativeInputObservation::from_table(name, &source.table);
+                    let provider =
+                        crate::query::table(source.table, job.budget.clone(), Some(source.rows))?;
+                    let schema = provider.schema().as_ref().clone();
+                    job.context.register_table(
+                        name.as_str(),
+                        Arc::new(super::native::AdmittedTable {
+                            provider,
+                            memory: Arc::new(source.memory),
+                            observation,
+                        }),
+                    )?;
+                    result
+                        .native_versions
+                        .push(super::NativeVersionObservation {
+                            name: name.clone(),
+                            version: version.clone(),
+                            schema_id: source.schema_id,
+                            schema,
+                            physical_snapshot: Some(physical_snapshot),
+                        });
+                }
             }
             if matches!(
                 input,
@@ -375,18 +470,36 @@ impl JobSpec {
                     .push(job.native_input_observation(input.name()).await?);
             }
         }
+        #[cfg(feature = "substrait")]
+        let mut saved_plan_admission = Vec::new();
         for (step_index, step) in self.steps.iter().enumerate() {
             *running = Some(Running::Step(step_index));
             let start_epoch = super::metrics::now_epoch_secs();
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            compactions.take();
             let (storage, rows, charged_bytes) = match step {
-                JobStep::Sql(step) if step.materialize => {
+                JobStep::Sql(step) if step.materialize && step.parameters.is_empty() => {
                     job.materialize_detailed(&step.name, &step.sql).await?
                 }
                 JobStep::Sql(step) => {
-                    job.register_view(&step.name, &step.sql).await?;
+                    if step.materialize {
+                        return Err(Error::refusal(
+                            "unsupported_parameters",
+                            "parameters are supported for view steps",
+                        ));
+                    }
+                    let frame = job.sql_bound(&step.sql, &step.parameters).await?;
+                    job.register_frame(&step.name, frame)?;
+                    (StepStorage::View, 0, 0)
+                }
+                #[cfg(feature = "substrait")]
+                JobStep::Substrait(step) => {
+                    let (frame, receipt, memory) = job.read_substrait(&step.substrait).await?;
+                    job.register_frame(&step.name, frame)?;
+                    result.saved_plans.push(receipt);
+                    saved_plan_admission.push(memory);
                     (StepStorage::View, 0, 0)
                 }
                 JobStep::Components(step) => {
@@ -413,6 +526,7 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                compactions.take(),
             );
             for name in step.release_after() {
                 job.release_for_step(step_index, step.name(), name)?;
@@ -483,6 +597,8 @@ impl JobSpec {
                 name: output.name.clone(),
                 file,
             });
+            job.register_completed_output(&output.name, &output.path)
+                .await?;
 
             let remaining_outputs_sql = self.outputs[output_index + 1..]
                 .iter()
@@ -515,6 +631,7 @@ impl JobSpec {
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            compactions.take();
             let q_res = super::query_result::query(&job, &query.name, &query.sql).await?;
             let pool_after = job.budget.runtime_env().memory_pool.reserved();
             let end_epoch = super::metrics::now_epoch_secs();
@@ -531,6 +648,7 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                compactions.take(),
             );
             result.queries.push(q_res);
 

@@ -62,6 +62,7 @@ struct HashedWriter<W> {
     inner: W,
     sha256: Sha256,
     md5: Md5,
+    blake3: blake3::Hasher,
     size: u64,
     tail: [u8; 8],
 }
@@ -71,6 +72,7 @@ impl<W: Write> Write for HashedWriter<W> {
         let bytes = &bytes[..n];
         self.sha256.update(bytes);
         self.md5.update(bytes);
+        self.blake3.update(bytes);
         self.size += n as u64;
         if n >= 8 {
             self.tail.copy_from_slice(&bytes[n - 8..]);
@@ -85,12 +87,23 @@ impl<W: Write> Write for HashedWriter<W> {
     }
 }
 
-pub(super) async fn export(
+pub(super) struct PreparedExport {
+    pub frame: DataFrame,
+    pub input_schema: arrow::datatypes::SchemaRef,
+    pub schema: arrow::datatypes::SchemaRef,
+    pub output_indices: Vec<usize>,
+    pub key_indices: Vec<usize>,
+    pub converter: RowConverter,
+    pub properties: WriterProperties,
+    pub metadata_unit: usize,
+}
+
+// Share all schema-dependent export checks without opening a writer or scanning rows.
+pub(super) fn prepare(
     frame: DataFrame,
-    path: &Path,
     settings: &ExportSettings,
     budget: &Budget,
-) -> Result<ExportedFile> {
+) -> Result<PreparedExport> {
     if settings.row_group_rows == 0
         || settings.order_by.is_empty()
         || settings.created_by.is_empty()
@@ -99,12 +112,6 @@ pub(super) async fn export(
         return Err(Error::refusal(
             "invalid_export",
             "export requires a positive row count, explicit order, writer identity and footer bound",
-        ));
-    }
-    if path.exists() {
-        return Err(Error::refusal(
-            "invalid_export",
-            "export output already exists",
         ));
     }
     let order = settings
@@ -118,7 +125,8 @@ pub(super) async fn export(
         })
         .collect::<Vec<_>>();
     let frame = frame.sort(order)?;
-    let input_schema = crate::export::portable_schema(frame.schema().as_arrow());
+    let input_schema =
+        crate::export::portable_schema(&super::plan::inferred_schema(&frame, budget)?);
     let output_indices = if settings.columns.is_empty() {
         (0..input_schema.fields().len()).collect::<Vec<_>>()
     } else {
@@ -220,6 +228,61 @@ pub(super) async fn export(
             properties = properties.set_column_statistics_enabled(path, EnabledStatistics::Page);
         }
     }
+    let key_indices = settings
+        .order_by
+        .iter()
+        .map(|sort| input_schema.index_of(&sort.field))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let converter = RowConverter::new(
+        key_indices
+            .iter()
+            .map(|i| SortField::new(input_schema.field(*i).data_type().clone()))
+            .collect(),
+    )?;
+    let metadata_unit = crate::storage::writer_metadata_unit(leaves.iter().map(String::as_str));
+    Ok(PreparedExport {
+        frame,
+        input_schema,
+        schema,
+        output_indices,
+        key_indices,
+        converter,
+        properties: properties.build(),
+        metadata_unit,
+    })
+}
+
+pub(super) async fn export(
+    frame: DataFrame,
+    path: &Path,
+    settings: &ExportSettings,
+    budget: &Budget,
+) -> Result<ExportedFile> {
+    Ok(export_retained(frame, path, settings, budget).await?.0)
+}
+
+pub(super) async fn export_retained(
+    frame: DataFrame,
+    path: &Path,
+    settings: &ExportSettings,
+    budget: &Budget,
+) -> Result<(ExportedFile, String)> {
+    if path.exists() {
+        return Err(Error::refusal(
+            "invalid_export",
+            "export output already exists",
+        ));
+    }
+    let PreparedExport {
+        frame,
+        input_schema,
+        schema,
+        output_indices,
+        key_indices,
+        converter,
+        properties,
+        metadata_unit,
+    } = prepare(frame, settings, budget)?;
     let temporary = budget
         .runtime_env()
         .disk_manager
@@ -236,37 +299,32 @@ pub(super) async fn export(
         .footer_limit
         .saturating_mul(8)
         .min(budget.limits.max_metadata_bytes);
-    let _metadata = budget.reserve(metadata_limit)?;
-    let metadata_unit = crate::storage::writer_metadata_unit(leaves.iter().map(String::as_str));
     if metadata_unit > metadata_limit {
         return Err(Error::refusal(
             "metadata_capacity",
             "export schema exceeds metadata allowance",
         ));
     }
-    let key_indices = settings
-        .order_by
-        .iter()
-        .map(|sort| input_schema.index_of(&sort.field))
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let converter = RowConverter::new(
-        key_indices
-            .iter()
-            .map(|i| SortField::new(input_schema.field(*i).data_type().clone()))
-            .collect(),
-    )?;
+    // Native exports disable byte-triggered row groups and explicit flushes.
+    // Admit the existing conservative file/schema unit now, then actual row-group
+    // units before each write rather than reserving the whole allowed maximum.
+    let mut metadata_memory = budget.reserve(metadata_unit)?;
     let previous_key: Option<Vec<u8>> = None;
     let hashed = HashedWriter {
         inner: budget.scratch_writer(&temporary)?,
         sha256: Sha256::new(),
         md5: Md5::new(),
+        blake3: blake3::Hasher::new(),
         size: 0,
         tail: [0; 8],
     };
     let projected_schema = schema.clone();
-    let mut writer = ArrowWriter::try_new(hashed, schema, Some(properties.build()))?;
-    let stream =
-        crate::export::portable_stream(frame.execute_stream().await?, input_schema, budget);
+    let mut writer = ArrowWriter::try_new(hashed, schema, Some(properties))?;
+    let stream = crate::export::portable_stream(
+        super::plan::execute_stream(frame).await?,
+        input_schema,
+        budget,
+    );
     let projected_stream = futures::stream::try_unfold(
         (stream, converter, previous_key, key_indices, output_indices),
         |(mut stream, converter, mut previous_key, key_indices, output_indices)| async move {
@@ -319,12 +377,19 @@ pub(super) async fn export(
         } else {
             (rows as usize).div_ceil(settings.row_group_rows)
         };
-        if groups.saturating_add(1).saturating_mul(metadata_unit) > metadata_limit {
+        let required_metadata = groups
+            .checked_add(1)
+            .and_then(|groups| groups.checked_mul(metadata_unit))
+            .ok_or_else(|| Error::refusal("metadata_capacity", "export metadata overflow"))?;
+        if required_metadata > metadata_limit {
             return Err(Error::refusal(
                 "metadata_capacity",
                 "export row groups exceed metadata allowance",
             ));
         }
+        metadata_memory.merge(
+            budget.reserve(required_metadata.saturating_sub(metadata_memory.num_permits()))?,
+        );
         super::encoding::write(
             &mut writer,
             &batch,
@@ -352,8 +417,24 @@ pub(super) async fn export(
         rows,
         footer_bytes,
     };
+    let digest = hashed.blake3.finalize().to_hex().to_string();
     drop(writer);
     temporary.inner().as_file().sync_all()?;
     std::fs::hard_link(temporary.path(), path)?;
-    Ok(result)
+    budget.retain_temporary(temporary)?;
+    sync_parent(path)?;
+    Ok((result, digest))
+}
+
+pub(super) fn sync_parent(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::refusal("invalid_export", "output has no parent"))?;
+    std::fs::File::open(if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    })?
+    .sync_all()?;
+    Ok(())
 }

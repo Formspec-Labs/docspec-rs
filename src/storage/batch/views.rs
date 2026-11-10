@@ -112,6 +112,24 @@ pub(super) fn add_weights(array: &dyn Array, weights: &mut [usize]) -> bool {
     }
 }
 
+/// Bytes a copy must free before it is made, by this guard and by view compaction.
+///
+/// A smaller copy is not worth its work, and a copied view column holds shared
+/// admission, which can only refuse, for as long as an operator keeps it.
+///
+/// What the floor leaves charged: up to this much spare buffer per view column
+/// per batch, since the rule is applied to each view column on its own.
+pub(super) const MIN_FREED: usize = 1 << 20;
+
+/// Copies a view column into buffers of its own when the copy pays for itself.
+///
+/// The rule: copy when the column's strings fill under half of its buffers'
+/// capacity and the copy frees more than [`MIN_FREED`], and then hold shared
+/// admission for exactly what the copy keeps. Capacity is what DataFusion
+/// charges: Arrow's output coalescer copies sparse strings into blocks of at
+/// least 1 MiB, or sized for its whole input (arrow-select 58.4
+/// coalesce/byte_view.rs), so a buffer can be short in length and far larger
+/// in size; a block of short strings frees too little to copy.
 fn collect<T: ByteViewType>(
     view: &GenericByteViewArray<T>,
     array: ArrayRef,
@@ -130,15 +148,14 @@ fn collect<T: ByteViewType>(
             if length > 12 { length } else { 0 }
         })
         .fold(0usize, usize::saturating_add);
-    // Measure buffers by capacity, as DataFusion charges them: Arrow's output
-    // coalescer copies strings into blocks sized for its whole input, so a
-    // buffer it emits can be short in length and several times that in size.
+    let worth_copying =
+        |capacity: usize| payload < capacity / 2 && capacity.saturating_sub(payload) > MIN_FREED;
     let upper = view
         .data_buffers()
         .iter()
         .map(|buffer| buffer.capacity())
         .fold(0usize, usize::saturating_add);
-    if payload >= upper / 2 {
+    if !worth_copying(upper) {
         return Ok(array);
     }
 
@@ -160,7 +177,7 @@ fn collect<T: ByteViewType>(
         .fold(0usize, usize::saturating_add);
     drop(seen);
     drop(metadata);
-    if payload >= retained / 2 {
+    if !worth_copying(retained) {
         return Ok(array);
     }
 
@@ -218,6 +235,11 @@ fn collect<T: ByteViewType>(
     drop(collected);
     drop(cleared);
     drop(temporary);
+    // The reservation covered gc's working space; keep only what the copy holds.
+    let spare = memory
+        .num_permits()
+        .saturating_sub(result.get_buffer_memory_size());
+    drop(memory.split(spare));
     admit_array(result, memory)
 }
 

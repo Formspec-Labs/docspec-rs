@@ -21,7 +21,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
-    file::properties::WriterProperties,
+    file::properties::{EnabledStatistics, WriterProperties},
 };
 use std::{any::Any, sync::Arc};
 
@@ -128,8 +128,9 @@ pub(super) async fn materialize(
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = job.sql(sql).await?;
-    let schema = crate::export::portable_schema(frame.schema().as_arrow());
-    let stream = frame.execute_stream().await?;
+    let schema =
+        crate::export::portable_schema(&super::plan::inferred_schema(&frame, &job.budget)?);
+    let stream = super::plan::execute_stream(frame).await?;
     retain(&job.context, &job.budget, name, schema, stream).await
 }
 
@@ -172,10 +173,18 @@ pub(super) async fn retain(
                 .create_tmp_file("SQL named step")?;
             let props = WriterProperties::builder()
                 .set_compression(Compression::ZSTD(ZstdLevel::try_new(3)?))
-                .set_max_row_group_row_count(Some(budget.limits.batch_rows))
+                // Compute batches need not become individual physical groups.
+                // Keep the native default row ceiling and the byte ceiling.
                 .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
+                // A spill is replayed whole, in order and with no predicate
+                // (`Batches::execute`), and the step tells the planner its
+                // rows itself, so nothing reads statistics or a page index.
+                // With them a wide spill's footer and index outweighed its
+                // data; `spill_reader` asks for neither.
+                .set_statistics_enabled(EnabledStatistics::None)
+                .set_offset_index_disabled(true)
                 .build();
             let mut spill = ArrowWriter::try_new(
                 budget.scratch_writer(&temporary)?,
@@ -218,26 +227,7 @@ pub(super) async fn retain(
         writer.close()?;
         drop(writer_memory);
         let file = file.expect("spill owns temporary file");
-        // A frame from the job's own catalog would retain this table and form
-        // a cycle. A fresh context shares its runtime, not its catalog.
-        let reader = budget.context();
-        // This private table advertises the already normalized spill schema.
-        // Keep the native reader in that representation instead of changing
-        // Utf8 fields back to views underneath the streaming table.
-        reader
-            .state_ref()
-            .write()
-            .config_mut()
-            .options_mut()
-            .execution
-            .parquet
-            .schema_force_view_types = false;
-        let frame = reader
-            .read_parquet(
-                file.path().to_string_lossy().as_ref(),
-                ParquetReadOptions::default().file_extension(""),
-            )
-            .await?;
+        let frame = read_spill(budget, &file, name).await?;
         (
             StepStorage::Scratch,
             StepData::Scratch {
@@ -276,6 +266,107 @@ pub(super) async fn retain(
     );
     Ok((storage, rows, bytes))
 }
+
+/// Reads back step `step`'s spill file through the handle its writer still holds.
+///
+/// The footer is charged to the shared budget and not judged by
+/// `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
+///
+/// # Errors
+/// Refuses with `capacity`, naming the step, when the shared budget cannot
+/// hold the footer's charge.
+async fn read_spill(
+    budget: &Budget,
+    file: &RefCountedTempFile,
+    step: &str,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let memory = crate::storage::admit_spill_footer(file, budget)
+        .await
+        .map_err(|error| match error.code() {
+            "capacity" => Error::refusal(
+                "capacity",
+                format!(
+                    "spilled step {step}: the shared budget cannot hold its file's footer: {}",
+                    error.message()
+                ),
+            ),
+            _ => error,
+        })?;
+    scan_retained(spill_reader(budget), file.path(), Arc::new(memory)).await
+}
+
+/// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
+pub(super) async fn read_retained(
+    budget: &Budget,
+    path: &std::path::Path,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
+    scan_retained(retained_reader(budget), path, memory).await
+}
+
+/// A reader for the engine's own Parquet files.
+///
+/// A frame from the job's own catalog would retain the table it backs and
+/// form a cycle. A fresh context shares the budget's runtime, not a catalog.
+fn retained_reader(budget: &Budget) -> SessionContext {
+    let reader = budget.context();
+    // Private materializations advertise their already normalized portable schema.
+    reader
+        .state_ref()
+        .write()
+        .config_mut()
+        .options_mut()
+        .execution
+        .parquet
+        .schema_force_view_types = false;
+    reader
+}
+
+/// [`retained_reader`] for a spill file: the one place its read options are set.
+///
+/// The spill writer leaves no statistics and no page index, and a replay is
+/// the whole file with no predicate, so the reader asks for neither.
+fn spill_reader(budget: &Budget) -> SessionContext {
+    let reader = retained_reader(budget);
+    {
+        let state = reader.state_ref();
+        let mut state = state.write();
+        let execution = &mut state.config_mut().options_mut().execution;
+        execution.collect_statistics = false;
+        execution.parquet.enable_page_index = false;
+        execution.parquet.pruning = false;
+        execution.parquet.pushdown_filters = false;
+    }
+    reader
+}
+
+/// Scans `path` whole through `reader`, keeping its footer admission with the scan.
+async fn scan_retained(
+    reader: SessionContext,
+    path: &std::path::Path,
+    memory: Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let frame = reader
+        .read_parquet(
+            path.to_string_lossy().as_ref(),
+            ParquetReadOptions::default().file_extension(""),
+        )
+        .await?;
+    let datafusion::logical_expr::LogicalPlan::TableScan(scan) = frame.logical_plan() else {
+        return Err(Error::refusal(
+            "invalid_spec",
+            "retained Parquet did not produce a native file scan",
+        ));
+    };
+    let provider = datafusion::datasource::source_as_provider(&scan.source)?;
+    Ok(reader.read_table(Arc::new(super::fitting::FittedTable {
+        provider,
+        metadata_memory: Some(memory),
+    }))?)
+}
+
+#[cfg(test)]
+mod spill_tests;
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,7 @@
 // Rust guideline compliant 2026-02-21
 
 mod batch;
+pub(crate) mod custody;
 pub(crate) use batch::{
     arrow_schema_to_schema_auto_assign_ids, coerce_batch, coerce_data_type, compact_batch_slice,
     compact_retained, effective_batch_bytes, has_list_of_struct, has_splittable_skewed_column,
@@ -13,7 +14,7 @@ pub(crate) mod identity;
 mod inspection;
 mod object_io;
 mod occurrences;
-pub(crate) use object_io::{Objects, PinTable, valid_object_locator};
+pub(crate) use object_io::{Objects, PinTable, is_remote_uri, valid_object_locator};
 mod partitioning;
 #[cfg(test)]
 pub(crate) use partitioning::days_to_months_since_epoch;
@@ -24,13 +25,16 @@ pub(crate) use partitioning::{
 mod pinned;
 #[cfg(test)]
 pub(crate) use pinned::pin;
+pub(crate) use pinned::read_retained_snapshot_metadata;
 #[doc(inline)]
 pub use pinned::{NativeTableSnapshot, open_pin, open_pin_with_io, open_snapshot_with_io};
 pub(crate) use pinned::{
     check_inventory, check_inventory_files, decode as decode_native_metadata, pin_bound,
     pin_bound_with_files,
 };
-pub(crate) use pinned::{open_pin_admitted, open_snapshot, open_snapshot_with_io_admitted};
+pub(crate) use pinned::{
+    open_local_pin_observed, open_pin_admitted, open_snapshot, open_snapshot_with_io_admitted,
+};
 #[cfg(feature = "remote")]
 pub mod remote;
 pub(crate) mod removal;
@@ -40,6 +44,7 @@ mod scan_metrics;
 pub use scan_metrics::{NativeScanObservation, NativeScanSample};
 pub(crate) mod schema;
 mod selection;
+pub(crate) use flat::{admit_parquet_footer, admit_spill_footer};
 pub(crate) use selection::reserve_projection;
 mod tables;
 pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};
@@ -97,6 +102,7 @@ use std::{
 /// (including 36-byte UUIDs, 64-byte SHA-256 hex digests, and 74-byte `body_key`
 /// locators).
 pub(crate) const STATISTICS_TRUNCATE_BYTES: usize = 128;
+pub(crate) const SNAPSHOT_MEMBER_CHUNK_BYTES: usize = 64 << 10;
 
 /// Hashes the exact compact JSON serialization without retaining its bytes.
 ///
@@ -174,12 +180,37 @@ pub async fn read_batches(
     read_projected_batches(table, budget, None).await
 }
 
+// Cold lifecycle reads consume bounded, variable-length metadata records.
+// When the metadata allowance leaves little room inside the Arrow batch cap,
+// don't let Parquet combine independently admitted records into a larger batch.
+// The threshold chooses a row count; the existing byte guard still decides
+// admission, including for a single record.
+pub(crate) async fn read_catalog_batches(
+    table: &Table,
+    budget: &Budget,
+) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
+    let rows = if budget.limits.max_metadata_bytes > budget.limits.max_batch_bytes / 2 {
+        1
+    } else {
+        budget.limits.batch_rows
+    };
+    read_projected_batches_inner(table, budget, None, None, &[], rows).await
+}
+
 pub(crate) async fn read_projected_batches(
     table: &Table,
     budget: &Budget,
     projection: Option<&[usize]>,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    read_projected_batches_inner(table, budget, projection, None, &[]).await
+    read_projected_batches_inner(
+        table,
+        budget,
+        projection,
+        None,
+        &[],
+        budget.limits.batch_rows,
+    )
+    .await
 }
 
 pub(crate) async fn read_projected_batches_with_filters(
@@ -188,7 +219,15 @@ pub(crate) async fn read_projected_batches_with_filters(
     projection: Option<&[usize]>,
     filters: &[datafusion::logical_expr::Expr],
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-    read_projected_batches_inner(table, budget, projection, None, filters).await
+    read_projected_batches_inner(
+        table,
+        budget,
+        projection,
+        None,
+        filters,
+        budget.limits.batch_rows,
+    )
+    .await
 }
 
 /// Reads selected columns while observing attempted native data ranges.
@@ -208,9 +247,15 @@ pub async fn read_batches_observed(
     NativeScanObservation,
 )> {
     let observation = NativeScanObservation::default();
-    let stream =
-        read_projected_batches_inner(table, budget, projection, Some(observation.clone()), &[])
-            .await?;
+    let stream = read_projected_batches_inner(
+        table,
+        budget,
+        projection,
+        Some(observation.clone()),
+        &[],
+        budget.limits.batch_rows,
+    )
+    .await?;
     Ok((stream, observation))
 }
 
@@ -220,6 +265,7 @@ async fn read_projected_batches_inner(
     projection: Option<&[usize]>,
     observation: Option<scan_metrics::NativeScanObservation>,
     filters: &[datafusion::logical_expr::Expr],
+    batch_rows: usize,
 ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
     defaults::check_expansion(table.metadata().current_schema(), &budget.limits, false)?;
     let reservation = budget.reserve(budget.limits.max_batch_bytes.saturating_mul(2))?;
@@ -274,7 +320,7 @@ async fn read_projected_batches_inner(
     let result = table
         .reader_builder()
         .with_data_file_concurrency_limit(1)
-        .with_batch_size(budget.limits.batch_rows)
+        .with_batch_size(batch_rows)
         .build()
         .read(tasks)?;
     if let Some(observation) = &observation {

@@ -327,6 +327,15 @@ pub struct Authority {
     pub release: Option<ReleasePin>,
     /// Native revision that selected this release, preserved across later admissions.
     pub selection_revision: Option<i64>,
+    /// Native family of a whole-job dataset; absent for ordinary source datasets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_profile: Option<String>,
+    /// Whole-job selection committed with the same native authority and epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_selected: Option<super::JobCandidateRef>,
+    /// Guarded producer interpretation for new adopted whole-job admissions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_producer_adoption: Option<super::JobProducerAdoptionRef>,
 }
 
 /// Objects protected by an owner before a consumer can promise their availability.

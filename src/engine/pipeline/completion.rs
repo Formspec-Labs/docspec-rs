@@ -110,6 +110,17 @@ impl Engine {
         release: Retained<ReleasePin>,
         stop: Option<&'a str>,
     ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
+        self.select_prepared_with_policy(spec, operation, release, stop, None)
+    }
+
+    pub(in crate::engine) fn select_prepared_with_policy<'a>(
+        &'a self,
+        spec: &'a OperationRequest,
+        operation: &'a Operation,
+        release: Retained<ReleasePin>,
+        stop: Option<&'a str>,
+        requested_policy: Option<&'a Id>,
+    ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
         // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             if let OperationRequest::Refresh(refresh) = spec {
@@ -133,10 +144,22 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation()))
                 .await?
             {
+                if let Some(requested_policy) = requested_policy {
+                    self.guard_completed_policy(&view, spec.operation(), requested_policy)
+                        .await?;
+                }
                 return Ok(completed);
             }
             let authority = self.check(&view, operation, spec.operation()).await?;
             self.check_backend_selection(&authority, spec)?;
+            self.guard_external_qualification(
+                &view,
+                &authority,
+                spec.operation(),
+                &release,
+                requested_policy,
+            )
+            .await?;
             if authority
                 .selected
                 .as_ref()

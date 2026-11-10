@@ -66,6 +66,56 @@ Sampling does not establish exact unsampled values or statistical completeness.
 
 ## Lifecycle
 
+The retained whole-job extension uses the same native lifecycle owner. Resolve
+per-member custody and sealed material dependencies before caller payload reads;
+include expression subqueries and the exact originating runtime in reuse keys.
+Keep input/step payload replay under the existing conservative result-availability
+promise until explicit retirement ends every applicable root. Admit retained
+files and native spills together, preserve host-wide disk concurrency bounds,
+and reclaim private crash scratch only under exclusive workspace ownership.
+End admission authority-read snapshots after their guarded commit, before
+execution. End computation providers after their last consumer while retaining
+independent schema, report, witness, disk and protection accounting.
+Avoid unused representation capacity at known-size lifecycle writes. Admit the
+existing conservative export metadata units as row groups become necessary,
+before writing, while retaining the same ceiling and owner lifetime. Keep private
+spill layout independent of compute-batch rows and preserve native byte limits.
+Qualify these boundaries with tiny successor, interruption, actual-spill and
+footer/cache lifetime probes before the complete repository gate.
+
+Extend retained input admission to exact native snapshots through selected-read
+closure custody. Preserve original metadata, manifest, data and supported delete
+URIs; use maintained native I/O over protected exact copies rather than rewriting
+metadata or exporting rows. Seal useful members before later transfers and reuse
+them before reopening original objects. Version native custody receipts explicitly
+so file-only readers cannot silently accept stronger claims. Keep historical
+metadata for interpretation and ancestry without promising historical payloads.
+Native producer-definition adoption and accepted population prerequisites must
+precede application model execution; hashes and custody alone do not prove them.
+First adopt exact independently established definition metadata through the
+existing local dataset authority. Guard the current definition, epoch, selection
+and adoption; change definition and adoption in the same commit without selecting.
+Retain one current byte witness and immutable action identity, so lost-response
+retries return history without reopening artifacts or restoring an old adoption.
+Keep new managed execution and acceptance in adopted scopes refused until exact
+static proof and accepted population prerequisite admission are wired. An
+adoption records the owner's interpretation; it does not prove writer execution,
+row equality, extraction readiness or publication.
+Before population work, capture the exact adopted definition and original
+producer record bytes with proof admission. Check original head pins, adopted
+producer facts and selected native append ancestry through existing protected
+metadata reads. Accept exact native required counters under the adopted proof
+policy. Admit the dependent model only with its exact accepted same-scope proof,
+original model file member pins and inherited native input custody. Preserve
+the grant independently of donor retirement, with proof and model evidence
+bound to each completed view set.
+Transfer same-owner custody through a guarded receiving operation, binding the
+exact lifecycle table incarnation and original input generation. Commit inherited
+objects and original-copy provenance as roots before later seals. Keep that new
+root independent of donor retirement, and retain provenance under independent
+result availability. Use source-only material keys; physical copy locations and
+custody-reference history must not invalidate computation.
+
 Record completion at useful boundaries: admission/transfer, processing, evidence
 preparation, validation, export/upload and independent readback. Each completion
 binds exact inputs, material dependencies, outputs, verification and retention
@@ -104,6 +154,68 @@ policy exists.
 Restore points bind verified metadata and the required object closure. Restore
 into a fresh catalog with old destructive actors fenced at the actual storage
 boundary. Do not promise recovery beyond the last completed restore point.
+
+## Whole-job schema preparation
+
+Prepare one complete captured `JobSpec` from explicit named Arrow IPC schema
+messages or exact bounded native Arrow-serde/Iceberg schema artifacts with explicit
+format tags and maintained native conversion. Reuse the job's native name/lifetime checks, guarded SQL/function and
+parameter planning, export projection/portable schema rules, and connected-component
+endpoint/type rules. Return every named input, step, export and report schema,
+including private outputs, tied to the exact captured artifact and declared schema
+bytes. Distinguish declared input schema bytes from the native provider relation
+schema, including JSON Lines source columns and declaration restrictions. When
+both an Iceberg declaration and an input pin supply native schema IDs, require
+exact equality before registration; retain the declared ID without claiming
+observed admission. Arrow-only declarations remain unobserved assumptions.
+Schema-only providers refuse scans. Preparation does not create job scratch,
+open data sources/catalogs, materialize graph rows, export rows or execute reports.
+Reject nonempty `table_operations` in this profile.
+
+Input schemas remain declarations, including original raw pins. They do not prove
+observed schema, admission, custody, consumed coverage or protection. Use standard
+Arrow IPC schema messages for maintained Python consumption without another type
+language. Bound artifact decoding, declared schemas and returned schema metadata
+under the execution host's existing budget. Guarded literal expansion charges
+actual conservative estimates before invocation, preserves cumulative limits and
+holds admission through maintained consumer lifetimes; empty contexts consume no
+unused literal allowance. Prove unchanged small-host consumer capacity as well as
+expansion refusal and stream ownership.
+
+Ordinary whole-job execution, retained multi-output completion/reopen hooks,
+remote custody, complete candidate qualification and guarded selection require
+separate evidence. Retained execution must reuse native durable phase completions
+for expensive materializations, exports and reports; wrapping `JobSpec::run` is
+insufficient. The initial managed whole-job family must also reject table operations.
+
+## Local external quality gates
+
+The local `managed-build` command supports independent source-only Build and
+based Update operations. `prepare_update` carries the existing `UpdateSpec` and
+an immutable qualification policy. Reuse the native admission, retained phases,
+exact protected reads, evidence acceptance and guarded selection; do not add
+another lifecycle or treat ordinary SQL jobs as managed operations.
+
+The first Update profile requires a selected independent source-only base. Keep
+complete-key replacement, explicit deletion, declared column merge rules and
+unchanged-row inheritance distinct. Qualify the exact candidate before selection.
+A changed selection or authority refuses promotion; this profile does not compose
+a new candidate from a newer sibling state. Rule-only changes reuse computed
+values. Completed retries return the original historical result without requiring
+it to remain current or selecting it over a successor.
+
+An exact retry of accepted evidence resolves native retained acceptance before
+opening caller artifacts again. Compare the complete submitted evidence, active
+policy, candidate and retained acceptance identity. New acceptances retain the
+original resolved-rule bytes; older records do not gain a byte-custody claim.
+Keep the exact managed request/result through checkpoint compaction until native
+recovery or availability retirement ends that promise. Quality control metadata
+does not add a separate payload lifetime.
+
+Refresh, Backfill, computed/related views, multi-view qualification and publication
+need their own supported selection paths and exact candidate evidence. This local
+profile does not qualify those extensions. Its focused tests, DDK wrapper tests,
+repository gate and independent review remain separate evidence.
 
 ## Delivery and completion checklist
 
@@ -169,3 +281,20 @@ metadata operations third and execution overhead afterward. Reconsider an
 additional SQL backend only when lifecycle metadata prevents the target and a
 controlled comparison proves a material complete-path improvement with identical
 guarantees. Earlier speculative overhead estimates are not acceptance results.
+# Active retained whole-job increment
+
+Implement the existing native whole `JobSpec` through durable phase completion
+and reopen hooks. Keep one authority for dataset selection and use the existing
+protection, inventory, phase recovery, operation recovery and result availability
+scopes. Preserve original request bytes for unknown submission reconciliation.
+Native SQL qualification resolves the original completed candidate, full named
+view inventory, original SQL digests, exact Arrow types and one complete integer
+zero row per declared blocking report; metadata reports remain ordinary results.
+
+The first local file profile needs independent interruption/reopen, changed-rule
+material reuse, null/empty/nonzero/truncated refusal, historical selection,
+retirement/resource and actual DDK consumer proof before a full repository gate.
+An explicit native adoption of original producer-definition manifests, exact
+origin/append chains and native population prerequisites must close Congress Gate5
+before its application guards can be removed. Remote raw snapshot custody and
+publisher intent remain unavailable until implemented and qualified.

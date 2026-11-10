@@ -291,7 +291,9 @@ impl TableOperation {
                         })
                     },
                     |table, frame| async move {
-                        let stream = frame.execute_stream().await?.map_err(Error::from);
+                        let stream = super::plan::execute_stream(frame)
+                            .await?
+                            .map_err(Error::from);
                         storage::write_batches_with_layout(&table, stream, &job.budget, *layout)
                             .await
                     },

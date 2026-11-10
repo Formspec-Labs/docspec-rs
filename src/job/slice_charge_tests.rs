@@ -159,6 +159,11 @@ async fn refused_compaction_keeps_the_batch_and_the_rows() {
             "AggregateExec",
         ),
     ];
+    // The step event's counts: none refused while the budget has room.
+    let compactions = super::metrics::Compactions::install(&job.context);
+    execute(&job.context, &cases[0].1).await.unwrap();
+    let (copied, refused) = compactions.take();
+    assert_eq!(refused, 0, "refused with room ({copied} copied)");
     // Leave less than one 8,192-row view copy (about 2.7 MB) admissible.
     let _held = hold_admission(&job.budget, 1 << 20);
     let mut failures = Vec::new();
@@ -186,6 +191,10 @@ async fn refused_compaction_keeps_the_batch_and_the_rows() {
                 displayable(plan.as_ref()).indent(true)
             ));
         }
+    }
+    let (_, refused) = compactions.take();
+    if refused == 0 {
+        failures.push("the step counts no refused copies".to_owned());
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

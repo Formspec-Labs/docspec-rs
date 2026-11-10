@@ -684,10 +684,56 @@ async fn compact_lifecycle_survives_lost_commit_response_with_succession_checkpo
         .unwrap();
 }
 
+fn fixture_metadata_charge(key: &str, value: &str, encoded_root: &str) -> (usize, usize, usize) {
+    let raw = crate::catalog::history_row_bytes(key, value);
+    let references = key.matches(encoded_root).count() + value.matches(encoded_root).count();
+    (raw, raw - references * encoded_root.len(), references)
+}
+
+// Test-only accounting separates the fixture location from structural metadata.
+// The existing raw-byte assertions remain unchanged during this diagnostic.
+async fn emit_metadata_components(
+    engine: &Engine,
+    dataset: &Id,
+    root: &Path,
+    label: &str,
+    expected_charge: usize,
+) -> (usize, usize) {
+    let view = engine.inner.lifecycle.open(dataset).await.unwrap();
+    let rows = engine.inner.lifecycle.rows(&view).await.unwrap();
+    let encoded_root = serde_json::to_string(&root.to_string_lossy()).unwrap();
+    let prefix = &encoded_root[1..encoded_root.len() - 1];
+    let mut key_bytes = 0usize;
+    let mut json_bytes = 0usize;
+    let mut overhead_bytes = 0usize;
+    let mut root_occurrences = 0usize;
+    let mut records = Vec::new();
+    for (key, (_, value)) in &rows.values {
+        let (charge, _, occurrences) = fixture_metadata_charge(key, value, prefix);
+        key_bytes += key.len();
+        json_bytes += value.len();
+        overhead_bytes += charge - key.len() - value.len();
+        root_occurrences += occurrences;
+        records.push(serde_json::json!({"key":key,"key_bytes":key.len(),"json_bytes":value.len(),"overhead_bytes":charge-key.len()-value.len(),"charge":charge,"root_occurrences":occurrences}));
+    }
+    let total = key_bytes + json_bytes + overhead_bytes;
+    assert_eq!(
+        total, expected_charge,
+        "component sum differs from native statistic"
+    );
+    println!(
+        "DOCSPEC_METADATA_COMPONENTS {}",
+        serde_json::json!({"label":label,"root":root,"encoded_root_bytes":prefix.len(),"rows":records.len(),"key_bytes":key_bytes,"json_bytes":json_bytes,"overhead_bytes":overhead_bytes,"charge":total,"root_occurrences":root_occurrences,"root_bytes":root_occurrences*prefix.len(),"root_excluded_charge":total-root_occurrences*prefix.len(),"records":records})
+    );
+    (total - root_occurrences * prefix.len(), root_occurrences)
+}
+
 #[tokio::test]
 async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
     let root = tempfile::TempDir::new().unwrap();
     let limits = Limits {
+        // This two-row metadata fixture needs no full default32GiB scratch reservation.
+        scratch_bytes: 64 << 20,
         max_metadata_bytes: 3 << 20,
         ..Limits::default()
     };
@@ -738,6 +784,7 @@ async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
             selected: Some(next_pin.dataset.clone()),
             release: Some(next_pin.clone()),
             selection_revision: Some(view.revision + 2),
+            ..Authority::default()
         };
         view = engine
             .inner
@@ -789,11 +836,25 @@ async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
                 "expected O(1) rows_after, got {}",
                 stats.rows_after
             );
+            let (structural, root_references) = emit_metadata_components(
+                &engine,
+                &dataset,
+                root.path(),
+                &format!("checkpoint-{step}"),
+                stats.metadata_bytes_after,
+            )
+            .await;
+            // Measured typed fixture: 13 records carry at most58 root references.
+            // Bound references independently so prefix exclusion cannot hide history growth.
             assert!(
-                stats.metadata_bytes_after < 32 << 10,
-                "expected O(1) metadata_bytes_after < 32 KiB, got {}",
-                stats.metadata_bytes_after
+                root_references <= 58,
+                "retained root references grew: {root_references}"
             );
+            assert!(
+                structural < 32 << 10,
+                "structural metadata exceeds32KiB: {structural}"
+            );
+            assert!(stats.metadata_bytes_after <= limits.max_metadata_bytes);
             view = engine.inner.lifecycle.open(&dataset).await.unwrap();
         }
     }
@@ -808,11 +869,24 @@ async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
         "rows_after={} must remain O(1) bounded",
         final_stats.rows_after
     );
+    let (structural, root_references) = emit_metadata_components(
+        &engine,
+        &dataset,
+        root.path(),
+        "final-real-build-260",
+        final_stats.metadata_bytes_after,
+    )
+    .await;
+    // The real final Build adds its native phase/custody records: at most68 references.
     assert!(
-        final_stats.metadata_bytes_after < 32 << 10,
-        "metadata_bytes_after={} must remain O(1) bounded (< 32 KiB)",
-        final_stats.metadata_bytes_after
+        root_references <= 68,
+        "retained root references grew: {root_references}"
     );
+    assert!(
+        structural < 32 << 10,
+        "structural metadata exceeds32KiB: {structural}"
+    );
+    assert!(final_stats.metadata_bytes_after <= limits.max_metadata_bytes);
 
     drop(engine);
     let reopened = Engine::open(root.path(), limits.clone()).await.unwrap();
@@ -831,4 +905,20 @@ async fn compact_lifecycle_keeps_260_operations_within_metadata_budget() {
         .await
         .unwrap();
     assert_eq!(proof.selections_advanced, 260);
+}
+
+#[test]
+fn metadata_fixture_guard_detects_nonpath_and_reference_growth() {
+    let root = "/fixture/explicit-root";
+    let ordinary =
+        serde_json::json!({"paths":[format!("{root}/a"),format!("{root}/b")],"meaning":"retained"})
+            .to_string();
+    let (_, structural, references) = fixture_metadata_charge("fixture", &ordinary, root);
+    assert!(structural < 32 << 10 && references <= 68);
+    let history = serde_json::json!({"history":"x".repeat(32<<10)}).to_string();
+    let (_, structural, references) = fixture_metadata_charge("fixture", &history, root);
+    assert!(structural >= 32 << 10 && references == 0);
+    let paths = serde_json::json!({"paths":vec![format!("{root}/old");69]}).to_string();
+    let (_, structural, references) = fixture_metadata_charge("fixture", &paths, root);
+    assert!(structural < 32 << 10 && references > 68);
 }

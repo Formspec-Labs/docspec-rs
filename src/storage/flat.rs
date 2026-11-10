@@ -2,7 +2,10 @@
 
 use super::Objects;
 use crate::{Error, Result, budget::Budget, model::ObjectRef};
-use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter};
+use datafusion::{
+    execution::disk_manager::RefCountedTempFile,
+    physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter},
+};
 use futures::TryStreamExt;
 use parquet::{
     arrow::{
@@ -54,27 +57,9 @@ pub(super) async fn read(
     // maintained-client allocations, not a measured whole-process memory bound.
     let transport = budget.reserve(2 << 20)?;
     let mut reader = open_reader(objects, object).await?;
-    // Bound the footer before allocating or decoding it. Supply the decoded
-    // interpretation to the maintained stream builder rather than rereading it.
-    let tail = reader
-        .get_bytes(object.bytes - 8..object.bytes)
-        .await
-        .map_err(|_| invalid())?;
-    let tail: [u8; 8] = tail.as_ref().try_into().map_err(|_| invalid())?;
-    let footer_len = FooterTail::try_from(tail)
-        .map_err(|_| invalid())?
-        .metadata_length();
-    if footer_len > budget.limits.max_metadata_bytes {
-        return Err(Error::refusal(
-            "metadata_capacity",
-            "export footer exceeds metadata allowance",
-        ));
-    }
-    let footer_start = object
-        .bytes
-        .checked_sub(8 + footer_len as u64)
-        .filter(|start| *start >= 4)
-        .ok_or_else(invalid)?;
+    let allowance = Some(budget.limits.max_metadata_bytes);
+    let (footer_len, footer_start) =
+        footer_bounds(reader.as_mut(), object.bytes, allowance).await?;
     // Serialized metadata plus retained native and Arrow interpretations.
     let metadata_memory = budget.reserve(footer_len.checked_mul(4).ok_or_else(capacity)?)?;
     let encoded = reader
@@ -86,6 +71,205 @@ pub(super) async fn read(
     }
     let metadata = ParquetMetaDataReader::decode_metadata(&encoded).map_err(|_| invalid())?;
     drop(encoded);
+    read_prepared(
+        budget,
+        reader,
+        metadata,
+        metadata_memory,
+        transport,
+        footer_start,
+    )
+    .await
+}
+
+/// Admits one file's footer and declared index ranges before native decoding.
+///
+/// The file is one this process did not write, or one it wrote to keep, so its
+/// footer is judged by `max_metadata_bytes` and then charged.
+///
+/// # Errors
+/// Refuses with `metadata_capacity` over the allowance and with `capacity`
+/// when the shared budget cannot hold the charge.
+pub(crate) async fn admit_parquet_footer(
+    path: &std::path::Path,
+    budget: &Budget,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    admit_footer(path, budget, Some(budget.limits.max_metadata_bytes)).await
+}
+
+/// Admits the footer of a spill file through the handle its writer holds.
+///
+/// `max_metadata_bytes` bounds metadata the engine did not produce. A spill's
+/// footer is the engine's own: its size follows from the spill writer's row
+/// groups, and the pinned line read it back with no check at all. Judging it
+/// by that allowance refused a step according to how its batches happened to
+/// fall. What bounds it now is the charge, which stays: a footer the shared
+/// budget cannot hold is refused, so a spill never costs unledgered memory.
+///
+/// The handle is what makes the file the engine's own. Only the disk manager
+/// issues one, for a file it has just created; a file that merely lies in the
+/// scratch directory has none and is admitted by [`admit_parquet_footer`].
+///
+/// # Errors
+/// Refuses with `capacity` when the shared budget cannot hold the charge.
+pub(crate) async fn admit_spill_footer(
+    file: &RefCountedTempFile,
+    budget: &Budget,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    admit_footer(file.path(), budget, None).await
+}
+
+/// Charges a footer and its index ranges, judging them by `allowance` if one is given.
+async fn admit_footer(
+    path: &std::path::Path,
+    budget: &Budget,
+    allowance: Option<usize>,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    let mut reader = tokio::fs::File::open(path).await?;
+    let bytes = reader.metadata().await?.len();
+    let (footer_len, footer_start) = footer_bounds(&mut reader, bytes, allowance).await?;
+    // Admit the bounded footer before decoding its maintained native index
+    // descriptors. DataFusion eagerly decodes page indexes while inferring a
+    // schema, even before cache insertion or physical page-pruning decisions.
+    // Local metadata ranges cannot exceed this exact immutable file. Keep the
+    // existing transport ceiling without reserving it for a tiny file; decoded
+    // footer and validated enclosing-index allowances remain separate.
+    let transport = usize::try_from(bytes.min(2 << 20)).map_err(|_| capacity())?;
+    let mut memory = budget.reserve(
+        footer_len
+            .checked_mul(16)
+            .and_then(|size| size.checked_add(transport))
+            .ok_or_else(capacity)?,
+    )?;
+    let encoded = reader
+        .get_bytes(footer_start..bytes - 8)
+        .await
+        .map_err(|_| invalid())?;
+    if encoded.len() != footer_len {
+        return Err(invalid());
+    }
+    let metadata = ParquetMetaDataReader::decode_metadata(&encoded).map_err(|_| invalid())?;
+    let mut indexes = IndexRanges::default();
+    for column in metadata
+        .row_groups()
+        .iter()
+        .flat_map(|group| group.columns())
+    {
+        for (offset, length) in [
+            (column.column_index_offset(), column.column_index_length()),
+            (column.offset_index_offset(), column.offset_index_length()),
+        ] {
+            indexes.add(offset, length, footer_start)?;
+        }
+    }
+    let index_charge = indexes.charge(footer_len, allowance)?;
+    // Provider/plan ownership retains this allowance through native readers,
+    // including bare metadata Arcs that may outlive a cache entry. Sixteen is
+    // the same conservative native/Arrow decode estimate as footer admission;
+    // it is not a whole-process RSS claim. Cache residency is charged separately.
+    memory.merge(budget.reserve(index_charge)?);
+    Ok(memory)
+}
+
+#[derive(Default)]
+struct IndexRanges {
+    decoded_bytes: usize,
+    first: Option<u64>,
+    end: u64,
+}
+impl IndexRanges {
+    fn add(&mut self, offset: Option<i64>, length: Option<i32>, footer_start: u64) -> Result<()> {
+        let bytes = index_range_bytes(offset, length, footer_start)?;
+        self.decoded_bytes = self.decoded_bytes.checked_add(bytes).ok_or_else(capacity)?;
+        if let Some(offset) = offset {
+            let offset = u64::try_from(offset).map_err(|_| invalid())?;
+            self.first = Some(self.first.map_or(offset, |first| first.min(offset)));
+            self.end = self
+                .end
+                .max(offset.checked_add(bytes as u64).ok_or_else(invalid)?);
+        }
+        Ok(())
+    }
+    fn charge(&self, footer_bytes: usize, allowance: Option<usize>) -> Result<usize> {
+        // Parquet 58.4 fetches one enclosing page-index range, including gaps.
+        let span = usize::try_from(self.end.saturating_sub(self.first.unwrap_or(self.end)))
+            .map_err(|_| capacity())?;
+        if let Some(limit) = allowance
+            && footer_bytes
+                .checked_add(span.max(self.decoded_bytes))
+                .is_none_or(|bytes| bytes > limit)
+        {
+            return Err(Error::refusal(
+                "metadata_capacity",
+                "Parquet footer and enclosing page-index range exceed metadata allowance",
+            ));
+        }
+        self.decoded_bytes
+            .checked_mul(16)
+            .and_then(|bytes| bytes.checked_add(span.checked_mul(2)?))
+            .ok_or_else(capacity)
+    }
+}
+
+fn index_range_bytes(offset: Option<i64>, length: Option<i32>, footer_start: u64) -> Result<usize> {
+    match (offset, length) {
+        (None, None) => Ok(0),
+        (Some(offset), Some(length)) => {
+            let offset = u64::try_from(offset).map_err(|_| invalid())?;
+            let length = usize::try_from(length).map_err(|_| invalid())?;
+            if offset < 4
+                || length == 0
+                || offset
+                    .checked_add(length as u64)
+                    .is_none_or(|end| end > footer_start)
+            {
+                return Err(invalid());
+            }
+            Ok(length)
+        }
+        _ => Err(invalid()),
+    }
+}
+
+async fn footer_bounds(
+    reader: &mut dyn AsyncFileReader,
+    bytes: u64,
+    allowance: Option<usize>,
+) -> Result<(usize, u64)> {
+    if bytes < 12 {
+        return Err(invalid());
+    }
+    // Bound the footer before allocating or decoding it. Supply the decoded
+    // interpretation to the maintained stream builder rather than rereading it.
+    let tail = reader
+        .get_bytes(bytes - 8..bytes)
+        .await
+        .map_err(|_| invalid())?;
+    let tail: [u8; 8] = tail.as_ref().try_into().map_err(|_| invalid())?;
+    let footer_len = FooterTail::try_from(tail)
+        .map_err(|_| invalid())?
+        .metadata_length();
+    if allowance.is_some_and(|limit| footer_len > limit) {
+        return Err(Error::refusal(
+            "metadata_capacity",
+            "export footer exceeds metadata allowance",
+        ));
+    }
+    let footer_start = bytes
+        .checked_sub(8 + footer_len as u64)
+        .filter(|start| *start >= 4)
+        .ok_or_else(invalid)?;
+    Ok((footer_len, footer_start))
+}
+
+async fn read_prepared(
+    budget: &Budget,
+    reader: Box<dyn AsyncFileReader>,
+    metadata: parquet::file::metadata::ParquetMetaData,
+    metadata_memory: tokio::sync::OwnedSemaphorePermit,
+    transport: tokio::sync::OwnedSemaphorePermit,
+    footer_start: u64,
+) -> Result<SendableRecordBatchStream> {
     // The async reader buffers one selected row group. Admit its largest exact
     // compressed and declared decoded size before payload ranges are requested.
     let mut largest_group = 0usize;
@@ -175,6 +359,38 @@ mod tests {
         record_batch::RecordBatch,
     };
     use parquet::arrow::ArrowWriter;
+
+    #[test]
+    fn metadata_index_ranges_refuse_incomplete_negative_overflow_and_out_of_file_descriptors() {
+        assert_eq!(index_range_bytes(Some(4), Some(12), 16).unwrap(), 12);
+        assert_eq!(index_range_bytes(None, None, 16).unwrap(), 0);
+        for (offset, length) in [
+            (Some(-1), Some(1)),
+            (Some(4), Some(-1)),
+            (Some(4), None),
+            (None, Some(4)),
+            (Some(4), Some(13)),
+            (Some(i64::MAX), Some(i32::MAX)),
+        ] {
+            assert!(index_range_bytes(offset, length, 16).is_err());
+        }
+    }
+
+    #[test]
+    fn metadata_index_ranges_charge_the_actual_transport_gap() {
+        let mut indexes = IndexRanges::default();
+        indexes.add(Some(4), Some(8), 20000).unwrap();
+        indexes.add(Some(19990), Some(8), 20000).unwrap();
+        assert_eq!(indexes.decoded_bytes, 16);
+        assert_eq!(
+            indexes.charge(512, Some(4096)).unwrap_err().code(),
+            "metadata_capacity"
+        );
+        assert_eq!(
+            indexes.charge(512, Some(32768)).unwrap(),
+            16 * 16 + (19998 - 4) * 2
+        );
+    }
 
     #[tokio::test]
     async fn local_flat_reader_holds_shared_capacity_until_stream_drop() {

@@ -44,6 +44,7 @@ pub(super) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
         .as_any()
         .downcast_ref::<GenericFunction>()
         .map(|function| function.budget.limits.max_batch_bytes)
+        .or_else(|| super::plan::constants::byte_limit(function))
         .or_else(|| super::json_many::byte_limit(function))
 }
 impl Kind {

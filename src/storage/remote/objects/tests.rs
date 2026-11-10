@@ -12,7 +12,7 @@ use std::{
 
 mod flat;
 mod job_reads;
-mod pinning;
+pub(crate) mod pinning;
 pub(crate) mod writes;
 
 fn properties() -> HashMap<String, String> {
@@ -249,6 +249,8 @@ async fn empty_readback_uses_only_stats_and_scope_refusal_performs_no_io() {
     assert!(fixture.finish().is_empty());
 }
 
+type FixtureInventory = Arc<std::sync::Mutex<HashMap<String, Vec<u8>>>>;
+
 // A tiny read-only S3 HTTP boundary, using the actual configured native operator.
 // Records only method/range, never credential-bearing request headers.
 pub(crate) struct ReadFixture {
@@ -256,15 +258,26 @@ pub(crate) struct ReadFixture {
     stop: Arc<AtomicBool>,
     server: thread::JoinHandle<Vec<(String, Option<String>)>>,
     paths: Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    contents: Option<FixtureInventory>,
+    session_token_observed: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+enum RangeReply {
+    Normal,
+    IgnoreRange,
+    Fragmented,
+    Redirect(String),
+    HeldError,
 }
 
 impl ReadFixture {
     pub(crate) fn new(payload: Vec<u8>, sizes: [u64; 2]) -> Self {
-        Self::serve(payload, sizes, None, None)
+        Self::serve(payload, sizes, None, None, RangeReply::Normal)
     }
 
     pub(crate) fn inventory(contents: HashMap<String, Vec<u8>>) -> Self {
-        Self::serve(Vec::new(), [0; 2], Some(contents), None)
+        Self::serve(Vec::new(), [0; 2], Some(contents), None, RangeReply::Normal)
     }
 
     pub(crate) fn held(
@@ -278,7 +291,13 @@ impl ReadFixture {
         let (reached, received) = tokio::sync::oneshot::channel();
         let (release, held) = std::sync::mpsc::channel();
         (
-            Self::serve(payload, [size; 2], None, Some((reached, held))),
+            Self::serve(
+                payload,
+                [size; 2],
+                None,
+                Some((reached, held)),
+                RangeReply::Normal,
+            ),
             received,
             release,
         )
@@ -295,7 +314,13 @@ impl ReadFixture {
         let (reached, received) = tokio::sync::oneshot::channel();
         let (release, held) = std::sync::mpsc::channel();
         (
-            Self::serve(Vec::new(), [0; 2], Some(contents), Some((reached, held))),
+            Self::serve(
+                Vec::new(),
+                [0; 2],
+                Some(contents),
+                Some((reached, held)),
+                RangeReply::Normal,
+            ),
             received,
             release,
         )
@@ -309,9 +334,14 @@ impl ReadFixture {
             tokio::sync::oneshot::Sender<()>,
             std::sync::mpsc::Receiver<()>,
         )>,
+        reply: RangeReply,
     ) -> Self {
+        let contents = contents.map(|value| Arc::new(std::sync::Mutex::new(value)));
+        let inventory = contents.clone();
         let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
         let observed_paths = paths.clone();
+        let session_token_observed = Arc::new(AtomicBool::new(false));
+        let observed_token = session_token_observed.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -345,6 +375,12 @@ impl ReadFixture {
                     assert!(request.len() < 16 << 10);
                 }
                 let request = String::from_utf8(request).unwrap();
+                if request.lines().any(|line| {
+                    line.split_once(':')
+                        .is_some_and(|(name, _)| name.eq_ignore_ascii_case("x-amz-security-token"))
+                }) {
+                    observed_token.store(true, Ordering::Release);
+                }
                 let method = request.split_whitespace().next().unwrap().to_owned();
                 let path = request.split_whitespace().nth(1).unwrap();
                 let uri = format!("s3://{}", path.strip_prefix('/').unwrap());
@@ -358,6 +394,26 @@ impl ReadFixture {
                         .then(|| value.trim().to_owned())
                 });
                 requests.push((method.clone(), range.clone()));
+                if let RangeReply::Redirect(location) = &reply {
+                    write!(
+                        socket,
+                        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    continue;
+                }
+                if matches!(reply, RangeReply::HeldError) {
+                    write!(
+                        socket,
+                        "HTTP/1.1 403 Forbidden\r\nContent-Length: 33554432\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    let (reached, held) = hold.take().unwrap();
+                    reached.send(()).unwrap();
+                    held.recv_timeout(Duration::from_secs(5)).unwrap();
+                    continue;
+                }
+                let contents = inventory.as_ref().map(|objects| objects.lock().unwrap());
                 let bytes = if let Some(contents) = &contents {
                     let Some(bytes) = contents.get(&uri) else {
                         write!(socket, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
@@ -387,6 +443,11 @@ impl ReadFixture {
                         held.recv_timeout(Duration::from_secs(5)).unwrap();
                     }
                     if contents.is_some() {
+                        if range.is_some() && matches!(reply, RangeReply::IgnoreRange) {
+                            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n", bytes.len()).unwrap();
+                            let _ = socket.write_all(bytes);
+                            continue;
+                        }
                         let (start, end) = match range.as_deref() {
                             None => (0, bytes.len()),
                             Some(value) => {
@@ -419,7 +480,14 @@ impl ReadFixture {
                         } else {
                             write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n").unwrap();
                         }
-                        socket.write_all(selected).unwrap();
+                        if matches!(reply, RangeReply::Fragmented) {
+                            let split = selected.len() / 2;
+                            socket.write_all(&selected[..split]).unwrap();
+                            thread::sleep(Duration::from_millis(20));
+                            socket.write_all(&selected[split..]).unwrap();
+                        } else {
+                            socket.write_all(selected).unwrap();
+                        }
                         continue;
                     }
                     let size = bytes.len();
@@ -443,6 +511,8 @@ impl ReadFixture {
             stop,
             server,
             paths,
+            contents,
+            session_token_observed,
         }
     }
 
@@ -456,10 +526,186 @@ impl ReadFixture {
         RemoteObjects::from_resolved(&config, "s3://bucket/owned/").unwrap()
     }
 
+    pub(crate) fn snapshot_source(&self, token: Option<&str>) -> SnapshotSource {
+        let mut config = properties();
+        config.insert("s3.endpoint".into(), self.endpoint.clone());
+        if let Some(token) = token {
+            config.insert("s3.session-token".into(), token.into());
+        }
+        SnapshotSource::from_resolved(&config, "s3://bucket/owned/").unwrap()
+    }
+
+    pub(crate) fn insert(&self, uri: String, bytes: Vec<u8>) {
+        self.contents
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .insert(uri, bytes);
+    }
+
+    pub(crate) fn session_token_observed(&self) -> bool {
+        self.session_token_observed.load(Ordering::Acquire)
+    }
+
     pub(crate) fn finish(self) -> Vec<(String, Option<String>)> {
         self.stop.store(true, Ordering::Release);
         self.server.join().unwrap()
     }
+}
+
+#[tokio::test]
+async fn snapshot_source_refuses_ignored_ranges_and_fills_fragments() {
+    const URI: &str = "s3://bucket/owned/source.bin";
+    let bytes = b"0123456789abcdef";
+    let budget = Budget::new(Limits::default()).unwrap();
+    let _destination = budget.reserve(5).unwrap();
+    for reply in [RangeReply::IgnoreRange, RangeReply::Fragmented] {
+        let fixture = ReadFixture::serve(
+            Vec::new(),
+            [0; 2],
+            Some(HashMap::from([(URI.into(), bytes.to_vec())])),
+            None,
+            reply.clone(),
+        );
+        let source = fixture.snapshot_source(None);
+        let mut output = [b'-'; 5];
+        let result = source.read_range(URI, 16, 3..8, &mut output, &budget).await;
+        match reply {
+            RangeReply::IgnoreRange => {
+                assert!(result.is_err());
+                assert_eq!(&output, b"-----");
+            }
+            RangeReply::Fragmented => {
+                result.unwrap();
+                assert_eq!(&output, b"34567");
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            fixture.finish(),
+            vec![("GET".into(), Some("bytes=3-7".into()))]
+        );
+    }
+}
+
+#[tokio::test]
+async fn snapshot_source_refuses_redirects_without_opening_another_placement() {
+    const URI: &str = "s3://bucket/owned/source.bin";
+    let sink = ReadFixture::new(b"0123456789abcdef".to_vec(), [16; 2]);
+    let redirected = ReadFixture::serve(
+        Vec::new(),
+        [0; 2],
+        None,
+        None,
+        RangeReply::Redirect(format!("{}/bucket/owned/source.bin", sink.endpoint)),
+    );
+    let source = redirected.snapshot_source(None);
+    let budget = Budget::new(Limits::default()).unwrap();
+    let _destination = budget.reserve(5).unwrap();
+    let mut output = [b'-'; 5];
+    assert_eq!(
+        source.size(URI, &budget).await.unwrap_err().code(),
+        "remote_read"
+    );
+    assert_eq!(
+        source
+            .read_range(URI, 16, 3..8, &mut output, &budget)
+            .await
+            .unwrap_err()
+            .code(),
+        "remote_read"
+    );
+    assert_eq!(&output, b"-----");
+    assert_eq!(
+        redirected.finish(),
+        vec![
+            ("HEAD".into(), None),
+            ("GET".into(), Some("bytes=3-7".into()))
+        ]
+    );
+    assert!(sink.finish().is_empty());
+}
+
+#[tokio::test]
+async fn snapshot_source_refuses_error_without_reading_its_body() {
+    const URI: &str = "s3://bucket/owned/source.bin";
+    let (reached, headers_sent) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let fixture = ReadFixture::serve(
+        Vec::new(),
+        [0; 2],
+        None,
+        Some((reached, held)),
+        RangeReply::HeldError,
+    );
+    let source = fixture.snapshot_source(None);
+    let budget = Budget::new(Limits::default()).unwrap();
+    let read = tokio::spawn(async move {
+        let _destination = budget.reserve(5).unwrap();
+        let mut output = [b'-'; 5];
+        let error = source
+            .read_range(URI, 16, 3..8, &mut output, &budget)
+            .await
+            .unwrap_err();
+        (error, output)
+    });
+    tokio::time::timeout(Duration::from_secs(5), headers_sent)
+        .await
+        .unwrap()
+        .unwrap();
+    let refused = tokio::time::timeout(Duration::from_secs(2), read).await;
+    release.send(()).unwrap();
+    let (error, output) = refused.unwrap().unwrap();
+    assert_eq!(error.code(), "remote_read");
+    assert_eq!(&output, b"-----");
+    assert_eq!(
+        fixture.finish(),
+        vec![("GET".into(), Some("bytes=3-7".into()))]
+    );
+}
+
+#[tokio::test]
+async fn snapshot_source_holds_transport_admission_through_active_read() {
+    const URI: &str = "s3://bucket/owned/source.bin";
+    let (fixture, reached, release) =
+        ReadFixture::held_inventory(HashMap::from([(URI.into(), b"0123456789abcdef".to_vec())]));
+    let source = fixture.snapshot_source(None);
+    let budget = Budget::new(Limits::default()).unwrap();
+    let available = || budget.reserve(0).unwrap().semaphore().available_permits();
+    let initial = available();
+    let read = tokio::spawn({
+        let budget = budget.clone();
+        async move {
+            let _destination = budget.reserve(5).unwrap();
+            let mut bytes = [0; 5];
+            source
+                .read_range(URI, 16, 3..8, &mut bytes, &budget)
+                .await
+                .unwrap();
+            bytes
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(5), reached)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(available(), initial - READ_ADMISSION - 5);
+    release.send(()).unwrap();
+    assert_eq!(read.await.unwrap(), *b"34567");
+    assert_eq!(available(), initial);
+    assert_eq!(
+        fixture.finish(),
+        vec![("GET".into(), Some("bytes=3-7".into()))]
+    );
+}
+
+#[test]
+fn snapshot_source_does_not_register_ambient_scope() {
+    let prefix = "s3://bucket/snapshot-source-only";
+    let source = SnapshotSource::from_resolved(&properties(), prefix).unwrap();
+    assert_eq!(source.prefix(), prefix);
+    assert!(RemoteObjects::for_uri("s3://bucket/snapshot-source-only/member").is_none());
 }
 
 #[test]

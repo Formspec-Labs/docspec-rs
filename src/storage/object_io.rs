@@ -300,6 +300,7 @@ impl Objects {
         let memory = budget.reserve(bytes.capacity().saturating_add(self.read_allowance()))?;
         let objects = self.clone();
         let retained = expected.clone();
+        let retained_budget = budget.clone();
         let _handle = tokio::runtime::Handle::current();
         let result = budget
             .blocking_admitted(move || {
@@ -308,6 +309,13 @@ impl Objects {
                     Self::Local if _resuming && Path::new(&retained.path).try_exists()? => {
                         super::verify_object(&retained)?;
                         super::tables::sync_candidate_parent(&retained)
+                    }
+                    Self::Local if retained_budget.tracks_retained_files() => {
+                        super::tables::publish_retained_metadata(
+                            &retained,
+                            &bytes,
+                            &retained_budget,
+                        )
                     }
                     Self::Local => super::tables::publish_candidate_metadata(&retained, &bytes),
                     #[cfg(feature = "remote")]

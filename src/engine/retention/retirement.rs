@@ -17,7 +17,15 @@ pub(super) struct RetiredRecord {
 }
 
 pub(in crate::engine) fn completion_key(key: &str) -> bool {
-    named_key(key, "prepared-changes/")
+    key.starts_with("job-phase/")
+        || key.starts_with("job-member/")
+        || key.starts_with("job-snapshot-member/")
+        || key.starts_with("job-snapshot-plan/")
+        || key.starts_with("job-producer-static/")
+        || key.starts_with("job-material/")
+        || key.starts_with("job-input/")
+        || key.starts_with("job-input-material/")
+        || named_key(key, "prepared-changes/")
         || key.starts_with("restore-reuse/")
         || key.starts_with("phase/backfill/")
         || (key.starts_with("phase/")
@@ -51,6 +59,9 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
         RetirementScope::OperationRecovery { operation } => {
             super::recovery::scope_key(operation, key)
         }
+        RetirementScope::PublicationIntent { operation } => {
+            super::publication::scope_key(operation, key)
+        }
         RetirementScope::ExportRecovery { operation } => {
             super::export_recovery::scope_key(operation, key)
         }
@@ -58,7 +69,8 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
             super::compaction_recovery::scope_key(operation, key)
         }
         RetirementScope::ResultAvailability { operation } => {
-            key == format!("result/{operation}")
+            key == format!("job-result/{operation}")
+                || key == format!("result/{operation}")
                 || key == format!("readback/{operation}")
                 || key
                     .strip_prefix(&format!("backfill-readback/{operation}/"))
@@ -71,6 +83,9 @@ pub(super) fn scope_key(scope: &RetirementScope, key: &str) -> bool {
 
 pub(super) fn retained_key(key: &str) -> bool {
     completion_key(key)
+        || key.starts_with("job-operation/")
+        || key.starts_with("job-result/")
+        || named_key(key, crate::engine::job_publication::PAYLOAD_PREFIX)
         || named_key(key, "generation/")
         || named_key(key, "change-certificate/")
         || key.starts_with("restore-point/")
@@ -192,6 +207,7 @@ pub(super) fn validate_markers(
     }
     super::export_recovery::validate_saved(rows, view, receipt, engine)?;
     super::availability::validate_pointer(rows, view, receipt, revision)?;
+    super::publication::validate_saved(rows, view, receipt, &engine.inner.lifecycle.budget)?;
     super::recovery::validate_saved(rows, view, receipt, engine)?;
     super::compaction_recovery::validate_saved(rows, view, receipt, engine)?;
     super::grants::validate_saved(rows, view, receipt, engine)?;
@@ -647,6 +663,9 @@ impl Engine {
                 ));
             }
         }
+        if let RetirementScope::PublicationIntent { operation } = &plan.scope {
+            super::publication::validate_plan(&rows, &view, plan, operation, &lifecycle.budget)?;
+        }
         if let RetirementScope::OperationRecovery { operation } = &plan.scope {
             let current = super::recovery::collect(
                 &rows,
@@ -723,6 +742,7 @@ impl Engine {
         if let RetirementScope::ResultAvailability { operation } = &plan.scope {
             records.push(super::availability::pointer_record(plan, operation)?);
         }
+        drop(rows);
         if let Err(error) = lifecycle.commit(&view, records).await {
             let after = lifecycle.open(&plan.dataset).await?;
             let rows = lifecycle.rows(&after).await?;

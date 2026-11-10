@@ -5,7 +5,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use docspec::{
     Engine,
     budget::{Budget, Limits},
-    engine::{read_evidence, read_group, read_receipts, verify_input_coverage, verify_release_at},
+    engine::{
+        ManagedBuildCommand, ManagedJobCommand, NativeVersionRead, read_evidence, read_group,
+        read_receipts, verify_input_coverage, verify_release_at,
+    },
     evidence::EvidenceSpec,
     export::ExportSpec,
     model::{
@@ -42,6 +45,9 @@ struct Cli {
     /// Explicit remote JSON configuration; requires the remote feature.
     #[arg(long, global = true)]
     remote: Option<PathBuf>,
+    /// Read-only S3 source configuration for a local managed job.
+    #[arg(long, global = true, conflicts_with = "remote")]
+    snapshot_source: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -121,6 +127,20 @@ struct ReleaseOutputArgs {
 enum Command {
     /// Run a declarative multi-input SQL job without a lifecycle workspace.
     Job(SpecArg),
+    /// Prepare a calculation using schemas only, with optional Substrait output.
+    JobPlan(SpecArg),
+    /// Infer every schema in one complete job from named declarations only.
+    PrepareJob(SpecArg),
+    /// Prepare, qualify, select or reconcile a protected local Build or Update.
+    ManagedBuild(SpecArg),
+    /// Execute, qualify, select or reconcile one retained complete native job.
+    ManagedJob(SpecArg),
+    /// Freeze or inspect a local fixture publication intent.
+    JobPublicationIntent(SpecArg),
+    /// Adopt exact producer-definition metadata under the local dataset authority.
+    AdoptJobProducerDefinition(SpecArg),
+    /// Stream an exact protected source version as Arrow IPC.
+    ReadVersion(SpecArg),
     /// Upload one known local file with a create-only single PUT.
     #[cfg(feature = "remote")]
     CreateFile(SpecArg),
@@ -295,6 +315,10 @@ enum Command {
     PlanAvailabilityRetirement(OperationRetirementArgs),
     /// End standalone availability from a saved plan; preserve dependent data and files.
     RetireAvailability(PlanArg),
+    /// Capture one exact publication payload generation for logical retirement.
+    PlanPublicationIntentRetirement(OperationRetirementArgs),
+    /// End the payload's protection and preserve its original publication audit.
+    RetirePublicationIntent(PlanArg),
     /// Capture a terminal operation's recovery records for logical retirement.
     PlanOperationRetirement(OperationRetirementArgs),
     /// End terminal operation recovery; preserve completed phases and available results.
@@ -602,10 +626,21 @@ async fn async_main() -> anyhow::Result<()> {
     tracing::debug!(soft = ?open_files.current, hard = ?open_files.maximum, "open-file limit");
     let cli = Cli::parse_from(normalize_cli_args(std::env::args_os()));
     check_startup(&cli)?;
-    if matches!(&cli.command, Command::Job(_)) && cli.limits.is_none() {
+    if matches!(
+        &cli.command,
+        Command::Job(_)
+            | Command::JobPlan(_)
+            | Command::PrepareJob(_)
+            | Command::ManagedBuild(_)
+            | Command::ManagedJob(_)
+            | Command::JobPublicationIntent(_)
+            | Command::AdoptJobProducerDefinition(_)
+            | Command::ReadVersion(_)
+    ) && cli.limits.is_none()
+    {
         return Err(docspec::Error::refusal(
             "invalid_budget",
-            "SQL job requires --limits for its execution host",
+            "execution profile requires --limits for its execution host",
         )
         .into());
     }
@@ -638,6 +673,34 @@ async fn async_main() -> anyhow::Result<()> {
             print_json(
                 &serde_json::json!({"result":result,"destination":spec.destination,"sha256":spec.sha256,"md5":spec.md5,"size":spec.size}),
             )?;
+        }
+        Command::JobPlan(SpecArg { spec }) => {
+            let spec: docspec::job::JobPlanSpec = read_json(spec)?;
+            match spec.prepare(limits).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
+        }
+        Command::PrepareJob(SpecArg { spec }) => {
+            let spec: docspec::job::PrepareJobSpec = read_json(spec)?;
+            match spec.prepare(limits).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "profile": "urn:docspec:job:schema-only:1",
+                        "execution": "not_run",
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
         }
         Command::Job(SpecArg { spec }) => {
             let spec = read_json::<docspec::job::JobSpec>(spec)?;
@@ -726,7 +789,11 @@ async fn async_main() -> anyhow::Result<()> {
             write_stream(output, stream).await?;
         }
         command => {
-            let engine = open_engine(&cli.workspace, limits, cli.remote.as_deref()).await?;
+            let engine = if let Some(path) = &cli.snapshot_source {
+                open_snapshot_source_engine(&cli.workspace, path, limits).await?
+            } else {
+                open_engine(&cli.workspace, limits, cli.remote.as_deref()).await?
+            };
             execute_engine_command(&cli.workspace, cli.remote.is_some(), engine, command).await?;
         }
     }
@@ -805,6 +872,83 @@ async fn execute_engine_command(
         }
         Command::Plan(SpecArg { spec }) => {
             print_json(&engine.plan(&read_json::<RunSpec>(spec)?).await?)?
+        }
+        Command::ManagedJob(SpecArg { spec }) => {
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
+            #[derive(serde::Deserialize)]
+            struct Identity {
+                dataset: Id,
+                operation: Id,
+            }
+            let identity: Identity = serde_json::from_slice(&bytes)?;
+            match engine.managed_job_bytes(bytes).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    let completed = engine
+                        .managed_job(ManagedJobCommand::Inspect {
+                            dataset: identity.dataset,
+                            operation: identity.operation,
+                        })
+                        .await
+                        .ok();
+                    print_json(
+                        &serde_json::json!({"status":"failed","completed":completed,"error":{"code":error.code(),"message":error.message()}}),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
+        }
+        Command::JobPublicationIntent(SpecArg { spec }) => {
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
+            match engine.job_publication_intent_bytes(bytes).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    print_json(
+                        &serde_json::json!({"status":"failed","error":{"code":error.code(),"message":error.message()}}),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
+        }
+        Command::AdoptJobProducerDefinition(SpecArg { spec }) => {
+            let bytes = read_job_metadata(spec, engine.limits().max_metadata_bytes)?;
+            print_json(&engine.adopt_job_producer_definition_bytes(bytes).await?)?;
+            engine.shutdown().await?;
+        }
+        Command::ManagedBuild(SpecArg { spec }) => {
+            let request = read_json::<ManagedBuildCommand>(spec)?;
+            let (dataset, operation) = request.identity();
+            let reconcile = ManagedBuildCommand::Inspect {
+                dataset: dataset.clone(),
+                operation: operation.clone(),
+            };
+            match engine.managed_build(request).await {
+                Ok(result) => print_json(&result)?,
+                Err(error) => {
+                    let completed = engine.managed_build(reconcile).await.ok();
+                    print_json(&serde_json::json!({
+                        "status": "failed",
+                        "completed": completed,
+                        "error": {"code": error.code(), "message": error.message()},
+                    }))?;
+                    return Err(error.into());
+                }
+            }
+            engine.shutdown().await?;
+        }
+        Command::ReadVersion(SpecArg { spec }) => {
+            let request: NativeVersionRead = read_json(spec)?;
+            let receipt = engine
+                .write_source_version(&request.version, std::io::stdout())
+                .await?;
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(request.receipt_path)?;
+            serde_json::to_writer(file, &receipt)?;
+            engine.shutdown().await?;
         }
         Command::Run(SpecArg { spec }) | Command::Resume(SpecArg { spec }) => {
             print_json(&engine.run(&read_json::<RunSpec>(spec)?).await?)?
@@ -1020,6 +1164,17 @@ async fn execute_engine_command(
         }
         Command::RetireAvailability(PlanArg { plan }) => {
             print_json(&engine.retire_availability(&read_json(plan)?).await?)?
+        }
+        Command::PlanPublicationIntentRetirement(args) => {
+            let (ds, ret, op) = args.ids()?;
+            print_json(
+                &engine
+                    .plan_publication_intent_retirement(&ds, &ret, &op, &args.reason)
+                    .await?,
+            )?;
+        }
+        Command::RetirePublicationIntent(PlanArg { plan }) => {
+            print_json(&engine.retire_publication_intent(&read_json(plan)?).await?)?
         }
         Command::PlanOperationRetirement(args) => {
             let (ds, ret, op) = args.ids()?;
@@ -1340,6 +1495,20 @@ async fn serve_http(
 }
 
 fn check_startup(cli: &Cli) -> docspec::Result<()> {
+    if cli.snapshot_source.is_some() {
+        #[cfg(not(feature = "remote"))]
+        return Err(docspec::Error::refusal(
+            "remote_feature",
+            "snapshot sources require the remote feature",
+        ));
+        #[cfg(feature = "remote")]
+        if !matches!(&cli.command, Command::ManagedJob(_)) {
+            return Err(docspec::Error::refusal(
+                "snapshot_source_config",
+                "snapshot source configuration requires a local managed job",
+            ));
+        }
+    }
     #[cfg(feature = "remote")]
     if matches!(&cli.command, Command::RestoreRemote { .. }) && cli.remote.is_none() {
         return Err(docspec::Error::refusal(
@@ -1362,6 +1531,9 @@ fn check_startup(cli: &Cli) -> docspec::Result<()> {
                 | Command::RestoreLocal { .. }
                 | Command::ReadEvidence(_)
                 | Command::ReadReceipts(_)
+                | Command::JobPublicationIntent(_)
+                | Command::PlanPublicationIntentRetirement(_)
+                | Command::RetirePublicationIntent(_)
         ) || matches!(
             &cli.command,
             Command::Read { group, .. }
@@ -1433,11 +1605,34 @@ async fn open_engine(
     Ok(Engine::open(workspace, limits).await?)
 }
 
+async fn open_snapshot_source_engine(
+    workspace: &std::path::Path,
+    path: &std::path::Path,
+    limits: Limits,
+) -> anyhow::Result<Engine> {
+    #[cfg(feature = "remote")]
+    {
+        let config: storage::remote::SnapshotSourceConfig =
+            read_json(path.to_owned()).map_err(|_| {
+                docspec::Error::refusal(
+                    "snapshot_source_config",
+                    "snapshot source configuration is unavailable, oversized or invalid",
+                )
+            })?;
+        Ok(Engine::open_with_snapshot_source(workspace, config, limits).await?)
+    }
+    #[cfg(not(feature = "remote"))]
+    {
+        let _ = (workspace, path, limits);
+        anyhow::bail!("remote_feature: snapshot sources require the remote feature");
+    }
+}
+
 async fn write_stream(
     output: PathBuf,
     mut stream: datafusion::physical_plan::SendableRecordBatchStream,
 ) -> anyhow::Result<()> {
-    let file = std::fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(output)?;
@@ -1457,6 +1652,23 @@ fn read_json<T: serde::de::DeserializeOwned>(path: PathBuf) -> anyhow::Result<T>
         "metadata input exceeds 32 MiB"
     );
     Ok(serde_json::from_reader(BufReader::new(file))?)
+}
+
+fn read_job_metadata(path: PathBuf, limit: usize) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let file = File::open(path)?;
+    let size = file.metadata()?.len();
+    anyhow::ensure!(
+        size <= limit as u64,
+        "managed job metadata exceeds host allowance"
+    );
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 == size,
+        "managed job metadata size changed"
+    );
+    Ok(bytes)
 }
 
 fn print_json(value: &impl serde::Serialize) -> anyhow::Result<()> {
