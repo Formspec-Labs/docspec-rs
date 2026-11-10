@@ -537,6 +537,14 @@ enum PausedOperation {
 /// a close-loop by the soft limit does badly with an unlimited one.
 const OPEN_FILES: u64 = 65_536;
 
+/// What the CLI asks for once, if the kernel refuses [`OPEN_FILES`].
+///
+/// It is `OPEN_MAX` in macOS's `<sys/syslimits.h>`, the value Apple's
+/// setrlimit(2) tells callers to stay at or under, and the pipeline's nightly
+/// driver falls back to the same number. No kernel has been seen to refuse:
+/// macOS 26.6 accepted every value when measured on 2026-11-10.
+const OPEN_FILES_FALLBACK: u64 = 10_240;
+
 /// Raises the soft open-file limit to [`OPEN_FILES`] or the hard limit, whichever is lower.
 ///
 /// The hard limit is never changed and nothing is lowered: a soft limit
@@ -558,30 +566,18 @@ fn raise_open_file_limit() -> Rlimit {
     getrlimit(Resource::Nofile)
 }
 
-/// Asks `set` for the target, else for the highest value it accepts above `soft`.
+/// Asks `set` for the target and, if refused, once for [`OPEN_FILES_FALLBACK`].
 ///
 /// The target is [`OPEN_FILES`], or `hard` when that is lower; `None` is an
-/// unlimited hard limit. `set` says whether the kernel accepted a value.
-/// Some macOS kernels are said to refuse a soft limit above their
-/// per-process ceiling (`kern.maxfilesperproc`, which follows installed
-/// memory and can be under the target); macOS 26.6 accepted every value when
-/// measured on 2026-11-10, so the search has only met a stand-in kernel.
-/// Reading that ceiling needs `unsafe`, which this crate forbids. Acceptance
-/// only falls as the value rises, so halving the gap finds the boundary in at
-/// most 16 more calls, each accepted one above the last.
+/// unlimited hard limit. `set` says whether the kernel accepted a value. The
+/// fallback is asked for only when it is a raise and under the target.
 fn raise_toward(soft: u64, hard: Option<u64>, mut set: impl FnMut(u64) -> bool) {
     let target = hard.map_or(OPEN_FILES, |hard| hard.min(OPEN_FILES));
     if soft >= target || set(target) {
         return;
     }
-    let (mut accepted, mut refused) = (soft, target);
-    while refused - accepted > 1 {
-        let middle = accepted + (refused - accepted) / 2;
-        if set(middle) {
-            accepted = middle;
-        } else {
-            refused = middle;
-        }
+    if soft < OPEN_FILES_FALLBACK && OPEN_FILES_FALLBACK < target {
+        set(OPEN_FILES_FALLBACK);
     }
 }
 
@@ -1499,7 +1495,7 @@ fn write_ready_file(path: &std::path::Path, address: SocketAddr) -> anyhow::Resu
 
 #[cfg(test)]
 mod open_file_limit_tests {
-    use super::{OPEN_FILES, raise_toward};
+    use super::{OPEN_FILES, OPEN_FILES_FALLBACK, raise_toward};
 
     /// Runs `raise_toward` against a kernel that accepts at most `ceiling`.
     ///
@@ -1542,12 +1538,16 @@ mod open_file_limit_tests {
     }
 
     #[test]
-    fn a_refused_target_ends_at_the_highest_accepted_value() {
-        // A 16 GiB Mac's per-process ceiling, under the stated number.
-        let (in_force, asked) = kernel(256, None, 61_440);
-        assert_eq!(in_force, 61_440);
-        assert!(asked.len() <= 17, "{} calls", asked.len());
-        assert!(asked.iter().all(|wanted| *wanted > 256));
+    fn a_refused_target_gets_one_fallback_that_is_always_a_raise() {
+        // A kernel whose ceiling is under the stated number.
+        assert_eq!(
+            kernel(256, None, 61_440),
+            (OPEN_FILES_FALLBACK, vec![OPEN_FILES, OPEN_FILES_FALLBACK])
+        );
+        // The fallback would lower this limit, so it is not asked for.
+        assert_eq!(kernel(20_000, None, 61_440), (20_000, vec![OPEN_FILES]));
+        // The fallback is above this hard limit, so it is not asked for.
+        assert_eq!(kernel(256, Some(8192), 0), (256, vec![8192]));
         // A kernel that refuses every raise leaves the limit where it was.
         assert_eq!(kernel(256, None, 0).0, 256);
     }

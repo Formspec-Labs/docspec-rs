@@ -12,6 +12,9 @@ const LOW: u64 = 256;
 /// The soft limit the CLI is documented to ask for (`OPEN_FILES` in `src/main.rs`).
 const STATED: u64 = 65_536;
 
+/// What the CLI asks for once if the kernel refuses that (`OPEN_FILES_FALLBACK`).
+const FALLBACK: u64 = 10_240;
+
 /// Runs `script` in `sh` with the CLI as `$0` and `arguments` as `$@`.
 fn sh(script: &str, arguments: &[&std::ffi::OsStr]) -> Output {
     Command::new("/bin/sh")
@@ -78,20 +81,10 @@ fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
     assert_eq!(reported_hard, hard, "the hard limit must not move");
     // Never unlimited, whatever the hard limit is.
     let soft = soft.expect("a soft limit raised from a number is a number");
-    if soft != target {
-        // The kernel refused the target, so the CLI must have stopped at the
-        // last value the kernel accepts: one more is refused to sh too.
-        assert!(soft > LOW && soft < target, "{soft}");
-        let one_more = sh(
-            &format!("ulimit -S -n {LOW} && ulimit -S -n {}", soft + 1),
-            &[],
-        );
-        assert!(
-            !one_more.status.success(),
-            "the kernel accepts {}",
-            soft + 1
-        );
-    }
+    // A kernel that refuses the target gets one retry at the fallback; none
+    // has been seen to refuse, and either way the limit went up.
+    assert!(soft == target || soft == FALLBACK, "{soft}");
+    assert!(soft > LOW, "{soft}");
 }
 
 #[test]
