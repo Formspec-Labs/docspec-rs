@@ -127,6 +127,12 @@ fn short_columns() -> Vec<(&'static str, ArrayRef)> {
     ]
 }
 
+/// Arrow's own copy and a join's `take` size their view buffers exactly, so
+/// this control also passes under the flattened-text measure fb50a24
+/// replaced: there an exact view column sits just under four times its text
+/// size. fb50a24's message says the control was not run against that measure;
+/// it was, and passed. The layout that separates the two measures is in
+/// `views_a_builder_left_room_in_are_not_copied`.
 #[test]
 fn compact_batch_is_returned_with_the_buffers_it_arrived_with() {
     let budget = Budget::new(crate::budget::Limits::default()).unwrap();
@@ -169,6 +175,94 @@ fn compact_batch_is_returned_with_the_buffers_it_arrived_with() {
     assert!(
         copied.is_empty(),
         "compact batches were copied:\n{}",
+        copied.join("\n")
+    );
+}
+
+/// Views a builder grew by doubling: 140,000 rows in 262,144 slots.
+const GROWN: usize = 140_000;
+/// Views per row of the list and fixed-size-list columns.
+const PER_ROW: usize = 8;
+
+/// Empty and null strings as a builder leaves them, alone and nested.
+///
+/// Builders, Parquet's view decoder and DataFusion's group values grow their
+/// view vector by doubling and keep the spare slots, which DataFusion charges.
+fn grown_columns() -> Vec<(&'static str, ArrayRef)> {
+    let views = || {
+        let mut builder = arrow::array::StringViewBuilder::new();
+        for row in 0..GROWN {
+            if row % 2 == 0 {
+                builder.append_value("");
+            } else {
+                builder.append_null();
+            }
+        }
+        Arc::new(builder.finish()) as ArrayRef
+    };
+    let lists = OffsetBuffer::from_lengths(std::iter::repeat_n(PER_ROW, GROWN / PER_ROW));
+    let item = |values: &ArrayRef| Arc::new(Field::new("item", values.data_type().clone(), true));
+    let (list_items, fixed_items) = (views(), views());
+    vec![
+        ("views", views()),
+        ("struct_of_views", {
+            let field = Field::new("text", DataType::Utf8View, true);
+            Arc::new(StructArray::new(
+                Fields::from(vec![field]),
+                vec![views()],
+                None,
+            ))
+        }),
+        (
+            "list_of_views",
+            Arc::new(ListArray::new(item(&list_items), lists, list_items, None)),
+        ),
+        (
+            "fixed_size_list_of_views",
+            Arc::new(FixedSizeListArray::new(
+                item(&fixed_items),
+                PER_ROW as i32,
+                fixed_items,
+                None,
+            )),
+        ),
+    ]
+}
+
+/// fb50a24's reason, as a failing case for the measure it replaced.
+///
+/// The guard copies a batch charged at more than four times a compact copy.
+/// The export measure it replaced sized each view as flattened text, 4.1
+/// bytes for an empty or null value against the 16 a copy holds, so these
+/// columns, charged under two times Arrow's own copy, looked about seven
+/// times oversized and were copied. Measured as views they are kept.
+#[test]
+fn views_a_builder_left_room_in_are_not_copied() {
+    let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+    let mut copied = Vec::new();
+    for (name, column) in grown_columns() {
+        let given = RecordBatch::try_from_iter([(name, column)]).unwrap();
+        let charged = get_record_batch_memory_size(&given);
+        let owned = get_record_batch_memory_size(
+            &compact_batch_slice(&given, 0, given.num_rows(), &budget).unwrap(),
+        );
+        // Under the 4x contract, and past the guard's 1 MiB floor, so only
+        // the measure decides.
+        assert!(
+            charged < 4 * owned && charged > owned + (1 << 20),
+            "{name}: charged {charged}, Arrow's own copy {owned}"
+        );
+        let kept = compact_retained(given.clone(), &budget).unwrap();
+        if !same_buffers(&kept, &given) {
+            copied.push(format!(
+                "{name}: charged {charged}, own copy {owned}, measured {}",
+                sliced_batch_bytes(&given)
+            ));
+        }
+    }
+    assert!(
+        copied.is_empty(),
+        "batches under four times their own copy were copied:\n{}",
         copied.join("\n")
     );
 }
