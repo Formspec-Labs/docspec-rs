@@ -91,8 +91,9 @@ fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
 
 #[test]
 fn a_hard_limit_below_the_stated_number_is_respected() {
-    // Lowering the hard limit binds only the child that sh becomes.
-    let limits = limits_after(&format!("ulimit -H -n 4096 && ulimit -S -n {LOW}"));
+    // Lowering the hard limit binds only the child that sh becomes. The soft
+    // limit goes first: sh refuses a hard limit under the soft one in force.
+    let limits = limits_after(&format!("ulimit -S -n {LOW} && ulimit -H -n 4096"));
     assert_eq!(limits, (Some(4096), Some(4096)));
     // Without -S or -H, sh sets both limits: nothing is left to raise.
     let limits = limits_after(&format!("ulimit -n {LOW}"));
