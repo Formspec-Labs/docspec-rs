@@ -533,29 +533,44 @@ mod tests {
     async fn left_join_builds_on_the_smaller_retained_step() {
         let root = tempfile::tempdir().unwrap();
         let job = job(&root);
-        // `big` and `mid` are over DataFusion's 131,072-row ceiling for a
-        // single-partition build, so their join stays partitioned, as the
-        // pipeline's large joins do. `few` is under it.
-        for (name, rows) in [("big", 300_000), ("mid", 150_000), ("few", 3)] {
+        // `big`, `twin` and `mid` are over DataFusion's 131,072-row ceiling
+        // for a single-partition build, so their joins stay partitioned, as
+        // the pipeline's large joins do. `few` and `trio` are under it.
+        let steps = [
+            ("big", 300_000),
+            ("twin", 300_000),
+            ("mid", 150_000),
+            ("few", 3),
+            ("trio", 3),
+        ];
+        for (name, rows) in steps {
             retain_keys(&job, name, rows).await;
         }
-        for (small, mode) in [
-            ("mid", PartitionMode::Partitioned),
-            ("few", PartitionMode::CollectLeft),
+        let (swapped, written) = (JoinType::Right, JoinType::Left);
+        // (left as written, right as written, build side, join type, mode)
+        for (left, right, build, join_type, mode) in [
+            ("big", "mid", "mid", swapped, PartitionMode::Partitioned),
+            ("big", "few", "few", swapped, PartitionMode::CollectLeft),
+            // The left input stays the build side when the right one has as
+            // many rows or more: only a strictly larger left input is swapped.
+            ("mid", "big", "mid", written, PartitionMode::Partitioned),
+            ("big", "twin", "big", written, PartitionMode::Partitioned),
+            ("few", "trio", "few", written, PartitionMode::CollectLeft),
         ] {
-            let sql =
-                format!("SELECT big.k, {small}.v FROM big LEFT JOIN {small} ON big.k = {small}.k");
+            let sql = format!(
+                "SELECT {left}.k, {right}.v FROM {left} LEFT JOIN {right} ON {left}.k = {right}.k"
+            );
             let plan = physical_plan(&job, &sql).await;
             let text = displayable(plan.as_ref()).indent(true).to_string();
             let join = find::<HashJoinExec>(&plan).expect(&text);
-            // A hash join builds on its left input: the join was swapped.
+            // A hash join builds on its left input.
             assert!(
-                line(scan(join.left())).contains(&format!("step={small},")),
+                line(scan(join.left())).contains(&format!("step={build},")),
                 "{text}"
             );
             assert_eq!(
                 (join.join_type(), join.partition_mode()),
-                (&JoinType::Right, &mode),
+                (&join_type, &mode),
                 "{text}"
             );
         }
