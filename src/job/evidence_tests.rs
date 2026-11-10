@@ -189,10 +189,17 @@ async fn a_parquet_input_with_no_file_is_refused_before_any_statement() {
     let absent_directory = root.path().join("absent/");
     let empty_directory = root.path().join("empty");
     std::fs::create_dir(&empty_directory).unwrap();
-    // The listing skips a file of no bytes, so it is not a torn file to it.
-    let zero_bytes = root.path().join("zero.parquet");
-    std::fs::write(&zero_bytes, b"").unwrap();
-    for path in [absent, absent_directory, empty_directory, zero_bytes] {
+    // The listing skips a file of no bytes, so a folder holding only one has
+    // nothing to read. A lone zero-byte file is refused before the listing.
+    let zero_bytes_directory = root.path().join("zero");
+    std::fs::create_dir(&zero_bytes_directory).unwrap();
+    std::fs::write(zero_bytes_directory.join("part-0.parquet"), b"").unwrap();
+    for path in [
+        absent,
+        absent_directory,
+        empty_directory,
+        zero_bytes_directory,
+    ] {
         let failure = failure(
             root.path(),
             Limits::default(),
@@ -234,25 +241,48 @@ async fn an_unreadable_parquet_input_is_named_with_its_cause() {
     let root = tempfile::tempdir().unwrap();
     let torn = root.path().join("torn.parquet");
     std::fs::write(&torn, b"not a Parquet file").unwrap();
+    let zero_bytes = root.path().join("zero.parquet");
+    std::fs::write(&zero_bytes, b"").unwrap();
     // A readable Parquet file that the listing refuses for its name.
     let other_suffix = root.path().join("rows.pq");
     write_ids(&other_suffix, &[1, 2]);
-    for path in [torn, other_suffix] {
-        // What the listing alone says about this path.
-        let alone = Error::from(
-            SessionContext::new()
-                .register_parquet(
-                    "captures",
-                    path.to_string_lossy().as_ref(),
-                    ParquetReadOptions::default(),
-                )
+    // What reading each path alone says. A single file's footer is admitted
+    // before the listing, so a torn or empty file is refused there; a whole
+    // file with another suffix passes it and is refused by the listing.
+    let job = lone_job(root.path(), Limits::default());
+    let budget = &job.budget;
+    let cases = [
+        (
+            &torn,
+            crate::storage::admit_parquet_footer(&torn, budget)
                 .await
                 .unwrap_err(),
-        );
+        ),
+        (
+            &zero_bytes,
+            crate::storage::admit_parquet_footer(&zero_bytes, budget)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            &other_suffix,
+            Error::from(
+                SessionContext::new()
+                    .register_parquet(
+                        "captures",
+                        other_suffix.to_string_lossy().as_ref(),
+                        ParquetReadOptions::default(),
+                    )
+                    .await
+                    .unwrap_err(),
+            ),
+        ),
+    ];
+    for (path, alone) in cases {
         let failure = failure(
             root.path(),
             Limits::default(),
-            captures_job(&path, COUNT_CAPTURES),
+            captures_job(path, COUNT_CAPTURES),
         )
         .await;
         let named = format!("Parquet input \"captures\" at {}", path.display());

@@ -246,12 +246,14 @@ impl Job {
 
     /// Refuses a Parquet input for which the listing found no file to read.
     ///
-    /// The listing reads a path it cannot find, a directory holding no file
-    /// with the suffix, and a file of zero bytes (which it skips) as a table
-    /// with no columns and no rows. A statement then fails on an unknown
-    /// column, or counts zero rows and succeeds. A written Parquet file
-    /// brings its columns whether or not it has rows, so `listed` without
-    /// columns means nothing was read.
+    /// The listing reads a path it cannot find, and a directory holding no
+    /// non-empty file with the suffix (it skips files of zero bytes), as a
+    /// table with no columns and no rows. A statement then fails on an
+    /// unknown column, or counts zero rows and succeeds. A written Parquet
+    /// file brings its columns whether or not it has rows, so `listed`
+    /// without columns means nothing was read. A single file's footer is
+    /// admitted before the listing, so a lone empty or torn file is refused
+    /// there instead.
     ///
     /// It runs after the listing on purpose: a check before it would restate
     /// the listing's rules for what it reads, list the path twice, and refuse
