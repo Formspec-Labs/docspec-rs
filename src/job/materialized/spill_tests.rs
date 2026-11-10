@@ -246,13 +246,18 @@ fn write_foreign(path: &Path, rows: usize) {
 
 #[tokio::test]
 async fn a_foreign_file_over_the_allowance_is_refused_wherever_it_lies() {
-    const ROWS: usize = 4096;
+    // 8,192 rows: at 4,096 this file's footer is under the 1 MiB allowance.
+    const ROWS: usize = 8192;
     let root = tempfile::tempdir().unwrap();
     let scratch = root.path().join("scratch");
     let job = Job::new(tight(), scratch.clone()).unwrap();
     let outside = root.path().join("foreign.parquet");
     write_foreign(&outside, ROWS);
-    assert!(footer_bytes(&outside) > tight().max_metadata_bytes);
+    assert!(
+        footer_bytes(&outside) > tight().max_metadata_bytes,
+        "the footer must exceed the allowance, or this test shows nothing: {} bytes",
+        footer_bytes(&outside)
+    );
     // Lying in the scratch directory does not make a file the engine's own.
     let planted = scratch.join("planted.parquet");
     std::fs::copy(&outside, &planted).unwrap();
