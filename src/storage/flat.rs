@@ -97,18 +97,27 @@ pub(crate) async fn admit_parquet_footer(
     admit_footer(path, budget, Some(budget.limits.max_metadata_bytes)).await
 }
 
-/// Admits the footer of a spill file through the handle its writer holds.
+/// Admits a spill file's footer: charged, but not judged by the allowance.
 ///
 /// `max_metadata_bytes` bounds metadata the engine did not produce. A spill's
 /// footer is the engine's own: its size follows from the spill writer's row
 /// groups, and the pinned line read it back with no check at all. Judging it
 /// by that allowance refused a step according to how its batches happened to
 /// fall. What bounds it now is the charge, which stays: a footer the shared
-/// budget cannot hold is refused, so a spill never costs unledgered memory.
+/// budget cannot hold is refused.
 ///
-/// The handle is what makes the file the engine's own. Only the disk manager
-/// issues one, for a file it has just created; a file that merely lies in the
-/// scratch directory has none and is admitted by [`admit_parquet_footer`].
+/// The charge starts here, at read-back. While the spill is written, the
+/// Parquet writer keeps every row group's metadata until it closes and nothing
+/// charges it: `encoding::write` has no metadata term, where exports charge
+/// theirs per row group.
+///
+/// Neither the handle nor the path makes a file the engine's own: the disk
+/// manager also issues handles for byte copies of input files the engine did
+/// not write (a managed job's retained input and native members). The caller
+/// does. The sole caller, `read_spill` in `job::materialized`, passes the file
+/// its step's spill writer has just closed; any other file goes through
+/// [`admit_parquet_footer`]. `pub(crate)` is the narrowest visibility that
+/// reaches that caller from this module.
 ///
 /// # Errors
 /// Refuses with `capacity` when the shared budget cannot hold the charge.

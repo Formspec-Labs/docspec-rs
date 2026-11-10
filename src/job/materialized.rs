@@ -182,7 +182,7 @@ pub(super) async fn retain(
                 // (`Batches::execute`), and the step tells the planner its
                 // rows itself, so nothing reads statistics or a page index.
                 // With them a wide spill's footer and index outweighed its
-                // data; `spill_reader` asks for neither.
+                // data; `read_spill` asks for no statistics.
                 .set_statistics_enabled(EnabledStatistics::None)
                 .set_offset_index_disabled(true)
                 .build();
@@ -269,8 +269,16 @@ pub(super) async fn retain(
 
 /// Reads back step `step`'s spill file through the handle its writer still holds.
 ///
-/// The footer is charged to the shared budget and not judged by
-/// `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
+/// `file` must be the file the step's spill writer has just closed: that, not
+/// the handle, is why its footer is charged to the shared budget without being
+/// judged by `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
+///
+/// The scan collects no statistics: a replay is the whole file in order
+/// (`Batches::execute`) and the step gives the planner its rows itself
+/// (`ReservedTable`). No other reader option is set, because none can act:
+/// pruning, page-index and filter-pushdown options need a predicate, and none
+/// reaches this scan (`ReservedTable` accepts no filters, and the frame runs
+/// as built here). The file has no page index either.
 ///
 /// # Errors
 /// Refuses with `capacity`, naming the step, when the shared budget cannot
@@ -292,7 +300,15 @@ async fn read_spill(
             ),
             _ => error,
         })?;
-    scan_retained(spill_reader(budget), file.path(), Arc::new(memory)).await
+    let reader = retained_reader(budget);
+    reader
+        .state_ref()
+        .write()
+        .config_mut()
+        .options_mut()
+        .execution
+        .collect_statistics = false;
+    scan_retained(reader, file.path(), Arc::new(memory)).await
 }
 
 /// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
@@ -319,24 +335,6 @@ fn retained_reader(budget: &Budget) -> SessionContext {
         .execution
         .parquet
         .schema_force_view_types = false;
-    reader
-}
-
-/// [`retained_reader`] for a spill file: the one place its read options are set.
-///
-/// The spill writer leaves no statistics and no page index, and a replay is
-/// the whole file with no predicate, so the reader asks for neither.
-fn spill_reader(budget: &Budget) -> SessionContext {
-    let reader = retained_reader(budget);
-    {
-        let state = reader.state_ref();
-        let mut state = state.write();
-        let execution = &mut state.config_mut().options_mut().execution;
-        execution.collect_statistics = false;
-        execution.parquet.enable_page_index = false;
-        execution.parquet.pruning = false;
-        execution.parquet.pushdown_filters = false;
-    }
     reader
 }
 
