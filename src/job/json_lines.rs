@@ -144,12 +144,14 @@ impl PartitionStream for JsonPartition {
 }
 
 /// Runs one blocking read off the async threads.
+///
+/// A read that panics reports the panic's message instead of only "failed".
 async fn on_worker<T: Send + 'static>(
     read: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tokio::task::spawn_blocking(read)
         .await
-        .map_err(|_| DataFusionError::Execution("JSON-lines worker failed".into()))?
+        .map_err(|error| DataFusionError::Execution(format!("JSON-lines worker failed: {error}")))?
 }
 
 /// Names the file and the operating-system error behind a failed `action`.
@@ -193,7 +195,7 @@ impl Reader {
             .map_err(|error| error.context(format!("{key} line {line}")))
     }
 
-    fn error(&self, line: i64, message: &str) -> DataFusionError {
+    fn error(&self, line: i64, message: impl std::fmt::Display) -> DataFusionError {
         DataFusionError::Execution(format!("{} line {line}: {message}", self.file.key))
     }
     /// Returns each raw line between `offsets` as text; `first` numbers the first one.
@@ -207,8 +209,9 @@ impl Reader {
             .windows(2)
             .enumerate()
             .map(|(i, p)| {
-                std::str::from_utf8(&raw[p[0]..p[1]])
-                    .map_err(|_| self.error(first + i as i64, "invalid UTF-8"))
+                std::str::from_utf8(&raw[p[0]..p[1]]).map_err(|error| {
+                    self.error(first + i as i64, format_args!("invalid UTF-8: {error}"))
+                })
             })
             .collect()
     }
@@ -319,7 +322,7 @@ impl Reader {
             .with_batch_size(self.batch_rows)
             .with_ignore_type_conflicts(true)
             .build(raw.as_slice())
-            .map_err(|_| self.error(first, "decoder setup failed"))?;
+            .map_err(|error| self.error(first, format_args!("decoder setup failed: {error}")))?;
         let batch = match decoder.next().transpose() {
             Ok(Some(batch)) if batch.num_rows() == offsets.len() - 1 => batch,
             _ => {
