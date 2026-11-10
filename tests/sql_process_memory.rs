@@ -121,7 +121,14 @@ fn repeated_dictionary_views_respect_process_memory() {
     );
 }
 
-fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, ceiling: usize) {
+/// Runs `test` alone in a child process with `variable` set and returns its peak RSS.
+fn measure_child(
+    test: &str,
+    variable: &str,
+    value: impl AsRef<std::ffi::OsStr>,
+    configured: usize,
+    ceiling: usize,
+) -> usize {
     let mut command = Command::new("/usr/bin/time");
     #[cfg(target_os = "macos")]
     command.arg("-l");
@@ -129,15 +136,18 @@ fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, cei
     command.args(["-f", "DOCSPEC_MAXRSS_KIB=%M"]);
     let output = command
         .arg(std::env::current_exe().unwrap())
-        .args(["--exact", test, "--nocapture"])
-        .env(variable, path)
+        .args(["--exact", test, "--nocapture", "--include-ignored"])
+        .env(variable, value)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stdout}\n{stderr}");
     assert!(stdout.contains("1 passed"), "{stdout}");
-    for line in stdout.lines().filter(|line| line.contains("json_case")) {
+    for line in stdout
+        .lines()
+        .filter(|line| line.contains("json_case") || line.contains("slice_case"))
+    {
         println!("{line}");
     }
     for line in stderr
@@ -181,6 +191,121 @@ fn measure_child(test: &str, variable: &str, path: &Path, configured: usize, cei
             .unwrap();
         println!("peak_physical_footprint_bytes={footprint}");
         assert!(footprint <= ceiling, "{stdout}\n{stderr}");
+    }
+    peak
+}
+
+const SLICE_CASE: &str = "DOCSPEC_TEST_SLICE_MEMORY_CASE";
+/// About 150 MiB retained per partition at two partitions.
+const SLICE_ROWS: usize = 600_000;
+
+/// One measured child: a payload (`list` or `view`) and an arm. `base` stops
+/// after retaining the inputs; `on` and `off` then run the LEFT JOIN chain
+/// with and without retained-input compaction.
+#[cfg(feature = "test-util")]
+fn run_slice_case(case: &str) {
+    let (payload, arm) = case.split_once(' ').unwrap();
+    let column = match payload {
+        "list" => {
+            "make_array(lpad(cast(value AS varchar), 150, 'x'), \
+             lpad(cast(value AS varchar), 150, 'y'))"
+        }
+        "view" => "lpad(cast(value AS varchar), 300, 'x')",
+        other => unreachable!("{other}"),
+    };
+    // Retained steps hold text; raw Parquet inputs are read as views.
+    let big = if payload == "view" {
+        "(SELECT k, arrow_cast(body, 'Utf8View') AS body, \
+         arrow_cast(payload, 'Utf8View') AS payload FROM big) AS big"
+    } else {
+        "big"
+    };
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let root = tempfile::tempdir().unwrap();
+            let mut job = Job::new(
+                Limits {
+                    compute_threads: 2,
+                    // Room for the uncompacted arm's inflated charge.
+                    memory_bytes: 48 << 30,
+                    ..Limits::default()
+                },
+                root.path().join("scratch"),
+            )
+            .unwrap();
+            if arm == "off" {
+                job.without_retained_compaction();
+            }
+            let (storage, _, retained) = job
+                .materialize_detailed(
+                    "big",
+                    &format!(
+                        "SELECT value AS k, lpad(cast(value AS varchar), 200, 'b') AS body, \
+                         {column} AS payload FROM generate_series(1, {SLICE_ROWS}) AS t(value)"
+                    ),
+                )
+                .await
+                .unwrap();
+            assert_eq!(storage, docspec::job::StepStorage::Memory);
+            for (name, keys) in [("mid", 2000), ("tiny", 1)] {
+                let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
+                job.materialize(name, &sql).await.unwrap();
+            }
+            if arm != "base" {
+                job.restart_pool_peak();
+                let start = std::time::Instant::now();
+                let (_, rows, bytes) = job
+                    .materialize_detailed(
+                        "chain",
+                        &format!(
+                            "SELECT big.k, big.body, big.payload FROM {big} \
+                             LEFT JOIN mid ON big.k = mid.k LEFT JOIN tiny ON big.k = tiny.k"
+                        ),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(rows, SLICE_ROWS);
+                println!(
+                    "slice_case payload={payload} arm={arm} retained_bytes={retained} \
+                     chain_bytes={bytes} pool_reserved_peak={} seconds={:.1}",
+                    job.pool_peak(),
+                    start.elapsed().as_secs_f64()
+                );
+            }
+        });
+}
+
+/// Real and charged memory of a chained LEFT JOIN, with compaction on and off.
+///
+/// The measurement behind the outer-join wrap: peak RSS of a child that
+/// retains about 300 MiB and stops (`base`), against children that then run
+/// the chain with the rule (`on`) and without it (`off`), with the pool's
+/// peak while the chain ran. Run it alone, since timing shares the machine:
+/// `cargo test --all-features --test sql_process_memory -- --ignored --nocapture slice`.
+/// On 2026-11-10 each child peaked under 1.8 GiB RSS and the run took 76 s.
+#[cfg(feature = "test-util")]
+#[test]
+#[ignore = "measurement: six children of up to 2 GiB each"]
+fn outer_join_slice_compaction_real_and_charged_memory() {
+    if let Some(case) = std::env::var_os(SLICE_CASE) {
+        run_slice_case(case.to_str().unwrap());
+        return;
+    }
+    for payload in ["list", "view"] {
+        for arm in ["base", "on", "off"] {
+            let peak = measure_child(
+                "outer_join_slice_compaction_real_and_charged_memory",
+                SLICE_CASE,
+                format!("{payload} {arm}"),
+                48 << 30,
+                8 << 30,
+            );
+            println!("slice_peak payload={payload} arm={arm} peak_rss_bytes={peak}");
+        }
     }
 }
 

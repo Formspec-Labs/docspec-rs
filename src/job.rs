@@ -129,6 +129,20 @@ impl Job {
         self.context = crate::budget::without_retained_compaction(&self.context);
     }
 
+    /// Highest native pool total since [`Self::restart_pool_peak`], for memory tests.
+    ///
+    /// The step log's `pool_reserved_peak` is this figure for one step.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn pool_peak(&self) -> usize {
+        self.budget.pool_peak()
+    }
+
+    /// Starts a new pool peak interval at the current total, for memory tests.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn restart_pool_peak(&self) {
+        self.budget.restart_pool_peak();
+    }
+
     /// Registers a Parquet file or directory with native projection and statistics.
     ///
     /// # Errors
