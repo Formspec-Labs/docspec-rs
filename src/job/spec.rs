@@ -243,9 +243,16 @@ impl JobSpec {
             outputs: Vec::new(),
             queries: Vec::new(),
         };
-        match self.execute(limits, &mut completed, connections).await {
+        let mut running = None;
+        match self
+            .execute(limits, &mut completed, connections, &mut running)
+            .await
+        {
             Ok(()) => Ok(completed),
-            Err(error) => Err(JobFailure { completed, error }),
+            Err(error) => Err(JobFailure {
+                completed,
+                error: self.named(running, error),
+            }),
         }
     }
 
@@ -254,6 +261,7 @@ impl JobSpec {
         limits: Limits,
         result: &mut JobResult,
         connections: Connections,
+        running: &mut Option<Running>,
     ) -> Result<()> {
         let mut names = BTreeSet::new();
         for name in self
@@ -368,6 +376,7 @@ impl JobSpec {
             }
         }
         for (step_index, step) in self.steps.iter().enumerate() {
+            *running = Some(Running::Step(step_index));
             let start_epoch = super::metrics::now_epoch_secs();
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
@@ -413,6 +422,7 @@ impl JobSpec {
                 storage,
             });
         }
+        *running = None;
         let catalog = if !self.table_operations.is_empty() {
             match connections.catalog {
                 Some(catalog) => Some(catalog),
@@ -448,6 +458,7 @@ impl JobSpec {
             self.steps.iter().map(|s| s.name().to_owned()).collect();
 
         for (output_index, output) in self.outputs.iter().enumerate() {
+            *running = Some(Running::Output(output_index));
             let start_epoch = super::metrics::now_epoch_secs();
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
@@ -498,7 +509,9 @@ impl JobSpec {
             }
         }
 
+        *running = None;
         for (query_index, query) in self.queries.iter().enumerate() {
+            *running = Some(Running::Query(query_index));
             let start_epoch = super::metrics::now_epoch_secs();
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
@@ -539,6 +552,33 @@ impl JobSpec {
         }
         Ok(())
     }
+
+    /// Puts the running statement's kind, position and name ahead of a failure.
+    ///
+    /// The code and cause are unchanged. Without it a failure says only what
+    /// went wrong, and which of a job's statements did is read off the order
+    /// of the log.
+    fn named(&self, running: Option<Running>, error: Error) -> Error {
+        let (kind, index, name) = match running {
+            None => return error,
+            Some(Running::Step(index)) => ("step", index, self.steps[index].name()),
+            Some(Running::Output(index)) => ("output", index, self.outputs[index].name.as_str()),
+            Some(Running::Query(index)) => ("query", index, self.queries[index].name.as_str()),
+        };
+        error.context(format_args!("{kind} {index} {name:?}"))
+    }
+}
+
+/// The statement `execute` is working on, by position in its own list.
+///
+/// Positions count from zero, as `step_index` and `output_index` do in the
+/// step log. `execute` sets it as each statement starts and clears it before
+/// other work follows a list, so that work is not blamed on a statement.
+#[derive(Debug, Clone, Copy)]
+enum Running {
+    Step(usize),
+    Output(usize),
+    Query(usize),
 }
 
 fn sql_references_table(sql: &str, table: &str) -> bool {
