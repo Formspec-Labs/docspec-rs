@@ -116,6 +116,9 @@ pub(super) fn add_weights(array: &dyn Array, weights: &mut [usize]) -> bool {
 ///
 /// A smaller copy is not worth its work, and a copied view column holds shared
 /// admission, which can only refuse, for as long as an operator keeps it.
+///
+/// What the floor leaves charged: up to this much spare buffer per view column
+/// per batch, since the rule is applied to each view column on its own.
 pub(super) const MIN_FREED: usize = 1 << 20;
 
 /// Copies a view column into buffers of its own when the copy pays for itself.
