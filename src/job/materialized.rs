@@ -269,8 +269,9 @@ pub(super) async fn retain(
 
 /// Reads back step `step`'s spill file through the handle its writer still holds.
 ///
-/// The footer is charged to the shared budget and not judged by
-/// `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
+/// `file` must be the file the step's spill writer has just closed: that, not
+/// the handle, is why its footer is charged to the shared budget without being
+/// judged by `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
 ///
 /// # Errors
 /// Refuses with `capacity`, naming the step, when the shared budget cannot
