@@ -595,13 +595,14 @@ async fn outer_join_shapes_keep_their_rows_and_charge_once() {
                 "{payload}, {case}: charged {charged} for {retained}"
             ));
         }
-        // Without the rule the fixture inflates, so the check above can see
-        // the rule. Not for views behind a nested-loop join: its output
-        // coalescer copies the strings of a range that uses under half of
-        // its buffers (arrow-select 58.4 coalesce/byte_view.rs), which every
-        // range of the whole build batch does.
-        let compacted_upstream = *payload == "string view" && case.starts_with("nested");
-        if *emission == Emission::Sliced && !compacted_upstream && *unguarded < 2 * retained {
+        // Without the rule the list fixture inflates, so the check above can
+        // see the rule. Views may not: Arrow's output coalescer copies the
+        // strings of a batch that uses under half of its buffers (arrow-select
+        // 58.4 coalesce/byte_view.rs), every range of a nested-loop build and,
+        // depending on how two workers' repartition packed the build, a hash
+        // join's unmatched rows. Unguarded view charges ranged 1.06x to 12.8x
+        // between runs of the same shape.
+        if *emission == Emission::Sliced && *payload != "string view" && *unguarded < 2 * retained {
             failures.push(format!(
                 "{payload}, {case}: sliced, yet {unguarded} unguarded for {retained}"
             ));
