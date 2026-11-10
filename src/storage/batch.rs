@@ -9,6 +9,8 @@ pub(crate) use views::{compact_views, referenced_batch_bytes};
 
 #[cfg(test)]
 mod alignment_tests;
+#[cfg(test)]
+mod retained_tests;
 
 pub(crate) fn coerce_data_type(
     data_type: &arrow::datatypes::DataType,
@@ -234,19 +236,12 @@ pub(crate) fn compact_batch_slice(
 }
 
 /// Bytes a batch's rows reference, counting view payloads and slice ranges.
+///
+/// The export measure owns this: it follows list and map offsets into the
+/// child rows a slice references, where Arrow's `get_slice_memory_size`
+/// counts the whole child. A batch it cannot measure counts as fully referenced.
 fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
-    batch
-        .columns()
-        .iter()
-        .map(|array| {
-            views::reference_bytes(array.as_ref(), array.len()).unwrap_or_else(|| {
-                array
-                    .to_data()
-                    .get_slice_memory_size()
-                    .unwrap_or_else(|_| array.get_array_memory_size())
-            })
-        })
-        .fold(0, usize::saturating_add)
+    crate::export::portable_batch_bytes(batch).unwrap_or_else(|_| batch.get_array_memory_size())
 }
 
 /// Releases buffers a batch retains beyond its own rows before an operator keeps it.
@@ -254,9 +249,11 @@ fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
 /// DataFusion 53.1 emits a grouped aggregate's output as `batch_rows` slices
 /// of one array, and repartition, sort and hash-join build inputs charge each
 /// slice for the whole array: charges grow with the square of groups per
-/// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). A batch charged
-/// at more than four times what its rows reference, and by more than 1 MiB,
-/// is copied once into its own buffers; others keep only view compaction.
+/// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). An outer join
+/// does the same with its unmatched build rows when its output coalescer
+/// already holds a few rows. A batch charged at more than four times what its
+/// rows reference, and by more than 1 MiB, is copied once into its own
+/// buffers; others keep only view compaction.
 ///
 /// # Errors
 /// Refuses when the shared memory pool cannot admit a view compaction copy.
