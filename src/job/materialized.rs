@@ -1,10 +1,13 @@
 //! Retained batches own native and retention reservations; either refusal spills once.
 // Rust guideline compliant 2026-02-21
 use crate::{Error, Result, budget::Budget};
-use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use arrow::{
+    datatypes::{Schema, SchemaRef},
+    record_batch::RecordBatch,
+};
 use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
-    common::{Statistics, stats::Precision},
+    common::{Statistics, internal_err, stats::Precision},
     execution::{
         TaskContext,
         disk_manager::RefCountedTempFile,
@@ -12,8 +15,9 @@ use datafusion::{
     },
     logical_expr::{Expr, TableType},
     physical_plan::{
-        ExecutionPlan, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
-        streaming::PartitionStream,
+        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+        display::ProjectSchemaDisplay, metrics::MetricsSet, projection::ProjectionExec,
+        stream::RecordBatchStreamAdapter, streaming::PartitionStream,
     },
     prelude::{ParquetReadOptions, SessionContext},
 };
@@ -23,7 +27,7 @@ use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties,
 };
-use std::{any::Any, sync::Arc};
+use std::{any::Any, fmt, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -32,6 +36,16 @@ pub enum StepStorage {
     View,
     Memory,
     Scratch,
+}
+impl StepStorage {
+    /// The name the retain log and query plans print.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::View => "view",
+            Self::Memory => "memory",
+            Self::Scratch => "scratch",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -84,11 +98,27 @@ impl PartitionStream for Batches {
     }
 }
 
+/// What a retained step tells the planner: its exact rows, capped by a pushed limit.
+///
+/// No byte size is given, although the one `retain` counts is accurate: 1.00
+/// to 1.01 times Arrow's own count on 14 step tables of a pipeline build,
+/// since `portable_batch` compacts what it retains. It is a size for whole
+/// rows, and a scan usually reads a few columns. Split by column count it
+/// came to 0.61 to 2.47 times the join keys' real bytes on three of those
+/// tables, and DataFusion's join selection compares byte sizes before row
+/// counts when both sides give one, so such a share would overrule the exact
+/// count. Publishing bytes needs them kept per column.
+fn statistics(schema: &Schema, rows: usize, fetch: Option<usize>) -> Statistics {
+    let rows = fetch.map_or(rows, |fetch| fetch.min(rows));
+    Statistics::new_unknown(schema).with_num_rows(Precision::Exact(rows))
+}
+
 #[derive(Debug)]
 struct ReservedTable {
     table: StreamingTable,
+    step: Arc<str>,
     rows: usize,
-    bytes: usize,
+    storage: StepStorage,
 }
 #[async_trait::async_trait]
 impl TableProvider for ReservedTable {
@@ -102,11 +132,7 @@ impl TableProvider for ReservedTable {
         TableType::Temporary
     }
     fn statistics(&self) -> Option<Statistics> {
-        Some(
-            Statistics::new_unknown(&self.schema())
-                .with_num_rows(Precision::Exact(self.rows))
-                .with_total_byte_size(Precision::Exact(self.bytes)),
-        )
+        Some(statistics(&self.schema(), self.rows, None))
     }
     async fn scan(
         &self,
@@ -115,7 +141,117 @@ impl TableProvider for ReservedTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        self.table.scan(session, projection, filters, limit).await
+        Ok(Arc::new(RetainedScan {
+            input: self.table.scan(session, projection, filters, limit).await?,
+            step: self.step.clone(),
+            rows: self.rows,
+            storage: self.storage,
+        }))
+    }
+}
+
+/// The scan of one retained step, with the row count and name its plan lacked.
+///
+/// DataFusion's streaming scan reports no statistics and prints no relation.
+/// Join selection reads only the physical plan's statistics, so every join
+/// built on its left input as written, and a plan did not say which step a
+/// leaf read. The scan itself stays `input`'s work: its projection, its limit,
+/// and the partition that keeps the step's reservation or scratch file alive.
+/// The optimizer sees a leaf, so it can put nothing between the two.
+#[derive(Debug)]
+struct RetainedScan {
+    input: Arc<dyn ExecutionPlan>,
+    step: Arc<str>,
+    rows: usize,
+    storage: StepStorage,
+}
+impl RetainedScan {
+    /// This step's scan again, over `input` with a projection or limit pushed into it.
+    fn over(&self, input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
+        Arc::new(Self {
+            input,
+            step: self.step.clone(),
+            rows: self.rows,
+            storage: self.storage,
+        })
+    }
+}
+impl DisplayAs for RetainedScan {
+    fn fmt_as(&self, format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (step, rows, storage) = (&self.step, self.rows, self.storage.label());
+        // The tree format takes one `key=value` a line and prints no node name.
+        let tree = matches!(format, DisplayFormatType::TreeRender);
+        if tree {
+            write!(f, "step={step}\nrows={rows}\nstorage={storage}")?;
+        } else {
+            write!(
+                f,
+                "RetainedScan: step={step}, rows={rows}, storage={storage}"
+            )?;
+            let schema = self.schema();
+            if !schema.fields().is_empty() {
+                write!(f, ", projection={}", ProjectSchemaDisplay(&schema))?;
+            }
+        }
+        match self.fetch() {
+            Some(fetch) if tree => write!(f, "\nfetch={fetch}"),
+            Some(fetch) => write!(f, ", fetch={fetch}"),
+            None => Ok(()),
+        }
+    }
+}
+impl ExecutionPlan for RetainedScan {
+    fn name(&self) -> &str {
+        "RetainedScan"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        self.input.properties()
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        Vec::new()
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        if children.is_empty() {
+            Ok(self)
+        } else {
+            internal_err!("RetainedScan has no inputs to replace")
+        }
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        self.input.execute(partition, context)
+    }
+    fn metrics(&self) -> Option<MetricsSet> {
+        self.input.metrics()
+    }
+    /// One partition holds the whole step, so its statistics are the plan's.
+    fn partition_statistics(
+        &self,
+        _partition: Option<usize>,
+    ) -> datafusion::common::Result<Statistics> {
+        Ok(statistics(&self.schema(), self.rows, self.fetch()))
+    }
+    fn fetch(&self) -> Option<usize> {
+        self.input.fetch()
+    }
+    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
+        Some(self.over(self.input.with_fetch(limit)?))
+    }
+    fn try_swapping_with_projection(
+        &self,
+        projection: &ProjectionExec,
+    ) -> datafusion::common::Result<Option<Arc<dyn ExecutionPlan>>> {
+        let input = self.input.try_swapping_with_projection(projection)?;
+        Ok(input.map(|input| self.over(input)))
     }
 }
 
@@ -259,21 +395,15 @@ pub(super) async fn retain(
         schema: schema.clone(),
         retained: Arc::new(retained),
     });
-    let table = StreamingTable::try_new(schema, vec![partition])?;
-    context.register_table(name, Arc::new(ReservedTable { table, rows, bytes }))?;
-    let pool_after = budget.runtime_env().memory_pool.reserved();
-    super::metrics::log_retain(
-        name,
-        match storage {
-            StepStorage::Memory => "memory",
-            StepStorage::Scratch => "scratch",
-            StepStorage::View => "view",
-        },
+    let table = ReservedTable {
+        table: StreamingTable::try_new(schema, vec![partition])?,
+        step: name.into(),
         rows,
-        bytes,
-        pool_before,
-        pool_after,
-    );
+        storage,
+    };
+    context.register_table(name, Arc::new(table))?;
+    let pool_after = budget.runtime_env().memory_pool.reserved();
+    super::metrics::log_retain(name, storage.label(), rows, bytes, pool_before, pool_after);
     Ok((storage, rows, bytes))
 }
 
