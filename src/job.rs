@@ -148,7 +148,8 @@ impl Job {
     /// Registers a Parquet file or directory with native projection and statistics.
     ///
     /// # Errors
-    /// Refuses a path where the listing finds no file (code `missing_input`).
+    /// Refuses a path where the listing finds no file to read (code
+    /// `missing_input`).
     /// Returns native schema, input I/O, or registration errors. Listing
     /// failures name the input and its path.
     pub async fn register_parquet(&self, name: &str, path: &Path) -> Result<()> {
@@ -168,13 +169,14 @@ impl Job {
         Ok(())
     }
 
-    /// Refuses a Parquet input for which the listing found no file.
+    /// Refuses a Parquet input for which the listing found no file to read.
     ///
-    /// The listing reads a path it cannot find, and a directory holding no
-    /// file with the suffix, as a table with no columns and no rows. A
-    /// statement then fails on an unknown column, or counts zero rows and
-    /// succeeds. A file brings its columns whether or not it has rows, so
-    /// `listed` without columns means no file.
+    /// The listing reads a path it cannot find, a directory holding no file
+    /// with the suffix, and a file of zero bytes (which it skips) as a table
+    /// with no columns and no rows. A statement then fails on an unknown
+    /// column, or counts zero rows and succeeds. A written Parquet file
+    /// brings its columns whether or not it has rows, so `listed` without
+    /// columns means nothing was read.
     ///
     /// It runs after the listing on purpose: a check before it would restate
     /// the listing's rules for what it reads, list the path twice, and refuse
@@ -192,8 +194,8 @@ impl Job {
         Err(crate::Error::refusal(
             "missing_input",
             format!(
-                "Parquet input {name:?} has no file to read at {}: \
-                 the path is missing or holds no file ending in .parquet",
+                "Parquet input {name:?} has no readable Parquet file at {}: \
+                 the path is missing or holds no non-empty file ending in .parquet",
                 path.display()
             ),
         ))

@@ -189,7 +189,10 @@ async fn a_parquet_input_with_no_file_is_refused_before_any_statement() {
     let absent_directory = root.path().join("absent/");
     let empty_directory = root.path().join("empty");
     std::fs::create_dir(&empty_directory).unwrap();
-    for path in [absent, absent_directory, empty_directory] {
+    // The listing skips a file of no bytes, so it is not a torn file to it.
+    let zero_bytes = root.path().join("zero.parquet");
+    std::fs::write(&zero_bytes, b"").unwrap();
+    for path in [absent, absent_directory, empty_directory, zero_bytes] {
         let failure = failure(
             root.path(),
             Limits::default(),
@@ -199,8 +202,8 @@ async fn a_parquet_input_with_no_file_is_refused_before_any_statement() {
         assert_eq!(
             failure.report()["error"],
             json!({"code":"missing_input","message":format!(
-                "Parquet input \"captures\" has no file to read at {}: \
-                 the path is missing or holds no file ending in .parquet",
+                "Parquet input \"captures\" has no readable Parquet file at {}: \
+                 the path is missing or holds no non-empty file ending in .parquet",
                 path.display()
             )})
         );
