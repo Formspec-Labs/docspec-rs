@@ -3,15 +3,19 @@
 //! Sorts and hash-join builds retain their input; repartition and the join
 //! charge each batch by its buffers' capacity. DataFusion 53.1 emits grouped
 //! aggregate output as `batch_rows` slices of one array, so those charges grow
-//! with the square of groups per partition (ct-deg8, ss-ud8y). An outer join
-//! emits its unmatched build rows the same way. The planner compacts
-//! aggregate outputs, sort inputs and hash-join build inputs.
+//! with the square of groups per partition (ct-deg8, ss-ud8y). A hash or
+//! nested-loop join that emits build rows after its probe ends hands them on
+//! the same way (ct-n5ec). The planner compacts where such slices are made,
+//! the output of aggregates and of those joins, so every operator downstream
+//! is covered at once, and where input is retained from any source: sort
+//! inputs and hash-join build inputs. A batch is copied at most once; a
+//! compact batch only pays the measurement again.
 // Rust guideline compliant 2026-02-21
 
 use super::Budget;
 use datafusion::{
     common::{
-        Result, Statistics,
+        JoinType, Result, Statistics,
         config::ConfigOptions,
         tree_node::{Transformed, TreeNode},
     },
@@ -19,7 +23,9 @@ use datafusion::{
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
-        aggregates::AggregateExec, joins::HashJoinExec, sorts::sort::SortExec,
+        aggregates::AggregateExec,
+        joins::{HashJoinExec, NestedLoopJoinExec},
+        sorts::sort::SortExec,
         stream::RecordBatchStreamAdapter,
     },
 };
@@ -41,6 +47,32 @@ impl Planner {
         }
     }
 }
+
+/// Whether `plan`'s output can be `batch_rows` slices of one large batch.
+///
+/// An aggregate emits its groups that way. So does a join that produces build
+/// rows only after its probe ends (the vendored `need_produce_result_in_final`):
+/// a hash join pushes them into its output coalescer as one batch, and a
+/// nested-loop join emits unfiltered ranges of its build batch.
+fn emits_slices(plan: &dyn ExecutionPlan) -> bool {
+    let plan = plan.as_any();
+    let join_type = if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
+        join.join_type()
+    } else if let Some(join) = plan.downcast_ref::<NestedLoopJoinExec>() {
+        join.join_type()
+    } else {
+        return plan.is::<AggregateExec>();
+    };
+    matches!(
+        join_type,
+        JoinType::Left
+            | JoinType::LeftAnti
+            | JoinType::LeftSemi
+            | JoinType::LeftMark
+            | JoinType::Full
+    )
+}
+
 impl PhysicalOptimizerRule for Planner {
     fn name(&self) -> &str {
         "compact_retained_inputs"
@@ -55,32 +87,39 @@ impl PhysicalOptimizerRule for Planner {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(plan
             .transform_up(|plan| {
-                if plan.as_any().is::<AggregateExec>() {
-                    return Ok(Transformed::yes(self.compacted(&plan)));
+                // Leading inputs the operator retains whole: all of a sort's,
+                // and a hash join's first child, its build side.
+                let retained = if plan.as_any().is::<SortExec>() {
+                    usize::MAX
+                } else {
+                    usize::from(plan.as_any().is::<HashJoinExec>())
+                };
+                let sliced = emits_slices(plan.as_ref());
+                if retained == 0 && !sliced {
+                    return Ok(Transformed::no(plan));
                 }
-                let children = plan.children();
-                let children = if plan.as_any().is::<SortExec>() {
-                    children
-                        .into_iter()
-                        .map(|input| self.compacted(input))
-                        .collect()
-                } else if plan.as_any().is::<HashJoinExec>() {
-                    // The first child is the build side, retained whole.
-                    children
+                let plan = if retained > 0 {
+                    let children = plan
+                        .children()
                         .into_iter()
                         .enumerate()
                         .map(|(index, input)| {
-                            if index == 0 {
+                            if index < retained {
                                 self.compacted(input)
                             } else {
                                 input.clone()
                             }
                         })
-                        .collect()
+                        .collect();
+                    plan.with_new_children(children)?
                 } else {
-                    return Ok(Transformed::no(plan));
+                    plan
                 };
-                Ok(Transformed::yes(plan.with_new_children(children)?))
+                Ok(Transformed::yes(if sliced {
+                    self.compacted(&plan)
+                } else {
+                    plan
+                }))
             })?
             .data)
     }
@@ -153,7 +192,6 @@ mod tests {
     use super::super::{Budget, Limits};
     use arrow::{
         array::{Array, ArrayRef, StringViewArray},
-        datatypes::DataType,
         record_batch::RecordBatch,
     };
     use datafusion::physical_plan::{ExecutionPlan, collect, joins::HashJoinExec};
@@ -319,103 +357,6 @@ mod tests {
                 .iter()
                 .all(|(_, charged, referenced)| *charged < 4 * *referenced),
             "build charged bytes against referenced bytes: {charges:?}"
-        );
-    }
-
-    /// Runs `big LEFT JOIN mid LEFT JOIN tiny` over retained steps.
-    ///
-    /// Returns the bytes `big` retains and the second join's build charge.
-    async fn chained_left_join_build_charge(
-        payload: &str,
-        expected: fn(&DataType) -> bool,
-    ) -> (usize, usize) {
-        const ROWS: usize = 200_000;
-        const MATCHED: usize = 2000;
-        let scratch = tempfile::tempdir().unwrap();
-        let job = crate::job::Job::new(
-            Limits {
-                // Retained steps carry no statistics, so each join builds on
-                // its left input, hash-partitioned by key.
-                compute_threads: 2,
-                // A 4 GiB pool admits an inflated charge so the test reports it.
-                memory_bytes: 8 << 30,
-                ..Limits::default()
-            },
-            scratch.path().join("scratch"),
-        )
-        .unwrap();
-        let (storage, rows, retained) = job
-            .materialize_detailed(
-                "big",
-                &format!(
-                    "SELECT value AS k, lpad(cast(value AS varchar), 200, 'b') AS body, \
-                     {payload} AS payload FROM generate_series(1, {ROWS}) AS t(value)"
-                ),
-            )
-            .await
-            .unwrap();
-        assert_eq!((storage, rows), (crate::job::StepStorage::Memory, ROWS));
-        for (name, keys) in [("mid", MATCHED), ("tiny", 1)] {
-            let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
-            job.materialize(name, &sql).await.unwrap();
-        }
-        let frame = job
-            .sql(
-                "SELECT big.k, big.body, big.payload, mid.k AS mid_k, tiny.k AS tiny_k \
-                 FROM big LEFT JOIN mid ON big.k = mid.k LEFT JOIN tiny ON big.k = tiny.k",
-            )
-            .await
-            .unwrap();
-        let context = Arc::new(frame.task_ctx());
-        let plan = frame.create_physical_plan().await.unwrap();
-        let joins = hash_joins(&plan);
-        assert_eq!(joins.len(), 2);
-        // The reproduced shape: the second join builds on the first join's
-        // output, whose unmatched rows leave as slices of one batch.
-        let second = joins[0].as_any().downcast_ref::<HashJoinExec>().unwrap();
-        assert_eq!(hash_joins(second.left()).len(), 1);
-        let batches = collect(plan, context).await.unwrap();
-        assert!(expected(batches[0].column(2).data_type()));
-        let present = |column: usize| {
-            batches
-                .iter()
-                .map(|batch| batch.num_rows() - batch.column(column).null_count())
-                .sum::<usize>()
-        };
-        assert_eq!([present(0), present(3), present(4)], [ROWS, MATCHED, 1]);
-        (retained, build_charge(&joins[0]))
-    }
-
-    #[tokio::test]
-    async fn hash_join_build_charges_sliced_join_output_once() {
-        let mut charges = Vec::new();
-        for (name, payload, expected) in [
-            (
-                "list",
-                "make_array(lpad(cast(value AS varchar), 150, 'x'), \
-                 lpad(cast(value AS varchar), 150, 'y'))",
-                (|data_type| matches!(data_type, DataType::List(item) if item.data_type() == &DataType::Utf8))
-                    as fn(&DataType) -> bool,
-            ),
-            // Control: the same bytes in a column the guard always measured.
-            (
-                "string",
-                "lpad(cast(value AS varchar), 300, 'x')",
-                |data_type| data_type == &DataType::Utf8,
-            ),
-        ] {
-            let (retained, charged) = chained_left_join_build_charge(payload, expected).await;
-            charges.push((name, charged, retained));
-        }
-        eprintln!("second build charged bytes against retained step bytes: {charges:?}");
-        // The whole left relation plus the join's hash table. Unguarded, every
-        // batch_rows slice of the first join's unmatched rows is charged for
-        // all of them.
-        assert!(
-            charges
-                .iter()
-                .all(|(_, charged, retained)| *charged < 2 * *retained),
-            "second build charged bytes against retained step bytes: {charges:?}"
         );
     }
 }

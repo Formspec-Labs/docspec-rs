@@ -16,6 +16,9 @@ mod spec;
 mod table_operations;
 pub mod tables;
 
+#[cfg(test)]
+mod slice_charge_tests;
+
 use crate::{
     Result,
     budget::{Budget, Limits},
