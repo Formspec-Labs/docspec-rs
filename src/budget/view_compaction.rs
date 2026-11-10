@@ -3,8 +3,9 @@
 //! Sorts and hash-join builds retain their input; repartition and the join
 //! charge each batch by its buffers' capacity. DataFusion 53.1 emits grouped
 //! aggregate output as `batch_rows` slices of one array, so those charges grow
-//! with the square of groups per partition (ct-deg8, ss-ud8y). The
-//! planner compacts aggregate outputs, sort inputs and hash-join build inputs.
+//! with the square of groups per partition (ct-deg8, ss-ud8y). An outer join
+//! emits its unmatched build rows the same way. The planner compacts
+//! aggregate outputs, sort inputs and hash-join build inputs.
 // Rust guideline compliant 2026-02-21
 
 use super::Budget;
@@ -152,8 +153,10 @@ mod tests {
     use super::super::{Budget, Limits};
     use arrow::{
         array::{Array, ArrayRef, StringViewArray},
+        datatypes::DataType,
         record_batch::RecordBatch,
     };
+    use datafusion::physical_plan::{ExecutionPlan, collect, joins::HashJoinExec};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -213,9 +216,27 @@ mod tests {
         );
     }
 
+    /// Every hash join in `plan`, outermost first.
+    fn hash_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<Arc<dyn ExecutionPlan>> {
+        let mut found = Vec::new();
+        if plan.as_any().is::<HashJoinExec>() {
+            found.push(plan.clone());
+        }
+        for child in plan.children() {
+            found.extend(hash_joins(child));
+        }
+        found
+    }
+
+    /// Bytes an executed hash join charged the pool for its build side.
+    fn build_charge(join: &Arc<dyn ExecutionPlan>) -> usize {
+        join.metrics()
+            .and_then(|metrics| metrics.sum_by_name("build_mem_used"))
+            .map_or(0, |value| value.as_usize())
+    }
+
     /// Runs a DISTINCT that builds a hash join and returns the build charge.
     async fn distinct_join_build_charge(values: ArrayRef) -> (i64, usize) {
-        use datafusion::physical_plan::{ExecutionPlan, collect, joins::HashJoinExec};
         let budget = Budget::new(Limits {
             compute_threads: 2,
             // Room for the aggregates' own state (about 60 MB at 200k keys).
@@ -249,16 +270,7 @@ mod tests {
             .create_physical_plan()
             .await
             .unwrap();
-        fn joins(plan: &Arc<dyn ExecutionPlan>, found: &mut Vec<Arc<dyn ExecutionPlan>>) {
-            if plan.as_any().is::<HashJoinExec>() {
-                found.push(plan.clone());
-            }
-            for child in plan.children() {
-                joins(child, found);
-            }
-        }
-        let mut found = Vec::new();
-        joins(&plan, &mut found);
+        let found = hash_joins(&plan);
         assert_eq!(found.len(), 1);
         // The reproduced shape: the build side is the DISTINCT's aggregate.
         let mut build = found[0]
@@ -282,11 +294,7 @@ mod tests {
             .unwrap()
             .value(0);
         assert_eq!(usize::try_from(count).unwrap(), 2 * rows);
-        let charged = found[0]
-            .metrics()
-            .and_then(|metrics| metrics.sum_by_name("build_mem_used"))
-            .map_or(0, |value| value.as_usize());
-        (count, charged)
+        (count, build_charge(&found[0]))
     }
 
     #[tokio::test]
@@ -311,6 +319,103 @@ mod tests {
                 .iter()
                 .all(|(_, charged, referenced)| *charged < 4 * *referenced),
             "build charged bytes against referenced bytes: {charges:?}"
+        );
+    }
+
+    /// Runs `big LEFT JOIN mid LEFT JOIN tiny` over retained steps.
+    ///
+    /// Returns the bytes `big` retains and the second join's build charge.
+    async fn chained_left_join_build_charge(
+        payload: &str,
+        expected: fn(&DataType) -> bool,
+    ) -> (usize, usize) {
+        const ROWS: usize = 200_000;
+        const MATCHED: usize = 2000;
+        let scratch = tempfile::tempdir().unwrap();
+        let job = crate::job::Job::new(
+            Limits {
+                // Retained steps carry no statistics, so each join builds on
+                // its left input, hash-partitioned by key.
+                compute_threads: 2,
+                // A 4 GiB pool admits an inflated charge so the test reports it.
+                memory_bytes: 8 << 30,
+                ..Limits::default()
+            },
+            scratch.path().join("scratch"),
+        )
+        .unwrap();
+        let (storage, rows, retained) = job
+            .materialize_detailed(
+                "big",
+                &format!(
+                    "SELECT value AS k, lpad(cast(value AS varchar), 200, 'b') AS body, \
+                     {payload} AS payload FROM generate_series(1, {ROWS}) AS t(value)"
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!((storage, rows), (crate::job::StepStorage::Memory, ROWS));
+        for (name, keys) in [("mid", MATCHED), ("tiny", 1)] {
+            let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
+            job.materialize(name, &sql).await.unwrap();
+        }
+        let frame = job
+            .sql(
+                "SELECT big.k, big.body, big.payload, mid.k AS mid_k, tiny.k AS tiny_k \
+                 FROM big LEFT JOIN mid ON big.k = mid.k LEFT JOIN tiny ON big.k = tiny.k",
+            )
+            .await
+            .unwrap();
+        let context = Arc::new(frame.task_ctx());
+        let plan = frame.create_physical_plan().await.unwrap();
+        let joins = hash_joins(&plan);
+        assert_eq!(joins.len(), 2);
+        // The reproduced shape: the second join builds on the first join's
+        // output, whose unmatched rows leave as slices of one batch.
+        let second = joins[0].as_any().downcast_ref::<HashJoinExec>().unwrap();
+        assert_eq!(hash_joins(second.left()).len(), 1);
+        let batches = collect(plan, context).await.unwrap();
+        assert!(expected(batches[0].column(2).data_type()));
+        let present = |column: usize| {
+            batches
+                .iter()
+                .map(|batch| batch.num_rows() - batch.column(column).null_count())
+                .sum::<usize>()
+        };
+        assert_eq!([present(0), present(3), present(4)], [ROWS, MATCHED, 1]);
+        (retained, build_charge(&joins[0]))
+    }
+
+    #[tokio::test]
+    async fn hash_join_build_charges_sliced_join_output_once() {
+        let mut charges = Vec::new();
+        for (name, payload, expected) in [
+            (
+                "list",
+                "make_array(lpad(cast(value AS varchar), 150, 'x'), \
+                 lpad(cast(value AS varchar), 150, 'y'))",
+                (|data_type| matches!(data_type, DataType::List(item) if item.data_type() == &DataType::Utf8))
+                    as fn(&DataType) -> bool,
+            ),
+            // Control: the same bytes in a column the guard always measured.
+            (
+                "string",
+                "lpad(cast(value AS varchar), 300, 'x')",
+                |data_type| data_type == &DataType::Utf8,
+            ),
+        ] {
+            let (retained, charged) = chained_left_join_build_charge(payload, expected).await;
+            charges.push((name, charged, retained));
+        }
+        eprintln!("second build charged bytes against retained step bytes: {charges:?}");
+        // The whole left relation plus the join's hash table. Unguarded, every
+        // batch_rows slice of the first join's unmatched rows is charged for
+        // all of them.
+        assert!(
+            charges
+                .iter()
+                .all(|(_, charged, retained)| *charged < 2 * *retained),
+            "second build charged bytes against retained step bytes: {charges:?}"
         );
     }
 }
