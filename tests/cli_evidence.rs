@@ -61,13 +61,18 @@ fn limits_after(ulimit_command: &str) -> (Option<u64>, Option<u64>) {
     (field(" soft="), field(" hard="))
 }
 
+/// The hard limit this test process hands to its children; `None` is unlimited.
+fn inherited_hard_limit() -> Option<u64> {
+    limit(&String::from_utf8_lossy(&sh("ulimit -H -n", &[]).stdout))
+}
+
 #[test]
 fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
-    let hard = limit(&String::from_utf8_lossy(&sh("ulimit -H -n", &[]).stdout));
-    assert!(
-        hard.is_none_or(|hard| hard > LOW),
-        "this test needs a hard limit above {LOW}, found {hard:?}"
-    );
+    let hard = inherited_hard_limit();
+    if hard.is_some_and(|hard| hard <= LOW) {
+        eprintln!("skipped: the hard limit here is {hard:?}, so nothing above {LOW} can be asked for");
+        return;
+    }
     let target = hard.map_or(STATED, |hard| hard.min(STATED));
     let (soft, reported_hard) = limits_after(&format!("ulimit -S -n {LOW}"));
     assert_eq!(reported_hard, hard, "the hard limit must not move");
@@ -91,24 +96,31 @@ fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
 
 #[test]
 fn a_hard_limit_below_the_stated_number_is_respected() {
-    // Lowering the hard limit binds only the child that sh becomes. The soft
-    // limit goes first: sh refuses a hard limit under the soft one in force.
-    let limits = limits_after(&format!("ulimit -S -n {LOW} && ulimit -H -n 4096"));
-    assert_eq!(limits, (Some(4096), Some(4096)));
+    let hard = inherited_hard_limit();
+    // A hard limit under the stated number, or this machine's own if lower.
+    let lowered = hard.map_or(4096, |hard| hard.min(4096));
+    if lowered > LOW {
+        // Lowering the hard limit binds only the child that sh becomes. The soft
+        // limit goes first: sh refuses a hard limit under the soft one in force.
+        let limits = limits_after(&format!("ulimit -S -n {LOW} && ulimit -H -n {lowered}"));
+        assert_eq!(limits, (Some(lowered), Some(lowered)));
+    } else {
+        eprintln!("skipped the lowered case: the hard limit here is {hard:?}");
+    }
     // Without -S or -H, sh sets both limits: nothing is left to raise.
-    let limits = limits_after(&format!("ulimit -n {LOW}"));
-    assert_eq!(limits, (Some(LOW), Some(LOW)));
+    let floor = hard.map_or(LOW, |hard| hard.min(LOW));
+    let limits = limits_after(&format!("ulimit -n {floor}"));
+    assert_eq!(limits, (Some(floor), Some(floor)));
 }
 
 #[test]
 fn a_soft_limit_above_the_stated_number_is_not_lowered() {
     let above = STATED + 1000;
-    let hard = limit(&String::from_utf8_lossy(&sh("ulimit -H -n", &[]).stdout));
-    let settable = sh(&format!("ulimit -S -n {above}"), &[]).status.success();
-    assert!(
-        hard.is_none_or(|hard| hard >= above) && settable,
-        "this test needs to set a soft limit of {above}; hard limit {hard:?}"
-    );
+    let hard = inherited_hard_limit();
+    if !sh(&format!("ulimit -S -n {above}"), &[]).status.success() {
+        eprintln!("skipped: a soft limit of {above} cannot be set here (hard limit {hard:?})");
+        return;
+    }
     let (soft, _) = limits_after(&format!("ulimit -S -n {above}"));
     assert_eq!(soft, Some(above));
 }
