@@ -491,6 +491,8 @@ mod tests {
     }
 
     /// The rows of `left <kind> JOIN right ON left.k = right.k`, sorted, by nested loop.
+    ///
+    /// `NOT IN` stands for `left WHERE k NOT IN (SELECT k FROM right)`.
     fn joined(kind: &str, left: &[Row], right: &[Row]) -> Vec<Vec<Option<i64>>> {
         let matches = |l: &Row, r: &Row| l.0.is_some() && l.0 == r.0;
         let side = |row: Option<&Row>| row.map_or([None, None], |row| [row.0, Some(row.1)]);
@@ -501,6 +503,13 @@ mod tests {
             match kind {
                 "LEFT SEMI" | "LEFT ANTI" => {
                     if matched.is_empty() == (kind == "LEFT ANTI") {
+                        rows.push(side(Some(l)).to_vec());
+                    }
+                }
+                "NOT IN" => {
+                    // Kept only when every comparison is true: no null, no match.
+                    let differs = |r: &Row| l.0.is_some() && r.0.is_some() && l.0 != r.0;
+                    if right.iter().all(differs) {
                         rows.push(side(Some(l)).to_vec());
                     }
                 }
@@ -566,36 +575,61 @@ mod tests {
             let sql = format!("SELECT * FROM (VALUES {values}) AS t(k, v)");
             job.materialize(name, &sql).await.unwrap();
         }
-        for kind in ["INNER", "LEFT", "RIGHT", "FULL", "LEFT SEMI", "LEFT ANTI"] {
-            for (left, right) in [(steps[0], steps[1]), (steps[1], steps[0])] {
+        // (query, the join it states, its left rows, its right rows)
+        let mut cases = Vec::new();
+        for (left, right) in [(steps[0], steps[1]), (steps[1], steps[0])] {
+            for kind in ["INNER", "LEFT", "RIGHT", "FULL", "LEFT SEMI", "LEFT ANTI"] {
                 let sql = format!(
                     "SELECT * FROM {} AS l {kind} JOIN {} AS r ON l.k = r.k",
                     left.0, right.0
                 );
-                let frame = job.sql(&sql).await.unwrap();
-                let task = Arc::new(frame.task_ctx());
-                let plan = frame.create_physical_plan().await.unwrap();
-                let text = displayable(plan.as_ref()).indent(true).to_string();
-                let batches = collect(plan.clone(), task).await.unwrap();
-                let cell = |batch: &RecordBatch, column: usize, row| {
-                    let values = batch.column(column).as_primitive::<Int64Type>();
-                    values.is_valid(row).then(|| values.value(row))
-                };
-                let mut rows = Vec::new();
-                for batch in &batches {
-                    rows.extend((0..batch.num_rows()).map(|row| {
-                        let cells = (0..batch.num_columns()).map(|column| cell(batch, column, row));
-                        cells.collect::<Vec<_>>()
-                    }));
-                }
-                rows.sort();
-                assert_eq!(rows, joined(kind, left.1, right.1), "{sql}\n{text}");
+                cases.push((sql, kind, left.1, right.1.to_vec()));
+            }
+            // With a null key in the subquery NOT IN keeps no row; without, some.
+            for keys in ["", " WHERE k IS NOT NULL"] {
+                let sql = format!(
+                    "SELECT * FROM {} WHERE k NOT IN (SELECT k FROM {}{keys})",
+                    left.0, right.0
+                );
+                let right = right
+                    .1
+                    .iter()
+                    .filter(|row| keys.is_empty() || row.0.is_some());
+                cases.push((sql, "NOT IN", left.1, right.copied().collect()));
+            }
+        }
+        let mut null_aware = 0;
+        for (sql, kind, left, right) in cases {
+            let frame = job.sql(&sql).await.unwrap();
+            let task = Arc::new(frame.task_ctx());
+            let plan = frame.create_physical_plan().await.unwrap();
+            let text = displayable(plan.as_ref()).indent(true).to_string();
+            let batches = collect(plan.clone(), task).await.unwrap();
+            let cell = |batch: &RecordBatch, column: usize, row| {
+                let values = batch.column(column).as_primitive::<Int64Type>();
+                values.is_valid(row).then(|| values.value(row))
+            };
+            let mut rows = Vec::new();
+            for batch in &batches {
+                rows.extend((0..batch.num_rows()).map(|row| {
+                    let cells = (0..batch.num_columns()).map(|column| cell(batch, column, row));
+                    cells.collect::<Vec<_>>()
+                }));
+            }
+            rows.sort();
+            assert_eq!(rows, joined(kind, left, &right), "{sql}\n{text}");
+            let join = find::<HashJoinExec>(&plan).expect(&text);
+            if join.null_aware {
+                // Its answer depends on which side builds, so it stays as written.
+                assert_eq!(join.join_type(), &JoinType::LeftAnti, "{sql}\n{text}");
+                null_aware += 1;
+            } else if kind != "NOT IN" {
                 // Whichever step is written first, the smaller one is the build side.
-                let join = find::<HashJoinExec>(&plan).expect(&text);
                 let build = line(scan(join.left()));
                 assert!(build.contains("step=small,"), "{sql}\n{text}");
             }
         }
+        assert!(null_aware > 0, "no NOT IN was planned as a null-aware join");
     }
 
     #[tokio::test]
