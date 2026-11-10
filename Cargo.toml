@@ -78,6 +78,9 @@ parquet = { version = "58", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 jiter = "=0.13.0"
+# Safe getrlimit/setrlimit for the CLI's open-file limit: std has neither and
+# this crate forbids unsafe. Already locked through tempfile.
+rustix = { version = "1.1", features = ["process"] }
 ryu = "=1.0.23"
 sha2 = "=0.10.9"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
