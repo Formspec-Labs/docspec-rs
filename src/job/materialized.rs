@@ -4,7 +4,7 @@ use crate::{Error, Result, budget::Budget};
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
-    common::{Statistics, stats::Precision},
+    common::{Statistics, internal_err, stats::Precision},
     execution::{
         TaskContext,
         disk_manager::RefCountedTempFile,
@@ -12,7 +12,8 @@ use datafusion::{
     },
     logical_expr::{Expr, TableType},
     physical_plan::{
-        ExecutionPlan, SendableRecordBatchStream, stream::RecordBatchStreamAdapter,
+        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+        metrics::MetricsSet, projection::ProjectionExec, stream::RecordBatchStreamAdapter,
         streaming::PartitionStream,
     },
     prelude::{ParquetReadOptions, SessionContext},
@@ -23,7 +24,7 @@ use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::{EnabledStatistics, WriterProperties},
 };
-use std::{any::Any, sync::Arc};
+use std::{any::Any, fmt, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -32,6 +33,16 @@ pub enum StepStorage {
     View,
     Memory,
     Scratch,
+}
+impl StepStorage {
+    /// The name the retain log and query plans print.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::View => "view",
+            Self::Memory => "memory",
+            Self::Scratch => "scratch",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -87,8 +98,10 @@ impl PartitionStream for Batches {
 #[derive(Debug)]
 struct ReservedTable {
     table: StreamingTable,
+    step: Arc<str>,
     rows: usize,
     bytes: usize,
+    storage: StepStorage,
 }
 #[async_trait::async_trait]
 impl TableProvider for ReservedTable {
@@ -115,7 +128,111 @@ impl TableProvider for ReservedTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        self.table.scan(session, projection, filters, limit).await
+        Ok(Arc::new(RetainedScan {
+            input: self.table.scan(session, projection, filters, limit).await?,
+            step: self.step.clone(),
+            rows: self.rows,
+            storage: self.storage,
+        }))
+    }
+}
+
+/// The scan of one retained step, its line in a plan naming the step.
+///
+/// DataFusion's streaming scan prints no relation, so a plan did not say which
+/// of a job's steps a leaf read or how large it was. This leaf is that scan
+/// with the step's name, rows and storage appended to its line, as in
+/// `StreamingTableExec: partition_sizes=1, projection=[k], step=big,
+/// rows=300000, storage=memory`. The scan's own name and text stay first, so
+/// plan readers that match `StreamingTableExec` still do.
+///
+/// All else is the scan's: its projection, limit and partition (which keeps
+/// the step's reservation or scratch file alive), properties, metrics and
+/// statistics. The planner sees what it saw before, and no row count. Given
+/// one, DataFusion's join selection swaps a larger left input, which moves
+/// build sides and memory; that change is to be made, and measured, on its
+/// own. The optimizer sees a leaf, so it can put nothing between the two.
+#[derive(Debug)]
+struct RetainedScan {
+    input: Arc<dyn ExecutionPlan>,
+    step: Arc<str>,
+    rows: usize,
+    storage: StepStorage,
+}
+impl RetainedScan {
+    /// This step's scan again, over `input` with a projection or limit pushed into it.
+    fn over(&self, input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
+        Arc::new(Self {
+            input,
+            step: self.step.clone(),
+            rows: self.rows,
+            storage: self.storage,
+        })
+    }
+}
+impl DisplayAs for RetainedScan {
+    fn fmt_as(&self, format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.input.fmt_as(format, f)?;
+        let (step, rows, storage) = (&self.step, self.rows, self.storage.label());
+        // The tree format takes one `key=value` a line.
+        if matches!(format, DisplayFormatType::TreeRender) {
+            write!(f, "\nstep={step}\nrows={rows}\nstorage={storage}")
+        } else {
+            write!(f, ", step={step}, rows={rows}, storage={storage}")
+        }
+    }
+}
+impl ExecutionPlan for RetainedScan {
+    fn name(&self) -> &str {
+        self.input.name()
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        self.input.properties()
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        Vec::new()
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        if children.is_empty() {
+            Ok(self)
+        } else {
+            internal_err!("a retained step's scan has no inputs to replace")
+        }
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        self.input.execute(partition, context)
+    }
+    fn metrics(&self) -> Option<MetricsSet> {
+        self.input.metrics()
+    }
+    fn partition_statistics(
+        &self,
+        partition: Option<usize>,
+    ) -> datafusion::common::Result<Statistics> {
+        self.input.partition_statistics(partition)
+    }
+    fn fetch(&self) -> Option<usize> {
+        self.input.fetch()
+    }
+    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
+        Some(self.over(self.input.with_fetch(limit)?))
+    }
+    fn try_swapping_with_projection(
+        &self,
+        projection: &ProjectionExec,
+    ) -> datafusion::common::Result<Option<Arc<dyn ExecutionPlan>>> {
+        let input = self.input.try_swapping_with_projection(projection)?;
+        Ok(input.map(|input| self.over(input)))
     }
 }
 
@@ -179,8 +296,8 @@ pub(super) async fn retain(
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
                 // A spill is replayed whole, in order and with no predicate
-                // (`Batches::execute`), and the step tells the planner its
-                // rows itself, so nothing reads statistics or a page index.
+                // (`Batches::execute`), and the step counts its own rows
+                // (`ReservedTable`), so nothing reads statistics or a page index.
                 // With them a wide spill's footer and index outweighed its
                 // data; `read_spill` asks for no statistics.
                 .set_statistics_enabled(EnabledStatistics::None)
@@ -249,21 +366,16 @@ pub(super) async fn retain(
         schema: schema.clone(),
         retained: Arc::new(retained),
     });
-    let table = StreamingTable::try_new(schema, vec![partition])?;
-    context.register_table(name, Arc::new(ReservedTable { table, rows, bytes }))?;
-    let pool_after = budget.runtime_env().memory_pool.reserved();
-    super::metrics::log_retain(
-        name,
-        match storage {
-            StepStorage::Memory => "memory",
-            StepStorage::Scratch => "scratch",
-            StepStorage::View => "view",
-        },
+    let table = ReservedTable {
+        table: StreamingTable::try_new(schema, vec![partition])?,
+        step: name.into(),
         rows,
         bytes,
-        pool_before,
-        pool_after,
-    );
+        storage,
+    };
+    context.register_table(name, Arc::new(table))?;
+    let pool_after = budget.runtime_env().memory_pool.reserved();
+    super::metrics::log_retain(name, storage.label(), rows, bytes, pool_before, pool_after);
     Ok((storage, rows, bytes))
 }
 
@@ -374,10 +486,7 @@ mod tests {
         array::{AsArray, Int64Array},
         datatypes::{DataType, Field, Schema},
     };
-    use datafusion::{
-        physical_expr::expressions::col,
-        physical_plan::{displayable, projection::ProjectionExec},
-    };
+    use datafusion::{physical_expr::expressions::col, physical_plan::displayable};
 
     /// A job on two partitions, as the CLI runs queries, with room to keep steps in memory.
     fn job(root: &tempfile::TempDir) -> Job {
