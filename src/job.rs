@@ -121,6 +121,14 @@ impl Job {
         Ok(job)
     }
 
+    /// Plans later queries without retained-input compaction, for comparisons in tests.
+    ///
+    /// Tables stay registered; only the planner rule is removed.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn without_retained_compaction(&mut self) {
+        self.context = crate::budget::without_retained_compaction(&self.context);
+    }
+
     /// Registers a Parquet file or directory with native projection and statistics.
     ///
     /// # Errors

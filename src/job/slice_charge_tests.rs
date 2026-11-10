@@ -3,6 +3,8 @@
 //! A join that emits its unmatched build rows at the end hands them on as
 //! zero-copy `batch_rows` slices of one batch, and every operator that
 //! charges a batch by its buffers then counts that whole batch per slice.
+//! Tests that compare against plans without the compaction rule plan them
+//! with `budget::without_retained_compaction` over the same catalog.
 // Rust guideline compliant 2026-02-21
 use super::*;
 use arrow::datatypes::DataType;
@@ -61,11 +63,123 @@ fn operators(plan: &Arc<dyn ExecutionPlan>, name: &str) -> Vec<Arc<dyn Execution
     found
 }
 
+/// The sum of an executed operator's metric `name` over its partitions.
+fn metric(plan: &Arc<dyn ExecutionPlan>, name: &str) -> usize {
+    plan.metrics()
+        .and_then(|metrics| metrics.sum_by_name(name))
+        .map_or(0, |value| value.as_usize())
+}
+
 /// Bytes an executed join charged the pool for its build side.
 fn build_charge(join: &Arc<dyn ExecutionPlan>) -> usize {
-    join.metrics()
-        .and_then(|metrics| metrics.sum_by_name("build_mem_used"))
-        .map_or(0, |value| value.as_usize())
+    metric(join, "build_mem_used")
+}
+
+/// The compaction wraps placed directly over an operator called `producer`.
+fn wraps_over(plan: &Arc<dyn ExecutionPlan>, producer: &str) -> Vec<Arc<dyn ExecutionPlan>> {
+    operators(plan, "CompactViews")
+        .into_iter()
+        .filter(|wrap| wrap.children()[0].name() == producer)
+        .collect()
+}
+
+/// Runs `sql` in `context` and returns the executed plan and its rows, sorted.
+///
+/// Sorted row encodings compare two plans' results as multisets, nested
+/// values and nulls included, whatever order the plans emit them in.
+async fn execute(
+    context: &SessionContext,
+    sql: &str,
+) -> datafusion::common::Result<(Arc<dyn ExecutionPlan>, Vec<arrow::row::OwnedRow>)> {
+    let frame = context.sql(sql).await?;
+    let task = Arc::new(frame.task_ctx());
+    let plan = frame.create_physical_plan().await?;
+    let batches = collect(plan.clone(), task).await?;
+    let converter = arrow::row::RowConverter::new(
+        plan.schema()
+            .fields()
+            .iter()
+            .map(|field| arrow::row::SortField::new(field.data_type().clone()))
+            .collect(),
+    )?;
+    let mut rows = Vec::new();
+    for batch in &batches {
+        let converted = converter.convert_columns(batch.columns())?;
+        rows.extend(converted.iter().map(|row| row.owned()));
+    }
+    rows.sort_unstable();
+    Ok((plan, rows))
+}
+
+/// Holds all of the budget's shared admission but `spare` bytes, as retained
+/// spills and window reservations can.
+fn hold_admission(budget: &Budget, spare: usize) -> Vec<tokio::sync::OwnedSemaphorePermit> {
+    let room = budget.reserve(spare).unwrap();
+    let mut held = Vec::new();
+    for chunk in [1 << 30, 1 << 20, 1 << 10, 1] {
+        while let Ok(permit) = budget.reserve(chunk) {
+            held.push(permit);
+        }
+    }
+    drop(room);
+    held
+}
+
+/// `big` with string-view text, as raw Parquet inputs are read; it needs the
+/// string payload, since retained steps hold text.
+const BIG_VIEWS: &str = "(SELECT k, arrow_cast(body, 'Utf8View') AS body, \
+                         arrow_cast(payload, 'Utf8View') AS payload FROM big) AS big";
+
+#[tokio::test]
+async fn refused_compaction_keeps_the_batch_and_the_rows() {
+    let (_scratch, job, _) = retained_job(payloads()[1].1).await;
+    let native = crate::budget::without_retained_compaction(&job.context);
+    let cases = [
+        // New with the outer-join wrap: its output shares the build's views.
+        (
+            "outer join output",
+            format!(
+                "SELECT big.k, big.body FROM {BIG_VIEWS} LEFT JOIN mid ON big.k = mid.k \
+                 CROSS JOIN tiny"
+            ),
+            "HashJoinExec",
+        ),
+        // Wrapped before the outer-join wrap: slices of the grouped views.
+        (
+            "aggregate output",
+            format!("SELECT body, count(*) AS n FROM {BIG_VIEWS} GROUP BY body"),
+            "AggregateExec",
+        ),
+    ];
+    // Leave less than one 8,192-row view copy (about 2.7 MB) admissible.
+    let _held = hold_admission(&job.budget, 1 << 20);
+    let mut failures = Vec::new();
+    for (case, sql, producer) in &cases {
+        let (_, expected) = execute(&native, sql)
+            .await
+            .unwrap_or_else(|error| panic!("{case} without the rule: {error}"));
+        let (plan, rows) = match execute(&job.context, sql).await {
+            Ok(result) => result,
+            Err(error) => {
+                failures.push(format!("{case}: {error}"));
+                continue;
+            }
+        };
+        assert_eq!(rows.len(), expected.len(), "{case}");
+        assert!(rows == expected, "{case}: rows differ from the native plan");
+        // The fallback ran where the copy was refused, not merely nowhere.
+        let refused = wraps_over(&plan, producer)
+            .iter()
+            .map(|wrap| metric(wrap, "refused_copies"))
+            .sum::<usize>();
+        if refused == 0 {
+            failures.push(format!(
+                "{case}: no refused copy over {producer}:\n{}",
+                displayable(plan.as_ref()).indent(true)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Runs `sql`, checks it returns every `big` row with the payload intact in

@@ -29,6 +29,8 @@ mod scratch;
 mod subqueries;
 mod view_compaction;
 pub(crate) use scratch::ScratchWriter;
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) use view_compaction::without as without_retained_compaction;
 
 /// Declared limits for one workspace execution host.
 #[derive(Clone, Debug, Serialize, Deserialize)]

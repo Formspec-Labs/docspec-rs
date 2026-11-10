@@ -9,7 +9,8 @@
 //! the output of aggregates and of those joins, so every operator downstream
 //! is covered at once, and where input is retained from any source: sort
 //! inputs and hash-join build inputs. A batch is copied at most once; a
-//! compact batch only pays the measurement again.
+//! compact batch only pays the measurement again. Compaction is optional: a
+//! copy the shared budget refuses is skipped and the batch passes on as made.
 // Rust guideline compliant 2026-02-21
 
 use super::Budget;
@@ -25,12 +26,16 @@ use datafusion::{
         DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
         aggregates::AggregateExec,
         joins::{HashJoinExec, NestedLoopJoinExec},
+        metrics::{ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
         sorts::sort::SortExec,
         stream::RecordBatchStreamAdapter,
     },
 };
 use futures::TryStreamExt;
 use std::{any::Any, fmt, sync::Arc};
+
+/// The rule's name, which also removes it from a session in tests.
+const NAME: &str = "compact_retained_inputs";
 
 /// Runs after native planning so compaction sees retained inputs, before reservation.
 #[derive(Debug)]
@@ -43,9 +48,31 @@ impl Planner {
             Arc::new(CompactViews {
                 input: input.clone(),
                 budget: self.0.clone(),
+                metrics: ExecutionPlanMetricsSet::new(),
             })
         }
     }
+}
+
+/// A copy of `context` that plans without this rule, to compare results in tests.
+///
+/// The copy shares the catalog, so tables registered in either are seen by both.
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) fn without(
+    context: &datafusion::prelude::SessionContext,
+) -> datafusion::prelude::SessionContext {
+    let state = context.state();
+    let rules = state
+        .physical_optimizers()
+        .iter()
+        .filter(|rule| rule.name() != NAME)
+        .cloned()
+        .collect();
+    datafusion::prelude::SessionContext::new_with_state(
+        datafusion::execution::SessionStateBuilder::new_from_existing(state)
+            .with_physical_optimizer_rules(rules)
+            .build(),
+    )
 }
 
 /// Whether `plan`'s output can be `batch_rows` slices of one large batch.
@@ -75,7 +102,7 @@ fn emits_slices(plan: &dyn ExecutionPlan) -> bool {
 
 impl PhysicalOptimizerRule for Planner {
     fn name(&self) -> &str {
-        "compact_retained_inputs"
+        NAME
     }
     fn schema_check(&self) -> bool {
         true
@@ -125,10 +152,24 @@ impl PhysicalOptimizerRule for Planner {
     }
 }
 
+/// Copies each batch that holds far more than its rows, as `compact_retained` decides.
+///
+/// A copy the shared budget refuses leaves the batch as it came. EXPLAIN
+/// ANALYZE shows `copied_batches`, the batches returned in new buffers, and
+/// `refused_copies`, those passed on uncompacted for want of admission.
+///
+/// A copied view column is charged twice while an operator retains it: its
+/// buffers carry the shared-budget permit `compact_views` reserved (payload
+/// plus 128 bytes a row), and the operator charges the same buffers (payload
+/// plus 16 bytes a row) to the native pool, the other half of the budget.
+/// Aggregate output, sort input and hash-join build input were charged so
+/// before the outer-join wrap; it adds outer-join output. Copies of other
+/// columns hold no permit and are charged once, by the operator.
 #[derive(Debug)]
 struct CompactViews {
     input: Arc<dyn ExecutionPlan>,
     budget: Budget,
+    metrics: ExecutionPlanMetricsSet,
 }
 impl DisplayAs for CompactViews {
     fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -167,7 +208,11 @@ impl ExecutionPlan for CompactViews {
         Ok(Arc::new(Self {
             input: children[0].clone(),
             budget: self.budget.clone(),
+            metrics: ExecutionPlanMetricsSet::new(),
         }))
+    }
+    fn metrics(&self) -> Option<MetricsSet> {
+        Some(self.metrics.clone_inner())
     }
     fn execute(
         &self,
@@ -177,12 +222,40 @@ impl ExecutionPlan for CompactViews {
         let input = self.input.execute(partition, context)?;
         let schema = input.schema();
         let budget = self.budget.clone();
-        let stream =
-            input.and_then(move |batch| {
-                futures::future::ready(crate::storage::compact_retained(batch, &budget).map_err(
-                    |error| datafusion::common::DataFusionError::External(Box::new(error)),
-                ))
-            });
+        let copied = MetricBuilder::new(&self.metrics).counter("copied_batches", partition);
+        let refused = MetricBuilder::new(&self.metrics).counter("refused_copies", partition);
+        let stream = input.and_then(move |batch| {
+            let given = batch.clone();
+            let kept = match crate::storage::compact_retained(batch, &budget) {
+                Ok(kept) => {
+                    if !kept
+                        .columns()
+                        .iter()
+                        .zip(given.columns())
+                        .all(|(kept, given)| Arc::ptr_eq(kept, given))
+                    {
+                        copied.add(1);
+                    }
+                    Ok(kept)
+                }
+                // Compaction is optional. When the shared budget refuses the
+                // copy, pass the batch on as its operator made it: the
+                // consumer charges it in full, as it did before this wrap.
+                Err(error) if error.code() == "capacity" => {
+                    refused.add(1);
+                    tracing::debug!(
+                        rows = given.num_rows(),
+                        error = %error,
+                        "retained compaction refused; batch passed on uncompacted"
+                    );
+                    Ok(given)
+                }
+                Err(error) => Err(datafusion::common::DataFusionError::External(Box::new(
+                    error,
+                ))),
+            };
+            futures::future::ready(kept)
+        });
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 }
