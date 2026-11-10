@@ -78,26 +78,39 @@ pub(crate) fn without(
 /// Whether `plan`'s output can be `batch_rows` slices of one large batch.
 ///
 /// An aggregate emits its groups that way. So does a join that produces build
-/// rows only after its probe ends (the vendored `need_produce_result_in_final`):
-/// a hash join pushes them into its output coalescer as one batch, and a
-/// nested-loop join emits unfiltered ranges of its build batch.
+/// rows only after its probe ends: a hash join pushes them into its output
+/// coalescer as one batch, and a nested-loop join emits unfiltered ranges of
+/// its build batch.
 fn emits_slices(plan: &dyn ExecutionPlan) -> bool {
     let plan = plan.as_any();
-    let join_type = if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
-        join.join_type()
+    if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
+        emits_build_rows_last(*join.join_type())
     } else if let Some(join) = plan.downcast_ref::<NestedLoopJoinExec>() {
-        join.join_type()
+        emits_build_rows_last(*join.join_type())
     } else {
-        return plan.is::<AggregateExec>();
-    };
-    matches!(
-        join_type,
+        plan.is::<AggregateExec>()
+    }
+}
+
+/// Whether a join of `join_type` emits build rows only after its probe ends.
+///
+/// This restates the vendored `need_produce_result_in_final`, which DataFusion
+/// keeps crate-private. The match names every variant, so an upgrade that adds
+/// one stops the build here; `join_types_emitting_build_rows_last_match_datafusion`
+/// checks every answer against what the joins themselves allocate.
+fn emits_build_rows_last(join_type: JoinType) -> bool {
+    match join_type {
         JoinType::Left
-            | JoinType::LeftAnti
-            | JoinType::LeftSemi
-            | JoinType::LeftMark
-            | JoinType::Full
-    )
+        | JoinType::Full
+        | JoinType::LeftSemi
+        | JoinType::LeftAnti
+        | JoinType::LeftMark => true,
+        JoinType::Inner
+        | JoinType::Right
+        | JoinType::RightSemi
+        | JoinType::RightAnti
+        | JoinType::RightMark => false,
+    }
 }
 
 impl PhysicalOptimizerRule for Planner {
@@ -114,6 +127,14 @@ impl PhysicalOptimizerRule for Planner {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(plan
             .transform_up(|plan| {
+                // Children are visited first, so a second pass wraps a slicing
+                // operator again beneath its first wrap. Folding the pair keeps
+                // the rule idempotent.
+                if let Some(wrap) = plan.as_any().downcast_ref::<CompactViews>()
+                    && wrap.input.as_any().is::<CompactViews>()
+                {
+                    return Ok(Transformed::yes(wrap.input.clone()));
+                }
                 // Leading inputs the operator retains whole: all of a sort's,
                 // and a hash join's first child, its build side.
                 let retained = if plan.as_any().is::<SortExec>() {
@@ -406,6 +427,111 @@ mod tests {
             .value(0);
         assert_eq!(usize::try_from(count).unwrap(), 2 * rows);
         (count, build_charge(&found[0]))
+    }
+
+    #[tokio::test]
+    async fn applying_the_rule_twice_yields_the_same_plan() {
+        use datafusion::{physical_optimizer::PhysicalOptimizerRule, physical_plan::displayable};
+        let budget = Budget::new(Limits {
+            compute_threads: 2,
+            memory_bytes: 64 << 20,
+            ..Limits::default()
+        })
+        .unwrap();
+        let context = budget.context();
+        // The larger table stays the probe side, so the outer join stays Left.
+        for (name, rows) in [("t", 100), ("u", 10_000)] {
+            let keys = Arc::new(arrow::array::Int64Array::from_iter_values(0..rows)) as ArrayRef;
+            context
+                .register_batch(name, RecordBatch::try_from_iter([("k", keys)]).unwrap())
+                .unwrap();
+        }
+        // Wraps over aggregate and outer-join output and under a sort; the
+        // aggregate's wrap is also the build input of the join.
+        let plan = context
+            .sql(
+                "SELECT a.k, count(*) AS n FROM (SELECT k, count(*) AS c FROM t GROUP BY k) a \
+                 LEFT JOIN u b ON a.k = b.k GROUP BY a.k ORDER BY a.k",
+            )
+            .await
+            .unwrap()
+            .create_physical_plan()
+            .await
+            .unwrap();
+        let once = displayable(plan.as_ref()).indent(true).to_string();
+        let state = context.state();
+        let again = super::Planner(budget.clone())
+            .optimize(plan, state.config_options())
+            .unwrap();
+        let twice = displayable(again.as_ref()).indent(true).to_string();
+        // A node's first child is the next line of the indented plan.
+        for (parent, child) in [
+            ("CompactViews", "AggregateExec"),
+            ("CompactViews", "HashJoinExec"),
+            ("SortExec", "CompactViews"),
+        ] {
+            assert!(
+                once.lines()
+                    .zip(once.lines().skip(1))
+                    .any(|(above, below)| above.trim_start().starts_with(parent)
+                        && below.trim_start().starts_with(child)
+                        && (child != "HashJoinExec" || below.contains("join_type=Left"))),
+                "no {parent} over {child}:\n{once}"
+            );
+        }
+        assert_eq!(twice, once);
+    }
+
+    #[tokio::test]
+    async fn join_types_emitting_build_rows_last_match_datafusion() {
+        use datafusion::{
+            common::JoinType::*, datasource::memory::MemorySourceConfig, execution::TaskContext,
+            physical_plan::joins::NestedLoopJoinExec,
+        };
+        // Every variant: `emits_build_rows_last` stops compiling on a new one.
+        let every = [
+            Inner, Left, Right, Full, LeftSemi, RightSemi, LeftAnti, RightAnti, LeftMark, RightMark,
+        ];
+        let rows = 1000usize;
+        let build = RecordBatch::try_from_iter([(
+            "b",
+            Arc::new(arrow::array::Int64Array::from_iter_values(0..rows as i64)) as ArrayRef,
+        )])
+        .unwrap();
+        let probe = RecordBatch::try_from_iter([(
+            "p",
+            Arc::new(arrow::array::Int64Array::from(vec![0])) as ArrayRef,
+        )])
+        .unwrap();
+        let task = Arc::new(TaskContext::default());
+        let mut answers = Vec::new();
+        for join_type in every {
+            let input = |batch: &RecordBatch| {
+                MemorySourceConfig::try_new_exec(&[vec![batch.clone()]], batch.schema(), None)
+                    .unwrap() as Arc<dyn ExecutionPlan>
+            };
+            let join: Arc<dyn ExecutionPlan> = Arc::new(
+                NestedLoopJoinExec::try_new(input(&build), input(&probe), None, &join_type, None)
+                    .unwrap(),
+            );
+            collect(join.clone(), task.clone()).await.unwrap();
+            // DataFusion charges its build a bitmap of visited rows exactly
+            // when it must emit build rows after the probe ends.
+            let bitmap = build_charge(&join) - build.get_array_memory_size();
+            assert!(
+                bitmap == 0 || bitmap == rows.div_ceil(8),
+                "{join_type}: {bitmap}"
+            );
+            answers.push((
+                join_type,
+                bitmap > 0,
+                super::emits_build_rows_last(join_type),
+            ));
+        }
+        assert!(
+            answers.iter().all(|(_, native, ours)| native == ours),
+            "(join type, DataFusion, emits_build_rows_last): {answers:?}"
+        );
     }
 
     #[tokio::test]
