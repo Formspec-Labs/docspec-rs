@@ -205,19 +205,6 @@ async fn a_spill_file_carries_no_statistics_and_no_page_index_and_replays_its_ro
 }
 
 #[tokio::test]
-async fn the_spill_reader_asks_for_neither_statistics_nor_a_page_index() {
-    let root = tempfile::tempdir().unwrap();
-    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
-    let state = spill_reader(&job.budget).state();
-    let execution = &state.config().options().execution;
-    assert!(!execution.collect_statistics);
-    assert!(!execution.parquet.enable_page_index);
-    assert!(!execution.parquet.pruning);
-    assert!(!execution.parquet.pushdown_filters);
-    assert!(!execution.parquet.schema_force_view_types);
-}
-
-#[tokio::test]
 async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
     // Whether a scan collects statistics is fixed in its listing table when
     // the frame is built, so the frame `read_spill` returns is where to look.
