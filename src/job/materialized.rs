@@ -297,6 +297,9 @@ pub(super) async fn read_retained(
 }
 
 #[cfg(test)]
+mod spill_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{budget::Limits, job::Job};
