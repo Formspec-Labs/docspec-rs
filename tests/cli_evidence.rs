@@ -73,7 +73,9 @@ fn inherited_hard_limit() -> Option<u64> {
 fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
     let hard = inherited_hard_limit();
     if hard.is_some_and(|hard| hard <= LOW) {
-        eprintln!("skipped: the hard limit here is {hard:?}, so nothing above {LOW} can be asked for");
+        eprintln!(
+            "skipped: the hard limit here is {hard:?}, so nothing above {LOW} can be asked for"
+        );
         return;
     }
     let target = hard.map_or(STATED, |hard| hard.min(STATED));
