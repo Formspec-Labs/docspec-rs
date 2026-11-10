@@ -174,8 +174,11 @@ impl Job {
     /// file with the suffix, as a table with no columns and no rows. A
     /// statement then fails on an unknown column, or counts zero rows and
     /// succeeds. A file brings its columns whether or not it has rows, so
-    /// `listed` without columns means no file. Asking the listing's own
-    /// answer keeps one authority on what it reads, and one listing.
+    /// `listed` without columns means no file.
+    ///
+    /// It runs after the listing on purpose: a check before it would restate
+    /// the listing's rules for what it reads, list the path twice, and refuse
+    /// a path given as a URL.
     fn require_parquet_file(
         &self,
         name: &str,

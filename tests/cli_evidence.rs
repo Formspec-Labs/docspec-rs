@@ -9,6 +9,9 @@ use std::process::{Command, Output};
 /// The soft limit launchd gives a scheduled job.
 const LOW: u64 = 256;
 
+/// The soft limit the CLI is documented to ask for (`OPEN_FILES` in `src/main.rs`).
+const STATED: u64 = 65_536;
+
 /// Runs `script` in `sh` with the CLI as `$0` and `arguments` as `$@`.
 fn sh(script: &str, arguments: &[&std::ffi::OsStr]) -> Output {
     Command::new("/bin/sh")
@@ -59,19 +62,21 @@ fn limits_after(ulimit_command: &str) -> (Option<u64>, Option<u64>) {
 }
 
 #[test]
-fn a_low_soft_limit_is_raised_as_far_as_the_kernel_allows() {
+fn a_low_soft_limit_is_raised_to_the_stated_number_or_the_hard_limit() {
     let hard = limit(&String::from_utf8_lossy(&sh("ulimit -H -n", &[]).stdout));
     assert!(
         hard.is_none_or(|hard| hard > LOW),
         "this test needs a hard limit above {LOW}, found {hard:?}"
     );
+    let target = hard.map_or(STATED, |hard| hard.min(STATED));
     let (soft, reported_hard) = limits_after(&format!("ulimit -S -n {LOW}"));
     assert_eq!(reported_hard, hard, "the hard limit must not move");
-    if soft != hard {
-        // The kernel refused the hard limit, so the CLI must have stopped at
-        // the last value the kernel accepts: one more is refused to sh too.
-        let soft = soft.expect("a soft limit below an unlimited hard one is a number");
-        assert!(soft > LOW, "{soft}");
+    // Never unlimited, whatever the hard limit is.
+    let soft = soft.expect("a soft limit raised from a number is a number");
+    if soft != target {
+        // The kernel refused the target, so the CLI must have stopped at the
+        // last value the kernel accepts: one more is refused to sh too.
+        assert!(soft > LOW && soft < target, "{soft}");
         let one_more = sh(
             &format!("ulimit -S -n {LOW} && ulimit -S -n {}", soft + 1),
             &[],
@@ -85,10 +90,26 @@ fn a_low_soft_limit_is_raised_as_far_as_the_kernel_allows() {
 }
 
 #[test]
-fn a_limit_already_at_its_ceiling_is_left_alone() {
-    // Without -S or -H, sh sets both limits.
+fn a_hard_limit_below_the_stated_number_is_respected() {
+    // Lowering the hard limit binds only the child that sh becomes.
+    let limits = limits_after(&format!("ulimit -H -n 4096 && ulimit -S -n {LOW}"));
+    assert_eq!(limits, (Some(4096), Some(4096)));
+    // Without -S or -H, sh sets both limits: nothing is left to raise.
     let limits = limits_after(&format!("ulimit -n {LOW}"));
     assert_eq!(limits, (Some(LOW), Some(LOW)));
+}
+
+#[test]
+fn a_soft_limit_above_the_stated_number_is_not_lowered() {
+    let above = STATED + 1000;
+    let hard = limit(&String::from_utf8_lossy(&sh("ulimit -H -n", &[]).stdout));
+    let settable = sh(&format!("ulimit -S -n {above}"), &[]).status.success();
+    assert!(
+        hard.is_none_or(|hard| hard >= above) && settable,
+        "this test needs to set a soft limit of {above}; hard limit {hard:?}"
+    );
+    let (soft, _) = limits_after(&format!("ulimit -S -n {above}"));
+    assert_eq!(soft, Some(above));
 }
 
 #[test]
