@@ -330,6 +330,7 @@ impl JobSpec {
         };
         #[cfg(not(feature = "remote"))]
         let job = Job::new(limits, self.scratch.clone())?;
+        let compactions = super::metrics::Compactions::install(&job.context);
         for input in &self.inputs {
             match input {
                 JobInput::Parquet { name, path } => job.register_parquet(name, path).await?,
@@ -372,6 +373,7 @@ impl JobSpec {
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            compactions.take();
             let (storage, rows, charged_bytes) = match step {
                 JobStep::Sql(step) if step.materialize => {
                     job.materialize_detailed(&step.name, &step.sql).await?
@@ -404,6 +406,7 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                compactions.take(),
             );
             for name in step.release_after() {
                 job.release_for_step(step_index, step.name(), name)?;
@@ -503,6 +506,7 @@ impl JobSpec {
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            compactions.take();
             let q_res = super::query_result::query(&job, &query.name, &query.sql).await?;
             let pool_after = job.budget.runtime_env().memory_pool.reserved();
             let end_epoch = super::metrics::now_epoch_secs();
@@ -519,6 +523,7 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                compactions.take(),
             );
             result.queries.push(q_res);
 

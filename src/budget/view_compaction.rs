@@ -178,7 +178,8 @@ impl PhysicalOptimizerRule for Planner {
 ///
 /// A view copy the shared budget refuses leaves the views as they came. EXPLAIN
 /// ANALYZE shows `copied_batches`, the batches returned in new buffers, and
-/// `refused_copies`, those passed on uncompacted for want of admission.
+/// `refused_copies`, those passed on uncompacted for want of admission; the
+/// step metric event carries both for the step.
 ///
 /// A copied view column is charged twice while an operator retains it: its
 /// buffers carry the shared-budget permit `compact_views` reserved (payload
@@ -241,6 +242,10 @@ impl ExecutionPlan for CompactViews {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
+        // The job's step counts, when its session carries them.
+        let step = context
+            .session_config()
+            .get_extension::<crate::job::metrics::Compactions>();
         let input = self.input.execute(partition, context)?;
         let schema = input.schema();
         let budget = self.budget.clone();
@@ -252,9 +257,11 @@ impl ExecutionPlan for CompactViews {
                 .map(|retained| {
                     if retained.copied {
                         copied.add(1);
+                        step.iter().for_each(|step| step.record_copy());
                     }
                     if let Some(error) = &retained.refused {
                         refused.add(1);
+                        step.iter().for_each(|step| step.record_refusal());
                         tracing::debug!(
                             rows,
                             error = %error,
