@@ -371,9 +371,202 @@ mod tests {
     use super::*;
     use crate::{budget::Limits, job::Job};
     use arrow::{
-        array::Int64Array,
+        array::{AsArray, Int64Array},
         datatypes::{DataType, Field, Schema},
     };
+    use datafusion::{
+        physical_expr::expressions::col,
+        physical_plan::{displayable, projection::ProjectionExec},
+    };
+
+    /// A job on two partitions, as the CLI runs queries, with room to keep steps in memory.
+    fn job(root: &tempfile::TempDir) -> Job {
+        let limits = Limits {
+            compute_threads: 2,
+            ..Limits::default()
+        };
+        Job::new(limits, root.path().join("scratch")).unwrap()
+    }
+
+    /// Retains `rows` consecutive keys `k`, each with a value `v`, as step `name`.
+    async fn retain_keys(job: &Job, name: &str, rows: usize) {
+        let sql = format!(
+            "SELECT value AS k, value * 2 AS v FROM generate_series(1, {rows}) AS t(value)"
+        );
+        assert_eq!(
+            job.materialize(name, &sql).await.unwrap(),
+            StepStorage::Memory
+        );
+    }
+
+    async fn physical_plan(job: &Job, sql: &str) -> Arc<dyn ExecutionPlan> {
+        let frame = job.sql(sql).await.unwrap();
+        frame.create_physical_plan().await.unwrap()
+    }
+
+    /// Each query's physical plan as text, every operator with its statistics.
+    async fn plans(job: &Job, queries: &[String]) -> Vec<String> {
+        let mut plans = Vec::new();
+        for sql in queries {
+            let plan = physical_plan(job, sql).await;
+            let text = displayable(plan.as_ref()).set_show_statistics(true);
+            plans.push(text.indent(true).to_string());
+        }
+        plans
+    }
+
+    /// The physical plan of `sql` as `EXPLAIN` returns it.
+    async fn explain(job: &Job, sql: &str) -> String {
+        let frame = job.sql(&format!("EXPLAIN {sql}")).await.unwrap();
+        let batches = frame.collect().await.unwrap();
+        let plans = batches.iter().flat_map(|batch| {
+            let plan = batch.column(1).as_string::<i32>();
+            (0..batch.num_rows()).map(move |row| plan.value(row).to_owned())
+        });
+        plans.collect()
+    }
+
+    /// The scan beneath `plan`, following each operator's first input.
+    fn scan(plan: &Arc<dyn ExecutionPlan>) -> &Arc<dyn ExecutionPlan> {
+        plan.children().first().copied().map_or(plan, scan)
+    }
+
+    /// `plan`'s own line of an `EXPLAIN`.
+    fn line(plan: &Arc<dyn ExecutionPlan>) -> String {
+        displayable(plan.as_ref()).one_line().to_string()
+    }
+
+    /// A retained step that scans as before steps were named: the bare streaming scan.
+    #[derive(Debug)]
+    struct Unnamed(Arc<dyn TableProvider>);
+    #[async_trait::async_trait]
+    impl TableProvider for Unnamed {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn schema(&self) -> SchemaRef {
+            self.0.schema()
+        }
+        fn table_type(&self) -> TableType {
+            self.0.table_type()
+        }
+        fn statistics(&self) -> Option<Statistics> {
+            self.0.statistics()
+        }
+        async fn scan(
+            &self,
+            session: &dyn Session,
+            projection: Option<&Vec<usize>>,
+            filters: &[Expr],
+            limit: Option<usize>,
+        ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+            let step = self.0.as_any().downcast_ref::<ReservedTable>();
+            let step = step.expect("a retained step");
+            step.table.scan(session, projection, filters, limit).await
+        }
+    }
+
+    #[tokio::test]
+    async fn explain_names_the_step_a_scan_reads() {
+        let root = tempfile::tempdir().unwrap();
+        let job = job(&root);
+        retain_keys(&job, "few", 3).await;
+        let text = explain(&job, "SELECT v FROM few LIMIT 2").await;
+        // The streaming scan's own text comes first: plan readers match it.
+        let scan = "StreamingTableExec: partition_sizes=1, projection=[v], fetch=2, \
+                    step=few, rows=3, storage=memory";
+        assert!(text.contains(scan), "{text}");
+    }
+
+    #[tokio::test]
+    async fn joins_over_retained_steps_plan_as_the_bare_scan_did() {
+        let root = tempfile::tempdir().unwrap();
+        let job = job(&root);
+        // Given row counts, DataFusion's join selection would swap a strictly
+        // larger left input: `big LEFT JOIN mid` would build on mid,
+        // partitioned (both are over its 131,072-row single-partition
+        // ceiling), and `big LEFT JOIN few` on few, collected. Without them
+        // every join builds on its left input as written. The other shapes
+        // cover each join operator and type. Queries are planned, not run.
+        let steps = [
+            ("big", 300_000),
+            ("twin", 300_000),
+            ("mid", 150_000),
+            ("few", 3),
+            ("trio", 3),
+        ];
+        for (name, rows) in steps {
+            retain_keys(&job, name, rows).await;
+        }
+        let pairs = [
+            ("big", "mid"),
+            ("big", "few"),
+            ("mid", "big"),
+            ("big", "twin"),
+            ("few", "trio"),
+        ];
+        let mut queries = Vec::from(pairs.map(|(left, right)| {
+            format!(
+                "SELECT {left}.k, {right}.v FROM {left} LEFT JOIN {right} ON {left}.k = {right}.k"
+            )
+        }));
+        for kind in ["INNER", "RIGHT", "FULL", "LEFT SEMI", "LEFT ANTI"] {
+            queries.push(format!(
+                "SELECT * FROM big {kind} JOIN few ON big.k = few.k"
+            ));
+        }
+        queries.extend(
+            [
+                "SELECT big.k, few.v FROM big JOIN few ON big.k < few.k",
+                "SELECT big.k, few.v FROM big CROSS JOIN few",
+                "SELECT k FROM big WHERE k NOT IN (SELECT k FROM few)",
+            ]
+            .map(String::from),
+        );
+        let named = plans(&job, &queries).await;
+        for (name, _) in steps {
+            let step = job.context.deregister_table(name).unwrap().unwrap();
+            job.context
+                .register_table(name, Arc::new(Unnamed(step)))
+                .unwrap();
+        }
+        let bare = plans(&job, &queries).await;
+        for ((sql, named), bare) in queries.iter().zip(named).zip(bare) {
+            // Both scans name their step, and nothing else in the plan moved,
+            // the statistics of every operator included.
+            let scans = named.matches("StreamingTableExec:").count();
+            let steps_named = named.matches(", step=").count();
+            assert_eq!((scans, steps_named), (2, 2), "{sql}\n{named}");
+            let unnamed = steps.iter().fold(named, |text, (step, rows)| {
+                text.replace(&format!(", step={step}, rows={rows}, storage=memory"), "")
+            });
+            assert_eq!(unnamed, bare, "{sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn pushed_limits_and_projections_keep_the_step_named() {
+        let root = tempfile::tempdir().unwrap();
+        let job = job(&root);
+        retain_keys(&job, "few", 3).await;
+        // The physical optimizer can push a limit or a projection into a
+        // planned scan. The step's name must survive both.
+        let plan = physical_plan(&job, "SELECT * FROM few").await;
+        let leaf = scan(&plan);
+        let limited = leaf.with_fetch(Some(1)).expect("the scan takes a limit");
+        let v = (col("v", &leaf.schema()).unwrap(), "v".to_owned());
+        let projection = ProjectionExec::try_new([v], leaf.clone()).unwrap();
+        let projected = leaf.try_swapping_with_projection(&projection).unwrap();
+        let projected = projected.expect("the scan takes a projection");
+        for (pushed, text) in [
+            (limited, "projection=[k, v], fetch=1"),
+            (projected, "projection=[v]"),
+        ] {
+            let line = line(&pushed);
+            let named = format!("{text}, step=few, rows=3, storage=memory");
+            assert!(line.contains(&named), "{line}");
+        }
+    }
 
     #[tokio::test]
     async fn scratch_batches_do_not_reacquire_retained_memory() {
@@ -429,5 +622,8 @@ mod tests {
                 .unwrap(),
             rows
         );
+        let text = explain(&job, "SELECT * FROM spilled").await;
+        let scan = "step=spilled, rows=3072, storage=scratch";
+        assert!(text.contains(scan), "{text}");
     }
 }
