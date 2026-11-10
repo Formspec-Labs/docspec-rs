@@ -168,7 +168,7 @@ fn compact_batch_is_returned_with_the_buffers_it_arrived_with() {
             let referenced = sliced_batch_bytes(&given);
             // Large enough that only the ratio keeps the guard silent.
             assert!(charged > 1 << 20, "{name} {source}: {charged}");
-            let kept = compact_retained(given.clone(), &budget).unwrap();
+            let kept = compact_retained(given.clone(), &budget).unwrap().batch;
             if !same_buffers(&kept, &given) {
                 copied.push(format!(
                     "{name} {source}: charged {charged}, referenced {referenced}"
@@ -256,7 +256,7 @@ fn views_a_builder_left_room_in_are_not_copied() {
             charged < 4 * owned && charged > owned + (1 << 20),
             "{name}: charged {charged}, Arrow's own copy {owned}"
         );
-        let kept = compact_retained(given.clone(), &budget).unwrap();
+        let kept = compact_retained(given.clone(), &budget).unwrap().batch;
         if !same_buffers(&kept, &given) {
             copied.push(format!(
                 "{name}: charged {charged}, own copy {owned}, measured {}",
@@ -292,12 +292,15 @@ fn retained_slice_of_nested_column_is_measured_and_copied_by_referenced_rows() {
              payload {payload}, owned {owned}, charged {charged}"
         );
         let referenced = sliced_batch_bytes(&slice);
-        let kept = compact_retained(slice.clone(), &budget).unwrap();
+        let kept = compact_retained(slice.clone(), &budget).unwrap().batch;
         let kept_charge = get_record_batch_memory_size(&kept);
         assert_eq!(kept, slice, "{name}: compaction must keep every value");
         // A second guard on the same path measures the copy and leaves it alone.
         assert!(
-            same_buffers(&compact_retained(kept.clone(), &budget).unwrap(), &kept),
+            same_buffers(
+                &compact_retained(kept.clone(), &budget).unwrap().batch,
+                &kept
+            ),
             "{name}: a compacted slice must not be copied again"
         );
         if referenced < payload || referenced > 2 * owned || kept_charge > 2 * owned {
@@ -371,7 +374,7 @@ fn retain_all(given: &[RecordBatch], budget: &Budget) -> (Vec<RecordBatch>, usiz
     let before = available(budget);
     let kept = given
         .iter()
-        .map(|batch| compact_retained(batch.clone(), budget).unwrap())
+        .map(|batch| compact_retained(batch.clone(), budget).unwrap().batch)
         .collect::<Vec<_>>();
     let held = before - available(budget);
     let copied = kept
@@ -440,5 +443,45 @@ fn short_views_in_a_coalescer_block_are_kept() {
         copies == 0 && held <= copied,
         "{copies} of {} batches copied, holding {held} B of shared admission for {copied} B",
         given.len()
+    );
+}
+
+/// A refused view copy keeps the rows the guard already copied.
+///
+/// The guard copies an inflated slice's rows, then compacts its views; when
+/// the shared budget refuses that view copy, the slice's list column must
+/// still come back in its own buffers, not as the parent-sized slice.
+#[test]
+fn a_refused_view_copy_keeps_the_rows_already_copied() {
+    let budget = probed_budget();
+    let keys = Arc::new(Int64Array::from_iter_values(0..ROWS as i64)) as ArrayRef;
+    let text = Arc::new(StringViewArray::from_iter_values(
+        (0..ROWS).map(|row| format!("{row:0200}")),
+    )) as ArrayRef;
+    let parent =
+        RecordBatch::try_from_iter([("k", keys), ("nested", nested("list")), ("text", text)])
+            .unwrap();
+    let slice = parent.slice(3 * SLICE, SLICE);
+    drop(parent);
+    // The list column's own size: Arrow's copy of it alone, which needs no view copy.
+    let list = |batch: &RecordBatch| get_record_batch_memory_size(&batch.project(&[1]).unwrap());
+    let own = get_record_batch_memory_size(
+        &compact_batch_slice(&slice.project(&[1]).unwrap(), 0, SLICE, &budget).unwrap(),
+    );
+    // Leave 1 MiB: the view copy of 8,192 200-byte strings (2.7 MB) is refused.
+    let _held = budget.reserve(available(&budget) - (1 << 20)).unwrap();
+    let retained =
+        compact_retained(slice.clone(), &budget).expect("a refused view copy is not an error");
+    assert!(
+        retained.copied && retained.refused.is_some(),
+        "{retained:?}"
+    );
+    let kept = retained.batch;
+    assert_eq!(kept, slice, "rows must be unchanged");
+    assert!(
+        list(&kept) <= 2 * own,
+        "list column kept at {} B, its own copy {own} B, the slice {} B",
+        list(&kept),
+        list(&slice)
     );
 }
