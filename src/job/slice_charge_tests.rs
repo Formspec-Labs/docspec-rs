@@ -92,9 +92,12 @@ async fn run(
     (plan, peak)
 }
 
+/// A payload's name, its SQL expression and the check of its retained type.
+type Payload = (&'static str, &'static str, fn(&DataType) -> bool);
+
 /// The list payload and its control: the same bytes in a plain string column,
 /// which the guard measured correctly before nested columns were.
-fn payloads() -> [(&'static str, &'static str, fn(&DataType) -> bool); 2] {
+fn payloads() -> [Payload; 2] {
     [
         (
             "list",
