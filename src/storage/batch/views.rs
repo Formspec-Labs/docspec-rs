@@ -6,8 +6,8 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryViewArray, GenericByteViewArray, StringViewArray,
-        types::ByteViewType,
+        Array, ArrayRef, AsArray, BinaryViewArray, GenericByteViewArray, OffsetSizeTrait,
+        StringViewArray, types::ByteViewType,
     },
     record_batch::RecordBatch,
 };
@@ -38,6 +38,47 @@ pub(super) fn reference_bytes(array: &dyn Array, rows: usize) -> Option<usize> {
             .downcast_ref::<BinaryViewArray>()
             .map(|array| referenced(array, rows))
     }
+}
+
+/// Bytes a compact copy of `array`'s rows would hold, in the same representation.
+///
+/// Arrow's `get_slice_memory_size` counts the whole child of a sliced list or
+/// map; this follows the offsets into the child rows the slice references.
+/// Views count as [`reference_bytes`] does at every depth. A dictionary's
+/// values, a dense union's children and a list view's child are still counted
+/// whole: the referenced part is known only by reading every key or offset,
+/// and Arrow's copy does not always drop the rest.
+pub(super) fn sliced_bytes(array: &dyn Array) -> usize {
+    fn range<O: OffsetSizeTrait>(offsets: &[O], values: &dyn Array) -> usize {
+        let start = offsets[0].as_usize();
+        let end = offsets[offsets.len() - 1].as_usize();
+        sliced_bytes(values.slice(start, end - start).as_ref())
+            .saturating_add(std::mem::size_of_val(offsets))
+    }
+    if let Some(bytes) = reference_bytes(array, array.len()) {
+        return bytes;
+    }
+    let nested = if let Some(list) = array.as_list_opt::<i32>() {
+        range(list.value_offsets(), list.values().as_ref())
+    } else if let Some(list) = array.as_list_opt::<i64>() {
+        range(list.value_offsets(), list.values().as_ref())
+    } else if let Some(map) = array.as_map_opt() {
+        range(map.value_offsets(), map.entries())
+    } else if let Some(list) = array.as_fixed_size_list_opt() {
+        sliced_bytes(list.values().as_ref())
+    } else if let Some(fields) = array.as_struct_opt() {
+        fields
+            .columns()
+            .iter()
+            .map(|column| sliced_bytes(column.as_ref()))
+            .fold(0, usize::saturating_add)
+    } else {
+        return array
+            .to_data()
+            .get_slice_memory_size()
+            .unwrap_or_else(|_| array.get_array_memory_size());
+    };
+    nested.saturating_add(array.nulls().map_or(0, |nulls| nulls.len().div_ceil(8)))
 }
 
 pub(crate) fn referenced_batch_bytes(batch: &RecordBatch) -> usize {

@@ -235,13 +235,14 @@ pub(crate) fn compact_batch_slice(
     compact_views(compacted, budget)
 }
 
-/// Bytes a batch's rows reference, counting view payloads and slice ranges.
-///
-/// The export measure owns this: it follows list and map offsets into the
-/// child rows a slice references, where Arrow's `get_slice_memory_size`
-/// counts the whole child. A batch it cannot measure counts as fully referenced.
+/// Bytes a compact copy of a batch's rows would hold: view payloads, slice
+/// ranges and the child rows that nested columns reference.
 fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
-    crate::export::portable_batch_bytes(batch).unwrap_or_else(|_| batch.get_array_memory_size())
+    batch
+        .columns()
+        .iter()
+        .map(|array| views::sliced_bytes(array.as_ref()))
+        .fold(0, usize::saturating_add)
 }
 
 /// Releases buffers a batch retains beyond its own rows before an operator keeps it.
@@ -249,11 +250,12 @@ fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
 /// DataFusion 53.1 emits a grouped aggregate's output as `batch_rows` slices
 /// of one array, and repartition, sort and hash-join build inputs charge each
 /// slice for the whole array: charges grow with the square of groups per
-/// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). An outer join
-/// does the same with its unmatched build rows when its output coalescer
-/// already holds a few rows. A batch charged at more than four times what its
-/// rows reference, and by more than 1 MiB, is copied once into its own
-/// buffers; others keep only view compaction.
+/// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). A join that
+/// emits build rows after its probe ends does the same with them (ct-n5ec).
+/// A batch charged at more than four times what a compact copy of its rows
+/// would hold, and by more than 1 MiB, is copied once into its own buffers;
+/// others keep only view compaction, so a batch already compact comes back
+/// with the buffers it arrived with.
 ///
 /// # Errors
 /// Refuses when the shared memory pool cannot admit a view compaction copy.

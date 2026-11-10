@@ -38,7 +38,11 @@ fn pairs<O: OffsetSizeTrait>() -> OffsetBuffer<O> {
 }
 
 fn item_field(values: &ArrayRef) -> Arc<Field> {
-    Arc::new(Field::new("item", values.data_type().clone(), false))
+    Arc::new(Field::new(
+        "item",
+        values.data_type().clone(),
+        values.null_count() > 0,
+    ))
 }
 
 fn list(values: ArrayRef) -> ArrayRef {
@@ -90,6 +94,85 @@ fn nested(name: &str) -> ArrayRef {
     }
 }
 
+/// Whether `kept` holds the very arrays of `given`, with nothing copied.
+fn same_buffers(kept: &RecordBatch, given: &RecordBatch) -> bool {
+    kept.columns()
+        .iter()
+        .zip(given.columns())
+        .all(|(kept, given)| Arc::ptr_eq(kept, given))
+}
+
+/// Columns of `ROWS` short values, where a view costs most against its text.
+fn short_columns() -> Vec<(&'static str, ArrayRef)> {
+    let views = |value: fn(usize) -> Option<String>| {
+        Arc::new((0..2 * ROWS).map(value).collect::<StringViewArray>()) as ArrayRef
+    };
+    let rows = |column: ArrayRef| column.slice(0, ROWS);
+    vec![
+        ("text", text(ROWS, 8)),
+        ("empty_views", rows(views(|_| Some(String::new())))),
+        ("null_views", rows(views(|_| None))),
+        // Twelve bytes is the longest value a view holds inline.
+        (
+            "inline_views",
+            rows(views(|item| Some(format!("{item:012}")))),
+        ),
+        (
+            "long_views",
+            rows(views(|item| Some(format!("{item:013}")))),
+        ),
+        ("list", list(text(2 * ROWS, 8))),
+        ("list_of_empty_views", list(views(|_| Some(String::new())))),
+        ("list_of_null_views", list(views(|_| None))),
+    ]
+}
+
+#[test]
+fn compact_batch_is_returned_with_the_buffers_it_arrived_with() {
+    let budget = Budget::new(crate::budget::Limits::default()).unwrap();
+    let columns = short_columns();
+    let keys = Arc::new(Int64Array::from_iter_values(0..ROWS as i64)) as ArrayRef;
+    let together =
+        RecordBatch::try_from_iter([("k", keys)].into_iter().chain(columns.clone())).unwrap();
+    let batches = columns
+        .into_iter()
+        .map(|(name, column)| (name, RecordBatch::try_from_iter([(name, column)]).unwrap()))
+        .chain([("together", together)]);
+    let every_row = arrow::array::UInt32Array::from_iter_values(0..ROWS as u32);
+    let mut copied = Vec::new();
+    for (name, batch) in batches {
+        // The two ways the engine receives compact batches: Arrow's own copy,
+        // which is what the guard returns, and a join's `take`.
+        let compact = [
+            (
+                "copy",
+                compact_batch_slice(&batch, 0, ROWS, &budget).unwrap(),
+            ),
+            (
+                "take",
+                arrow::compute::take_record_batch(&batch, &every_row).unwrap(),
+            ),
+        ];
+        for (source, given) in compact {
+            let charged = get_record_batch_memory_size(&given);
+            let referenced = sliced_batch_bytes(&given);
+            // Large enough that only the ratio keeps the guard silent.
+            assert!(charged > 1 << 20, "{name} {source}: {charged}");
+            let kept = compact_retained(given.clone(), &budget).unwrap();
+            if !same_buffers(&kept, &given) {
+                copied.push(format!(
+                    "{name} {source}: charged {charged}, referenced {referenced}"
+                ));
+            }
+        }
+    }
+    assert!(
+        copied.is_empty(),
+        "compact batches were copied:\n{}",
+        copied.join("\n")
+    );
+}
+
 #[test]
 fn retained_slice_of_nested_column_is_measured_and_copied_by_referenced_rows() {
     let budget = Budget::new(crate::budget::Limits::default()).unwrap();
@@ -114,6 +197,11 @@ fn retained_slice_of_nested_column_is_measured_and_copied_by_referenced_rows() {
         let kept = compact_retained(slice.clone(), &budget).unwrap();
         let kept_charge = get_record_batch_memory_size(&kept);
         assert_eq!(kept, slice, "{name}: compaction must keep every value");
+        // A second guard on the same path measures the copy and leaves it alone.
+        assert!(
+            same_buffers(&compact_retained(kept.clone(), &budget).unwrap(), &kept),
+            "{name}: a compacted slice must not be copied again"
+        );
         if referenced < payload || referenced > 2 * owned || kept_charge > 2 * owned {
             oversized.push(format!(
                 "{name}: referenced {referenced}, kept charge {kept_charge}, \
