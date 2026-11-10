@@ -3,8 +3,8 @@
 use super::*;
 use arrow::{
     array::{
-        Array, ArrayRef, FixedSizeListArray, Int64Array, LargeListArray, ListArray, MapArray,
-        OffsetSizeTrait, StringArray, StringViewArray, StructArray,
+        Array, ArrayRef, AsArray, FixedSizeListArray, Int64Array, LargeListArray, ListArray,
+        MapArray, OffsetSizeTrait, StringArray, StringViewArray, StructArray,
     },
     buffer::OffsetBuffer,
     datatypes::{DataType, Field, Fields},
@@ -314,20 +314,41 @@ fn retained_slice_of_nested_column_is_measured_and_copied_by_referenced_rows() {
     );
 }
 
-/// Views Arrow's output coalescer copied into blocks sized for its whole input.
+/// A 1 GiB budget, whose shared half `available` can probe in one reservation.
+fn probed_budget() -> Budget {
+    Budget::new(crate::budget::Limits {
+        memory_bytes: 1 << 30,
+        ..crate::budget::Limits::default()
+    })
+    .unwrap()
+}
+
+/// Shared admission still free, found as any caller finds it: by reserving.
 ///
-/// When a pushed view array uses under half of its buffers, arrow-select
-/// 58.4's `BatchCoalescer` copies its strings, allocating each output batch a
-/// block sized for every row it was pushed (coalesce/byte_view.rs:341, :162).
-/// An 8,192-row batch cut from 30,000 rows then holds 2.5 MB in a 9 MB block,
-/// and DataFusion charges the 9 MB. Joins and repartition emit through this
-/// coalescer, so their view output arrives this way.
-#[test]
-fn views_in_a_mostly_spare_block_are_copied() {
-    let budget = Budget::new(crate::budget::Limits::default()).unwrap();
-    // Every third of 90,000 300-byte strings: a third of the buffers used.
-    let text = StringViewArray::from_iter_values((0..90_000).map(|row| format!("{row:0300}")));
-    let every_third = arrow::array::UInt32Array::from_iter_values((0..90_000).step_by(3));
+/// The native pool's peak cannot see this half of the budget.
+fn available(budget: &Budget) -> usize {
+    let (mut free, mut refused) = (0, budget.limits.memory_bytes / 2 + 1);
+    while free + 1 < refused {
+        let probe = free + (refused - free) / 2;
+        if budget.reserve(probe).is_ok() {
+            free = probe;
+        } else {
+            refused = probe;
+        }
+    }
+    free
+}
+
+/// What Arrow's output coalescer emits for `pushes` pushes of every third of
+/// `3 * rows` strings of `width` bytes.
+///
+/// A pushed view array that uses under half of its buffers has its strings
+/// copied, into a block sized for every row pushed with it and, once warmed
+/// up, never under 1 MiB (arrow-select 58.4 coalesce/byte_view.rs:341, :382).
+/// Filters, joins and repartition emit through this coalescer.
+fn coalesced(pushes: usize, rows: usize, width: usize) -> Vec<RecordBatch> {
+    let text = StringViewArray::from_iter_values((0..3 * rows).map(|row| format!("{row:0width$}")));
+    let every_third = arrow::array::UInt32Array::from_iter_values((0..3 * rows as u32).step_by(3));
     let sparse = arrow::compute::take(&text, &every_third, None).unwrap();
     let schema = Arc::new(arrow::datatypes::Schema::new(vec![Field::new(
         "text",
@@ -335,16 +356,47 @@ fn views_in_a_mostly_spare_block_are_copied() {
         false,
     )]));
     let mut coalescer = arrow::compute::BatchCoalescer::new(schema.clone(), SLICE);
-    coalescer
-        .push_batch(RecordBatch::try_new(schema, vec![sparse]).unwrap())
-        .unwrap();
+    for _ in 0..pushes {
+        coalescer
+            .push_batch(RecordBatch::try_new(schema.clone(), vec![sparse.clone()]).unwrap())
+            .unwrap();
+    }
     coalescer.finish_buffered_batch().unwrap();
+    std::iter::from_fn(|| coalescer.next_completed_batch()).collect()
+}
+
+/// Copies `given` as retained input would be and returns the copies, the
+/// shared admission they hold and the bytes they hold, for batches copied.
+fn retain_all(given: &[RecordBatch], budget: &Budget) -> (Vec<RecordBatch>, usize, usize) {
+    let before = available(budget);
+    let kept = given
+        .iter()
+        .map(|batch| compact_retained(batch.clone(), budget).unwrap())
+        .collect::<Vec<_>>();
+    let held = before - available(budget);
+    let copied = kept
+        .iter()
+        .zip(given)
+        .filter(|(kept, given)| !same_buffers(kept, given))
+        .map(|(kept, _)| get_record_batch_memory_size(kept))
+        .sum();
+    (kept, held, copied)
+}
+
+/// An 8,192-row batch cut from 30,000 sparse 300-byte strings holds 2.5 MB in
+/// a 9 MB block, and DataFusion charges the 9 MB: it is copied, and the copy
+/// holds shared admission for what it keeps, not the reservation made for it.
+#[test]
+fn views_in_a_mostly_spare_block_are_copied() {
+    let budget = probed_budget();
+    let given = coalesced(1, 30_000, 300);
+    let (kept, held, copied) = retain_all(&given, &budget);
     let mut oversized = Vec::new();
-    while let Some(given) = coalescer.next_completed_batch() {
+    for (given, kept) in given.iter().zip(&kept) {
         // A view and its string for each row.
         let data = given.num_rows() * (16 + 300);
-        let charged = get_record_batch_memory_size(&given);
-        let kept = get_record_batch_memory_size(&compact_retained(given, &budget).unwrap());
+        let charged = get_record_batch_memory_size(given);
+        let kept = get_record_batch_memory_size(kept);
         if kept > 2 * data {
             oversized.push(format!("charged {charged}, kept {kept} for {data}"));
         }
@@ -353,5 +405,40 @@ fn views_in_a_mostly_spare_block_are_copied() {
         oversized.is_empty(),
         "batches kept in their coalescer blocks:\n{}",
         oversized.join("\n")
+    );
+    assert!(
+        held <= copied,
+        "copies of {copied} B hold {held} B of shared admission"
+    );
+}
+
+/// Under 512 KiB of short strings in a warmed 1 MiB block looks sparse, but a
+/// copy would free about 700 KiB and hold shared admission, which only refuses,
+/// for the rest: such batches are kept as they are.
+#[test]
+fn short_views_in_a_coalescer_block_are_kept() {
+    let budget = probed_budget();
+    let mut given = coalesced(17, SLICE, 40);
+    // The first block is smaller; every later one is 1 MiB.
+    let given = given.split_off(1);
+    for batch in &given {
+        let text = batch.column(0).as_string_view();
+        let capacity = text
+            .data_buffers()
+            .iter()
+            .map(arrow::buffer::Buffer::capacity)
+            .sum::<usize>();
+        assert_eq!((text.total_bytes_len(), capacity), (SLICE * 40, 1 << 20));
+    }
+    let (kept, held, copied) = retain_all(&given, &budget);
+    let copies = kept
+        .iter()
+        .zip(&given)
+        .filter(|(kept, given)| !same_buffers(kept, given))
+        .count();
+    assert!(
+        copies == 0 && held <= copied,
+        "{copies} of {} batches copied, holding {held} B of shared admission for {copied} B",
+        given.len()
     );
 }

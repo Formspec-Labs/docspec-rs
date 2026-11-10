@@ -253,7 +253,7 @@ fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
 /// partition (ct-deg8 model run: 5.3 GB charged for 118 MB). A join that
 /// emits build rows after its probe ends does the same with them (ct-n5ec).
 /// A batch charged at more than four times what a compact copy of its rows
-/// would hold, and by more than 1 MiB, is copied once into its own buffers;
+/// would hold, and by more than `MIN_FREED` (1 MiB), is copied once into its own buffers;
 /// others keep only view compaction, so a batch already compact comes back
 /// with the buffers it arrived with.
 ///
@@ -262,7 +262,7 @@ fn sliced_batch_bytes(batch: &RecordBatch) -> usize {
 pub(crate) fn compact_retained(batch: RecordBatch, budget: &Budget) -> Result<RecordBatch> {
     let charged = datafusion::common::utils::memory::get_record_batch_memory_size(&batch);
     let referenced = sliced_batch_bytes(&batch);
-    if charged > referenced.saturating_mul(4) && charged - referenced > 1 << 20 {
+    if charged > referenced.saturating_mul(4) && charged - referenced > views::MIN_FREED {
         compact_batch_slice(&batch, 0, batch.num_rows(), budget)
     } else {
         compact_views(batch, budget)
