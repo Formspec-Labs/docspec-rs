@@ -142,8 +142,8 @@ async fn a_failed_query_is_named_and_keeps_its_own_code() {
         max_metadata_bytes: 1024,
         ..Limits::default()
     };
-    let too_big = "SELECT repeat('x',8192) AS text";
-    let alone = query_result::query(&lone_job(root.path(), limits.clone()), "too_big", too_big)
+    let too_big = format!("SELECT '{}' AS text", "x".repeat(8192));
+    let alone = query_result::query(&lone_job(root.path(), limits.clone()), "too_big", &too_big)
         .await
         .unwrap_err();
     assert_ne!(alone.code(), "query");
@@ -167,15 +167,29 @@ fn captures_job(path: &Path, sql: &str) -> Value {
 }
 
 #[tokio::test]
+async fn a_failure_between_the_statement_lists_is_not_blamed_on_a_statement() {
+    let root = tempfile::tempdir().unwrap();
+    // Table operations run after the steps; this one reads a table nobody made.
+    let spec = json!({
+        "catalog_root":root.path().join("catalog"),
+        "steps":[{"name":"kept","sql":"SELECT 1 AS id"}],
+        "table_operations":[{"kind":"resolve","name":"head","table":{"namespace":["absent"],"name":"none"}}],
+    });
+    let failure = failure(root.path(), Limits::default(), spec).await;
+    assert_eq!(failure.completed.steps.len(), 1);
+    let message = failure.error.message();
+    assert!(!message.starts_with("step "), "{message}");
+}
+
+#[tokio::test]
 async fn a_parquet_input_with_no_file_is_refused_before_any_statement() {
     let root = tempfile::tempdir().unwrap();
     let absent = root.path().join("absent.parquet");
+    // The trailing separator makes the listing read it as a folder.
+    let absent_directory = root.path().join("absent/");
     let empty_directory = root.path().join("empty");
     std::fs::create_dir(&empty_directory).unwrap();
-    // A readable Parquet file that the listing skips for its name.
-    let other_suffix = root.path().join("rows.pq");
-    write_ids(&other_suffix, &[1, 2]);
-    for path in [absent, empty_directory, other_suffix] {
+    for path in [absent, absent_directory, empty_directory] {
         let failure = failure(
             root.path(),
             Limits::default(),
@@ -215,20 +229,30 @@ async fn a_parquet_file_with_no_rows_is_an_empty_table() {
 #[tokio::test]
 async fn an_unreadable_parquet_input_is_named_with_its_cause() {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("torn.parquet");
-    std::fs::write(&path, b"not a Parquet file").unwrap();
-    let failure = failure(
-        root.path(),
-        Limits::default(),
-        captures_job(&path, COUNT_CAPTURES),
-    )
-    .await;
-    let report = failure.report();
-    let message = report["error"]["message"].as_str().unwrap();
-    let named = format!("Parquet input \"captures\" at {}: ", path.display());
-    assert!(
-        message.starts_with(&named) && message.contains("Parquet"),
-        "{message}"
-    );
-    assert_eq!(report["error"]["code"], "query");
+    let torn = root.path().join("torn.parquet");
+    std::fs::write(&torn, b"not a Parquet file").unwrap();
+    // A readable Parquet file that the listing refuses for its name.
+    let other_suffix = root.path().join("rows.pq");
+    write_ids(&other_suffix, &[1, 2]);
+    for path in [torn, other_suffix] {
+        // What the listing alone says about this path.
+        let alone = Error::from(
+            SessionContext::new()
+                .register_parquet(
+                    "captures",
+                    path.to_string_lossy().as_ref(),
+                    ParquetReadOptions::default(),
+                )
+                .await
+                .unwrap_err(),
+        );
+        let failure = failure(
+            root.path(),
+            Limits::default(),
+            captures_job(&path, COUNT_CAPTURES),
+        )
+        .await;
+        let named = format!("Parquet input \"captures\" at {}", path.display());
+        assert_names(&failure, &named, &alone);
+    }
 }
