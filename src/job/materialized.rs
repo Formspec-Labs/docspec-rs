@@ -21,7 +21,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, ZstdLevel},
-    file::properties::WriterProperties,
+    file::properties::{EnabledStatistics, WriterProperties},
 };
 use std::{any::Any, sync::Arc};
 
@@ -178,6 +178,13 @@ pub(super) async fn retain(
                 .set_max_row_group_bytes(Some((budget.limits.max_batch_bytes / 4).max(1)))
                 .set_write_batch_size(budget.limits.batch_rows.min(32))
                 .set_dictionary_enabled(false)
+                // A spill is replayed whole, in order and with no predicate
+                // (`Batches::execute`), and the step tells the planner its
+                // rows itself, so nothing reads statistics or a page index.
+                // With them a wide spill's footer and index outweighed its
+                // data; `spill_reader` asks for neither.
+                .set_statistics_enabled(EnabledStatistics::None)
+                .set_offset_index_disabled(true)
                 .build();
             let mut spill = ArrowWriter::try_new(
                 budget.scratch_writer(&temporary)?,
@@ -220,9 +227,7 @@ pub(super) async fn retain(
         writer.close()?;
         drop(writer_memory);
         let file = file.expect("spill owns temporary file");
-        // A frame from the job's own catalog would retain this table and form
-        // a cycle. A fresh context shares its runtime, not its catalog.
-        let frame = read_retained(budget, file.path()).await?;
+        let frame = read_spill(budget, &file).await?;
         (
             StepStorage::Scratch,
             StepData::Scratch {
@@ -262,11 +267,29 @@ pub(super) async fn retain(
     Ok((storage, rows, bytes))
 }
 
+/// Reads back a spill file through the handle its writer still holds.
+async fn read_spill(
+    budget: &Budget,
+    file: &RefCountedTempFile,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let memory = Arc::new(crate::storage::admit_parquet_footer(file.path(), budget).await?);
+    scan_retained(spill_reader(budget), file.path(), memory).await
+}
+
+/// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
 pub(super) async fn read_retained(
     budget: &Budget,
     path: &std::path::Path,
 ) -> Result<datafusion::dataframe::DataFrame> {
     let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
+    scan_retained(retained_reader(budget), path, memory).await
+}
+
+/// A reader for the engine's own Parquet files.
+///
+/// A frame from the job's own catalog would retain the table it backs and
+/// form a cycle. A fresh context shares the budget's runtime, not a catalog.
+fn retained_reader(budget: &Budget) -> SessionContext {
     let reader = budget.context();
     // Private materializations advertise their already normalized portable schema.
     reader
@@ -277,6 +300,33 @@ pub(super) async fn read_retained(
         .execution
         .parquet
         .schema_force_view_types = false;
+    reader
+}
+
+/// [`retained_reader`] for a spill file: the one place its read options are set.
+///
+/// The spill writer leaves no statistics and no page index, and a replay is
+/// the whole file with no predicate, so the reader asks for neither.
+fn spill_reader(budget: &Budget) -> SessionContext {
+    let reader = retained_reader(budget);
+    {
+        let state = reader.state_ref();
+        let mut state = state.write();
+        let execution = &mut state.config_mut().options_mut().execution;
+        execution.collect_statistics = false;
+        execution.parquet.enable_page_index = false;
+        execution.parquet.pruning = false;
+        execution.parquet.pushdown_filters = false;
+    }
+    reader
+}
+
+/// Scans `path` whole through `reader`, keeping its footer admission with the scan.
+async fn scan_retained(
+    reader: SessionContext,
+    path: &std::path::Path,
+    memory: Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<datafusion::dataframe::DataFrame> {
     let frame = reader
         .read_parquet(
             path.to_string_lossy().as_ref(),

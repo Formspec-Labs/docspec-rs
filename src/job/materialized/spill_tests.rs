@@ -131,9 +131,10 @@ async fn rows_of(job: &Job, name: &str) -> RecordBatch {
 
 #[tokio::test]
 async fn a_spilled_step_is_read_back_whatever_its_footer_weighs() {
-    // 8,192 rows: about 500 row groups of 61 columns, a footer near 2 MiB
-    // even with no statistics in it, against a 1 MiB allowance.
-    const ROWS: usize = 8192;
+    // 16,384 rows: about 1,000 row groups of 61 columns. Without statistics
+    // the footer is 707,414 bytes at 8,192 rows, so twice that is needed to
+    // pass the 1 MiB allowance.
+    const ROWS: usize = 16_384;
     let root = tempfile::tempdir().unwrap();
     let job = Job::new(tight(), root.path().join("scratch")).unwrap();
     let (storage, rows, _) = retain_wide(&job, "wide", ROWS)
@@ -204,12 +205,25 @@ async fn a_spill_file_carries_no_statistics_and_no_page_index_and_replays_its_ro
 }
 
 #[tokio::test]
+async fn the_spill_reader_asks_for_neither_statistics_nor_a_page_index() {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+    let state = spill_reader(&job.budget).state();
+    let execution = &state.config().options().execution;
+    assert!(!execution.collect_statistics);
+    assert!(!execution.parquet.enable_page_index);
+    assert!(!execution.parquet.pruning);
+    assert!(!execution.parquet.pushdown_filters);
+    assert!(!execution.parquet.schema_force_view_types);
+}
+
+#[tokio::test]
 async fn a_spill_whose_footer_the_budget_cannot_hold_is_refused_by_name() {
-    const ROWS: usize = 8192;
+    const ROWS: usize = 16_384;
     let root = tempfile::tempdir().unwrap();
     let job = Job::new(tight(), root.path().join("scratch")).unwrap();
     // Leave the spill writer and the batch conversions their working room,
-    // and not the sixteen-fold charge of a footer of about 2 MiB.
+    // and not the sixteen-fold charge of a footer of about 1.4 MiB.
     let spare = 16 << 20;
     let available = job
         .budget
