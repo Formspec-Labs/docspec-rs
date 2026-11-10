@@ -44,7 +44,7 @@ mod scan_metrics;
 pub use scan_metrics::{NativeScanObservation, NativeScanSample};
 pub(crate) mod schema;
 mod selection;
-pub(crate) use flat::admit_parquet_footer;
+pub(crate) use flat::{admit_parquet_footer, admit_spill_footer};
 pub(crate) use selection::reserve_projection;
 mod tables;
 pub(crate) use inspection::{CheckedFile, inspect_table, schema_identity};

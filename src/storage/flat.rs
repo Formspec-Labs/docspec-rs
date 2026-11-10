@@ -2,7 +2,10 @@
 
 use super::Objects;
 use crate::{Error, Result, budget::Budget, model::ObjectRef};
-use datafusion::physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter};
+use datafusion::{
+    execution::disk_manager::RefCountedTempFile,
+    physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter},
+};
 use futures::TryStreamExt;
 use parquet::{
     arrow::{
@@ -54,7 +57,9 @@ pub(super) async fn read(
     // maintained-client allocations, not a measured whole-process memory bound.
     let transport = budget.reserve(2 << 20)?;
     let mut reader = open_reader(objects, object).await?;
-    let (footer_len, footer_start) = footer_bounds(reader.as_mut(), object.bytes, budget).await?;
+    let allowance = Some(budget.limits.max_metadata_bytes);
+    let (footer_len, footer_start) =
+        footer_bounds(reader.as_mut(), object.bytes, allowance).await?;
     // Serialized metadata plus retained native and Arrow interpretations.
     let metadata_memory = budget.reserve(footer_len.checked_mul(4).ok_or_else(capacity)?)?;
     let encoded = reader
@@ -78,13 +83,51 @@ pub(super) async fn read(
 }
 
 /// Admits one file's footer and declared index ranges before native decoding.
+///
+/// The file is one this process did not write, or one it wrote to keep, so its
+/// footer is judged by `max_metadata_bytes` and then charged.
+///
+/// # Errors
+/// Refuses with `metadata_capacity` over the allowance and with `capacity`
+/// when the shared budget cannot hold the charge.
 pub(crate) async fn admit_parquet_footer(
     path: &std::path::Path,
     budget: &Budget,
 ) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    admit_footer(path, budget, Some(budget.limits.max_metadata_bytes)).await
+}
+
+/// Admits the footer of a spill file through the handle its writer holds.
+///
+/// `max_metadata_bytes` bounds metadata the engine did not produce. A spill's
+/// footer is the engine's own: its size follows from the spill writer's row
+/// groups, and the pinned line read it back with no check at all. Judging it
+/// by that allowance refused a step according to how its batches happened to
+/// fall. What bounds it now is the charge, which stays: a footer the shared
+/// budget cannot hold is refused, so a spill never costs unledgered memory.
+///
+/// The handle is what makes the file the engine's own. Only the disk manager
+/// issues one, for a file it has just created; a file that merely lies in the
+/// scratch directory has none and is admitted by [`admit_parquet_footer`].
+///
+/// # Errors
+/// Refuses with `capacity` when the shared budget cannot hold the charge.
+pub(crate) async fn admit_spill_footer(
+    file: &RefCountedTempFile,
+    budget: &Budget,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    admit_footer(file.path(), budget, None).await
+}
+
+/// Charges a footer and its index ranges, judging them by `allowance` if one is given.
+async fn admit_footer(
+    path: &std::path::Path,
+    budget: &Budget,
+    allowance: Option<usize>,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
     let mut reader = tokio::fs::File::open(path).await?;
     let bytes = reader.metadata().await?.len();
-    let (footer_len, footer_start) = footer_bounds(&mut reader, bytes, budget).await?;
+    let (footer_len, footer_start) = footer_bounds(&mut reader, bytes, allowance).await?;
     // Admit the bounded footer before decoding its maintained native index
     // descriptors. DataFusion eagerly decodes page indexes while inferring a
     // schema, even before cache insertion or physical page-pruning decisions.
@@ -119,7 +162,7 @@ pub(crate) async fn admit_parquet_footer(
             indexes.add(offset, length, footer_start)?;
         }
     }
-    let index_charge = indexes.charge(footer_len, budget.limits.max_metadata_bytes)?;
+    let index_charge = indexes.charge(footer_len, allowance)?;
     // Provider/plan ownership retains this allowance through native readers,
     // including bare metadata Arcs that may outlive a cache entry. Sixteen is
     // the same conservative native/Arrow decode estimate as footer admission;
@@ -147,13 +190,14 @@ impl IndexRanges {
         }
         Ok(())
     }
-    fn charge(&self, footer_bytes: usize, limit: usize) -> Result<usize> {
+    fn charge(&self, footer_bytes: usize, allowance: Option<usize>) -> Result<usize> {
         // Parquet 58.4 fetches one enclosing page-index range, including gaps.
         let span = usize::try_from(self.end.saturating_sub(self.first.unwrap_or(self.end)))
             .map_err(|_| capacity())?;
-        if footer_bytes
-            .checked_add(span.max(self.decoded_bytes))
-            .is_none_or(|bytes| bytes > limit)
+        if let Some(limit) = allowance
+            && footer_bytes
+                .checked_add(span.max(self.decoded_bytes))
+                .is_none_or(|bytes| bytes > limit)
         {
             return Err(Error::refusal(
                 "metadata_capacity",
@@ -190,7 +234,7 @@ fn index_range_bytes(offset: Option<i64>, length: Option<i32>, footer_start: u64
 async fn footer_bounds(
     reader: &mut dyn AsyncFileReader,
     bytes: u64,
-    budget: &Budget,
+    allowance: Option<usize>,
 ) -> Result<(usize, u64)> {
     if bytes < 12 {
         return Err(invalid());
@@ -205,7 +249,7 @@ async fn footer_bounds(
     let footer_len = FooterTail::try_from(tail)
         .map_err(|_| invalid())?
         .metadata_length();
-    if footer_len > budget.limits.max_metadata_bytes {
+    if allowance.is_some_and(|limit| footer_len > limit) {
         return Err(Error::refusal(
             "metadata_capacity",
             "export footer exceeds metadata allowance",
@@ -339,11 +383,11 @@ mod tests {
         indexes.add(Some(19990), Some(8), 20000).unwrap();
         assert_eq!(indexes.decoded_bytes, 16);
         assert_eq!(
-            indexes.charge(512, 4096).unwrap_err().code(),
+            indexes.charge(512, Some(4096)).unwrap_err().code(),
             "metadata_capacity"
         );
         assert_eq!(
-            indexes.charge(512, 32768).unwrap(),
+            indexes.charge(512, Some(32768)).unwrap(),
             16 * 16 + (19998 - 4) * 2
         );
     }

@@ -268,11 +268,14 @@ pub(super) async fn retain(
 }
 
 /// Reads back a spill file through the handle its writer still holds.
+///
+/// The footer is charged to the shared budget and not judged by
+/// `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
 async fn read_spill(
     budget: &Budget,
     file: &RefCountedTempFile,
 ) -> Result<datafusion::dataframe::DataFrame> {
-    let memory = Arc::new(crate::storage::admit_parquet_footer(file.path(), budget).await?);
+    let memory = Arc::new(crate::storage::admit_spill_footer(file, budget).await?);
     scan_retained(spill_reader(budget), file.path(), memory).await
 }
 
