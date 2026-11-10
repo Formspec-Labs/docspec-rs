@@ -70,6 +70,9 @@ jobs:
           repository: civictechdc/congressional-tech
           ref: ${{ inputs.congressional_tech_ref || 'main' }}
           persist-credentials: false
+          # The lane's producer-proof tests read commits older than the tip
+          # (git archive <sha>, merge-base --is-ancestor); a depth-1 checkout has none.
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: docspec-linux-amd64-${{ github.sha }}
@@ -99,6 +102,14 @@ jobs:
                          build_features=pin['build_features'], limits=os.path.abspath('.github/docspec-local-limits.json'),
                          workspace=os.environ['WORKSPACE'], timeout_seconds=2700), open(os.environ['CONFIG'], 'w'))
           PY
+          # The lane's raw-writer guard refuses any uncommitted file, and the pin above is
+          # tracked. Commit it in this checkout only (nothing here can push), so the tree
+          # is clean and HEAD still descends from every commit the producer proofs name.
+          git diff --quiet -- model/docspec-runtime-pin.json ||
+            git -c user.name=docspec-qualify -c user.email=docspec-qualify@invalid commit --quiet \
+              -m "Qualify docspec $SOURCE_REVISION (local to this run)" model/docspec-runtime-pin.json
+          git status --porcelain
+          test -z "$(git status --porcelain)"
           echo "DOCSPEC_JOB_CONFIG=$CONFIG" >> "$GITHUB_ENV"
           echo "DOCSPEC_BINARY=$BINARY" >> "$GITHUB_ENV"
       - name: Binary checks
