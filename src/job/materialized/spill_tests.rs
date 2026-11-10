@@ -284,3 +284,26 @@ async fn a_foreign_file_over_the_allowance_is_refused_wherever_it_lies() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_copy_of_a_spill_planted_beside_it_is_judged_as_foreign() {
+    // What makes a spill the engine's own is the handle its writer holds,
+    // not where the file lies or what it contains.
+    const ROWS: usize = 16_384;
+    let root = tempfile::tempdir().unwrap();
+    let scratch = root.path().join("scratch");
+    let job = Job::new(tight(), scratch.clone()).unwrap();
+    let (storage, _, _) = retain_wide(&job, "wide", ROWS).await.unwrap();
+    assert_eq!(storage, StepStorage::Scratch);
+    let files = parquet_files(&scratch);
+    assert_eq!(files.len(), 1);
+    assert!(footer_bytes(&files[0]) > tight().max_metadata_bytes);
+    let planted = files[0].with_file_name("planted.parquet");
+    std::fs::copy(&files[0], &planted).unwrap();
+    let error = job.register_parquet("planted", &planted).await.unwrap_err();
+    assert_eq!(error.code(), "metadata_capacity", "{error}");
+    assert!(
+        error.message().contains("exceeds metadata allowance"),
+        "{error}"
+    );
+}
