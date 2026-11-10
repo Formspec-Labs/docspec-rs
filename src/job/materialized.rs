@@ -386,8 +386,8 @@ pub(super) async fn retain(
 /// judged by `max_metadata_bytes` (see [`crate::storage::admit_spill_footer`]).
 ///
 /// The scan collects no statistics: a replay is the whole file in order
-/// (`Batches::execute`) and the step gives the planner its rows itself
-/// (`ReservedTable`). No other reader option is set, because none can act:
+/// (`Batches::execute`) and the step counts its own rows (`ReservedTable`).
+/// No other reader option is set, because none can act:
 /// pruning, page-index and filter-pushdown options need a predicate, and none
 /// reaches this scan (`ReservedTable` accepts no filters, and the frame runs
 /// as built here). The file has no page index either.
