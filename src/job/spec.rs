@@ -509,7 +509,6 @@ impl JobSpec {
             }
         }
 
-        *running = None;
         for (query_index, query) in self.queries.iter().enumerate() {
             *running = Some(Running::Query(query_index));
             let start_epoch = super::metrics::now_epoch_secs();
@@ -557,7 +556,8 @@ impl JobSpec {
     ///
     /// The code and cause are unchanged. Without it a failure says only what
     /// went wrong, and which of a job's statements did is read off the order
-    /// of the log.
+    /// of the log. The name is the statement that was running: a view fails
+    /// when a later statement reads it, and is then named as that reader.
     fn named(&self, running: Option<Running>, error: Error) -> Error {
         let (kind, index, name) = match running {
             None => return error,
@@ -572,8 +572,9 @@ impl JobSpec {
 /// The statement `execute` is working on, by position in its own list.
 ///
 /// Positions count from zero, as `step_index` and `output_index` do in the
-/// step log. `execute` sets it as each statement starts and clears it before
-/// other work follows a list, so that work is not blamed on a statement.
+/// step log. `execute` sets it as each statement starts and clears it after
+/// the steps, so the table operations that follow are not blamed on a step.
+/// Nothing runs between the outputs and the queries, or after the queries.
 #[derive(Debug, Clone, Copy)]
 enum Running {
     Step(usize),
