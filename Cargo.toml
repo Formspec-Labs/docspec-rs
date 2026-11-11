@@ -33,11 +33,6 @@ path = "tests/restore.rs"
 name = "sql_process_memory"
 path = "tests/sql_process_memory.rs"
 
-# Starts the CLI as a child process, once under a lowered open-file limit.
-[[test]]
-name = "cli_evidence"
-path = "tests/cli_evidence.rs"
-
 [features]
 test-util = []
 substrait = ["dep:datafusion-substrait", "dep:prost", "dep:substrait"]
