@@ -1087,25 +1087,34 @@ async fn old_pins_keep_their_schema_while_old_rows_read_null_at_the_new_head() {
     .await;
     let new = &added["table_operations"][0];
     assert_ne!(new["metadata_location"], old["metadata_location"]);
+    let all = "SELECT * FROM selected ORDER BY id";
+    // The native reader reads a snapshot with the schema it was written under, so
+    // the addition alone (no snapshot) still reads the old columns at its head.
     assert_eq!(
-        read_pin(
-            root.path(),
-            "read-old",
-            old,
-            "SELECT * FROM selected ORDER BY id"
-        )
-        .await,
+        read_pin(root.path(), "read-added", new, all).await,
+        json!([{"id":1},{"id":2}])
+    );
+    let mut append = spec(root.path());
+    append["steps"][0]["sql"] =
+        json!("SELECT cast(3 AS BIGINT) AS id,'third' AS note,cast(NULL AS BIGINT) AS score");
+    append["table_operations"] = json!([append["table_operations"][2].clone()]);
+    append["table_operations"][0]["identity_sql"] =
+        json!("SELECT 'row-3-with-note' AS identity FROM pending LIMIT 1");
+    let appended = run_ok(append).await;
+    assert_eq!(
+        read_pin(root.path(), "read-old", old, all).await,
         json!([{"id":1},{"id":2}])
     );
     assert_eq!(
         read_pin(
             root.path(),
-            "read-new",
-            new,
-            "SELECT * FROM selected ORDER BY id"
+            "read-head",
+            &appended["table_operations"][0],
+            all
         )
         .await,
-        json!([{"id":1,"note":null,"score":null},{"id":2,"note":null,"score":null}])
+        json!([{"id":1,"note":null,"score":null},{"id":2,"note":null,"score":null},
+            {"id":3,"note":"third","score":null}])
     );
 }
 
