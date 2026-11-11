@@ -5,6 +5,7 @@ use super::*;
 use arrow::{datatypes::Field, ipc::convert::try_schema_from_ipc_buffer};
 use serde_json::json;
 
+mod field_ids;
 #[cfg(feature = "remote")]
 mod s3_source;
 
