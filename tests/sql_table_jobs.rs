@@ -1321,10 +1321,8 @@ async fn add_columns_takes_every_primitive_the_table_format_holds() {
         .clone();
     for (index, kind) in v2.iter().enumerate() {
         let field = schema.field_by_name(&format!("c{index}")).unwrap();
-        assert_eq!(
-            serde_json::to_value(&field.field_type).unwrap(),
-            json!(kind)
-        );
+        let parsed: PrimitiveType = serde_json::from_value(json!(kind)).unwrap();
+        assert_eq!(*field.field_type, Type::Primitive(parsed));
     }
     // A version 3 table takes the nanosecond timestamps a version 2 table refuses.
     let catalog = docspec::storage::local_catalog(&root.path().join("catalog"))
