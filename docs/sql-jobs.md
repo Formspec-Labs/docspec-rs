@@ -223,6 +223,24 @@ Iceberg `schema`, `format_version`, `properties`, and optional native
 `partition_spec`/`sort_order`. Creation refuses existing names. `purge` supplies
 `name`, `table`, `table_uuid` and exact `metadata_location`.
 
+`add_columns` supplies `name`, `table`, `expected_schema_id` and `columns`, each
+`{name, type, doc?}` with a native primitive `type` such as `"string"`. It adds
+optional top-level columns only, after the existing ones in request order, with
+fresh field IDs after the table's last column ID; the shape cannot carry an ID,
+a required flag or a nested type. Columns already present as optional with the
+same type are skipped. When all are present nothing is committed and the result
+reports `added_columns: []`, so repeating a completed request is a no-op whatever
+schema ID it names. Otherwise the current schema must be `expected_schema_id` and
+the head must not move before the single guarded schema commit
+(`stale_authority`, no retry). A name present with another type or as required
+refuses (`schema_mismatch`). The result adds `previous_schema_id` and
+`added_columns` (`name`, `field_id`). Appends keep their rule: the writer carries
+every table column, so after an addition the append SQL selects the new column,
+`NULL` where there is no value. The addition writes no snapshot, and the native
+reader reads a snapshot with the schema it was written under: the new column is
+visible from the next append's snapshot, where older rows read it as null. Pins
+taken before that keep their old schema.
+
 An `append` supplies `name`, `table`, distinct `current_table` and `work_table`
 binding names, `sql`, `identity_sql` and `layout`. Each conflict reloads native
 authority, rebinds the current table and materializes the work SQL once. Actual

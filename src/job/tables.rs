@@ -1,7 +1,13 @@
 //! Native table transactions; callers supply work and writer policy.
 // Rust guideline compliant 2026-02-21
 use crate::{Error, Result, storage};
-use iceberg::{Catalog, TableIdent, spec::DataFile, table::Table};
+use iceberg::{
+    Catalog, TableIdent,
+    spec::{DataFile, PrimitiveType, Type},
+    table::Table,
+    transaction::{AddColumn, ApplyTransactionAction, Transaction},
+};
+use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     future::Future,
@@ -120,6 +126,132 @@ where
         }
     }
     unreachable!("bounded append attempts return or refuse")
+}
+
+/// One optional top-level column to add; the table assigns its field id.
+///
+/// The shape cannot express a required column, a caller field id or a nested type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptionalColumn {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: PrimitiveType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+}
+
+/// A column committed by [`add_optional_columns`], with its fresh native field id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddedColumn {
+    pub name: String,
+    pub field_id: i32,
+}
+
+/// Native authority after [`add_optional_columns`]; no added columns means a no-op.
+#[derive(Debug)]
+pub(super) struct ColumnsOutcome {
+    pub table: Table,
+    pub previous_schema_id: i32,
+    pub added: Vec<AddedColumn>,
+}
+
+/// Adds missing optional top-level columns in one guarded schema commit.
+///
+/// The job admitted `columns` as a nonempty list of distinct, undotted names.
+/// Columns already present as optional with the same type are skipped. When
+/// every column is present nothing is committed, whatever `expected_schema_id`
+/// says, so repeating a completed request (a retry after a lost response) is a
+/// no-op. Otherwise the current schema must be `expected_schema_id`, and the
+/// head must not move before the commit. New columns follow the existing ones in
+/// request order, with fresh field ids after the table's last column id.
+///
+/// # Errors
+/// Refuses a name present with another type or as required (`schema_mismatch`),
+/// a schema other than `expected_schema_id` or a head that moves before the
+/// commit (`stale_authority`), and catalog failures, without retry.
+pub(super) async fn add_optional_columns(
+    catalog: &dyn Catalog,
+    ident: &TableIdent,
+    expected_schema_id: i32,
+    columns: &[OptionalColumn],
+) -> Result<ColumnsOutcome> {
+    let table = catalog.load_table(ident).await?;
+    let schema = table.metadata().current_schema();
+    let previous_schema_id = schema.schema_id();
+    let mut missing = Vec::new();
+    for column in columns {
+        match schema.as_struct().field_by_name(&column.name) {
+            None => missing.push(column),
+            Some(field)
+                if !field.required
+                    && *field.field_type == Type::Primitive(column.field_type.clone()) => {}
+            Some(_) => {
+                return Err(Error::refusal(
+                    "schema_mismatch",
+                    format!(
+                        "column {} exists with another type or as required",
+                        column.name
+                    ),
+                ));
+            }
+        }
+    }
+    if missing.is_empty() {
+        return Ok(ColumnsOutcome {
+            table,
+            previous_schema_id,
+            added: vec![],
+        });
+    }
+    if previous_schema_id != expected_schema_id {
+        return Err(Error::refusal(
+            "stale_authority",
+            format!("table schema {previous_schema_id} is not the expected {expected_schema_id}"),
+        ));
+    }
+    let tx = Transaction::new(&table);
+    let action = missing.iter().fold(tx.update_schema(), |action, column| {
+        let field_type = Type::Primitive(column.field_type.clone());
+        action.add_column(match &column.doc {
+            Some(doc) => AddColumn::builder()
+                .name(column.name.clone())
+                .field_type(field_type)
+                .doc(doc.clone())
+                .build(),
+            None => AddColumn::optional(&column.name, field_type),
+        })
+    });
+    // The guard refuses any head but the one checked above, so native refresh
+    // never re-applies these additions to a schema the caller did not expect.
+    let guard = crate::catalog::GuardedCatalog::new(catalog, &table);
+    let committed = match action.apply(tx)?.commit(&guard).await.map_err(Error::from) {
+        Ok(committed) => committed,
+        Err(error) if conflict(&error) => {
+            return Err(Error::refusal(
+                "stale_authority",
+                "table changed before its columns were added",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    let schema = committed.metadata().current_schema();
+    let added = missing
+        .iter()
+        .map(|column| AddedColumn {
+            name: column.name.clone(),
+            field_id: schema
+                .as_struct()
+                .field_by_name(&column.name)
+                .expect("the committed schema holds every added column")
+                .id,
+        })
+        .collect();
+    Ok(ColumnsOutcome {
+        table: committed,
+        previous_schema_id,
+        added,
+    })
 }
 
 /// Purges only the exact table selected by the caller, in one native attempt.

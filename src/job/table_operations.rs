@@ -2,7 +2,7 @@
 // Rust guideline compliant 2026-02-21
 use super::{
     Job, query_result,
-    tables::{AppendWork, append_with_retry},
+    tables::{AddedColumn, AppendWork, OptionalColumn, append_with_retry},
 };
 use crate::{
     Error, Result,
@@ -62,6 +62,14 @@ pub enum TableOperation {
         table_uuid: uuid::Uuid,
         metadata_location: String,
     },
+    /// Adds optional top-level columns while the schema is `expected_schema_id`;
+    /// a request whose columns all exist is a no-op.
+    AddColumns {
+        name: String,
+        table: TableIdent,
+        expected_schema_id: i32,
+        columns: Vec<OptionalColumn>,
+    },
 }
 /// Completed catalog authority, retained if any later operation fails.
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +88,12 @@ pub struct TableOperationResult {
     pub snapshot: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_id: Option<i32>,
+    /// `add_columns` only: the schema before the operation; equal to `schema_id` on a no-op.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_schema_id: Option<i32>,
+    /// `add_columns` only: columns this operation committed; empty on a no-op.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_columns: Option<Vec<AddedColumn>>,
     pub retries: usize,
     pub files: Vec<WrittenFile>,
 }
@@ -143,6 +157,21 @@ impl TableOperation {
                     return Err(invalid("append SQL and identity SQL are required"));
                 }
             }
+            if let Self::AddColumns { columns, .. } = operation {
+                // A dotted name would address a nested field; only top-level additions exist.
+                let mut seen = BTreeSet::new();
+                if columns.is_empty()
+                    || columns.iter().any(|column| {
+                        column.name.is_empty()
+                            || column.name.contains('.')
+                            || !seen.insert(column.name.as_str())
+                    })
+                {
+                    return Err(invalid(
+                        "add_columns needs distinct, nonempty, top-level column names",
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -152,7 +181,8 @@ impl TableOperation {
             | Self::CreateNamespace { name, .. }
             | Self::Create { name, .. }
             | Self::Append { name, .. }
-            | Self::Purge { name, .. } => name,
+            | Self::Purge { name, .. }
+            | Self::AddColumns { name, .. } => name,
         }
     }
     pub(super) async fn execute(
@@ -175,6 +205,8 @@ impl TableOperation {
             metadata_location: None,
             snapshot: None,
             schema_id: None,
+            previous_schema_id: None,
+            added_columns: None,
             retries: 0,
             files: vec![],
         };
@@ -332,6 +364,24 @@ impl TableOperation {
                 result.table_uuid = Some(*table_uuid);
                 result.metadata_location = Some(metadata_location.clone());
                 return Ok(result);
+            }
+            Self::AddColumns {
+                table,
+                expected_schema_id,
+                columns,
+                ..
+            } => {
+                result.kind = "add_columns".into();
+                let outcome = super::tables::add_optional_columns(
+                    catalog,
+                    table,
+                    *expected_schema_id,
+                    columns,
+                )
+                .await?;
+                result.previous_schema_id = Some(outcome.previous_schema_id);
+                result.added_columns = Some(outcome.added);
+                outcome.table
             }
         };
         result.table = Some(if let Self::Resolve { table, .. } = self {
