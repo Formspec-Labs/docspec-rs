@@ -3,7 +3,7 @@
 use crate::{Error, Result, storage};
 use iceberg::{
     Catalog, TableIdent,
-    spec::{DataFile, PrimitiveType, Type},
+    spec::{DataFile, FormatVersion, PrimitiveType, Type},
     table::Table,
     transaction::{AddColumn, ApplyTransactionAction, Transaction},
 };
@@ -163,13 +163,15 @@ pub(super) struct ColumnsOutcome {
 /// every column is present nothing is committed, whatever `expected_schema_id`
 /// says, so repeating a completed request (a retry after a lost response) is a
 /// no-op. Otherwise the current schema must be `expected_schema_id`, and the
-/// head must not move before the commit. New columns follow the existing ones in
+/// head must not move up to the commit's own reload; the catalog's swap itself
+/// is atomic only on the schema id. New columns follow the existing ones in
 /// request order, with fresh field ids after the table's last column id.
 ///
 /// # Errors
-/// Refuses a name present with another type or as required (`schema_mismatch`),
-/// a schema other than `expected_schema_id` or a head that moves before the
-/// commit (`stale_authority`), and catalog failures, without retry.
+/// Refuses a name present with another type or as required, or a type the
+/// table's format version cannot hold (`schema_mismatch`); a schema other than
+/// `expected_schema_id` or a head that moves before the commit's reload
+/// (`stale_authority`); and catalog failures, without retry.
 pub(super) async fn add_optional_columns(
     catalog: &dyn Catalog,
     ident: &TableIdent,
@@ -181,6 +183,21 @@ pub(super) async fn add_optional_columns(
     let previous_schema_id = schema.schema_id();
     let mut missing = Vec::new();
     for column in columns {
+        // Nanosecond timestamps are the only primitives a version 2 table cannot hold.
+        if table.metadata().format_version() < FormatVersion::V3
+            && matches!(
+                column.field_type,
+                PrimitiveType::TimestampNs | PrimitiveType::TimestamptzNs
+            )
+        {
+            return Err(Error::refusal(
+                "schema_mismatch",
+                format!(
+                    "column {} needs table format version 3 for its type",
+                    column.name
+                ),
+            ));
+        }
         match schema.as_struct().field_by_name(&column.name) {
             None => missing.push(column),
             Some(field)

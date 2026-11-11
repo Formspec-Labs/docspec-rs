@@ -493,16 +493,33 @@ impl Job {
     ) -> Result<()> {
         use iceberg_datafusion::table::IcebergStaticTableProvider;
         let observation = NativeInputObservation::from_table(name, &table);
-        let provider = match table.metadata().current_snapshot_id() {
-            Some(snapshot) => {
-                IcebergStaticTableProvider::try_new_from_table_snapshot(table, snapshot).await?
+        let metadata = table.metadata();
+        let head = match metadata.current_snapshot() {
+            Some(snapshot) => Some((
+                snapshot.snapshot_id(),
+                crate::storage::schema::appends_nullable_columns(
+                    snapshot.schema(metadata)?.as_ref(),
+                    metadata.current_schema(),
+                ),
+            )),
+            None => None,
+        };
+        let provider: std::sync::Arc<dyn datafusion::catalog::TableProvider> = match head {
+            // Columns added after the head snapshot belong to the head. The upstream
+            // provider scans a snapshot with its own schema, so read this head with
+            // the engine's current-schema reader; every other head is unchanged.
+            Some((_, true)) => crate::query::table(table, self.budget.clone(), None)?,
+            Some((snapshot, false)) => std::sync::Arc::new(
+                IcebergStaticTableProvider::try_new_from_table_snapshot(table, snapshot).await?,
+            ),
+            None => {
+                std::sync::Arc::new(IcebergStaticTableProvider::try_new_from_table(table).await?)
             }
-            None => IcebergStaticTableProvider::try_new_from_table(table).await?,
         };
         self.context.register_table(
             name,
             std::sync::Arc::new(native::AdmittedTable {
-                provider: std::sync::Arc::new(provider),
+                provider,
                 memory,
                 observation,
             }),
