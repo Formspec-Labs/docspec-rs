@@ -3,7 +3,7 @@
 use super::{ComponentsSettings, ExportSettings, ExportedFile, Job, QueryResult};
 use crate::{Error, Result, budget::Budget};
 use arrow::{
-    datatypes::Schema,
+    datatypes::{Schema, SchemaRef},
     ipc::{reader::StreamReader, writer::StreamWriter},
 };
 use datafusion::physical_plan::SendableRecordBatchStream;
@@ -111,8 +111,20 @@ impl Job {
             .insert(alias, key);
         Ok(frame)
     }
+    /// Registers managed step `name` from its sealed file at `path`, column metadata kept.
+    ///
+    /// A plain job keeps a step as planned, so its later steps and exports see
+    /// each column's metadata, a lake column's `PARQUET:field_id` among it.
+    /// DataFusion's Parquet reader skips top-level column metadata by default
+    /// (`skip_metadata`), which gave a managed job's exports the plain job's rows
+    /// without their field ids: different footers, so different files. Kept, the
+    /// step's schema is the one its writer declared, and later steps plan as in
+    /// the plain job.
     pub(crate) async fn reopen_retained(&self, name: &str, path: &Path) -> Result<()> {
-        let frame = super::materialized::read_retained(&self.budget, path).await?;
+        let frame = super::materialized::read_retained(&self.budget, path, |options| {
+            options.execution.parquet.skip_metadata = false;
+        })
+        .await?;
         self.register_frame(name, self.owned_relation_frame(name, false, frame)?)
     }
     pub(crate) async fn retained_view(&self, step: &super::JobStep) -> Result<Schema> {
@@ -198,10 +210,12 @@ impl Job {
         })?;
         Ok(names.into_iter().collect())
     }
+    /// Writes SQL step `sql` to the immutable file at `path`, declared as a plain job declares it.
     pub(crate) async fn retained_sql(&self, sql: &str, path: &Path) -> Result<ClosedFile> {
         let frame = self.sql(sql).await?;
-        self.retain_stream(super::plan::execute_stream(frame).await?, path)
-            .await
+        let schema = super::plan::declared_schema(&frame, &self.budget)?;
+        let stream = super::plan::execute_stream(frame).await?;
+        self.retain_stream(stream, schema, path).await
     }
 
     pub(crate) async fn retained_components(
@@ -210,19 +224,19 @@ impl Job {
         settings: &ComponentsSettings,
         path: &Path,
     ) -> Result<ClosedFile> {
-        self.retain_stream(
-            super::components::compute_stream(self, name, settings).await?,
-            path,
-        )
-        .await
+        let stream = super::components::compute_stream(self, name, settings).await?;
+        // A components step declares its own fixed output, plain or managed.
+        let schema = crate::export::portable_schema(&stream.schema());
+        self.retain_stream(stream, schema, path).await
     }
 
+    /// Writes `stream` to the immutable file at `path`, declared as `schema`.
     async fn retain_stream(
         &self,
         stream: SendableRecordBatchStream,
+        schema: SchemaRef,
         path: &Path,
     ) -> Result<ClosedFile> {
-        let schema = crate::export::portable_schema(&stream.schema());
         let mut stream = crate::export::portable_stream(stream, schema.clone(), &self.budget);
         let file = self
             .budget

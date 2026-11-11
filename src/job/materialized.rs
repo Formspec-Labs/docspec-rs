@@ -5,6 +5,7 @@ use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
     common::{Statistics, internal_err, stats::Precision},
+    config::ConfigOptions,
     execution::{
         TaskContext,
         disk_manager::RefCountedTempFile,
@@ -249,8 +250,7 @@ pub(super) async fn materialize(
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = job.sql(sql).await?;
-    let schema =
-        crate::export::portable_schema(&super::plan::inferred_schema(&frame, &job.budget)?);
+    let schema = super::plan::declared_schema(&frame, &job.budget)?;
     let stream = super::plan::execute_stream(frame).await?;
     retain(&job.context, &job.budget, name, schema, stream).await
 }
@@ -416,41 +416,41 @@ async fn read_spill(
             ),
             _ => error,
         })?;
-    let reader = retained_reader(budget);
-    reader
-        .state_ref()
-        .write()
-        .config_mut()
-        .options_mut()
-        .execution
-        .collect_statistics = false;
+    let reader = retained_reader(budget, |options| {
+        options.execution.collect_statistics = false;
+    });
     scan_retained(reader, file.path(), Arc::new(memory)).await
 }
 
 /// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
+///
+/// `configure` sets the reader's options beyond [`retained_reader`]'s, so each
+/// caller says what its read keeps: an export drops each column's own
+/// metadata (DataFusion's default, `outputs.<name>` as it has always been read)
+/// and a managed job's reopened step keeps it (`Job::reopen_retained`).
 pub(super) async fn read_retained(
     budget: &Budget,
     path: &std::path::Path,
+    configure: impl FnOnce(&mut ConfigOptions),
 ) -> Result<datafusion::dataframe::DataFrame> {
     let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
-    scan_retained(retained_reader(budget), path, memory).await
+    scan_retained(retained_reader(budget, configure), path, memory).await
 }
 
-/// A reader for the engine's own Parquet files.
+/// A reader for the engine's own Parquet files, its options then set by `configure`.
 ///
 /// A frame from the job's own catalog would retain the table it backs and
 /// form a cycle. A fresh context shares the budget's runtime, not a catalog.
-fn retained_reader(budget: &Budget) -> SessionContext {
+fn retained_reader(budget: &Budget, configure: impl FnOnce(&mut ConfigOptions)) -> SessionContext {
     let reader = budget.context();
-    // Private materializations advertise their already normalized portable schema.
-    reader
-        .state_ref()
-        .write()
-        .config_mut()
-        .options_mut()
-        .execution
-        .parquet
-        .schema_force_view_types = false;
+    {
+        let shared = reader.state_ref();
+        let mut state = shared.write();
+        let options = state.config_mut().options_mut();
+        // Private materializations advertise their already normalized portable schema.
+        options.execution.parquet.schema_force_view_types = false;
+        configure(options);
+    }
     reader
 }
 

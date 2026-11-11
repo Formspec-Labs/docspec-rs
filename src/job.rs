@@ -98,7 +98,9 @@ impl Job {
     }
 
     pub(crate) async fn register_completed_output(&self, name: &str, path: &Path) -> Result<()> {
-        let frame = materialized::read_retained(&self.budget, path).await?;
+        // DataFusion's defaults: an export's columns lose their own metadata, as
+        // `outputs.<name>` always has, in plain and managed jobs alike.
+        let frame = materialized::read_retained(&self.budget, path, |_| {}).await?;
         let frame = self.owned_relation_frame(name, true, frame)?;
         self.register_output_provider(name, frame.into_view())
     }

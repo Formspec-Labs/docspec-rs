@@ -125,8 +125,7 @@ pub(super) fn prepare(
         })
         .collect::<Vec<_>>();
     let frame = frame.sort(order)?;
-    let input_schema =
-        crate::export::portable_schema(&super::plan::inferred_schema(&frame, budget)?);
+    let input_schema = super::plan::declared_schema(&frame, budget)?;
     let output_indices = if settings.columns.is_empty() {
         (0..input_schema.fields().len()).collect::<Vec<_>>()
     } else {
