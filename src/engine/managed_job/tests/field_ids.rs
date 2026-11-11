@@ -30,13 +30,33 @@ fn footer(path: &Path) -> Vec<u8> {
     bytes[end - length..end].to_vec()
 }
 
-/// A managed job's later step and export keep a lake column's field id.
+/// The first step: the lake table's columns, then one column per field-identity case.
 ///
-/// `material` copies the lake table's columns, so its file carries their field
-/// ids. `later` reads `material` after the managed job has reopened it from
-/// that file, and `copied` exports `later`. A plain job keeps its steps as
-/// planned, so the same job file run as a plain job is the reference: the
-/// managed export must have its footer and its bytes.
+/// `occurrence`, `id` and `amount` are copied, so they carry the lake's ids 1,
+/// 2 and 3. After them, def-9ise's cases: `k` unions `id` with `amount`
+/// (conflicting ids), `amount_next` is computed (no id), `id_cast` is a
+/// `TRY_CAST` to the column's own type, and `same_id` is a correlated scalar
+/// subquery, whose decorrelation can change nullability. `amount_or_zero`
+/// follows a lake-only incident (W6), where a plan over `coalesce(f.valid,
+/// false)` carried the id in its running schema and not in its planned one.
+/// The test asserts the ids of the first three columns only; the plain job
+/// decides the rest.
+const MATERIAL: &str = "SELECT r.occurrence, r.id, r.amount, u.k, \
+    r.amount + 1 AS amount_next, TRY_CAST(r.id AS BIGINT) AS id_cast, \
+    (SELECT count(*) FROM raw s WHERE s.id = r.id) AS same_id, \
+    coalesce(r.amount, 0) AS amount_or_zero \
+    FROM raw r JOIN (SELECT occurrence, id AS k FROM raw WHERE occurrence < 3 \
+    UNION ALL SELECT occurrence, amount AS k FROM raw WHERE occurrence = 3) u \
+    ON u.occurrence = r.occurrence";
+
+/// A managed job's later step and export keep what a plain job keeps.
+///
+/// `material` ([`MATERIAL`]) copies the lake table's columns, so its file
+/// carries their field ids. `later` reads `material` after the managed job has
+/// reopened it from that file, and `copied` exports `later`. A plain job keeps
+/// its steps as planned, so the same job file run as a plain job is the
+/// reference: the managed export must have its footer and its bytes, every
+/// column's id, type and nullability included.
 #[tokio::test]
 async fn a_reopened_step_keeps_the_field_ids_a_plain_job_keeps() {
     let root = tempfile::tempdir().unwrap();
@@ -48,8 +68,8 @@ async fn a_reopened_step_keeps_the_field_ids_a_plain_job_keeps() {
     let mut job: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&request.job.path).unwrap()).unwrap();
     job["steps"] = json!([
-        {"name":"material","sql":"SELECT occurrence, id, amount FROM raw","materialize":true},
-        {"name":"later","sql":"SELECT occurrence, id, amount FROM material","materialize":true}
+        {"name":"material","sql":MATERIAL,"materialize":true},
+        {"name":"later","sql":"SELECT * FROM material","materialize":true}
     ]);
     job["outputs"] = json!([{"name":"copied","path":reference,"sql":"SELECT * FROM later","settings":{
         "profile":"whole","row_group_rows":128,"order_by":[{"field":"occurrence"}],"columns":[],"dictionary_columns":[],"delta_columns":[],"key_column":null,"created_by":"field-id-test","footer_limit":65536
@@ -77,8 +97,8 @@ async fn a_reopened_step_keeps_the_field_ids_a_plain_job_keeps() {
         serde_json::from_slice(&STANDARD.decode(&witness.bytes_base64).unwrap()).unwrap();
     // The first step writes the lake's ids: they are there for a reopen to lose.
     let written = manifest["steps"][0]["completion"]["path"].as_str().unwrap();
-    assert_eq!(footer_field_ids(Path::new(written)), expected);
-    // The second step's schema is the one it planned over the reopened first step.
+    assert_eq!(footer_field_ids(Path::new(written))[..3], expected[..]);
+    // The second step's recorded schema: the one it declared over the reopened first step.
     let sha256 = manifest["steps"][1]["schema_sha256"].as_str().unwrap();
     let encoded = manifest["schemas"][sha256].as_str().unwrap();
     let seen = try_schema_from_ipc_buffer(&STANDARD.decode(encoded).unwrap()).unwrap();
@@ -94,11 +114,12 @@ async fn a_reopened_step_keeps_the_field_ids_a_plain_job_keeps() {
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        seen, expected,
+        seen[..3],
+        expected[..],
         "the later step lost the reopened step's ids"
     );
     let exported = Path::new(managed.completed_outputs[0]["path"].as_str().unwrap());
-    assert_eq!(footer_field_ids(exported), expected);
+    assert_eq!(footer_field_ids(exported)[..3], expected[..]);
     let spec: JobSpec = serde_json::from_value(job).unwrap();
     let plain = spec.run(limits()).await.unwrap();
     assert_eq!(
