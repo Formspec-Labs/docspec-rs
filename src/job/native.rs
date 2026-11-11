@@ -156,35 +156,49 @@ impl TableProvider for AdmittedTable {
                 .scan(state, projection, filters, limit)
                 .await?,
             memory: self.memory.clone(),
+            // The pin wrapped lake inputs in this node with DataFusion's
+            // default, so lake plans keep their round-robin repartition.
+            parallel_input: true,
         }))
     }
 }
 /// Holds a metadata admission for as long as its plan runs.
 ///
-/// The wrapper only keeps the permit alive, so the planner must shape the plan
-/// as if it were absent. It keeps its input as a child, which lets the planner
-/// still split a large file scan beneath it, and it declares what a
-/// pass-through declares (DataFusion's `CoalesceBatchesExec` does the same):
-/// input order kept, statistics forwarded, no benefit from input partitioning.
-/// The default for the last asks for parallel input. At two threads that made
-/// the planner put a round-robin repartition beneath every admitted scan,
-/// adding spill-capable consumers that shrank every spiller's share of the
-/// pool (O10). A parent that wants parallel input still gets its repartition,
-/// above the wrapper, as it got one above the bare scan.
+/// The wrapper only keeps the permit alive, so plans keep the pin's (b0342a7)
+/// shape. It keeps its input as a child, so the planner still splits a large
+/// file scan beneath it and moves sorts through it (it keeps input order). What
+/// it asks of input partitioning depends on what the pin had:
 ///
-/// Not declared, so stopped at the wrapper: limit, projection, filter and sort
-/// pushdown, and cardinality. Whether that changes a plan against one without
-/// the wrapper is to be measured before any of them is passed through.
+/// - Over a lake input ([`AdmittedTable`]) it asks for parallel input,
+///   DataFusion's default, as the pin's wrapper there did: at two or more
+///   threads the planner puts a round-robin repartition beneath it.
+/// - Elsewhere ([`admit_metadata_plan`]: registered Parquet inputs, spilled
+///   steps' replays, a step's whole plan), where the pin had no wrapper, it
+///   declines, as DataFusion's pass-through `CoalesceBatchesExec` does. Asking
+///   put a round-robin repartition beneath every such scan at two threads,
+///   adding spill-capable consumers that shrank every spiller's share of the
+///   pool (O10). A parent that wants parallel input still gets its
+///   repartition, above the wrapper, as above the bare scan.
+///
+/// Whether limit, projection and filter pushdown stop at the wrapper, against
+/// a plan without it, is a measured follow-up.
 #[derive(Debug)]
 struct AdmittedPlan {
     input: Arc<dyn ExecutionPlan>,
     memory: Arc<dyn fmt::Debug + Send + Sync>,
+    /// Whether to ask for parallel input: only over lake inputs.
+    parallel_input: bool,
 }
+/// Admits a plan the pin read unwrapped; it declines input partitioning.
 pub(super) fn admit_metadata_plan(
     input: Arc<dyn ExecutionPlan>,
     memory: Arc<dyn fmt::Debug + Send + Sync>,
 ) -> Arc<dyn ExecutionPlan> {
-    Arc::new(AdmittedPlan { input, memory })
+    Arc::new(AdmittedPlan {
+        input,
+        memory,
+        parallel_input: false,
+    })
 }
 impl DisplayAs for AdmittedPlan {
     fn fmt_as(&self, _format: DisplayFormatType, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -208,7 +222,7 @@ impl ExecutionPlan for AdmittedPlan {
         vec![true]
     }
     fn benefits_from_input_partitioning(&self) -> Vec<bool> {
-        vec![false]
+        vec![self.parallel_input]
     }
     fn with_new_children(
         self: Arc<Self>,
@@ -222,6 +236,7 @@ impl ExecutionPlan for AdmittedPlan {
         Ok(Arc::new(Self {
             input: input.clone(),
             memory: self.memory.clone(),
+            parallel_input: self.parallel_input,
         }))
     }
     fn execute(
