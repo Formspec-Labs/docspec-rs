@@ -676,6 +676,9 @@ impl JobSpec {
     /// went wrong, and which of a job's statements did is read off the order
     /// of the log. The name is the statement that was running: a view fails
     /// when a later statement reads it, and is then named as that reader.
+    /// It covers `docspec job` only: managed jobs (`engine::managed_job::execution`)
+    /// and `prepare-job` (`PrepareJobSpec::prepare`) run their own statement
+    /// loops, and their failures are not named.
     fn named(&self, running: Option<Running>, error: Error) -> Error {
         let (kind, index, name) = match running {
             None => return error,
