@@ -35,8 +35,10 @@ pub enum StepStorage {
     Scratch,
 }
 impl StepStorage {
-    /// The name the retain log and query plans print.
-    const fn label(self) -> &'static str {
+    /// The name the step and retain logs and query plans print.
+    ///
+    /// It is the serde name too, which readers of a job's result.json depend on.
+    pub(super) const fn label(self) -> &'static str {
         match self {
             Self::View => "view",
             Self::Memory => "memory",
@@ -143,8 +145,10 @@ impl TableProvider for ReservedTable {
 /// of a job's steps a leaf read or how large it was. This leaf is that scan
 /// with the step's name, rows and storage appended to its line, as in
 /// `StreamingTableExec: partition_sizes=1, projection=[k], step=big,
-/// rows=300000, storage=memory`. The scan's own name and text stay first, so
-/// plan readers that match `StreamingTableExec` still do.
+/// step_rows=300000, storage=memory`. The scan's own name and text stay
+/// first, so plan readers that match `StreamingTableExec` still do, and the
+/// count is `step_rows`, which no reader can take for a metric such as
+/// `output_rows`.
 ///
 /// All else is the scan's: its projection, limit and partition (which keeps
 /// the step's reservation or scratch file alive), properties, metrics and
@@ -176,9 +180,9 @@ impl DisplayAs for RetainedScan {
         let (step, rows, storage) = (&self.step, self.rows, self.storage.label());
         // The tree format takes one `key=value` a line.
         if matches!(format, DisplayFormatType::TreeRender) {
-            write!(f, "\nstep={step}\nrows={rows}\nstorage={storage}")
+            write!(f, "\nstep={step}\nstep_rows={rows}\nstorage={storage}")
         } else {
-            write!(f, ", step={step}, rows={rows}, storage={storage}")
+            write!(f, ", step={step}, step_rows={rows}, storage={storage}")
         }
     }
 }

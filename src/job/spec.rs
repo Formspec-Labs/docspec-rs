@@ -513,11 +513,7 @@ impl JobSpec {
             super::metrics::log_step(
                 step_index,
                 step.name(),
-                match storage {
-                    StepStorage::Memory => "memory",
-                    StepStorage::Scratch => "scratch",
-                    StepStorage::View => "view",
-                },
+                storage.label(),
                 rows,
                 charged_bytes,
                 start_epoch,
