@@ -159,6 +159,22 @@ impl TableProvider for AdmittedTable {
         }))
     }
 }
+/// Holds a metadata admission for as long as its plan runs.
+///
+/// The wrapper only keeps the permit alive, so the planner must shape the plan
+/// as if it were absent. It keeps its input as a child, which lets the planner
+/// still split a large file scan beneath it, and it declares what a
+/// pass-through declares (DataFusion's `CoalesceBatchesExec` does the same):
+/// input order kept, statistics forwarded, no benefit from input partitioning.
+/// The default for the last asks for parallel input. At two threads that made
+/// the planner put a round-robin repartition beneath every admitted scan,
+/// adding spill-capable consumers that shrank every spiller's share of the
+/// pool (O10). A parent that wants parallel input still gets its repartition,
+/// above the wrapper, as it got one above the bare scan.
+///
+/// Not declared, so stopped at the wrapper: limit, projection, filter and sort
+/// pushdown, and cardinality. Whether that changes a plan against one without
+/// the wrapper is to be measured before any of them is passed through.
 #[derive(Debug)]
 struct AdmittedPlan {
     input: Arc<dyn ExecutionPlan>,
@@ -190,6 +206,9 @@ impl ExecutionPlan for AdmittedPlan {
     }
     fn maintains_input_order(&self) -> Vec<bool> {
         vec![true]
+    }
+    fn benefits_from_input_partitioning(&self) -> Vec<bool> {
+        vec![false]
     }
     fn with_new_children(
         self: Arc<Self>,
