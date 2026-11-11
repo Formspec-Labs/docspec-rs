@@ -237,7 +237,7 @@ async fn a_parquet_file_with_no_rows_is_an_empty_table() {
 }
 
 #[tokio::test]
-async fn an_unreadable_parquet_input_is_named_with_its_cause() {
+async fn an_unreadable_parquet_file_is_refused_naming_its_input_and_path() {
     let root = tempfile::tempdir().unwrap();
     let torn = root.path().join("torn.parquet");
     std::fs::write(&torn, b"not a Parquet file").unwrap();
@@ -247,8 +247,10 @@ async fn an_unreadable_parquet_input_is_named_with_its_cause() {
     let other_suffix = root.path().join("rows.pq");
     write_ids(&other_suffix, &[1, 2]);
     // What reading each path alone says. A single file's footer is admitted
-    // before the listing, so a torn or empty file is refused there; a whole
-    // file with another suffix passes it and is refused by the listing.
+    // before the listing, so a torn or empty file is refused there, as
+    // `export_read` with no cause (admission hides transport detail on
+    // purpose); a whole file with another suffix passes it and is refused by
+    // the listing, with the listing's message.
     let job = lone_job(root.path(), Limits::default());
     let budget = &job.budget;
     let cases = [
