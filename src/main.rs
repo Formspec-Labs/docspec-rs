@@ -20,6 +20,7 @@ use docspec::{
     storage,
 };
 use futures::TryStreamExt;
+use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
 use std::{
     fs::{File, OpenOptions},
     io::{BufReader, BufWriter, Write},
@@ -548,6 +549,62 @@ enum PausedOperation {
     Compaction,
 }
 
+/// The soft open-file limit the CLI asks for, when the hard limit allows it.
+///
+/// A model build holds a few hundred files at once: 56 inputs with 77
+/// JSON-lines files, 46 outputs, and the scratch and spill files of its
+/// retained steps. That is over the 256 that launchd grants a scheduled job
+/// and far under this number, which is the one the pipeline's nightly driver
+/// already asks for, so the driver's own raise can go without changing the
+/// limit in force. It is a number and not "as high as the hard limit"
+/// because launchd's hard limit is unlimited, and code that sizes a table or
+/// a close-loop by the soft limit does badly with an unlimited one.
+const OPEN_FILES: u64 = 65_536;
+
+/// What the CLI asks for once, if the kernel refuses [`OPEN_FILES`].
+///
+/// It is `OPEN_MAX` in macOS's `<sys/syslimits.h>`, the value Apple's
+/// setrlimit(2) tells callers to stay at or under, and the pipeline's nightly
+/// driver falls back to the same number. No kernel has been seen to refuse:
+/// macOS 26.6 accepted every value when measured on 2026-11-10.
+const OPEN_FILES_FALLBACK: u64 = 10_240;
+
+/// Raises the soft open-file limit to [`OPEN_FILES`] or the hard limit, whichever is lower.
+///
+/// The hard limit is never changed and nothing is lowered: a soft limit
+/// already at or above the target stays. A kernel that refuses leaves the
+/// limit as it was, which is not an error: the job may still fit.
+///
+/// Returns the limits in force afterwards, read back from the kernel.
+fn raise_open_file_limit() -> Rlimit {
+    let limit = getrlimit(Resource::Nofile);
+    if let Some(soft) = limit.current {
+        raise_toward(soft, limit.maximum, |wanted| {
+            let wanted = Rlimit {
+                current: Some(wanted),
+                maximum: limit.maximum,
+            };
+            setrlimit(Resource::Nofile, wanted).is_ok()
+        });
+    }
+    getrlimit(Resource::Nofile)
+}
+
+/// Asks `set` for the target and, if refused, once for [`OPEN_FILES_FALLBACK`].
+///
+/// The target is [`OPEN_FILES`], or `hard` when that is lower; `None` is an
+/// unlimited hard limit. `set` says whether the kernel accepted a value. The
+/// fallback is asked for only when it is a raise and under the target.
+fn raise_toward(soft: u64, hard: Option<u64>, mut set: impl FnMut(u64) -> bool) {
+    let target = hard.map_or(OPEN_FILES, |hard| hard.min(OPEN_FILES));
+    if soft >= target || set(target) {
+        return;
+    }
+    if soft < OPEN_FILES_FALLBACK && OPEN_FILES_FALLBACK < target {
+        set(OPEN_FILES_FALLBACK);
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(12)
@@ -565,6 +622,8 @@ async fn async_main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "docspec=info".into()),
         )
         .init();
+    let open_files = raise_open_file_limit();
+    tracing::debug!(soft = ?open_files.current, hard = ?open_files.maximum, "open-file limit");
     let cli = Cli::parse_from(normalize_cli_args(std::env::args_os()));
     check_startup(&cli)?;
     if matches!(
@@ -1644,4 +1703,64 @@ fn write_ready_file(path: &std::path::Path, address: SocketAddr) -> anyhow::Resu
     )?;
     output.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod open_file_limit_tests {
+    use super::{OPEN_FILES, OPEN_FILES_FALLBACK, raise_toward};
+
+    /// Runs `raise_toward` against a kernel that accepts at most `ceiling`.
+    ///
+    /// Returns the soft limit left in force and every value asked for.
+    fn kernel(soft: u64, hard: Option<u64>, ceiling: u64) -> (u64, Vec<u64>) {
+        let mut in_force = soft;
+        let mut asked = Vec::new();
+        raise_toward(soft, hard, |wanted| {
+            asked.push(wanted);
+            let accepted = wanted <= ceiling;
+            if accepted {
+                in_force = wanted;
+            }
+            accepted
+        });
+        (in_force, asked)
+    }
+
+    #[test]
+    fn an_unlimited_hard_limit_gives_the_stated_number_not_unlimited() {
+        assert_eq!(kernel(256, None, u64::MAX), (OPEN_FILES, vec![OPEN_FILES]));
+        assert_eq!(kernel(256, Some(1 << 20), u64::MAX).0, OPEN_FILES);
+    }
+
+    #[test]
+    fn a_hard_limit_below_the_stated_number_is_the_target() {
+        assert_eq!(kernel(256, Some(4096), u64::MAX), (4096, vec![4096]));
+    }
+
+    #[test]
+    fn a_limit_at_or_above_the_target_is_left_alone() {
+        for (soft, hard) in [
+            (1 << 20, None),
+            (OPEN_FILES, None),
+            (256, Some(256)),
+            (8192, Some(8192)),
+        ] {
+            assert_eq!(kernel(soft, hard, u64::MAX), (soft, vec![]));
+        }
+    }
+
+    #[test]
+    fn a_refused_target_gets_one_fallback_that_is_always_a_raise() {
+        // A kernel whose ceiling is under the stated number.
+        assert_eq!(
+            kernel(256, None, 61_440),
+            (OPEN_FILES_FALLBACK, vec![OPEN_FILES, OPEN_FILES_FALLBACK])
+        );
+        // The fallback would lower this limit, so it is not asked for.
+        assert_eq!(kernel(20_000, None, 61_440), (20_000, vec![OPEN_FILES]));
+        // The fallback is above this hard limit, so it is not asked for.
+        assert_eq!(kernel(256, Some(8192), 0), (256, vec![8192]));
+        // A kernel that refuses every raise leaves the limit where it was.
+        assert_eq!(kernel(256, None, 0).0, 256);
+    }
 }

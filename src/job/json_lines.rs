@@ -138,17 +138,24 @@ impl PartitionStream for JsonPartition {
                     reservation: MemoryConsumer::new("JSON-lines decoder")
                         .register(context.memory_pool()),
                 };
-                Ok::<_, DataFusionError>(stream::try_unfold(state, |mut state| async move {
-                    tokio::task::spawn_blocking(move || {
-                        state.next().map(|batch| batch.map(|batch| (batch, state)))
-                    })
-                    .await
-                    .map_err(|_| DataFusionError::Execution("JSON-lines worker failed".into()))?
+                Ok::<_, DataFusionError>(stream::try_unfold(state, |mut state| {
+                    on_worker(move || state.next().map(|batch| batch.map(|batch| (batch, state))))
                 }))
             })
             .try_flatten();
         Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), files))
     }
+}
+
+/// Runs one blocking read off the async threads.
+///
+/// A read that panics reports the panic's message instead of only "failed".
+async fn on_worker<T: Send + 'static>(
+    read: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(read)
+        .await
+        .map_err(|error| DataFusionError::Execution(format!("JSON-lines worker failed: {error}")))?
 }
 
 /// Names the file and the operating-system error behind a failed `action`.
@@ -192,9 +199,27 @@ impl Reader {
             .map_err(|error| error.context(format!("{key} line {line}")))
     }
 
-    fn error(&self, line: i64, message: &str) -> DataFusionError {
+    fn error(&self, line: i64, message: impl std::fmt::Display) -> DataFusionError {
         DataFusionError::Execution(format!("{} line {line}: {message}", self.file.key))
     }
+    /// Returns each raw line between `offsets` as text; `first` numbers the first one.
+    fn original_lines<'a>(
+        &self,
+        raw: &'a [u8],
+        offsets: &[usize],
+        first: i64,
+    ) -> Result<Vec<&'a str>> {
+        offsets
+            .windows(2)
+            .enumerate()
+            .map(|(i, p)| {
+                std::str::from_utf8(&raw[p[0]..p[1]]).map_err(|error| {
+                    self.error(first + i as i64, format_args!("invalid UTF-8: {error}"))
+                })
+            })
+            .collect()
+    }
+
     fn next(&mut self) -> Result<Option<RecordBatch>> {
         Self::admit(
             &mut self.reservation,
@@ -301,7 +326,7 @@ impl Reader {
             .with_batch_size(self.batch_rows)
             .with_ignore_type_conflicts(true)
             .build(raw.as_slice())
-            .map_err(|_| self.error(first, "decoder setup failed"))?;
+            .map_err(|error| self.error(first, format_args!("decoder setup failed: {error}")))?;
         let batch = match decoder.next().transpose() {
             Ok(Some(batch)) if batch.num_rows() == offsets.len() - 1 => batch,
             _ => {
@@ -325,14 +350,7 @@ impl Reader {
             .and_then(|bytes| bytes.checked_add(READER_BYTES))
             .ok_or_else(allocation_overflow)?;
         Self::admit(&mut self.reservation, &self.file.key, first, held)?;
-        let originals = offsets
-            .windows(2)
-            .enumerate()
-            .map(|(i, p)| {
-                std::str::from_utf8(&raw[p[0]..p[1]])
-                    .map_err(|_| self.error(first + i as i64, "invalid UTF-8"))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let originals = self.original_lines(&raw, &offsets, first)?;
         let rows = batch.num_rows();
         let mut columns = batch.columns().to_vec();
         columns.extend([
@@ -375,23 +393,16 @@ impl Reader {
 #[cfg(test)]
 mod reader_lifetime_tests {
     use super::*;
+    use datafusion::execution::memory_pool::MemoryPool;
     use std::io::Write;
 
-    #[test]
-    fn missing_source_reports_its_path_and_the_os_error() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("absent.jsonl");
+    /// A reader over `file` with a 1 MiB line and batch allowance.
+    fn reader(file: JsonLinesFile, input: SchemaRef, pool: &Arc<dyn MemoryPool>) -> Reader {
         let limits = crate::budget::Limits::default();
-        let budget = crate::budget::Budget::new(limits.clone()).unwrap();
-        let input = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-        let file = JsonLinesFile {
-            key: "accepted_versions".into(),
-            path: path.clone(),
-        };
         let schema = provider(vec![file.clone()], input.clone(), &limits)
             .unwrap()
             .schema();
-        let mut reader = Reader {
+        Reader {
             file,
             input,
             schema,
@@ -400,9 +411,24 @@ mod reader_lifetime_tests {
             max_line: 1 << 20,
             batch_rows: 64,
             max_batch_bytes: 1 << 20,
-            reservation: MemoryConsumer::new("JSON-lines missing source")
-                .register(&budget.runtime_env().memory_pool),
+            reservation: MemoryConsumer::new("JSON-lines fixture").register(pool),
+        }
+    }
+
+    fn ids() -> SchemaRef {
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]))
+    }
+
+    #[test]
+    fn missing_source_reports_its_path_and_the_os_error() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("absent.jsonl");
+        let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+        let file = JsonLinesFile {
+            key: "accepted_versions".into(),
+            path: path.clone(),
         };
+        let mut reader = reader(file, ids(), &budget.runtime_env().memory_pool);
         let message = reader.next().unwrap_err().to_string();
         // ENOENT is 2 on every Unix the engine builds for.
         assert_eq!(
@@ -413,6 +439,69 @@ mod reader_lifetime_tests {
                 path.display()
             )
         );
+    }
+
+    #[test]
+    fn decoder_setup_failure_keeps_the_decoder_error() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("one.jsonl");
+        std::fs::write(&path, b"{\"span\":1}\n").unwrap();
+        let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+        // Arrow's JSON reader has no decoder for intervals.
+        let unsupported = Arc::new(Schema::new(vec![Field::new(
+            "span",
+            DataType::Interval(arrow::datatypes::IntervalUnit::YearMonth),
+            true,
+        )]));
+        let cause = ReaderBuilder::new(unsupported.clone())
+            .build(&b""[..])
+            .err()
+            .unwrap();
+        let file = JsonLinesFile {
+            key: "history/one".into(),
+            path,
+        };
+        let mut reader = reader(file, unsupported, &budget.runtime_env().memory_pool);
+        assert_eq!(
+            reader.next().unwrap_err().to_string(),
+            format!("Execution error: history/one line 1: decoder setup failed: {cause}")
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_reports_its_line_and_the_byte_at_fault() {
+        let budget = crate::budget::Budget::new(crate::budget::Limits::default()).unwrap();
+        let file = JsonLinesFile {
+            key: "history/two".into(),
+            path: "unopened.jsonl".into(),
+        };
+        let reader = reader(file, ids(), &budget.runtime_env().memory_pool);
+        // Two lines; the second holds a byte that starts no UTF-8 sequence.
+        let raw = b"{\"id\":1}\n{\"id\":\xff}\n";
+        let error = reader.original_lines(raw, &[0, 9, 18], 41).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Execution error: history/two line 42: invalid UTF-8: \
+             invalid utf-8 sequence of 1 bytes from index 6"
+        );
+        assert_eq!(
+            reader.original_lines(&raw[..9], &[0, 9], 41).unwrap(),
+            ["{\"id\":1}\n"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dead_worker_reports_why_it_died() {
+        let error = on_worker(|| -> Result<()> { panic!("reader gave up") })
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("Execution error: JSON-lines worker failed: task ")
+                && error.ends_with("panicked with message \"reader gave up\""),
+            "{error}"
+        );
+        assert_eq!(on_worker(|| Ok(7)).await.unwrap(), 7);
     }
 
     #[test]
@@ -429,29 +518,14 @@ mod reader_lifetime_tests {
             memory_bytes: 64 << 20,
             ..crate::budget::Limits::default()
         };
-        let budget = crate::budget::Budget::new(limits.clone()).unwrap();
-        let input = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-        let files = vec![JsonLinesFile {
+        let budget = crate::budget::Budget::new(limits).unwrap();
+        let file = JsonLinesFile {
             key: "one".into(),
             path,
-        }];
-        let schema = provider(files.clone(), input.clone(), &limits)
-            .unwrap()
-            .schema();
+        };
         let pool = &budget.runtime_env().memory_pool;
         let before = pool.reserved();
-        let make = || Reader {
-            file: files[0].clone(),
-            input: input.clone(),
-            schema: schema.clone(),
-            reader: None,
-            line: 0,
-            max_line: 1 << 20,
-            batch_rows: 64,
-
-            max_batch_bytes: 1 << 20,
-            reservation: MemoryConsumer::new("JSON-lines lifetime fixture").register(pool),
-        };
+        let make = || reader(file.clone(), ids(), pool);
         let mut reader = make();
         let batch = reader.next().unwrap().unwrap();
         assert!(reader.reader.is_some());

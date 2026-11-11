@@ -137,6 +137,15 @@ impl Error {
         &self.backtrace
     }
 
+    /// Says where the failure happened, ahead of its own message.
+    ///
+    /// The code, kind, cause and backtrace stay as they were.
+    #[must_use]
+    pub(crate) fn context(mut self, place: impl fmt::Display) -> Self {
+        self.message = format!("{place}: {}", self.message);
+        self
+    }
+
     fn caused(code: &'static str, cause: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self {
             kind: ErrorKind::from_code(code),

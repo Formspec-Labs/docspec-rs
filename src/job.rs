@@ -22,6 +22,8 @@ mod table_operations;
 pub mod tables;
 
 #[cfg(test)]
+mod evidence_tests;
+#[cfg(test)]
 mod slice_charge_tests;
 
 use crate::{
@@ -207,11 +209,16 @@ impl Job {
     /// Registers a Parquet file or directory with native projection and statistics.
     ///
     /// # Errors
-    /// Returns native schema, input I/O, or registration errors.
+    /// Refuses a path where the listing finds no file to read (code
+    /// `missing_input`).
+    /// Returns native schema, input I/O, or registration errors. Footer
+    /// admission and listing failures name the input and its path.
     pub async fn register_parquet(&self, name: &str, path: &Path) -> Result<()> {
         let metadata_memory = if path.is_file() {
             Some(Arc::new(
-                crate::storage::admit_parquet_footer(path, &self.budget).await?,
+                crate::storage::admit_parquet_footer(path, &self.budget)
+                    .await
+                    .map_err(|error| unreadable_parquet(name, path, error))?,
             ))
         } else {
             None
@@ -222,8 +229,10 @@ impl Job {
                 path.to_string_lossy().as_ref(),
                 ParquetReadOptions::default(),
             )
-            .await?;
+            .await
+            .map_err(|error| unreadable_parquet(name, path, error))?;
         let provider = self.context.table_provider(name).await?;
+        self.require_parquet_file(name, path, &provider.schema())?;
         self.context.deregister_table(name)?;
         self.context.register_table(
             name,
@@ -233,6 +242,40 @@ impl Job {
             }),
         )?;
         Ok(())
+    }
+
+    /// Refuses a Parquet input for which the listing found no file to read.
+    ///
+    /// The listing reads a path it cannot find, and a directory holding no
+    /// non-empty file with the suffix (it skips files of zero bytes), as a
+    /// table with no columns and no rows. A statement then fails on an
+    /// unknown column, or counts zero rows and succeeds. A written Parquet
+    /// file brings its columns whether or not it has rows, so `listed`
+    /// without columns means nothing was read. A single file's footer is
+    /// admitted before the listing, so a lone empty or torn file is refused
+    /// there instead.
+    ///
+    /// It runs after the listing on purpose: a check before it would restate
+    /// the listing's rules for what it reads, list the path twice, and refuse
+    /// a path given as a URL.
+    fn require_parquet_file(
+        &self,
+        name: &str,
+        path: &Path,
+        listed: &arrow::datatypes::Schema,
+    ) -> Result<()> {
+        if !listed.fields().is_empty() {
+            return Ok(());
+        }
+        self.context.deregister_table(name)?;
+        Err(crate::Error::refusal(
+            "missing_input",
+            format!(
+                "Parquet input {name:?} has no readable Parquet file at {}: \
+                 the path is missing or holds no non-empty file ending in .parquet",
+                path.display()
+            ),
+        ))
     }
 
     /// Registers plain or gzip JSON lines with nullable fields and raw evidence.
@@ -499,6 +542,13 @@ impl Job {
     ) -> Result<ExportedFile> {
         export::export(self.sql(sql).await?, path, settings, &self.budget).await
     }
+}
+
+/// Puts the input's name and path ahead of a failure to list or read it.
+fn unreadable_parquet(name: &str, path: &Path, error: impl Into<crate::Error>) -> crate::Error {
+    error
+        .into()
+        .context(format_args!("Parquet input {name:?} at {}", path.display()))
 }
 
 #[cfg(test)]
