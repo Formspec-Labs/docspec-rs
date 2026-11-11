@@ -13,6 +13,7 @@ use iceberg::{
     Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
     spec::{DataFile, FormatVersion, NestedField, PrimitiveType, Schema, Type},
     table::Table,
+    transaction::{AddColumn, ApplyTransactionAction, Transaction},
 };
 use std::{
     collections::HashMap,
@@ -55,6 +56,8 @@ pub(super) struct AuthorityCatalog {
     updates: AtomicUsize,
     read_only: bool,
     read_failure: bool,
+    /// Before this load, another writer commits an optional `racer` column.
+    race_at: Option<usize>,
 }
 impl AuthorityCatalog {
     pub(super) fn read_only(inner: Arc<dyn Catalog>, read_failure: bool) -> Self {
@@ -65,10 +68,26 @@ impl AuthorityCatalog {
             updates: AtomicUsize::new(0),
             read_only: true,
             read_failure,
+            race_at: None,
+        }
+    }
+    /// A writable catalog where another writer commits just before load `at`.
+    pub(super) fn racing(inner: Arc<dyn Catalog>, at: usize) -> Self {
+        Self {
+            inner,
+            changed: None,
+            loads: AtomicUsize::new(0),
+            updates: AtomicUsize::new(0),
+            read_only: false,
+            read_failure: false,
+            race_at: Some(at),
         }
     }
     pub(super) fn load_count(&self) -> usize {
         self.loads.load(Ordering::SeqCst)
+    }
+    pub(super) fn update_count(&self) -> usize {
+        self.updates.load(Ordering::SeqCst)
     }
     fn writing(&self) {
         assert!(
@@ -91,6 +110,18 @@ impl Catalog for AuthorityCatalog {
             && let Some(table) = &self.changed
         {
             return Ok(table.clone());
+        }
+        if self.race_at == Some(n) {
+            let base = self.inner.load_table(id).await?;
+            let tx = Transaction::new(&base);
+            tx.update_schema()
+                .add_column(AddColumn::optional(
+                    "racer",
+                    Type::Primitive(PrimitiveType::Int),
+                ))
+                .apply(tx)?
+                .commit(self.inner.as_ref())
+                .await?;
         }
         self.inner.load_table(id).await
     }
@@ -179,6 +210,7 @@ async fn append_checks_current_authority_before_update_in_every_build() {
             updates: AtomicUsize::new(0),
             read_only: false,
             read_failure: false,
+            race_at: None,
         };
         let files = files(&table, &budget, vec![1]).await.unwrap();
         let result = docspec::storage::append(&table, &catalog, files).await;
