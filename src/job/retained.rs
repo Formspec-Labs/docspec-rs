@@ -111,8 +111,20 @@ impl Job {
             .insert(alias, key);
         Ok(frame)
     }
+    /// Registers managed step `name` from its sealed file at `path`, column metadata kept.
+    ///
+    /// A plain job keeps a step as planned, so its later steps and exports see
+    /// each column's metadata, a lake column's `PARQUET:field_id` among it.
+    /// DataFusion's Parquet reader skips top-level column metadata by default
+    /// (`skip_metadata`), which gave a managed job's exports the plain job's rows
+    /// without their field ids: different footers, so different files. Kept, the
+    /// step's schema is the one its writer declared, and later steps plan as in
+    /// the plain job.
     pub(crate) async fn reopen_retained(&self, name: &str, path: &Path) -> Result<()> {
-        let frame = super::materialized::read_retained_step(&self.budget, path).await?;
+        let frame = super::materialized::read_retained(&self.budget, path, |options| {
+            options.execution.parquet.skip_metadata = false;
+        })
+        .await?;
         self.register_frame(name, self.owned_relation_frame(name, false, frame)?)
     }
     pub(crate) async fn retained_view(&self, step: &super::JobStep) -> Result<Schema> {

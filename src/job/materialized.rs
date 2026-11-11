@@ -5,6 +5,7 @@ use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
     common::{Statistics, internal_err, stats::Precision},
+    config::ConfigOptions,
     execution::{
         TaskContext,
         disk_manager::RefCountedTempFile,
@@ -416,72 +417,41 @@ async fn read_spill(
             ),
             _ => error,
         })?;
-    let reader = retained_reader(budget);
-    reader
-        .state_ref()
-        .write()
-        .config_mut()
-        .options_mut()
-        .execution
-        .collect_statistics = false;
+    let reader = retained_reader(budget, |options| {
+        options.execution.collect_statistics = false;
+    });
     scan_retained(reader, file.path(), Arc::new(memory)).await
 }
 
-/// Reads a completed export back, for later outputs and queries.
+/// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
 ///
-/// Its columns lose their own metadata, a lake column's `PARQUET:field_id`
-/// among it, as DataFusion's Parquet reader skips it by default: plain and
-/// managed jobs alike have always read `outputs.<name>` so.
+/// `configure` sets the reader's options beyond [`retained_reader`]'s, so each
+/// caller says what its read keeps: an export drops each column's own
+/// metadata (DataFusion's default, `outputs.<name>` as it has always been read)
+/// and a managed job's reopened step keeps it (`Job::reopen_retained`).
 pub(super) async fn read_retained(
     budget: &Budget,
     path: &std::path::Path,
+    configure: impl FnOnce(&mut ConfigOptions),
 ) -> Result<datafusion::dataframe::DataFrame> {
     let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
-    scan_retained(retained_reader(budget), path, memory).await
+    scan_retained(retained_reader(budget, configure), path, memory).await
 }
 
-/// Reopens a managed job's retained step with each column's metadata.
-///
-/// A plain job keeps a step as planned, so its later steps and exports see
-/// each column's metadata, a lake column's `PARQUET:field_id` among it. A
-/// managed job writes the step to a file and reopens it here. DataFusion's
-/// Parquet reader skips top-level column metadata by default
-/// (`skip_metadata`), which gave a managed job's exports the plain job's rows
-/// without their field ids: different footers, so different files. Read with
-/// it, the step's schema is the one written, and later steps plan as in the
-/// plain job.
-pub(super) async fn read_retained_step(
-    budget: &Budget,
-    path: &std::path::Path,
-) -> Result<datafusion::dataframe::DataFrame> {
-    let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
-    let reader = retained_reader(budget);
-    reader
-        .state_ref()
-        .write()
-        .config_mut()
-        .options_mut()
-        .execution
-        .parquet
-        .skip_metadata = false;
-    scan_retained(reader, path, memory).await
-}
-
-/// A reader for the engine's own Parquet files.
+/// A reader for the engine's own Parquet files, its options then set by `configure`.
 ///
 /// A frame from the job's own catalog would retain the table it backs and
 /// form a cycle. A fresh context shares the budget's runtime, not a catalog.
-fn retained_reader(budget: &Budget) -> SessionContext {
+fn retained_reader(budget: &Budget, configure: impl FnOnce(&mut ConfigOptions)) -> SessionContext {
     let reader = budget.context();
-    // Private materializations advertise their already normalized portable schema.
-    reader
-        .state_ref()
-        .write()
-        .config_mut()
-        .options_mut()
-        .execution
-        .parquet
-        .schema_force_view_types = false;
+    {
+        let shared = reader.state_ref();
+        let mut state = shared.write();
+        let options = state.config_mut().options_mut();
+        // Private materializations advertise their already normalized portable schema.
+        options.execution.parquet.schema_force_view_types = false;
+        configure(options);
+    }
     reader
 }
 
