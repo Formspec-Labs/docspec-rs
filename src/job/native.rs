@@ -265,28 +265,26 @@ pub(super) fn operators_beside_admission(plan: &Arc<dyn ExecutionPlan>) -> Vec<S
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn a_sort_over_a_parquet_input_is_planned_as_if_unadmitted() {
-        use crate::{budget::Limits, job::Job};
-        use arrow::{
-            array::{ArrayRef, Int64Array, StringArray},
-            record_batch::RecordBatch,
-        };
-        use datafusion::physical_plan::displayable;
-        use parquet::arrow::ArrowWriter;
+    use crate::job::Job;
+    use arrow::record_batch::RecordBatch;
+    use datafusion::physical_plan::displayable;
 
-        // The pipeline's bounded-memory shape: two threads and 32-row batches,
-        // where the planner repartitions beneath any operator that asks for it.
-        let root = tempfile::tempdir().unwrap();
-        let limits = Limits {
+    /// The pipeline's bounded-memory shape: two threads and 32-row batches,
+    /// where the planner repartitions beneath any operator that asks for it.
+    fn bounded_job(root: &tempfile::TempDir) -> Job {
+        let limits = crate::budget::Limits {
             compute_threads: 2,
             batch_rows: 32,
-            ..Limits::default()
+            ..crate::budget::Limits::default()
         };
-        let job = Job::new(limits, root.path().join("scratch")).unwrap();
-        let path = root.path().join("input.parquet");
+        Job::new(limits, root.path().join("scratch")).unwrap()
+    }
+
+    /// 1,024 rows of a key `id` and a short `text`.
+    fn input_batch() -> RecordBatch {
+        use arrow::array::{ArrayRef, Int64Array, StringArray};
         let rows = 1024;
-        let batch = RecordBatch::try_from_iter([
+        RecordBatch::try_from_iter([
             (
                 "id",
                 Arc::new(Int64Array::from_iter_values(0..rows)) as ArrayRef,
@@ -298,20 +296,30 @@ mod tests {
                 )) as ArrayRef,
             ),
         ])
-        .unwrap();
-        let mut writer =
-            ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), batch.schema(), None)
-                .unwrap();
+        .unwrap()
+    }
+
+    fn write_input(path: &std::path::Path) {
+        let batch = input_batch();
+        let file = std::fs::File::create(path).unwrap();
+        let mut writer = parquet::arrow::ArrowWriter::try_new(file, batch.schema(), None).unwrap();
         writer.write(&batch).unwrap();
         writer.close().unwrap();
+    }
+
+    async fn plan_of(job: &Job, sql: &str) -> Arc<dyn ExecutionPlan> {
+        let frame = job.sql(sql).await.unwrap();
+        frame.create_physical_plan().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_sort_over_a_parquet_input_is_planned_as_if_unadmitted() {
+        let root = tempfile::tempdir().unwrap();
+        let job = bounded_job(&root);
+        let path = root.path().join("input.parquet");
+        write_input(&path);
         job.register_parquet("input", &path).await.unwrap();
-        let plan = job
-            .sql("SELECT id, text FROM input ORDER BY text")
-            .await
-            .unwrap()
-            .create_physical_plan()
-            .await
-            .unwrap();
+        let plan = plan_of(&job, "SELECT id, text FROM input ORDER BY text").await;
         // The pin (b0342a7) had no admission and planned this sort over one
         // scan: EXPLAIN ANALYZE of the same sort over a Parquet input on the
         // pinned binary (one-line scratch, cmp/probe-pin-r1-old_input-t2-m192-s1).
@@ -321,6 +329,95 @@ mod tests {
         assert_eq!(
             operators_beside_admission(&plan),
             ["SortExec", "CompactViews", "DataSourceExec"],
+            "{}",
+            displayable(plan.as_ref()).indent(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn parents_plan_alike_over_an_admitted_and_a_bare_parquet_input() {
+        // Declining partitioning must not take it from a parent that wants it:
+        // a filter, an aggregate and a join get their repartition above the
+        // wrapper, as over the bare scan. A file is admitted when registered;
+        // a directory is not (`Job::register_parquet`), so the same rows give
+        // both forms.
+        let root = tempfile::tempdir().unwrap();
+        let job = bounded_job(&root);
+        let folder = root.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("part.parquet");
+        write_input(&path);
+        job.register_parquet("admitted", &path).await.unwrap();
+        job.register_parquet("bare", &folder).await.unwrap();
+        for statement in [
+            "SELECT id FROM {t} WHERE id % 3 = 0",
+            "SELECT text, count(*) AS n FROM {t} GROUP BY text",
+            "SELECT a.id FROM {t} a JOIN {t} b ON a.id = b.id",
+            "SELECT id, text FROM {t} ORDER BY text",
+        ] {
+            let admitted = plan_of(&job, &statement.replace("{t}", "admitted")).await;
+            let bare = plan_of(&job, &statement.replace("{t}", "bare")).await;
+            assert_eq!(
+                operators_beside_admission(&admitted),
+                operators_beside_admission(&bare),
+                "{statement}\nadmitted:\n{}\nbare:\n{}",
+                displayable(admitted.as_ref()).indent(true),
+                displayable(bare.as_ref()).indent(true)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_lake_input_keeps_the_pins_round_robin_at_two_threads() {
+        use datafusion::physical_plan::Partitioning;
+        use iceberg::Catalog as _;
+        // The pin (b0342a7, src/job.rs:314 and native.rs:91-123) wrapped every
+        // lake input in this node, asking for parallel input: a lake scan has
+        // one partition and no row count, so at two threads the planner put a
+        // round-robin repartition beneath the wrapper. Lake plans stay so.
+        let root = tempfile::tempdir().unwrap();
+        let job = bounded_job(&root);
+        let lake = root.path().join("lake");
+        let catalog = crate::storage::local_catalog(&lake).await.unwrap();
+        let namespace = iceberg::NamespaceIdent::new("lake".into());
+        catalog
+            .create_namespace(&namespace, std::collections::HashMap::new())
+            .await
+            .unwrap();
+        let batch = input_batch();
+        let schema =
+            iceberg::arrow::arrow_schema_to_schema_auto_assign_ids(batch.schema().as_ref())
+                .unwrap();
+        let creation = iceberg::TableCreation::builder()
+            .name("source".into())
+            .location(lake.join("source").to_string_lossy().into_owned())
+            .schema(schema)
+            .properties(crate::storage::table_properties())
+            .build();
+        let table = catalog.create_table(&namespace, creation).await.unwrap();
+        let rows = futures::stream::iter([Ok(batch)]);
+        let files = crate::storage::write_batches(&table, rows, &job.budget)
+            .await
+            .unwrap();
+        let table = crate::storage::append(&table, catalog.as_ref(), files)
+            .await
+            .unwrap();
+        job.register_native_table("lake", table).await.unwrap();
+        let plan = plan_of(&job, "SELECT id, text FROM lake").await;
+        let mut pending = vec![plan.clone()];
+        let admission = std::iter::from_fn(|| {
+            let next = pending.pop()?;
+            pending.extend(next.children().into_iter().cloned());
+            Some(next)
+        })
+        .find(|node| node.as_any().is::<AdmittedPlan>())
+        .expect("a lake input is admitted");
+        let beneath = admission.children()[0];
+        assert!(
+            matches!(
+                beneath.output_partitioning(),
+                Partitioning::RoundRobinBatch(2)
+            ),
             "{}",
             displayable(plan.as_ref()).indent(true)
         );
