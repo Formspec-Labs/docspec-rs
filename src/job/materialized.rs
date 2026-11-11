@@ -580,15 +580,31 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let job = job(&root);
         retain_keys(&job, "few", 3).await;
-        let text = explain(&job, "SELECT v FROM few LIMIT 2").await;
+        retain_keys(&job, "zero", 0).await;
         // The streaming scan's own text comes first: plan readers match it.
-        let scan = "StreamingTableExec: partition_sizes=1, projection=[v], fetch=2, \
-                    step=few, rows=3, storage=memory";
-        assert!(text.contains(scan), "{text}");
+        let few = "StreamingTableExec: partition_sizes=1, projection=[v], fetch=2, \
+                   step=few, step_rows=3, storage=memory";
+        let zero = "StreamingTableExec: partition_sizes=1, projection=[v], \
+                    step=zero, step_rows=0, storage=memory";
+        for (sql, scan) in [
+            ("SELECT v FROM few LIMIT 2", few),
+            ("SELECT v FROM zero", zero),
+        ] {
+            let text = explain(&job, sql).await;
+            assert!(text.contains(scan), "{text}");
+        }
+    }
+
+    #[test]
+    fn storage_labels_are_their_serde_names() {
+        // Readers of a job's result.json, the pipeline's among them, read these.
+        for storage in [StepStorage::View, StepStorage::Memory, StepStorage::Scratch] {
+            assert_eq!(serde_json::to_value(storage).unwrap(), storage.label());
+        }
     }
 
     #[tokio::test]
-    async fn joins_over_retained_steps_plan_as_the_bare_scan_did() {
+    async fn plans_over_retained_steps_match_the_bare_scans() {
         let root = tempfile::tempdir().unwrap();
         let job = job(&root);
         // Given row counts, DataFusion's join selection would swap a strictly
@@ -596,7 +612,8 @@ mod tests {
         // partitioned (both are over its 131,072-row single-partition
         // ceiling), and `big LEFT JOIN few` on few, collected. Without them
         // every join builds on its left input as written. The other shapes
-        // cover each join operator and type. Queries are planned, not run.
+        // cover each join operator and type, a window, an aggregate, a sort
+        // under a limit and a union. Queries are planned, not run.
         let steps = [
             ("big", 300_000),
             ("twin", 300_000),
@@ -629,6 +646,10 @@ mod tests {
                 "SELECT big.k, few.v FROM big JOIN few ON big.k < few.k",
                 "SELECT big.k, few.v FROM big CROSS JOIN few",
                 "SELECT k FROM big WHERE k NOT IN (SELECT k FROM few)",
+                "SELECT k, row_number() OVER (PARTITION BY k % 7 ORDER BY v) AS n FROM big",
+                "SELECT k % 7 AS g, count(*) AS n FROM big GROUP BY k % 7",
+                "SELECT k, v FROM big ORDER BY v DESC LIMIT 5",
+                "SELECT k FROM big UNION ALL SELECT k FROM few",
             ]
             .map(String::from),
         );
@@ -641,13 +662,14 @@ mod tests {
         }
         let bare = plans(&job, &queries).await;
         for ((sql, named), bare) in queries.iter().zip(named).zip(bare) {
-            // Both scans name their step, and nothing else in the plan moved,
+            // Every scan names its step, and nothing else in the plan moved,
             // the statistics of every operator included.
             let scans = named.matches("StreamingTableExec:").count();
-            let steps_named = named.matches(", step=").count();
-            assert_eq!((scans, steps_named), (2, 2), "{sql}\n{named}");
+            assert!(scans > 0, "{sql}\n{named}");
+            assert_eq!(named.matches(", step=").count(), scans, "{sql}\n{named}");
             let unnamed = steps.iter().fold(named, |text, (step, rows)| {
-                text.replace(&format!(", step={step}, rows={rows}, storage=memory"), "")
+                let label = format!(", step={step}, step_rows={rows}, storage=memory");
+                text.replace(&label, "")
             });
             assert_eq!(unnamed, bare, "{sql}");
         }
@@ -672,7 +694,7 @@ mod tests {
             (projected, "projection=[v]"),
         ] {
             let line = line(&pushed);
-            let named = format!("{text}, step=few, rows=3, storage=memory");
+            let named = format!("{text}, step=few, step_rows=3, storage=memory");
             assert!(line.contains(&named), "{line}");
         }
     }
@@ -732,7 +754,7 @@ mod tests {
             rows
         );
         let text = explain(&job, "SELECT * FROM spilled").await;
-        let scan = "step=spilled, rows=3072, storage=scratch";
+        let scan = "step=spilled, step_rows=3072, storage=scratch";
         assert!(text.contains(scan), "{text}");
     }
 }
