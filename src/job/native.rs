@@ -225,9 +225,87 @@ impl ExecutionPlan for AdmittedPlan {
     }
 }
 
+/// `plan`'s operator names in pre-order, leaving out metadata admission.
+///
+/// The names are the plan as the planner shapes it, which admission must not
+/// change: what remains can be compared with a plan made without the wrapper.
+#[cfg(test)]
+pub(super) fn operators_beside_admission(plan: &Arc<dyn ExecutionPlan>) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut pending = vec![plan.clone()];
+    while let Some(plan) = pending.pop() {
+        if !plan.as_any().is::<AdmittedPlan>() {
+            names.push(plan.name().to_owned());
+        }
+        pending.extend(plan.children().into_iter().rev().cloned());
+    }
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_sort_over_a_parquet_input_is_planned_as_if_unadmitted() {
+        use crate::{budget::Limits, job::Job};
+        use arrow::{
+            array::{ArrayRef, Int64Array, StringArray},
+            record_batch::RecordBatch,
+        };
+        use datafusion::physical_plan::displayable;
+        use parquet::arrow::ArrowWriter;
+
+        // The pipeline's bounded-memory shape: two threads and 32-row batches,
+        // where the planner repartitions beneath any operator that asks for it.
+        let root = tempfile::tempdir().unwrap();
+        let limits = Limits {
+            compute_threads: 2,
+            batch_rows: 32,
+            ..Limits::default()
+        };
+        let job = Job::new(limits, root.path().join("scratch")).unwrap();
+        let path = root.path().join("input.parquet");
+        let rows = 1024;
+        let batch = RecordBatch::try_from_iter([
+            (
+                "id",
+                Arc::new(Int64Array::from_iter_values(0..rows)) as ArrayRef,
+            ),
+            (
+                "text",
+                Arc::new(StringArray::from_iter_values(
+                    (0..rows).map(|row| format!("text-{row:04}")),
+                )) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        let mut writer =
+            ArrowWriter::try_new(std::fs::File::create(&path).unwrap(), batch.schema(), None)
+                .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        job.register_parquet("input", &path).await.unwrap();
+        let plan = job
+            .sql("SELECT id, text FROM input ORDER BY text")
+            .await
+            .unwrap()
+            .create_physical_plan()
+            .await
+            .unwrap();
+        // The pin (b0342a7) had no admission and planned this sort over one
+        // scan: EXPLAIN ANALYZE of the same sort over a Parquet input on the
+        // pinned binary (one-line scratch, cmp/probe-pin-r1-old_input-t2-m192-s1).
+        // Admitted, the scan was split by a round-robin repartition beneath the
+        // wrapper, doubling the sort and adding spill-capable consumers that
+        // shrink every spiller's share of the pool.
+        assert_eq!(
+            operators_beside_admission(&plan),
+            ["SortExec", "CompactViews", "DataSourceExec"],
+            "{}",
+            displayable(plan.as_ref()).indent(true)
+        );
+    }
 
     #[tokio::test]
     async fn protected_snapshot_result_admission_survives_partial_failure() {

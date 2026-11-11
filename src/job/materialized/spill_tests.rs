@@ -204,19 +204,17 @@ async fn a_spill_file_carries_no_statistics_and_no_page_index_and_replays_its_ro
     assert_eq!(replayed.columns(), expected.columns());
 }
 
-#[tokio::test]
-async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
-    // Whether a scan collects statistics is fixed in its listing table when
-    // the frame is built, so the frame `read_spill` returns is where to look.
-    let root = tempfile::tempdir().unwrap();
-    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+/// One batch of wide rows in a file the disk manager issued, read back by `read_spill`.
+///
+/// The file is written with the writer's defaults, so it has statistics to ask
+/// for. The handle is returned with the frame because dropping it deletes the file.
+async fn read_back_one_batch(job: &Job) -> (RefCountedTempFile, datafusion::dataframe::DataFrame) {
     let file = job
         .budget
         .runtime_env()
         .disk_manager
         .create_tmp_file("spill under test")
         .unwrap();
-    // The writer's defaults: this file has statistics to ask for.
     let mut writer = ArrowWriter::try_new(
         std::fs::File::create(file.path()).unwrap(),
         wide_schema(),
@@ -226,6 +224,16 @@ async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
     writer.write(&wide_batch(&wide_schema(), 0, BATCH)).unwrap();
     writer.close().unwrap();
     let frame = read_spill(&job.budget, &file, "wide").await.unwrap();
+    (file, frame)
+}
+
+#[tokio::test]
+async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
+    // Whether a scan collects statistics is fixed in its listing table when
+    // the frame is built, so the frame `read_spill` returns is where to look.
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+    let (_file, frame) = read_back_one_batch(&job).await;
     let datafusion::logical_expr::LogicalPlan::TableScan(scan) = frame.logical_plan() else {
         panic!("a spill is read back through one file scan");
     };
@@ -242,6 +250,25 @@ async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
     assert!(
         !listing.options().collect_stat,
         "the scan read_spill builds would ask the spill file for statistics"
+    );
+}
+
+#[tokio::test]
+async fn a_spill_is_read_back_by_its_scan_alone_at_two_threads() {
+    // A replay is its own plan, run inside the step's streaming table, so no
+    // EXPLAIN of a statement shows it. The pin (b0342a7) read a spill through
+    // `read_parquet` alone: a bare scan. Admitted, the scan gained a
+    // round-robin repartition beneath the wrapper at two threads, two hidden
+    // spill-capable consumers in every statement that reads the step.
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+    let (_file, frame) = read_back_one_batch(&job).await;
+    let plan = frame.create_physical_plan().await.unwrap();
+    assert_eq!(
+        crate::job::native::operators_beside_admission(&plan),
+        ["DataSourceExec"],
+        "{}",
+        datafusion::physical_plan::displayable(plan.as_ref()).indent(true)
     );
 }
 
