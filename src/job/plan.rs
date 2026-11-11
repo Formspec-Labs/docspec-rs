@@ -37,6 +37,26 @@ pub(super) fn inferred_schema(
     Ok(optimized?.schema().as_arrow().clone())
 }
 
+/// The schema a materialized SQL step or an export declares: its optimized plan's, portable.
+///
+/// The one owner of every SQL step's and export's declared schema, plain or
+/// managed (a components step declares its own fixed output): a step kept in
+/// memory, the same step written to a file and an export of either then agree
+/// on types, nullability and each column's own metadata (a lake column's
+/// `PARQUET:field_id` among it). The running plan's schema can differ from the
+/// planned one (see [`inferred_schema`]), so nothing is declared from a
+/// running stream.
+///
+/// # Errors
+/// Returns the planner's refusal of the frame's plan.
+pub(super) fn declared_schema(
+    frame: &DataFrame,
+    budget: &crate::budget::Budget,
+) -> crate::Result<SchemaRef> {
+    let schema = inferred_schema(frame, budget)?;
+    Ok(crate::export::portable_schema(&schema))
+}
+
 pub(super) async fn execute_stream(
     frame: DataFrame,
 ) -> crate::Result<datafusion::physical_plan::SendableRecordBatchStream> {

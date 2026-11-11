@@ -250,8 +250,7 @@ pub(super) async fn materialize(
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = job.sql(sql).await?;
-    let schema =
-        crate::export::portable_schema(&super::plan::inferred_schema(&frame, &job.budget)?);
+    let schema = super::plan::declared_schema(&frame, &job.budget)?;
     let stream = super::plan::execute_stream(frame).await?;
     retain(&job.context, &job.budget, name, schema, stream).await
 }

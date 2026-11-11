@@ -424,10 +424,7 @@ impl PrepareJobSpec {
                     }
                     let frame = job.sql_bound(&step.sql, &step.parameters).await?;
                     if step.materialize {
-                        let schema = crate::export::portable_schema(&super::plan::inferred_schema(
-                            &frame,
-                            &job.budget,
-                        )?);
+                        let schema = super::plan::declared_schema(&frame, &job.budget)?;
                         job.context.register_table(
                             &step.name,
                             Arc::new(SchemaOnlyTable(schema.clone())),

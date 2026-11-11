@@ -3,7 +3,7 @@
 use super::{ComponentsSettings, ExportSettings, ExportedFile, Job, QueryResult};
 use crate::{Error, Result, budget::Budget};
 use arrow::{
-    datatypes::Schema,
+    datatypes::{Schema, SchemaRef},
     ipc::{reader::StreamReader, writer::StreamWriter},
 };
 use datafusion::physical_plan::SendableRecordBatchStream;
@@ -210,10 +210,12 @@ impl Job {
         })?;
         Ok(names.into_iter().collect())
     }
+    /// Writes SQL step `sql` to the immutable file at `path`, declared as a plain job declares it.
     pub(crate) async fn retained_sql(&self, sql: &str, path: &Path) -> Result<ClosedFile> {
         let frame = self.sql(sql).await?;
-        self.retain_stream(super::plan::execute_stream(frame).await?, path)
-            .await
+        let schema = super::plan::declared_schema(&frame, &self.budget)?;
+        let stream = super::plan::execute_stream(frame).await?;
+        self.retain_stream(stream, schema, path).await
     }
 
     pub(crate) async fn retained_components(
@@ -222,19 +224,19 @@ impl Job {
         settings: &ComponentsSettings,
         path: &Path,
     ) -> Result<ClosedFile> {
-        self.retain_stream(
-            super::components::compute_stream(self, name, settings).await?,
-            path,
-        )
-        .await
+        let stream = super::components::compute_stream(self, name, settings).await?;
+        // A components step declares its own fixed output, plain or managed.
+        let schema = crate::export::portable_schema(&stream.schema());
+        self.retain_stream(stream, schema, path).await
     }
 
+    /// Writes `stream` to the immutable file at `path`, declared as `schema`.
     async fn retain_stream(
         &self,
         stream: SendableRecordBatchStream,
+        schema: SchemaRef,
         path: &Path,
     ) -> Result<ClosedFile> {
-        let schema = crate::export::portable_schema(&stream.schema());
         let mut stream = crate::export::portable_stream(stream, schema.clone(), &self.budget);
         let file = self
             .budget
