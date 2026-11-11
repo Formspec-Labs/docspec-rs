@@ -385,7 +385,6 @@ mod tests {
     #[tokio::test]
     async fn a_lake_input_keeps_the_pins_round_robin_at_two_threads() {
         use datafusion::physical_plan::Partitioning;
-        use iceberg::Catalog as _;
         // The pin (b0342a7, src/job.rs:314 and native.rs:91-123) wrapped every
         // lake input in this node, asking for parallel input: a lake scan has
         // one partition and no row count, so at two threads the planner put a
@@ -430,7 +429,7 @@ mod tests {
         let beneath = admission.children()[0];
         assert!(
             matches!(
-                beneath.output_partitioning(),
+                beneath.properties().output_partitioning(),
                 Partitioning::RoundRobinBatch(2)
             ),
             "{}",
