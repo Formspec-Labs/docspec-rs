@@ -427,13 +427,44 @@ async fn read_spill(
     scan_retained(reader, file.path(), Arc::new(memory)).await
 }
 
-/// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
+/// Reads a completed export back, for later outputs and queries.
+///
+/// Its columns lose their own metadata, a lake column's `PARQUET:field_id`
+/// among it, as DataFusion's Parquet reader skips it by default: plain and
+/// managed jobs alike have always read `outputs.<name>` so.
 pub(super) async fn read_retained(
     budget: &Budget,
     path: &std::path::Path,
 ) -> Result<datafusion::dataframe::DataFrame> {
     let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
     scan_retained(retained_reader(budget), path, memory).await
+}
+
+/// Reopens a managed job's retained step with each column's metadata.
+///
+/// A plain job keeps a step as planned, so its later steps and exports see
+/// each column's metadata, a lake column's `PARQUET:field_id` among it. A
+/// managed job writes the step to a file and reopens it here. DataFusion's
+/// Parquet reader skips top-level column metadata by default
+/// (`skip_metadata`), which gave a managed job's exports the plain job's rows
+/// without their field ids: different footers, so different files. Read with
+/// it, the step's schema is the one written, and later steps plan as in the
+/// plain job.
+pub(super) async fn read_retained_step(
+    budget: &Budget,
+    path: &std::path::Path,
+) -> Result<datafusion::dataframe::DataFrame> {
+    let memory = Arc::new(crate::storage::admit_parquet_footer(path, budget).await?);
+    let reader = retained_reader(budget);
+    reader
+        .state_ref()
+        .write()
+        .config_mut()
+        .options_mut()
+        .execution
+        .parquet
+        .skip_metadata = false;
+    scan_retained(reader, path, memory).await
 }
 
 /// A reader for the engine's own Parquet files.

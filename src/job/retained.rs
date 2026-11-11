@@ -112,7 +112,7 @@ impl Job {
         Ok(frame)
     }
     pub(crate) async fn reopen_retained(&self, name: &str, path: &Path) -> Result<()> {
-        let frame = super::materialized::read_retained(&self.budget, path).await?;
+        let frame = super::materialized::read_retained_step(&self.budget, path).await?;
         self.register_frame(name, self.owned_relation_frame(name, false, frame)?)
     }
     pub(crate) async fn retained_view(&self, step: &super::JobStep) -> Result<Schema> {
