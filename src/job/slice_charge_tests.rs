@@ -20,12 +20,51 @@ const MATCHED: usize = 2000;
 /// The outer join whose unmatched `big` rows leave as slices of one batch.
 const LEFT_JOIN: &str = "big LEFT JOIN mid ON big.k = mid.k";
 
-/// A job retaining `big` (key, 200-byte body, payload), `mid` and `tiny`.
+/// A job retaining `big` (key, 200-byte body, payload), plus uncounted streaming
+/// inputs `mid` and `tiny` so `big` stays the build side of every join.
 ///
-/// Retained steps carry no statistics, so every join builds on its left
-/// input. Returns the bytes `big` retains.
+/// Retained steps publish row counts (`RetainedScan`), while streaming inputs
+/// such as `json_lines` publish `Precision::Absent`, so `JoinSelection` keeps
+/// `big` on the build side (`JS:76-81`). Returns the bytes `big` retains.
 async fn retained_job(payload: &str) -> (tempfile::TempDir, Job, usize) {
     retained_rows(payload, ROWS).await
+}
+
+/// Registers `sql`'s batches as an uncounted `StreamingTable` (`num_rows = Absent`).
+async fn register_uncounted(job: &Job, name: &str, sql: &str) {
+    use arrow::record_batch::RecordBatch;
+    use datafusion::{
+        catalog::streaming::StreamingTable,
+        execution::TaskContext,
+        physical_plan::{
+            SendableRecordBatchStream, stream::RecordBatchStreamAdapter, streaming::PartitionStream,
+        },
+    };
+    #[derive(Debug)]
+    struct Uncounted {
+        schema: arrow::datatypes::SchemaRef,
+        batches: Vec<RecordBatch>,
+    }
+    impl PartitionStream for Uncounted {
+        fn schema(&self) -> &arrow::datatypes::SchemaRef {
+            &self.schema
+        }
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            Box::pin(RecordBatchStreamAdapter::new(
+                self.schema.clone(),
+                futures::stream::iter(self.batches.clone().into_iter().map(Ok)),
+            ))
+        }
+    }
+    let frame = job.sql(sql).await.unwrap();
+    let schema = Arc::new(frame.schema().as_arrow().clone());
+    let batches = frame.collect().await.unwrap();
+    let partition = Arc::new(Uncounted {
+        schema: schema.clone(),
+        batches,
+    });
+    let table = StreamingTable::try_new(schema, vec![partition]).unwrap();
+    job.context.register_table(name, Arc::new(table)).unwrap();
 }
 
 /// [`retained_job`] with `rows` rows in `big`.
@@ -54,7 +93,7 @@ async fn retained_rows(payload: &str, rows: usize) -> (tempfile::TempDir, Job, u
     assert_eq!((storage, retained_rows), (StepStorage::Memory, rows));
     for (name, keys) in [("mid", MATCHED), ("tiny", 1)] {
         let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
-        job.materialize(name, &sql).await.unwrap();
+        register_uncounted(&job, name, &sql).await;
     }
     (scratch, job, retained)
 }
@@ -373,8 +412,10 @@ enum Emission {
     Whole,
 }
 
-/// Rows in `big` for the shape survey: enough slices to show inflation.
-const SHAPE_ROWS: usize = 100_000;
+/// Rows in `big` for the shape survey: above DataFusion's 131,072-row
+/// single-partition threshold so hash joins stay `Partitioned`, with enough
+/// slices to show inflation.
+const SHAPE_ROWS: usize = 140_000;
 
 /// (case, relation after FROM with `{big}` for the input, join, join type,
 /// emission, whether the session collects the build side)
@@ -524,12 +565,12 @@ async fn outer_join_shapes_keep_their_rows_and_charge_once() {
     let mut failures = Vec::new();
     for (payload, column, relation) in payloads {
         let (_scratch, job, retained) = retained_rows(column, SHAPE_ROWS).await;
-        job.materialize(
+        register_uncounted(
+            &job,
             "absent",
             &format!("SELECT -value AS k FROM generate_series(1, {MATCHED}) AS t(value)"),
         )
-        .await
-        .unwrap();
+        .await;
         // The same catalog, planning hash joins in CollectLeft mode.
         let collect_left = SessionContext::new_with_state(
             datafusion::execution::SessionStateBuilder::new_from_existing(job.context.state())
