@@ -1,4 +1,5 @@
 //! Readback persistence, selection promotion, and durable phase completion.
+// Rust guideline compliant 2026-02-21
 
 use super::*;
 
@@ -124,7 +125,9 @@ impl Engine {
         // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
             if let OperationRequest::Refresh(refresh) = spec {
-                let selected = self.select_refresh(refresh, operation, &release).await?;
+                let selected = self
+                    .select_refresh(refresh, operation, &release, requested_policy)
+                    .await?;
                 stop_after(stop, "selection")?;
                 return Ok(selected);
             }

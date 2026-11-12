@@ -1075,6 +1075,9 @@ impl Engine {
         requested: Option<&Id>,
     ) -> Result<()> {
         if self.initial_qualification(view, operation).await?.is_none() {
+            if requested.is_some() {
+                return Err(unknown_operation());
+            }
             return Ok(());
         }
         let policy = self.quality_policy(view, operation).await?;

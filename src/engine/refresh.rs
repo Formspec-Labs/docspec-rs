@@ -1,4 +1,5 @@
 //! Native related results, retained contributors, and guarded forward input coverage.
+// Rust guideline compliant 2026-02-21
 
 use super::write::{Prepared, identifier as quote};
 use super::*;
@@ -341,6 +342,7 @@ impl Engine {
         spec: &RefreshSpec,
         operation: &Operation,
         release: &Retained<ReleasePin>,
+        requested_policy: Option<&Id>,
     ) -> Result<ReleasePin> {
         let related = release
             .dataset
@@ -356,13 +358,24 @@ impl Engine {
             .get::<ReleasePin>(&view, &format!("result/{}", spec.operation))
             .await?
         {
+            if let Some(requested_policy) = requested_policy {
+                self.guard_completed_policy(&view, &spec.operation, requested_policy)
+                    .await?;
+            }
             return Ok(selected);
         }
         let authority = self.check(&view, operation, &spec.operation).await?;
-        check_rebuild(
+        let request = OperationRequest::Refresh(Box::new(spec.clone()));
+        self.check_backend_selection(&authority, &request)?;
+        self.guard_external_qualification(
+            &view,
             &authority,
-            &OperationRequest::Refresh(Box::new(spec.clone())),
-        )?;
+            &spec.operation,
+            release,
+            requested_policy,
+        )
+        .await?;
+        check_rebuild(&authority, &request)?;
         self.guard_ancestors(&dependencies, release).await?;
         let previous = authority
             .selected

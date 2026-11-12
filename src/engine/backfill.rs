@@ -1,4 +1,5 @@
 //! Recoverable row-local field groups, selected against an exact source boundary.
+// Rust guideline compliant 2026-02-21
 
 use super::retention::owners::ReferenceProtections;
 use super::{expr::is_valid_identifier, write::identifier as quote, *};
@@ -545,6 +546,10 @@ impl Engine {
                     .await?;
                 self.check_continuous_child(&view, spec, None).await?;
                 if operation.is_some_and(|operation| operation.request_digest == digest)
+                    && self
+                        .initial_qualification(&view, &spec.operation)
+                        .await?
+                        .is_none()
                     && let Some(completed) = lifecycle
                         .get(&view, &format!("result/{}", spec.operation))
                         .await?
@@ -663,6 +668,16 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
             {
+                if self
+                    .initial_qualification(&view, &spec.operation)
+                    .await?
+                    .is_some()
+                {
+                    return Err(Error::refusal(
+                        "stale_qualification_policy",
+                        "selection requires the active quality policy",
+                    ));
+                }
                 return Ok(BackfillAdmission::Completed(result));
             }
             self.check_not_abandoned(&view, &spec.operation).await?;
@@ -1129,9 +1144,21 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
             {
+                if self
+                    .initial_qualification(&view, &spec.operation)
+                    .await?
+                    .is_some()
+                {
+                    return Err(Error::refusal(
+                        "stale_qualification_policy",
+                        "selection requires the active quality policy",
+                    ));
+                }
                 return Ok(completed);
             }
             let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();
+            self.guard_external_qualification(&view, &authority, &spec.operation, &release, None)
+                .await?;
             promotion(&authority, operation, capture, source, spec)?;
             if authority.release.as_ref() != Some(&current) {
                 continue;
