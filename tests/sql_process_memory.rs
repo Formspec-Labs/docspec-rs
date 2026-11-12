@@ -251,22 +251,8 @@ fn run_slice_case(case: &str) {
                 .await
                 .unwrap();
             assert_eq!(storage, docspec::job::StepStorage::Memory);
-            for (name, sql) in [
-                (
-                    "mid",
-                    format!(
-                        "SELECT CASE WHEN value <= 2000 THEN value ELSE -value END AS k \
-                         FROM generate_series(1, {SLICE_ROWS}) AS t(value)"
-                    ),
-                ),
-                (
-                    "tiny",
-                    format!(
-                        "SELECT CASE WHEN value = 1 THEN 1 ELSE -1000000 - value END AS k \
-                         FROM generate_series(1, {SLICE_ROWS}) AS t(value)"
-                    ),
-                ),
-            ] {
+            for (name, keys) in [("mid", 2000), ("tiny", 1)] {
+                let sql = format!("SELECT value AS k FROM generate_series(1, {keys}) AS t(value)");
                 job.materialize(name, &sql).await.unwrap();
             }
             if arm != "base" {
@@ -302,11 +288,14 @@ fn run_slice_case(case: &str) {
 /// `cargo test --all-features --test sql_process_memory -- --ignored --nocapture slice`.
 /// On 2026-11-10 each child peaked under 1.8 GiB RSS and the run took 76 s.
 ///
-/// What it measures depends on the plan: `mid` and `tiny` each carry
-/// `SLICE_ROWS` keys (only 2,000 and 1 positive matches, the rest negative) so
-/// `JoinSelection` sees equal row counts (`left == right`) and keeps `big` as
-/// the `Partitioned` `Left` build side of the first join and its sliced
-/// unmatched rows as the build input of the second join.
+/// What it measures depends on the plan, and it checks only rows. While
+/// retained steps report no row counts, each join builds on its left input:
+/// `big` is the first build and its unmatched rows reach the second build as
+/// slices, the case the rule exists for. Once steps report row counts the
+/// planner swaps a join whose left input has more rows (DataFusion 53.1
+/// join_selection.rs `should_swap_join_order`), so both joins become Right
+/// joins built on `mid` and then `tiny`, no outer-join slices arise, and the
+/// on and off arms measure the same work.
 #[cfg(feature = "test-util")]
 #[test]
 #[ignore = "measurement: six children of up to 2 GiB each"]

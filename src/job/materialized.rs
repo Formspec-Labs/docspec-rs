@@ -103,6 +103,7 @@ struct ReservedTable {
     table: StreamingTable,
     step: Arc<str>,
     rows: usize,
+    bytes: usize,
     storage: StepStorage,
 }
 #[async_trait::async_trait]
@@ -117,7 +118,11 @@ impl TableProvider for ReservedTable {
         TableType::Temporary
     }
     fn statistics(&self) -> Option<Statistics> {
-        Some(Statistics::new_unknown(&self.schema()).with_num_rows(Precision::Exact(self.rows)))
+        Some(
+            Statistics::new_unknown(&self.schema())
+                .with_num_rows(Precision::Exact(self.rows))
+                .with_total_byte_size(Precision::Exact(self.bytes)),
+        )
     }
     async fn scan(
         &self,
@@ -146,11 +151,14 @@ impl TableProvider for ReservedTable {
 /// count is `step_rows`, which no reader can take for a metric such as
 /// `output_rows`.
 ///
-/// `partition_statistics` publishes the step's row count (capped by any pushed
-/// `fetch`) as `Precision::Inexact` without `total_byte_size`, so DataFusion's
-/// `JoinSelection` swaps a larger left input to build on the smaller step while
-/// `EnforceDistribution` preserves round-robin repartitioning over small steps.
-/// The optimizer sees a leaf, so it can put nothing between the two.
+/// All else is the scan's: its projection, limit and partition (which keeps
+/// the step's reservation or scratch file alive), properties, metrics and
+/// statistics. The planner sees what it saw before, and no row count: handing
+/// row counts without byte widths to DataFusion 53.1's `try_collect_left` swaps
+/// empty (`0`-row) steps, `json_lines` inputs (`Absent`) and narrow key steps
+/// off the build side in favor of wide steps under `131,072` rows or `FilterExec`'s
+/// `0.2` selectivity guess. The optimizer sees a leaf, so it can put nothing
+/// between the two.
 #[derive(Debug)]
 pub(super) struct RetainedScan {
     input: Arc<dyn ExecutionPlan>,
@@ -218,11 +226,7 @@ impl ExecutionPlan for RetainedScan {
         &self,
         partition: Option<usize>,
     ) -> datafusion::common::Result<Statistics> {
-        if partition.is_some_and(|p| p != 0) {
-            return self.input.partition_statistics(partition);
-        }
-        let rows = self.fetch().map_or(self.rows, |fetch| fetch.min(self.rows));
-        Ok(Statistics::new_unknown(&self.schema()).with_num_rows(Precision::Inexact(rows)))
+        self.input.partition_statistics(partition)
     }
     fn fetch(&self) -> Option<usize> {
         self.input.fetch()
@@ -455,6 +459,7 @@ pub(super) async fn retain(
         table: StreamingTable::try_new(schema, vec![partition])?,
         step: name.into(),
         rows,
+        bytes,
         storage,
     };
     context.register_table(name, Arc::new(table))?;
@@ -628,6 +633,17 @@ mod tests {
         frame.create_physical_plan().await.unwrap()
     }
 
+    /// Each query's physical plan as text, every operator with its statistics.
+    async fn plans(job: &Job, queries: &[String]) -> Vec<String> {
+        let mut plans = Vec::new();
+        for sql in queries {
+            let plan = physical_plan(job, sql).await;
+            let text = displayable(plan.as_ref()).set_show_statistics(true);
+            plans.push(text.indent(true).to_string());
+        }
+        plans
+    }
+
     /// The physical plan of `sql` as `EXPLAIN` returns it.
     async fn explain(job: &Job, sql: &str) -> String {
         let frame = job.sql(&format!("EXPLAIN {sql}")).await.unwrap();
@@ -649,36 +665,34 @@ mod tests {
         displayable(plan.as_ref()).one_line().to_string()
     }
 
-    fn first_hash_join(
-        plan: &Arc<dyn ExecutionPlan>,
-    ) -> &datafusion::physical_plan::joins::HashJoinExec {
-        if let Some(join) = plan
-            .as_any()
-            .downcast_ref::<datafusion::physical_plan::joins::HashJoinExec>()
-        {
-            return join;
+    /// A retained step that scans as before steps were named: the bare streaming scan.
+    #[derive(Debug)]
+    struct Unnamed(Arc<dyn TableProvider>);
+    #[async_trait::async_trait]
+    impl TableProvider for Unnamed {
+        fn as_any(&self) -> &dyn Any {
+            self
         }
-        for child in plan.children() {
-            if let Some(join) = find_hash_join(child) {
-                return join;
-            }
+        fn schema(&self) -> SchemaRef {
+            self.0.schema()
         }
-        panic!(
-            "expected HashJoinExec in:\n{}",
-            displayable(plan.as_ref()).indent(true)
-        );
-    }
-
-    fn find_hash_join(
-        plan: &Arc<dyn ExecutionPlan>,
-    ) -> Option<&datafusion::physical_plan::joins::HashJoinExec> {
-        if let Some(join) = plan
-            .as_any()
-            .downcast_ref::<datafusion::physical_plan::joins::HashJoinExec>()
-        {
-            return Some(join);
+        fn table_type(&self) -> TableType {
+            self.0.table_type()
         }
-        plan.children().into_iter().find_map(find_hash_join)
+        fn statistics(&self) -> Option<Statistics> {
+            self.0.statistics()
+        }
+        async fn scan(
+            &self,
+            session: &dyn Session,
+            projection: Option<&Vec<usize>>,
+            filters: &[Expr],
+            limit: Option<usize>,
+        ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+            let step = self.0.as_any().downcast_ref::<ReservedTable>();
+            let step = step.expect("a retained step");
+            step.table.scan(session, projection, filters, limit).await
+        }
     }
 
     #[tokio::test]
@@ -710,251 +724,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn left_join_builds_on_the_smaller_retained_step() {
-        use datafusion::{common::JoinType, physical_plan::joins::PartitionMode};
+    async fn plans_over_retained_steps_match_the_bare_scans() {
         let root = tempfile::tempdir().unwrap();
         let job = job(&root);
-        for (name, rows) in [
+        // Given row counts, DataFusion's join selection would swap a strictly
+        // larger left input: `big LEFT JOIN mid` would build on mid,
+        // partitioned (both are over its 131,072-row single-partition
+        // ceiling), and `big LEFT JOIN few` on few, collected. Without them
+        // every join builds on its left input as written. The other shapes
+        // cover each join operator and type, a window, an aggregate, a sort
+        // under a limit and a union. Queries are planned, not run.
+        let steps = [
             ("big", 300_000),
             ("twin", 300_000),
             ("mid", 150_000),
             ("few", 3),
             ("trio", 3),
-        ] {
+        ];
+        for (name, rows) in steps {
             retain_keys(&job, name, rows).await;
         }
-        let cases = [
-            (
-                "big",
-                "mid",
-                JoinType::Right,
-                PartitionMode::Partitioned,
-                "mid",
-                150_000,
-            ),
-            (
-                "big",
-                "few",
-                JoinType::Right,
-                PartitionMode::CollectLeft,
-                "few",
-                3,
-            ),
-            (
-                "mid",
-                "big",
-                JoinType::Left,
-                PartitionMode::Partitioned,
-                "mid",
-                150_000,
-            ),
-            (
-                "big",
-                "twin",
-                JoinType::Left,
-                PartitionMode::Partitioned,
-                "big",
-                300_000,
-            ),
-            (
-                "few",
-                "trio",
-                JoinType::Left,
-                PartitionMode::CollectLeft,
-                "few",
-                3,
-            ),
+        let pairs = [
+            ("big", "mid"),
+            ("big", "few"),
+            ("mid", "big"),
+            ("big", "twin"),
+            ("few", "trio"),
         ];
-        for (left, right, expected_type, expected_mode, expected_build, expected_rows) in cases {
-            let sql = format!(
+        let mut queries = Vec::from(pairs.map(|(left, right)| {
+            format!(
                 "SELECT {left}.k, {right}.v FROM {left} LEFT JOIN {right} ON {left}.k = {right}.k"
-            );
-            let plan = physical_plan(&job, &sql).await;
-            let join = first_hash_join(&plan);
-            assert_eq!(
-                (*join.join_type(), *join.partition_mode()),
-                (expected_type, expected_mode),
-                "{sql}\n{}",
-                displayable(plan.as_ref()).indent(true)
-            );
-            let build_leaf = scan(join.left());
-            let expected_label = format!("step={expected_build}, step_rows={expected_rows}");
-            assert!(
-                line(build_leaf).contains(&expected_label),
-                "{sql}\n{}",
-                displayable(plan.as_ref()).indent(true)
-            );
-        }
-
-        // `Inexact` row counts keep round-robin repartition over small steps when
-        // parallel operators benefit from partitioning.
-        let agg = physical_plan(
-            &job,
-            "SELECT k % 7 AS g, count(*) AS n FROM few GROUP BY k % 7",
-        )
-        .await;
-        let agg_text = displayable(agg.as_ref()).indent(true).to_string();
-        assert!(
-            agg_text.contains("RoundRobinBatch(2)"),
-            "expected round-robin repartition over `few`:\n{agg_text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn scan_statistics_follow_the_pushed_limit_and_projection() {
-        let root = tempfile::tempdir().unwrap();
-        let job = job(&root);
-        retain_keys(&job, "few", 3).await;
-
-        let provider = job.context.table_provider("few").await.unwrap();
-        let table_stats = provider
-            .statistics()
-            .expect("retained table publishes row count");
-        assert_eq!(table_stats.num_rows, Precision::Exact(3));
-        assert_eq!(table_stats.total_byte_size, Precision::Absent);
-        assert_eq!(table_stats.column_statistics.len(), 2);
-
-        let plan = physical_plan(&job, "SELECT * FROM few").await;
-        let leaf = scan(&plan);
-        let full = leaf.partition_statistics(None).unwrap();
-        assert_eq!(full.num_rows, Precision::Inexact(3));
-        assert_eq!(full.total_byte_size, Precision::Absent);
-        assert_eq!(full.column_statistics.len(), 2);
-        assert_eq!(
-            leaf.partition_statistics(Some(0)).unwrap().num_rows,
-            Precision::Inexact(3)
-        );
-        assert!(leaf.partition_statistics(Some(1)).is_err());
-
-        let limited = leaf.with_fetch(Some(1)).unwrap();
-        let limited_stats = limited.partition_statistics(None).unwrap();
-        assert_eq!(limited_stats.num_rows, Precision::Inexact(1));
-        assert_eq!(limited_stats.total_byte_size, Precision::Absent);
-
-        let capped = leaf.with_fetch(Some(10)).unwrap();
-        assert_eq!(
-            capped.partition_statistics(None).unwrap().num_rows,
-            Precision::Inexact(3)
-        );
-
-        let v = (col("v", &leaf.schema()).unwrap(), "v".to_owned());
-        let projection = ProjectionExec::try_new([v], leaf.clone()).unwrap();
-        let projected = leaf
-            .try_swapping_with_projection(&projection)
-            .unwrap()
-            .unwrap();
-        let projected_stats = projected.partition_statistics(None).unwrap();
-        assert_eq!(projected_stats.num_rows, Precision::Inexact(3));
-        assert_eq!(projected_stats.total_byte_size, Precision::Absent);
-        assert_eq!(projected_stats.column_statistics.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn swapped_joins_return_the_rows_of_the_join_as_written() {
-        use datafusion::{common::JoinType, physical_plan::joins::PartitionMode};
-        let root = tempfile::tempdir().unwrap();
-        let job = job(&root);
-        job.materialize(
-            "lhs",
-            "SELECT CASE WHEN value % 5 = 0 THEN NULL ELSE value END AS k, \
-             value * 10 AS lv FROM generate_series(1, 20) AS t(value)",
-        )
-        .await
-        .unwrap();
-        job.materialize(
-            "rhs",
-            "SELECT CASE WHEN value = 5 THEN NULL ELSE value * 2 END AS k, \
-             value * 100 AS rv FROM generate_series(1, 5) AS t(value)",
-        )
-        .await
-        .unwrap();
-
-        // Build an uncounted reference session (`StreamingTable` directly, so no join swaps).
-        let uncounted = Job::new(
-            Limits {
-                compute_threads: 2,
-                ..Limits::default()
-            },
-            root.path().join("scratch_uncounted"),
-        )
-        .unwrap();
-        for name in ["lhs", "rhs"] {
-            let batches = job
-                .sql(&format!("SELECT * FROM {name}"))
-                .await
-                .unwrap()
-                .collect()
-                .await
-                .unwrap();
-            let schema = batches[0].schema();
-            let partition = Arc::new(Batches {
-                schema: schema.clone(),
-                retained: Arc::new(StepData::Memory {
-                    batches,
-                    _reservation: MemoryConsumer::new("ref")
-                        .register(&uncounted.budget.runtime_env().memory_pool),
-                    _retention: MemoryConsumer::new("ref_ret")
-                        .register(uncounted.budget.retention_pool()),
-                }),
-            });
-            let bare = StreamingTable::try_new(schema, vec![partition]).unwrap();
-            uncounted
-                .context
-                .register_table(name, Arc::new(bare))
-                .unwrap();
-        }
-
-        let mut queries = Vec::new();
-        for (a, b) in [("lhs", "rhs"), ("rhs", "lhs")] {
-            for kind in ["INNER", "LEFT", "RIGHT", "FULL"] {
-                queries.push(format!(
-                    "SELECT {a}.k AS ak, {a}.*, {b}.* FROM {a} {kind} JOIN {b} ON {a}.k = {b}.k"
-                ));
-            }
-            for kind in ["LEFT SEMI", "LEFT ANTI"] {
-                queries.push(format!(
-                    "SELECT {a}.* FROM {a} {kind} JOIN {b} ON {a}.k = {b}.k"
-                ));
-            }
+            )
+        }));
+        for kind in ["INNER", "RIGHT", "FULL", "LEFT SEMI", "LEFT ANTI"] {
             queries.push(format!(
-                "SELECT * FROM {a} WHERE k NOT IN (SELECT k FROM {b})"
+                "SELECT * FROM big {kind} JOIN few ON big.k = few.k"
             ));
         }
-
-        // Null-aware anti join (`NOT IN` over nullable keys) must never swap.
-        let null_anti =
-            physical_plan(&job, "SELECT * FROM lhs WHERE k NOT IN (SELECT k FROM rhs)").await;
-        let join = first_hash_join(&null_anti);
-        assert_eq!(
-            (*join.join_type(), *join.partition_mode(), join.null_aware),
-            (JoinType::LeftAnti, PartitionMode::CollectLeft, true)
+        queries.extend(
+            [
+                "SELECT big.k, few.v FROM big JOIN few ON big.k < few.k",
+                "SELECT big.k, few.v FROM big CROSS JOIN few",
+                "SELECT k FROM big WHERE k NOT IN (SELECT k FROM few)",
+                "SELECT k, row_number() OVER (PARTITION BY k % 7 ORDER BY v) AS n FROM big",
+                "SELECT k % 7 AS g, count(*) AS n FROM big GROUP BY k % 7",
+                "SELECT k, v FROM big ORDER BY v DESC LIMIT 5",
+                "SELECT k FROM big UNION ALL SELECT k FROM few",
+            ]
+            .map(String::from),
         );
-
-        async fn sorted_rows(job: &Job, sql: &str) -> Vec<arrow::row::OwnedRow> {
-            let frame = job.sql(sql).await.unwrap();
-            let schema = Arc::new(frame.schema().as_arrow().clone());
-            let batches = frame.collect().await.unwrap();
-            let converter = arrow::row::RowConverter::new(
-                schema
-                    .fields()
-                    .iter()
-                    .map(|field| arrow::row::SortField::new(field.data_type().clone()))
-                    .collect(),
-            )
-            .unwrap();
-            let mut rows = Vec::new();
-            for batch in &batches {
-                let converted = converter.convert_columns(batch.columns()).unwrap();
-                rows.extend(converted.iter().map(|row| row.owned()));
-            }
-            rows.sort_unstable();
-            rows
+        let named = plans(&job, &queries).await;
+        for (name, _) in steps {
+            let step = job.context.deregister_table(name).unwrap().unwrap();
+            job.context
+                .register_table(name, Arc::new(Unnamed(step)))
+                .unwrap();
         }
-
-        for sql in &queries {
-            let actual = sorted_rows(&job, sql).await;
-            let expected = sorted_rows(&uncounted, sql).await;
-            assert!(actual == expected, "mismatch for {sql}");
+        let bare = plans(&job, &queries).await;
+        for ((sql, named), bare) in queries.iter().zip(named).zip(bare) {
+            // Every scan names its step, and nothing else in the plan moved,
+            // the statistics of every operator included.
+            let scans = named.matches("StreamingTableExec:").count();
+            assert!(scans > 0, "{sql}\n{named}");
+            assert_eq!(named.matches(", step=").count(), scans, "{sql}\n{named}");
+            let unnamed = steps.iter().fold(named, |text, (step, rows)| {
+                let label = format!(", step={step}, step_rows={rows}, storage=memory");
+                text.replace(&label, "")
+            });
+            assert_eq!(unnamed, bare, "{sql}");
         }
     }
 

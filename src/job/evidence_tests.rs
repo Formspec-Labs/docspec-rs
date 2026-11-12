@@ -342,7 +342,7 @@ async fn job_metric_events_record_start_join_summaries_shared_floor_and_failure(
         "steps": [
             {"name": "big", "materialize": true, "sql": "SELECT value AS k FROM generate_series(1, 20) AS t(value)"},
             {"name": "few", "materialize": true, "sql": "SELECT value * 2 AS k, value * 10 AS v FROM generate_series(1, 3) AS t(value)"},
-            {"name": "joined", "materialize": true, "sql": "SELECT big.k, few.v FROM big LEFT JOIN few ON big.k = few.k"}
+            {"name": "joined", "materialize": true, "sql": "SELECT big.k, few.v FROM few RIGHT JOIN big ON big.k = few.k"}
         ],
         "outputs": [
             {"name": "joined_out", "path": out_path, "sql": "SELECT k, v FROM joined", "settings": joined_export}
@@ -373,7 +373,7 @@ async fn job_metric_events_record_start_join_summaries_shared_floor_and_failure(
         joined_step["joins"],
         json!([{
             "join_type": "Right",
-            "partition_mode": "CollectLeft",
+            "partition_mode": "Partitioned",
             "build_step": "few",
             "build_rows": 3
         }])
