@@ -78,7 +78,9 @@ async fn auto_compacts_workspace_lifecycle_and_preserves_recovery_reuse_and_reti
     std::fs::write(&raw_path, raw_bytes).unwrap();
 
     let host = root.path().join("host");
-    let engine = Engine::open(&host, limits()).await.unwrap();
+    let mut bounds = limits();
+    bounds.max_batch_bytes = 512 << 10;
+    let engine = Engine::open(&host, bounds).await.unwrap();
     let dataset = Id::new("native-job").unwrap();
 
     // 1. Commit one complete retirement receipt before auto-compaction runs.

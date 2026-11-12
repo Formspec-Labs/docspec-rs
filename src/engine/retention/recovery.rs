@@ -328,13 +328,9 @@ pub(super) fn validate_saved(
         return Ok(());
     };
     let budget = &engine.inner.lifecycle.budget;
-    if let Some(mut records) = crate::engine::managed_job::retention::retirement_records(
-        rows, view, operation, false, budget,
+    if crate::engine::managed_job::retention::validate_saved_retirement(
+        rows, view, operation, receipt, budget,
     )? {
-        records.sort();
-        if records != receipt.plan.records {
-            return Err(invalid_retirement());
-        }
         return Ok(());
     }
     let _decoded = reserve_identity(rows, operation, budget)?;

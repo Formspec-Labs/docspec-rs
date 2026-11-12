@@ -447,6 +447,88 @@ pub(in crate::engine) fn retirement_records(
     Ok(Some(records))
 }
 
+pub(in crate::engine) fn validate_saved_retirement(
+    rows: &SnapshotRows,
+    view: &View,
+    operation: &Id,
+    receipt: &Retirement,
+    budget: &Budget,
+) -> Result<bool> {
+    let invalid = super::super::retention::retirement::invalid_retirement;
+    let operation_key = format!("job-operation/{operation}");
+    if !rows.contains_key(&operation_key) {
+        return Ok(false);
+    }
+    let result_key = format!("job-result/{operation}");
+    let protection_probe = format!("protection/job-{operation}");
+    let _memory = rows.reserve_decoded(
+        budget,
+        &[&operation_key, &result_key, &protection_probe, "authority"],
+    )?;
+    let (op_revision, _, admitted): (_, _, Admission) =
+        rows.get_record(&operation_key)?.ok_or_else(mismatch)?;
+    if admitted.request.operation != *operation
+        || &crate::catalog::lifecycle_ident(&admitted.request.dataset) != view.identifier()
+        || op_revision <= 0
+        || op_revision > receipt.plan.revision
+        || op_revision > view.revision
+    {
+        return Err(mismatch());
+    }
+    if !rows.contains_key(&result_key) {
+        let abandoned_key = format!("abandoned/{operation}");
+        let _memory = rows.reserve_decoded(budget, &[&abandoned_key])?;
+        let (_, _, abandoned): (_, _, Abandonment) =
+            rows.get_record(&abandoned_key)?.ok_or_else(invalid)?;
+        if abandoned.operation != *operation
+            || abandoned.dataset != admitted.request.dataset
+            || abandoned.request_digest != admitted.request_digest
+        {
+            return Err(mismatch());
+        }
+    }
+    let protection_key = format!("protection/{}", admitted.protection);
+    if receipt.plan.records.len() != 2 {
+        return Err(invalid());
+    }
+    let expected_op = RetainedGeneration {
+        key: operation_key,
+        revision: op_revision,
+    };
+    if receipt.plan.records.binary_search(&expected_op).is_err() {
+        return Err(invalid());
+    }
+    let Some(prot_gen) = receipt
+        .plan
+        .records
+        .iter()
+        .find(|generation| generation.key == protection_key)
+    else {
+        return Err(invalid());
+    };
+    if prot_gen.revision <= 0
+        || prot_gen.revision > receipt.plan.revision
+        || prot_gen.revision > view.revision
+    {
+        return Err(invalid());
+    }
+    if let Some(actual) = rows.revision(&protection_key) {
+        if actual != prot_gen.revision {
+            return Err(invalid());
+        }
+        let _prot_memory = rows.reserve_decoded(budget, &[&protection_key])?;
+        let (_, _, protection): (_, _, Protection) =
+            rows.get_record(&protection_key)?.ok_or_else(invalid)?;
+        if protection.id != admitted.protection
+            || protection.consumer != admitted.request.dataset
+            || protection.purpose != format!("{operation}/job")
+        {
+            return Err(invalid());
+        }
+    }
+    Ok(true)
+}
+
 impl Engine {
     pub(super) async fn check_job_recovery(&self, admitted: &Admission) -> Result<()> {
         let view = self.read_view(&admitted.request.dataset).await?;

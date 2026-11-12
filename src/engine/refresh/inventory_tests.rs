@@ -619,7 +619,7 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
     );
     assert_eq!(
         engine
-            .run_admitted(&backfill_req, Some("readback"))
+            .backfill_until(&backfill_spec, "readback")
             .await
             .unwrap_err()
             .code(),

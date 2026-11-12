@@ -1,4 +1,5 @@
 //! Guarded retirement of exact recovery and result-availability promises.
+// Rust guideline compliant 2026-02-21
 
 use super::*;
 use crate::catalog::SnapshotRows;
@@ -322,7 +323,7 @@ pub(super) fn retirement_marker(
     Ok(Some((retired_revision, marker)))
 }
 
-pub(super) fn invalid_retirement() -> Error {
+pub(in crate::engine) fn invalid_retirement() -> Error {
     Error::refusal(
         "invalid_retirement",
         "retirement identity or native generation is inconsistent",
