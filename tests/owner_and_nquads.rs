@@ -1089,3 +1089,283 @@ fn owner_worker_stdio_serves_init_paginates_shards_and_runs_exact_queries() {
     let exit_status = child.wait().unwrap();
     assert!(exit_status.success());
 }
+
+#[test]
+fn owner_worker_handles_tight_budgets_adjacent_tokens_nullable_decimals_symlinks_and_multishards() {
+    assert_eq!(
+        docspec::ErrorKind::from_code("existing_output"),
+        docspec::ErrorKind::Conflict
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let data_dir = root.join("data");
+    let catalog_dir = root.join("catalog");
+    let locks_dir = catalog_dir.join("locks");
+    let receipts_root = root.join("receipts_root");
+    let outside_dir = root.join("outside_unpermitted");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::create_dir_all(catalog_dir.join("recipes")).unwrap();
+    std::fs::create_dir_all(&locks_dir).unwrap();
+    std::fs::create_dir_all(&receipts_root).unwrap();
+    std::fs::create_dir_all(&outside_dir).unwrap();
+
+    // Write full single-file Parquet + 2 multi-shard Parquet files
+    let full_parquet = data_dir.join("full.parquet");
+    let full_batch = build_owner_test_batch(0..5);
+    write_parquet_with_row_group_size(&full_parquet, &full_batch, 2);
+    let full_sha = sha256_file_hex(&full_parquet);
+
+    let shard0 = data_dir.join("multi-0.parquet");
+    let shard1 = data_dir.join("multi-1.parquet");
+    write_parquet_with_row_group_size(&shard0, &build_owner_test_batch(0..1), 1);
+    write_parquet_with_row_group_size(&shard1, &build_owner_test_batch(1..2), 1);
+    let shard0_sha = sha256_file_hex(&shard0);
+    let shard1_sha = sha256_file_hex(&shard1);
+    let shard0_len = std::fs::metadata(&shard0).unwrap().len();
+
+    // Whitespace-free adjacent placeholders (`SELECT?AS`, `THEN:tag`, `id>=?AND`) + nullable number COALESCE on >53-bit Decimal128
+    let compact_sql = "SELECT?AS echoed, id, COALESCE(amount,:fallback_num) AS exact_amt, \
+                       CASE WHEN id>0 THEN:tag ELSE'none' END AS tag_out \
+                       FROM ledger WHERE id>=?AND amount>0 ORDER BY id ASC;";
+    let compact_rel = "recipes/compact.sql";
+    std::fs::write(catalog_dir.join(compact_rel), compact_sql.as_bytes()).unwrap();
+    let compact_sha = sha256_hex(compact_sql.as_bytes());
+
+    let catalog_doc = json!({
+        "specVersion": "0.1",
+        "kind": "catalog",
+        "id": "urn:test:r2-catalog",
+        "version": "1.0.0",
+        "audience": "local",
+        "datasets": [{"id": "urn:ds:ledger", "alias": "ledger"}],
+        "versions": [
+            {
+                "id": "urn:ver:single",
+                "dataset": "ledger",
+                "retention": "present",
+                "reference": {"scheme": "urn:ddk:version:lock-pinned", "value": "single"}
+            },
+            {
+                "id": "urn:ver:multi",
+                "dataset": "ledger",
+                "retention": "present",
+                "reference": {"scheme": "urn:ddk:version:lock-pinned", "value": "multi"}
+            }
+        ],
+        "representations": [
+            {"id": "urn:rep:single", "version": "urn:ver:single"},
+            {"id": "urn:rep:multi", "version": "urn:ver:multi"}
+        ],
+        "releases": [],
+        "relationships": [],
+        "recipes": [{
+            "id": "urn:recipe:compact",
+            "sql": compact_rel,
+            "dialect": "datafusion",
+            "inputs": {"ledger": "ledger"},
+            "relationships": [],
+            "parameterOrder": ["echo_val", "min_id"],
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["echo_val", "min_id", "fallback_num", "tag"],
+                "properties": {
+                    "echo_val": {"type": "string"},
+                    "min_id": {"type": "integer"},
+                    "fallback_num": {"type": ["number", "null"]},
+                    "tag": {"type": ["string", "null"]}
+                }
+            }
+        }],
+        "files": [
+            {"path": compact_rel, "role": "recipe", "sha256": compact_sha}
+        ]
+    });
+    let catalog_path = catalog_dir.join("catalog.ddk.json");
+    let catalog_bytes = serde_json::to_vec_pretty(&catalog_doc).unwrap();
+    std::fs::write(&catalog_path, &catalog_bytes).unwrap();
+    let catalog_sha = sha256_hex(&catalog_bytes);
+
+    // Put lock in `catalog/locks/catalog.lock.json` with paths relative to `lock_dir` (`../` and `../../data/`)
+    let lock_doc = json!({
+        "specVersion": "0.1",
+        "kind": "lock",
+        "id": "urn:test:r2-lock",
+        "files": [
+            {"role": "data", "identity": "urn:rep:single", "path": "../../data/full.parquet", "sha256": full_sha},
+            {"role": "data", "identity": "urn:rep:multi", "path": "../../data/multi-0.parquet", "sha256": shard0_sha},
+            {"role": "data", "identity": "urn:rep:multi", "path": "../../data/multi-1.parquet", "sha256": shard1_sha}
+        ],
+        "extensions": {
+            "urn:ddk:catalog:output-set": [
+                {"path": "../catalog.ddk.json", "role": "catalog", "sha256": catalog_sha},
+                {"path": compact_rel, "role": "recipe", "sha256": compact_sha}
+            ]
+        }
+    });
+    let lock_path = locks_dir.join("catalog.lock.json");
+    let lock_bytes = serde_json::to_vec_pretty(&lock_doc).unwrap();
+    std::fs::write(&lock_path, &lock_bytes).unwrap();
+    let lock_sha = sha256_hex(&lock_bytes);
+
+    let bin_path = Path::new(env!("CARGO_BIN_EXE_docspec"));
+    let mut child = Command::new(bin_path)
+        .arg("owner-worker")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    // 1. Dangling symlink inside permitted root pointing outside permittedRoots must NOT create outside directory
+    #[cfg(unix)]
+    {
+        let escaped_target = outside_dir.join("escaped_target");
+        let dangling_link = receipts_root.join("dangling_escape");
+        std::os::unix::fs::symlink(&escaped_target, &dangling_link).unwrap();
+        let symlink_init = send_rpc(
+            &mut stdin,
+            &mut stdout,
+            json!({
+                "id": 1,
+                "method": "init",
+                "params": {
+                    "permittedRoots": [&data_dir, &catalog_dir, &receipts_root],
+                    "catalogPath": &catalog_path,
+                    "lockPath": &lock_path,
+                    "expectedLockSha256": &lock_sha,
+                    "retainReceiptsDir": dangling_link.join("sub"),
+                }
+            }),
+        );
+        assert_eq!(symlink_init["ok"], false);
+        assert!(
+            !escaped_target.exists(),
+            "dangling symlink must never create directories outside permittedRoots"
+        );
+    }
+
+    // 2. Init with tight Limits (`memory_bytes = 32 MiB`, `max_batch_bytes = 16 MiB` -> `shared_half == max_batch_bytes`)
+    let init_ok = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 2,
+            "method": "init",
+            "params": {
+                "permittedRoots": [&data_dir, &catalog_dir, &receipts_root],
+                "catalogPath": &catalog_path,
+                "lockPath": &lock_path,
+                "expectedLockSha256": &lock_sha,
+                "retainReceiptsDir": receipts_root.join("audit"),
+                "docspecLimits": {
+                    "memory_bytes": 33_554_432,
+                    "max_batch_bytes": 16_777_216,
+                    "max_metadata_bytes": 4_194_304
+                }
+            }
+        }),
+    );
+    assert_eq!(init_ok["ok"], true, "{init_ok}");
+
+    // 3. `read_page` succeeds under tight `shared_half == max_batch_bytes`
+    let page_ok = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 3,
+            "method": "read_page",
+            "params": {
+                "shards": [{
+                    "path": &shard0,
+                    "sha256": &shard0_sha,
+                    "byteSize": shard0_len,
+                    "rowCount": 1,
+                    "rowRange": [0, 1]
+                }],
+                "offset": 0,
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(page_ok["ok"], true, "{page_ok}");
+    assert_eq!(page_ok["result"]["rows"].as_array().unwrap().len(), 1);
+
+    // 4. `run_query` against multi-shard version (`urn:ver:multi`) refuses partial single-file binding (`409 binding_mismatch`)
+    let multi_refused = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 4,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:compact",
+                "expectedSqlSha256": &compact_sha,
+                "versions": {"ledger": "urn:ver:multi"},
+                "inputs": {
+                    "ledger": {
+                        "path": &shard0,
+                        "sha256": &shard0_sha,
+                        "versionId": "urn:ver:multi"
+                    }
+                },
+                "parameters": {
+                    "echo_val": "hi",
+                    "min_id": {"$number": "9007199254740993"},
+                    "fallback_num": null,
+                    "tag": "ok"
+                },
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(multi_refused["ok"], false);
+    assert_eq!(multi_refused["error"]["code"], "binding_mismatch");
+    assert_eq!(multi_refused["error"]["status"], 409);
+
+    // 5. `run_query` against single-shard lock-pinned version (`urn:ver:single` resolved via `locks/` `../../data/full.parquet`)
+    //    with tight budget, adjacent SQL tokens, and `fallback_num: null` preserving exact >53-bit `Decimal128`!
+    let query_ok = send_rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "id": 5,
+            "method": "run_query",
+            "params": {
+                "recipeId": "urn:recipe:compact",
+                "expectedSqlSha256": &compact_sha,
+                "versions": {"ledger": "urn:ver:single"},
+                "inputs": {
+                    "ledger": {
+                        "path": &full_parquet,
+                        "sha256": &full_sha,
+                        "versionId": "urn:ver:single"
+                    }
+                },
+                "parameters": {
+                    "echo_val": "hi",
+                    "min_id": {"$number": "9007199254740993"},
+                    "fallback_num": null,
+                    "tag": "ok"
+                },
+                "limit": 10
+            }
+        }),
+    );
+    assert_eq!(query_ok["ok"], true, "{query_ok}");
+    let rows = query_ok["result"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["echoed"], json!("hi"));
+    assert_eq!(rows[0]["tag_out"], json!("ok"));
+    assert_eq!(
+        rows[0]["exact_amt"],
+        json!({"$number": "1234567890123456.7891"}),
+        "nullable number parameter must not coerce Decimal128 to Float64"
+    );
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}

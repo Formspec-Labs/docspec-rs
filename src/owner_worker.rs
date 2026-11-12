@@ -371,7 +371,7 @@ fn verify_retain_receipts_dir(raw_retain: &str, roots: &[PathBuf]) -> Result<Pat
     }
     let existing_ancestor = candidate
         .ancestors()
-        .find(|anc| anc.exists())
+        .find(|anc| anc.symlink_metadata().is_ok())
         .ok_or_else(|| {
             BridgeError::new(
                 "invalid_registration",
@@ -534,6 +534,7 @@ fn verify_version_file_binding(
     catalog_doc: &Value,
     lock_doc: &Value,
     catalog_dir: &Path,
+    lock_dir: &Path,
     file_path: &Path,
     expected_sha: &str,
 ) -> Result<(), BridgeError> {
@@ -598,19 +599,27 @@ fn verify_version_file_binding(
     }
 
     let ver_id = ver_doc.get("id").and_then(Value::as_str).unwrap_or("");
-    let rep_ids: BTreeSet<&str> = catalog_doc
-        .get("representations")
-        .and_then(Value::as_array)
-        .map(|reps| {
-            reps.iter()
-                .filter_map(Value::as_object)
-                .filter(|r| r.get("version").and_then(Value::as_str) == Some(ver_id))
-                .filter_map(|r| r.get("id").and_then(Value::as_str))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut rep_ids: BTreeSet<&str> = BTreeSet::new();
+    let mut multi_member_reps: BTreeSet<&str> = BTreeSet::new();
+    if let Some(reps) = catalog_doc.get("representations").and_then(Value::as_array) {
+        for r in reps.iter().filter_map(Value::as_object) {
+            if r.get("version").and_then(Value::as_str) != Some(ver_id) {
+                continue;
+            }
+            if let Some(rid) = r.get("id").and_then(Value::as_str) {
+                rep_ids.insert(rid);
+                if r.get("members")
+                    .and_then(Value::as_array)
+                    .is_some_and(|m| m.len() > 1)
+                {
+                    multi_member_reps.insert(rid);
+                }
+            }
+        }
+    }
 
-    let mut matched_path = false;
+    let mut shards_per_ident: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut pinned_entries: Vec<(&str, PathBuf, &str)> = Vec::new();
     if let Some(lock_files) = lock_doc.get("files").and_then(Value::as_array) {
         for entry in lock_files.iter().filter_map(Value::as_object) {
             if entry.get("role").and_then(Value::as_str) != Some("data") {
@@ -622,41 +631,74 @@ fn verify_version_file_binding(
             if ident != ver_id && !rep_ids.contains(ident) {
                 continue;
             }
-            let Some(raw_loc) = entry.get("path").and_then(Value::as_str) else {
-                continue;
-            };
-            let Some(pinned_sha) = entry
+            let count = shards_per_ident.entry(ident).or_insert(0);
+            *count += 1;
+            if *count > 1 || multi_member_reps.contains(ident) {
+                return Err(BridgeError::new(
+                    "binding_mismatch",
+                    "Input version or representation has multiple data shards; single-file recipe binding cannot partially bind a multi-shard dataset.",
+                    409,
+                ));
+            }
+            let raw_loc = entry.get("path").and_then(Value::as_str).ok_or_else(|| {
+                BridgeError::new(
+                    "integrity_mismatch",
+                    "Lock data entry is missing path.",
+                    409,
+                )
+            })?;
+            let pinned_sha = entry
                 .get("sha256")
                 .and_then(Value::as_str)
                 .filter(|s| is_lower_hex_64(s))
-            else {
-                continue;
-            };
-            if let Ok(candidate) = resolve_uri_or_path_from_dir(raw_loc, catalog_dir)
-                && let Ok(pinned_path) = std::fs::canonicalize(&candidate)
-                && pinned_path == file_path
-            {
-                matched_path = true;
-                if pinned_sha == expected_sha {
-                    return Ok(());
-                }
-            }
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        "integrity_mismatch",
+                        "Lock data entry is missing a valid 64-character lowercase hex sha256.",
+                        409,
+                    )
+                })?;
+            let candidate = resolve_uri_or_path_from_dir(raw_loc, lock_dir)?;
+            let pinned_path = std::fs::canonicalize(&candidate).map_err(|_| {
+                BridgeError::new(
+                    "binding_mismatch",
+                    "Pinned lock data file does not exist.",
+                    409,
+                )
+            })?;
+            pinned_entries.push((ident, pinned_path, pinned_sha));
         }
     }
 
-    if matched_path {
-        Err(BridgeError::new(
-            "integrity_mismatch",
-            "Input SHA-256 disagrees with lock data entry.",
+    if let Some((_, ver_path, _)) = pinned_entries.iter().find(|(id, _, _)| *id == ver_id)
+        && ver_path != file_path
+    {
+        return Err(BridgeError::new(
+            "binding_mismatch",
+            "Input file path disagrees with version data entry in catalog.lock.json.",
             409,
-        ))
-    } else {
-        Err(BridgeError::new(
+        ));
+    }
+
+    let matching_file: Vec<&(&str, PathBuf, &str)> = pinned_entries
+        .iter()
+        .filter(|(_, p, _)| p == file_path)
+        .collect();
+    if matching_file.is_empty() {
+        return Err(BridgeError::new(
             "binding_mismatch",
             "Input file is not pinned by the bound catalog version or lock.",
             409,
-        ))
+        ));
     }
+    if matching_file.iter().any(|(_, _, sha)| *sha != expected_sha) {
+        return Err(BridgeError::new(
+            "integrity_mismatch",
+            "Input SHA-256 disagrees with lock data entry.",
+            409,
+        ));
+    }
+    Ok(())
 }
 
 fn schemas_match_across_shards(first: &SchemaRef, candidate: &SchemaRef) -> bool {
@@ -1395,7 +1437,6 @@ impl OwnerWorker {
 
         let budget = Budget::new(self.limits.clone()).map_err(map_job_error)?;
         let exact_max_bytes = self.limits.max_batch_bytes.min(exact::MAX_EXACT_PAGE_BYTES);
-        let _page_permit = budget.reserve(exact_max_bytes).map_err(map_job_error)?;
 
         let roots = self.permitted_roots.clone();
         let runtime = self.runtime.clone();
@@ -1617,7 +1658,7 @@ impl OwnerWorker {
         let batch_size = (limit * 2).clamp(1, max_reader_rows);
         let mut rows: Vec<Value> = Vec::with_capacity(target_end - target_start);
         let mut row_positions: Vec<usize> = Vec::with_capacity(target_end - target_start);
-        let mut exact_budget = ExactBudget::with_max_bytes(exact_max_bytes);
+        let mut exact_budget = ExactBudget::admitted(budget.clone(), exact_max_bytes);
 
         for shard in verified_shards {
             if shard.end <= target_start || shard.start >= target_end {
@@ -1896,6 +1937,14 @@ impl OwnerWorker {
         let lock_doc = self.lock_doc.clone().ok_or_else(|| {
             BridgeError::new("owner_unavailable", "Lock document unavailable.", 503)
         })?;
+        let lock_dir = self
+            .lock_path
+            .as_deref()
+            .and_then(Path::parent)
+            .ok_or_else(|| {
+                BridgeError::new("owner_unavailable", "Lock directory unavailable.", 503)
+            })?
+            .to_path_buf();
 
         let recipe_doc = catalog_doc
             .get("recipes")
@@ -2292,6 +2341,7 @@ impl OwnerWorker {
                 &catalog_doc,
                 &lock_doc,
                 &catalog_dir,
+                &lock_dir,
                 &file_path,
                 expected_sha,
             )?;
@@ -2368,7 +2418,7 @@ impl OwnerWorker {
         let timeout_dur = self.query_timeout;
         let runtime = self.runtime.clone();
 
-        let mut encoded_rows = runtime.block_on(async move {
+        let (mut encoded_rows, _exact_budget) = runtime.block_on(async move {
             tokio::time::timeout(timeout_dur, async move {
                 let _scratch_guard = ScratchDirGuard {
                     path: scratch_dir.clone(),
@@ -2376,10 +2426,6 @@ impl OwnerWorker {
                 let job =
                     crate::job::Job::new(limits.clone(), scratch_dir).map_err(map_job_error)?;
                 let exact_max_bytes = limits.max_batch_bytes.min(exact::MAX_EXACT_PAGE_BYTES);
-                let _page_permit = job
-                    .budget()
-                    .reserve(exact_max_bytes)
-                    .map_err(map_job_error)?;
 
                 for (input_name, file_path) in &verified_inputs {
                     job.register_parquet(input_name, file_path)
@@ -2391,7 +2437,7 @@ impl OwnerWorker {
                     .await
                     .map_err(map_job_error)?;
 
-                let mut exact_budget = ExactBudget::with_max_bytes(exact_max_bytes);
+                let mut exact_budget = ExactBudget::admitted(job.budget().clone(), exact_max_bytes);
                 let mut out_rows = Vec::with_capacity(limit.min(1024).saturating_add(1));
                 'batches: while let Some(batch) = stream
                     .try_next()
@@ -2406,7 +2452,7 @@ impl OwnerWorker {
                         }
                     }
                 }
-                Ok::<Vec<Value>, BridgeError>(out_rows)
+                Ok::<(Vec<Value>, ExactBudget), BridgeError>((out_rows, exact_budget))
             })
             .await
             .map_err(|_| {
