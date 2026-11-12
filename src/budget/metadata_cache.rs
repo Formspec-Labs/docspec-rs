@@ -1,24 +1,24 @@
 //! Charge maintained cache-entry residency; native reader admission is separate.
 // Rust guideline compliant 2026-02-21
+use datafusion::common::{HashMap, Result, TableReference};
 use datafusion::execution::cache::{
-    CacheAccessor, DefaultFilesMetadataCache,
-    cache_manager::{
-        CachedFileMetadataEntry, FileMetadata, FileMetadataCache, FileMetadataCacheEntry,
-    },
+    Cache, CacheEntryInfo,
+    cache_manager::{CachedFileMetadataEntry, FileMetadata},
+    default_cache::DefaultCache,
 };
 use datafusion::object_store::path::Path;
 use std::{
     any::Any,
-    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub(super) struct AdmittedMetadataCache {
-    inner: DefaultFilesMetadataCache,
+    inner: DefaultCache<Path, CachedFileMetadataEntry>,
     bytes: Arc<Semaphore>,
     shared_available_min: Arc<AtomicUsize>,
 }
@@ -29,7 +29,7 @@ impl AdmittedMetadataCache {
         shared_available_min: Arc<AtomicUsize>,
     ) -> Self {
         Self {
-            inner: DefaultFilesMetadataCache::new(limit),
+            inner: DefaultCache::new(limit).with_name("AdmittedFileMetadataCache"),
             bytes,
             shared_available_min,
         }
@@ -51,7 +51,7 @@ impl FileMetadata for HeldMetadata {
         self.inner.extra_info()
     }
 }
-impl CacheAccessor<Path, CachedFileMetadataEntry> for AdmittedMetadataCache {
+impl Cache<Path, CachedFileMetadataEntry> for AdmittedMetadataCache {
     fn get(&self, key: &Path) -> Option<CachedFileMetadataEntry> {
         self.inner.get(key)
     }
@@ -99,15 +99,22 @@ impl CacheAccessor<Path, CachedFileMetadataEntry> for AdmittedMetadataCache {
     fn name(&self) -> String {
         "AdmittedFileMetadataCache".into()
     }
-}
-impl FileMetadataCache for AdmittedMetadataCache {
     fn cache_limit(&self) -> usize {
         self.inner.cache_limit()
     }
     fn update_cache_limit(&self, limit: usize) {
         self.inner.update_cache_limit(limit);
     }
-    fn list_entries(&self) -> HashMap<Path, FileMetadataCacheEntry> {
+    fn cache_ttl(&self) -> Option<Duration> {
+        self.inner.cache_ttl()
+    }
+    fn update_cache_ttl(&self, ttl: Option<Duration>) {
+        self.inner.update_cache_ttl(ttl);
+    }
+    fn drop_table_entries(&self, table_ref: &TableReference) -> Result<()> {
+        self.inner.drop_table_entries(table_ref)
+    }
+    fn list_entries(&self) -> HashMap<Path, CacheEntryInfo<CachedFileMetadataEntry>> {
         self.inner.list_entries()
     }
 }

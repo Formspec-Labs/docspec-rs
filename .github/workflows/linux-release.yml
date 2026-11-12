@@ -25,7 +25,7 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    container: rust:1.94.0-bookworm
+    container: rust:1.95.0-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -71,7 +71,7 @@ jobs:
           ref: ${{ inputs.congressional_tech_ref || 'main' }}
           persist-credentials: false
           # The lane's producer-proof tests read commits older than the tip
-          # (git archive <sha>, merge-base --is-ancestor); a depth-1 checkout has none.
+          # (git archive <sha>, merge-base --is-ancestor, gate 5); a depth-1 checkout has none.
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:

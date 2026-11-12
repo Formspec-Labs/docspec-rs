@@ -310,7 +310,7 @@ pub(super) async fn export_retained(
     let mut metadata_memory = budget.reserve(metadata_unit)?;
     let previous_key: Option<Vec<u8>> = None;
     let hashed = HashedWriter {
-        inner: budget.scratch_writer(&temporary)?,
+        inner: temporary.open_writer()?,
         sha256: Sha256::new(),
         md5: Md5::new(),
         blake3: blake3::Hasher::new(),
@@ -419,8 +419,9 @@ pub(super) async fn export_retained(
     };
     let digest = hashed.blake3.finalize().to_hex().to_string();
     drop(writer);
-    temporary.inner().as_file().sync_all()?;
-    std::fs::hard_link(temporary.path(), path)?;
+    let scratch = Budget::scratch_path(temporary.as_ref())?;
+    std::fs::File::open(scratch)?.sync_all()?;
+    std::fs::hard_link(scratch, path)?;
     budget.retain_temporary(temporary)?;
     sync_parent(path)?;
     Ok((result, digest))

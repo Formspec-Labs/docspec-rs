@@ -14,10 +14,7 @@ use object_store::{
     client::{HttpConnector, HttpError, HttpErrorKind, HttpRequest, HttpResponse, HttpService},
 };
 use opendal::{
-    Operator,
-    layers::{HttpClientLayer, TimeoutLayer},
-    raw::{HttpBody, HttpClient, HttpFetch},
-    services::S3,
+    HttpBody, HttpTransport, HttpTransporter, Operator, layers::TimeoutLayer, services::S3,
 };
 use std::ops::Range;
 use std::{collections::HashMap, fmt, fs::File, io::Read, path::PathBuf, sync::Arc};
@@ -33,8 +30,8 @@ const MAX_UPLOAD_BYTES: u64 = CHUNK as u64 * 10_000;
 // This is a conservative payload allowance, not a measured whole-process RSS cap.
 const UPLOAD_ADMISSION: usize = 4 * CHUNK + (4 << 20);
 
-struct ConditionalPutClient(HttpClient);
-impl HttpFetch for ConditionalPutClient {
+struct ConditionalPutClient(HttpTransporter);
+impl HttpTransport for ConditionalPutClient {
     async fn fetch(
         &self,
         request: axum::http::Request<opendal::Buffer>,
@@ -44,7 +41,7 @@ impl HttpFetch for ConditionalPutClient {
                 .headers()
                 .contains_key(axum::http::header::IF_NONE_MATCH);
         let response = self.0.fetch(request).await?;
-        // OpenDAL 0.57 maps both 304 and 412 to the same permanent error.
+        // OpenDAL 0.58 S3 still maps both 304 and 412 to ConditionNotMatch.
         // A 304 PUT response cannot prove that our create precondition failed.
         if conditional_put && response.status() == axum::http::StatusCode::NOT_MODIFIED {
             return Err(opendal::Error::new(
@@ -110,8 +107,9 @@ impl HttpService for SnapshotHttp {
 /// Conditional writer and independent reader for one owned S3 prefix.
 #[derive(Clone)]
 pub struct RemoteObjects {
-    operator: Operator,
-    single_put: Operator,
+    // OpenDAL 0.58 operators are large; share them to keep handles small.
+    operator: Arc<Operator>,
+    single_put: Arc<Operator>,
     file_io: FileIO,
     query_store: Arc<dyn ObjectStore>,
     scope: Scope,
@@ -684,22 +682,25 @@ impl RemoteObjects {
         // Keep multipart users on their existing operator: native S3 refuses
         // MD5 multipart. Whole-buffer creates use a separate native checksum.
         let finish = |builder: S3| -> Result<Operator> {
-            Ok(Operator::new(builder)
-                .map_err(|_| config())?
-                .finish()
-                .layer(
-                    TimeoutLayer::new()
-                        .with_timeout(super::REQUEST_TIMEOUT)
-                        .with_io_timeout(super::REQUEST_TIMEOUT),
-                ))
+            Ok(Operator::new(builder).map_err(|_| config())?.layer(
+                TimeoutLayer::new()
+                    .with_timeout(super::REQUEST_TIMEOUT)
+                    .with_io_timeout(super::REQUEST_TIMEOUT),
+            ))
         };
         let operator = finish(make_builder()?)?;
-        let single_put =
-            finish(make_builder()?.checksum_algorithm("md5"))?.layer(HttpClientLayer::new(
-                HttpClient::with(ConditionalPutClient(HttpClient::default())),
-            ));
+        let single_put = finish(make_builder()?.checksum_algorithm("md5"))?;
+        let transport = HttpTransporter::new(ConditionalPutClient(
+            single_put.base_context().http_transport().clone(),
+        ));
+        let context = single_put.base_context().with_http_transport(transport);
+        let single_put = single_put.with_context(context);
         let file_io = FileIOBuilder::new(Arc::new(super::FixedPartS3))
-            .with_props(properties.iter().filter(|(key, _)| key.starts_with("s3.")))
+            .with_props(
+                properties
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("s3.") || key.starts_with("opendal.")),
+            )
             .build();
         let (query, placement) = query_builder(properties, &scope)?;
         let query_store = Arc::new(query.build().map_err(|_| config())?);
@@ -707,8 +708,8 @@ impl RemoteObjects {
             .get("s3.session-token")
             .is_some_and(|token| !token.is_empty());
         let instance = Self {
-            operator,
-            single_put,
+            operator: Arc::new(operator),
+            single_put: Arc::new(single_put),
             file_io,
             query_store,
             scope,
@@ -738,12 +739,29 @@ impl RemoteObjects {
         object: &ObjectRef,
     ) -> Result<Box<dyn parquet::arrow::async_reader::AsyncFileReader>> {
         // The complete URI is checked before constructing a native range reader.
+        use datafusion::datasource::{
+            listing::PartitionedFile,
+            physical_plan::parquet::{DefaultParquetFileReaderFactory, ParquetFileReaderFactory},
+        };
         let key = self.scope.key(&object.path)?;
         let path = object_store::path::Path::parse(key).map_err(|_| scope_error())?;
-        Ok(Box::new(
-            parquet::arrow::async_reader::ParquetObjectReader::new(self.query_store.clone(), path)
-                .with_file_size(object.bytes),
-        ))
+        // DataFusion's maintained object-store reader. The known size avoids a
+        // HEAD request; there is no footer size hint or metadata cache.
+        let file = PartitionedFile::new_from_meta(object_store::ObjectMeta {
+            location: path,
+            last_modified: Default::default(),
+            size: object.bytes,
+            e_tag: None,
+            version: None,
+        });
+        Ok(
+            DefaultParquetFileReaderFactory::new(self.query_store.clone()).create_reader(
+                0,
+                file,
+                None,
+                &datafusion::physical_plan::metrics::ExecutionPlanMetricsSet::new(),
+            )?,
+        )
     }
 
     /// Returns native I/O for independently opening immutable table pins.

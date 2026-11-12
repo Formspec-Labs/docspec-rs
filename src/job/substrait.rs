@@ -122,9 +122,9 @@ impl Job {
             plan.relations.as_slice(),
             [rel] if matches!(&rel.rel_type, Some(plan_rel::RelType::Root(root)) if root.input.is_some())
         ) || plan.version.as_ref().is_none_or(|version| {
-            version.major_number != 0
-                || version.minor_number != 77
-                || version.patch_number != 0
+            version.major_number != substrait::version::SUBSTRAIT_MAJOR_VERSION
+                || version.minor_number != substrait::version::SUBSTRAIT_MINOR_VERSION
+                || version.patch_number != substrait::version::SUBSTRAIT_PATCH_VERSION
                 || version.producer != "datafusion"
         }) || plan.advanced_extensions.is_some()
             || !plan.parameter_bindings.is_empty()
@@ -133,7 +133,7 @@ impl Job {
         {
             return Err(Error::refusal(
                 "substrait_profile",
-                "expected one Substrait 0.77.0 root without dynamic parameters or advanced extensions",
+                "expected one Substrait 0.85.0 root without dynamic parameters or advanced extensions",
             ));
         }
         let extensions = guarded_extensions(&plan)?;
@@ -159,21 +159,15 @@ impl Job {
     }
 }
 
-#[expect(
-    deprecated,
-    reason = "validate both original namespace representations"
-)]
 fn guarded_extensions(plan: &Plan) -> Result<Extensions> {
     let mut anchors = BTreeSet::new();
     let mut names = BTreeSet::new();
-    if !plan.extension_uris.is_empty()
-        || !plan.extension_urns.is_empty()
+    if !plan.extension_urns.is_empty()
         || plan.extensions.iter().any(|declaration| {
             let Some(MappingType::ExtensionFunction(function)) = &declaration.mapping_type else {
                 return true;
             };
-            function.extension_uri_reference != u32::MAX
-                || function.extension_urn_reference != u32::MAX
+            function.extension_urn_reference != u32::MAX
                 || function.name.is_empty()
                 || function.name.contains(':')
                 || !anchors.insert(function.function_anchor)
@@ -343,10 +337,8 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-#[expect(deprecated, reason = "preserve the plan's original URI declarations")]
 fn receipt(plan: &Plan, path: PathBuf, bytes: &[u8]) -> Result<SubstraitReceipt> {
     let extension_declarations = serde_json::json!({
-        "uris": plan.extension_uris,
         "urns": plan.extension_urns,
         "declarations": plan.extensions,
     });
@@ -360,9 +352,9 @@ fn receipt(plan: &Plan, path: PathBuf, bytes: &[u8]) -> Result<SubstraitReceipt>
         version: serde_json::to_value(&plan.version)?,
         extension_declarations,
         extensions_sha256: sha256(&extension_bytes),
-        datafusion: "53.1.0".into(),
-        datafusion_substrait: "53.1.0".into(),
-        substrait_rust: "0.62.2".into(),
+        datafusion: "55.2.0".into(),
+        datafusion_substrait: "55.2.0".into(),
+        substrait_rust: "0.63.0".into(),
         standard_validity: "unknown".into(),
     })
 }
@@ -428,16 +420,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[expect(
-        deprecated,
-        reason = "exercise the producer's original namespace sentinel"
-    )]
     async fn duplicate_extension_anchors_cannot_overwrite_one_another() {
         let mut plan = single_relation(rel::RelType::Join(Box::<JoinRel>::default()));
         plan.extensions = ["sum", "count"]
             .map(|name| SimpleExtensionDeclaration {
                 mapping_type: Some(MappingType::ExtensionFunction(ExtensionFunction {
-                    extension_uri_reference: u32::MAX,
                     extension_urn_reference: u32::MAX,
                     function_anchor: 1,
                     name: name.into(),

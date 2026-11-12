@@ -268,7 +268,7 @@ impl Job {
             ));
         }
         let output = HashWriter {
-            inner: self.budget.scratch_writer(&file)?,
+            inner: file.open_writer()?,
             digest: blake3::Hasher::new(),
             sha256: Sha256::new(),
             size: 0,
@@ -305,8 +305,9 @@ impl Job {
             schema: schema.as_ref().clone(),
         };
         drop(writer);
-        file.inner().as_file().sync_all()?;
-        std::fs::hard_link(file.path(), path)?;
+        let scratch = Budget::scratch_path(file.as_ref())?;
+        std::fs::File::open(scratch)?.sync_all()?;
+        std::fs::hard_link(scratch, path)?;
         self.budget.retain_temporary(file)?;
         sync_parent(path)?;
         Ok(closed)
@@ -551,10 +552,11 @@ mod tests {
             .disk_manager
             .create_tmp_file("new retained bytes")
             .unwrap();
-        let mut writer = budget.scratch_writer(&file).unwrap();
+        let mut writer = file.open_writer().unwrap();
         writer.write_all(&[0x22; 1024]).unwrap();
         drop(writer);
-        std::fs::hard_link(file.path(), root.join("new-retained.bin")).unwrap();
+        let scratch = Budget::scratch_path(file.as_ref()).unwrap();
+        std::fs::hard_link(scratch, root.join("new-retained.bin")).unwrap();
         budget.retain_temporary(file).unwrap();
         assert_eq!(budget.retained_operation_disk_bytes(), initial + 1024);
         let job = Job::from_budget(budget.clone()).unwrap();
@@ -646,12 +648,10 @@ mod tests {
             constrained.4
         );
         assert!(
-            constrained.2 > constrained_limit,
-            "the native post-write accounting must include cold retained bytes, new retained bytes and the refused spill chunk"
-        );
-        assert!(
-            constrained.2 < constrained_limit + (2 << 20),
-            "report the bounded native chunk overshoot rather than a strict pre-write/RSS guarantee"
+            constrained.2 >= constrained.3 + 1024 && constrained.2 <= constrained_limit,
+            "DataFusion 55 checks scratch quota before writing and refunds refused writes: {} vs {}",
+            constrained.2,
+            constrained_limit
         );
     }
 

@@ -208,7 +208,7 @@ async fn a_spill_file_carries_no_statistics_and_no_page_index_and_replays_its_ro
 ///
 /// The file is written with the writer's defaults, so it has statistics to ask
 /// for. The handle is returned with the frame because dropping it deletes the file.
-async fn read_back_one_batch(job: &Job) -> (RefCountedTempFile, datafusion::dataframe::DataFrame) {
+async fn read_back_one_batch(job: &Job) -> (Arc<dyn SpillFile>, datafusion::dataframe::DataFrame) {
     let file = job
         .budget
         .runtime_env()
@@ -216,40 +216,48 @@ async fn read_back_one_batch(job: &Job) -> (RefCountedTempFile, datafusion::data
         .create_tmp_file("spill under test")
         .unwrap();
     let mut writer = ArrowWriter::try_new(
-        std::fs::File::create(file.path()).unwrap(),
+        std::fs::File::create(Budget::scratch_path(file.as_ref()).unwrap()).unwrap(),
         wide_schema(),
         None,
     )
     .unwrap();
     writer.write(&wide_batch(&wide_schema(), 0, BATCH)).unwrap();
     writer.close().unwrap();
-    let frame = read_spill(&job.budget, &file, "wide").await.unwrap();
+    let frame = read_spill(&job.budget, file.as_ref(), "wide")
+        .await
+        .unwrap();
     (file, frame)
 }
 
 #[tokio::test]
 async fn the_scan_read_spill_builds_asks_the_file_for_no_statistics() {
-    // Whether a scan collects statistics is fixed in its listing table when
+    // Whether a scan collects statistics is fixed in its session state when
     // the frame is built, so the frame `read_spill` returns is where to look.
     let root = tempfile::tempdir().unwrap();
     let job = Job::new(tight(), root.path().join("scratch")).unwrap();
     let (_file, frame) = read_back_one_batch(&job).await;
-    let datafusion::logical_expr::LogicalPlan::TableScan(scan) = frame.logical_plan() else {
+    let (state, plan) = frame.into_parts();
+    let datafusion::logical_expr::LogicalPlan::TableScan(scan) = &plan else {
         panic!("a spill is read back through one file scan");
     };
     let provider = datafusion::datasource::source_as_provider(&scan.source).unwrap();
     let fitted = provider
-        .as_any()
         .downcast_ref::<crate::job::fitting::FittedTable>()
         .expect("the footer's charge stays with the scan");
-    let listing = fitted
-        .provider
-        .as_any()
-        .downcast_ref::<datafusion::datasource::listing::ListingTable>()
-        .expect("read_parquet builds a listing table");
     assert!(
-        !listing.options().collect_stat,
+        fitted
+            .provider
+            .is::<datafusion::datasource::listing::ListingTable>(),
+        "read_parquet builds a listing table"
+    );
+    assert!(
+        !state.config().collect_statistics(),
         "the scan read_spill builds would ask the spill file for statistics"
+    );
+    assert_eq!(
+        state.config().target_partitions(),
+        1,
+        "read_spill replays sequentially without byte-range scan partitioning"
     );
 }
 

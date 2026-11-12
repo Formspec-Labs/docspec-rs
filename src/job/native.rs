@@ -3,17 +3,23 @@
 use arrow::datatypes::SchemaRef;
 use datafusion::{
     catalog::{Session, TableProvider},
-    common::{Result, Statistics},
+    common::{Result, Statistics, tree_node::TreeNodeRecursion},
     execution::TaskContext,
     logical_expr::{Expr, TableProviderFilterPushDown, TableType},
+    physical_expr::PhysicalSortExpr,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+        ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr, PlanProperties,
+        SendableRecordBatchStream, SortOrderPushdownResult, StatisticsArgs,
+        execution_plan::CardinalityEffect,
+        filter_pushdown::{
+            ChildPushdownResult, FilterDescription, FilterPushdownPhase, FilterPushdownPropagation,
+        },
         stream::RecordBatchStreamAdapter,
     },
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
 use crate::{budget::Budget, storage::NativeTableSnapshot};
@@ -125,9 +131,6 @@ pub(super) struct AdmittedTable {
 }
 #[async_trait::async_trait]
 impl TableProvider for AdmittedTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> SchemaRef {
         self.provider.schema()
     }
@@ -225,9 +228,6 @@ impl ExecutionPlan for AdmittedPlan {
     fn name(&self) -> &str {
         "NativeMetadataAdmission"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
@@ -270,8 +270,57 @@ impl ExecutionPlan for AdmittedPlan {
             }),
         )))
     }
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.input.partition_statistics(partition)
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        _args: &StatisticsArgs,
+    ) -> Result<Arc<Statistics>> {
+        Ok(Arc::clone(&input_stats[0]))
+    }
+    fn cardinality_effect(&self) -> CardinalityEffect {
+        CardinalityEffect::Equal
+    }
+    fn supports_limit_pushdown(&self) -> bool {
+        true
+    }
+    fn gather_filters_for_pushdown(
+        &self,
+        _phase: FilterPushdownPhase,
+        parent_filters: Vec<Arc<dyn PhysicalExpr>>,
+        _config: &datafusion::config::ConfigOptions,
+    ) -> Result<FilterDescription> {
+        FilterDescription::from_children(parent_filters, &self.children())
+    }
+    fn handle_child_pushdown_result(
+        &self,
+        _phase: FilterPushdownPhase,
+        child_pushdown_result: ChildPushdownResult,
+        _config: &datafusion::config::ConfigOptions,
+    ) -> Result<FilterPushdownPropagation<Arc<dyn ExecutionPlan>>> {
+        Ok(FilterPushdownPropagation::if_all(child_pushdown_result))
+    }
+    fn try_pushdown_sort(
+        &self,
+        order: &[PhysicalSortExpr],
+    ) -> Result<SortOrderPushdownResult<Arc<dyn ExecutionPlan>>> {
+        let memory = self.memory.clone();
+        let parallel_input = self.parallel_input;
+        self.input.try_pushdown_sort(order)?.try_map(|input| {
+            Ok(Arc::new(Self {
+                input,
+                memory,
+                parallel_input,
+            }) as Arc<dyn ExecutionPlan>)
+        })
     }
 }
 
@@ -284,7 +333,7 @@ pub(super) fn operators_beside_admission(plan: &Arc<dyn ExecutionPlan>) -> Vec<S
     let mut names = Vec::new();
     let mut pending = vec![plan.clone()];
     while let Some(plan) = pending.pop() {
-        if !plan.as_any().is::<AdmittedPlan>() {
+        if !plan.is::<AdmittedPlan>() {
             names.push(plan.name().to_owned());
         }
         pending.extend(plan.children().into_iter().rev().cloned());
@@ -385,6 +434,7 @@ mod tests {
             "SELECT text, count(*) AS n FROM {t} GROUP BY text",
             "SELECT a.id FROM {t} a JOIN {t} b ON a.id = b.id",
             "SELECT id, text FROM {t} ORDER BY text",
+            "SELECT id, text FROM {t} ORDER BY id DESC LIMIT 5",
         ] {
             let admitted = plan_of(&job, &statement.replace("{t}", "admitted")).await;
             let bare = plan_of(&job, &statement.replace("{t}", "bare")).await;
@@ -440,7 +490,7 @@ mod tests {
             pending.extend(next.children().into_iter().cloned());
             Some(next)
         })
-        .find(|node| node.as_any().is::<AdmittedPlan>())
+        .find(|node| node.is::<AdmittedPlan>())
         .expect("a lake input is admitted");
         let beneath = admission.children()[0];
         assert!(
@@ -586,9 +636,98 @@ mod tests {
         let mut stream = frame.execute_stream().await.unwrap();
         assert_eq!(sem.available_permits(), 0);
         assert_eq!(stream.next().await.unwrap().unwrap().num_rows(), 1);
-        assert!(stream.next().await.is_none());
         assert_eq!(sem.available_permits(), 0);
+        // DataFusion 55's stream adapter drops a finished inner stream, so the
+        // last owner releases the admission at end of stream, not at drop.
+        assert!(stream.next().await.is_none());
+        assert_eq!(sem.available_permits(), 1);
         drop(stream);
         assert_eq!(sem.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn dynamic_filters_and_sort_pushdown_reach_admitted_parquet_and_preserve_partial_null_joins()
+     {
+        use arrow::array::{ArrayRef, Int64Array};
+        use parquet::file::properties::WriterProperties;
+        let root = tempfile::tempdir().unwrap();
+        let job = bounded_job(&root);
+        let probe_path = root.path().join("probe.parquet");
+        let build_path = root.path().join("build.parquet");
+        let props = WriterProperties::builder()
+            .set_max_row_group_row_count(Some(64))
+            .build();
+        let probe_batch = RecordBatch::try_from_iter([
+            (
+                "k1",
+                Arc::new(Int64Array::from_iter((0..256_i64).map(Some))) as ArrayRef,
+            ),
+            (
+                "k2",
+                Arc::new(Int64Array::from_iter(
+                    (0..256_i64).map(|v| if v == 1 { None } else { Some(v) }),
+                )) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        let mut pw = parquet::arrow::ArrowWriter::try_new(
+            std::fs::File::create(&probe_path).unwrap(),
+            probe_batch.schema(),
+            Some(props),
+        )
+        .unwrap();
+        pw.write(&probe_batch).unwrap();
+        pw.close().unwrap();
+
+        // >20 distinct keys forces dynamic bounds past the static InList threshold,
+        // including partial-NULL key (1, NULL) matched via IS NOT DISTINCT FROM.
+        let build_batch = RecordBatch::try_from_iter([
+            (
+                "k1",
+                Arc::new(Int64Array::from_iter(
+                    std::iter::once(Some(1)).chain((200..230).map(Some)),
+                )) as ArrayRef,
+            ),
+            (
+                "k2",
+                Arc::new(Int64Array::from_iter(
+                    std::iter::once(None).chain((200..230).map(Some)),
+                )) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        let mut bw = parquet::arrow::ArrowWriter::try_new(
+            std::fs::File::create(&build_path).unwrap(),
+            build_batch.schema(),
+            None,
+        )
+        .unwrap();
+        bw.write(&build_batch).unwrap();
+        bw.close().unwrap();
+
+        job.register_parquet("probe", &probe_path).await.unwrap();
+        job.register_parquet("build", &build_path).await.unwrap();
+
+        let topk_plan = plan_of(&job, "SELECT k1 FROM probe ORDER BY k1 DESC LIMIT 5").await;
+        let topk_rendered = format!("{}", displayable(topk_plan.as_ref()).indent(true));
+        assert!(
+            topk_rendered.contains("DynamicFilter"),
+            "TopK DynamicFilter must push through AdmittedPlan:\n{topk_rendered}"
+        );
+
+        let join_sql = "SELECT p.k1, p.k2 FROM build b JOIN probe p \
+            ON (b.k1 IS NOT DISTINCT FROM p.k1) AND (b.k2 IS NOT DISTINCT FROM p.k2)";
+        let join_plan = plan_of(&job, join_sql).await;
+        let join_rendered = format!("{}", displayable(join_plan.as_ref()).indent(true));
+        assert!(
+            join_rendered.contains("DynamicFilter"),
+            "Join DynamicFilter must push through AdmittedPlan:\n{join_rendered}"
+        );
+        let batches = job.sql(join_sql).await.unwrap().collect().await.unwrap();
+        let rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
+        assert_eq!(
+            rows, 31,
+            "all 30 non-null keys plus partial-null (1, NULL) must match"
+        );
     }
 }

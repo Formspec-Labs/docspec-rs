@@ -670,17 +670,22 @@ impl Engine {
                 )
                 .await?;
             objects.push(list);
+            let retained_table = |io| {
+                iceberg::table::Table::builder()
+                    .metadata(table.metadata_ref())
+                    .metadata_location(&selected.metadata_location)
+                    .identifier(iceberg::TableIdent::from_strs(["retained", "snapshot"])?)
+                    .runtime(iceberg::Runtime::try_current()?)
+                    .file_io(io)
+                    .readonly(true)
+                    .disable_cache()
+                    .build()
+            };
             let list_io = crate::storage::custody::retained_io(paths(&objects)?, budget, None)?;
-            let read_table = iceberg::table::Table::builder()
-                .metadata(table.metadata_ref())
-                .metadata_location(&selected.metadata_location)
-                .identifier(iceberg::TableIdent::from_strs(["retained", "snapshot"])?)
-                .runtime(iceberg::Runtime::try_current()?)
-                .file_io(list_io)
-                .readonly(true)
-                .disable_cache()
-                .build()?;
-            let list = read_table.manifest_list_reader(snapshot).load().await?;
+            let list = retained_table(list_io)?
+                .manifest_list_reader(snapshot)
+                .load()
+                .await?;
             let mut seen = BTreeSet::new();
             let mut descriptor_bytes = 0usize;
             for entry in list.entries() {
@@ -723,7 +728,7 @@ impl Engine {
                 };
                 objects.push(manifest);
                 let io = crate::storage::custody::retained_io(paths(&objects)?, budget, None)?;
-                let manifest = entry.load_manifest(&io).await?;
+                let manifest = retained_table(io)?.manifest_reader().read(entry).await?;
                 for item in manifest.entries().iter().filter(|item| item.is_alive()) {
                     let file = item.data_file();
                     if file.file_format() != iceberg::spec::DataFileFormat::Parquet {
@@ -1156,7 +1161,7 @@ async fn copy_member_admitted(
                     .runtime_env()
                     .disk_manager
                     .create_tmp_file("retained native member")?;
-                let writer = budget_open.scratch_writer(&temporary)?;
+                let writer = temporary.open_writer()?;
                 Ok((Some(temporary), Some(writer)))
             })
             .await?
@@ -1235,8 +1240,9 @@ async fn copy_member_admitted(
         .blocking_admitted_queued(move || {
             drop(output);
             if let Some(temporary) = temporary {
-                temporary.inner().as_file().sync_all()?;
-                std::fs::hard_link(temporary.path(), &member_path)?;
+                let scratch = Budget::scratch_path(temporary.as_ref())?;
+                File::open(scratch)?.sync_all()?;
+                std::fs::hard_link(scratch, &member_path)?;
                 if let Err(error) = budget_finalize.retain_temporary(temporary) {
                     let _ = std::fs::remove_file(&member_path);
                     return Err(error);

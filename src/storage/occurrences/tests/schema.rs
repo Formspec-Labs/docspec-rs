@@ -460,9 +460,19 @@ async fn unqualified_schema_interpretations_refuse_before_reading_payload() {
             .unwrap()
             .set_current_schema(-1)
             .unwrap()
-            .build()
-            .unwrap()
-            .metadata;
+            .build();
+        // Iceberg now refuses a v2 initial default itself (a v3 feature), so
+        // that schema never reaches docspec's own interpretation check.
+        let metadata = match metadata {
+            Ok(built) => built.metadata,
+            Err(error) => {
+                assert!(
+                    error.to_string().contains("not supported until v3"),
+                    "{error}"
+                );
+                continue;
+            }
+        };
         let table = iceberg::table::StaticTable::from_metadata(
             metadata,
             original.identifier().clone(),

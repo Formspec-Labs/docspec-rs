@@ -95,7 +95,7 @@ calculation uses `format: "substrait"`, `path`, and `sha256`. To run it, give
 a job step a `name` and `substrait: {"path": "...", "sha256": "..."}`.
 
 Both formats use the bounded job context. The saved-plan profile accepts the
-pinned DataFusion 53.1 producer's Substrait 0.77 wire format with named reads,
+pinned DataFusion 55.2 producer's Substrait 0.85 wire format with named reads,
 filters, projections, inner joins, and aggregates. The consumer validates
 functions, extension declarations, and named inputs before planning execution.
 Filters must be separate relations. Receipts distinguish native planning

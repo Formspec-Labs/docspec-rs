@@ -5,7 +5,7 @@ use crate::{Error, Result};
 use datafusion::{
     execution::{
         SessionStateBuilder,
-        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
+        memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool, PeakRecordingPool},
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
     physical_optimizer::optimizer::PhysicalOptimizer,
@@ -24,15 +24,12 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod array_admission;
 mod distinct;
-mod peak_pool;
 pub(crate) use array_admission::{array as admit_array, clean_null_views, dirty_view_bytes};
 mod metadata_cache;
 mod portable_aggregates;
 mod schema_metadata;
-mod scratch;
 mod subqueries;
 mod view_compaction;
-pub(crate) use scratch::ScratchWriter;
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use view_compaction::without as without_retained_compaction;
 
@@ -76,16 +73,14 @@ pub struct Budget {
     shared_available_min: Arc<AtomicUsize>,
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
-    pool: Arc<peak_pool::PeakPool<FairSpillPool>>,
+    pool: Arc<PeakRecordingPool>,
     retention_pool: Arc<dyn MemoryPool>,
-    scratch_writes: Arc<std::sync::Mutex<()>>,
     retained_files: Option<Arc<std::sync::Mutex<RetainedFiles>>>,
     retained_existing_bytes: u64,
 }
 
 #[derive(Debug)]
 struct RetainedFiles {
-    ledger: Option<datafusion::execution::disk_manager::RefCountedTempFile>,
     retained_bytes: u64,
     count: usize,
     memory: OwnedSemaphorePermit,
@@ -131,12 +126,17 @@ impl Budget {
         );
         let cache = datafusion::execution::cache::cache_manager::CacheManagerConfig::default()
             .with_file_metadata_cache(Some(Arc::new(cache)))
-            .with_metadata_cache_limit(limits.max_metadata_bytes);
-        let pool = Arc::new(peak_pool::PeakPool::new(FairSpillPool::new(shared_half)));
+            .with_metadata_cache_limit(limits.max_metadata_bytes)
+            .with_file_statistics_cache_limit(0)
+            .with_list_files_cache_limit(0);
+        let pool = Arc::new(PeakRecordingPool::new(Arc::new(FairSpillPool::new(
+            shared_half,
+        ))));
         let mut runtime = RuntimeEnvBuilder::new()
             .with_memory_pool(pool.clone())
             .with_cache_manager(cache)
-            .with_max_temp_directory_size(limits.scratch_bytes);
+            .with_max_temp_directory_size(limits.scratch_bytes)
+            .with_max_spill_merge_fan_in(32);
         if let Some(scratch) = scratch {
             runtime = runtime.with_temp_file_path(scratch);
         }
@@ -147,7 +147,6 @@ impl Budget {
             runtime: Arc::new(runtime.build()?),
             pool,
             retention_pool: Arc::new(GreedyMemoryPool::new(limits.memory_bytes / 2 / 4)),
-            scratch_writes: Arc::default(),
             retained_files: None,
             retained_existing_bytes: 0,
             limits,
@@ -182,12 +181,12 @@ impl Budget {
                     .with_mode(mode)
                     .with_max_temp_directory_size(self.limits.scratch_bytes - bytes),
             )
+            .with_max_spill_merge_fan_in(32)
             .build_arc()?;
         let mut budget = self.clone();
         budget.runtime = runtime;
         budget.retained_existing_bytes = bytes;
         budget.retained_files = Some(Arc::new(std::sync::Mutex::new(RetainedFiles {
-            ledger: None,
             retained_bytes: 0,
             count: 0,
             memory: self.reserve(0)?,
@@ -195,30 +194,29 @@ impl Budget {
         Ok(budget)
     }
 
+    #[cfg(test)]
     pub(crate) fn retained_operation_disk_bytes(&self) -> u64 {
+        let retained = self
+            .retained_files
+            .as_ref()
+            .and_then(|files| files.lock().ok().map(|files| files.retained_bytes))
+            .unwrap_or(0);
         self.retained_existing_bytes
+            .saturating_add(retained)
             .saturating_add(self.runtime.disk_manager.used_disk_space())
     }
 
     pub(crate) fn retain_temporary(
         &self,
-        file: datafusion::execution::disk_manager::RefCountedTempFile,
+        file: Arc<dyn datafusion::execution::SpillFile>,
     ) -> Result<()> {
         if let Some(files) = &self.retained_files {
-            let _scratch_guard = self
-                .scratch_writes
-                .lock()
-                .map_err(|_| Error::refusal("worker", "scratch writer lock is poisoned"))?;
-            if self.retained_operation_disk_bytes() > self.limits.scratch_bytes {
-                return Err(Error::refusal(
-                    "disk_capacity",
-                    "retained files and native spill exceed the operation allowance",
-                ));
-            }
             let mut files = files
                 .lock()
                 .map_err(|_| Error::refusal("worker", "retained file admission is poisoned"))?;
-            let charge = size_of_val(&file).saturating_mul(2).saturating_add(128);
+            let charge = size_of::<Arc<dyn datafusion::execution::SpillFile>>()
+                .saturating_mul(2)
+                .saturating_add(128);
             if files.count.saturating_add(1).saturating_mul(charge) > self.limits.max_metadata_bytes
             {
                 return Err(Error::refusal(
@@ -226,7 +224,9 @@ impl Budget {
                     "retained file handles exceed metadata allowance",
                 ));
             }
-            let file_bytes = file.current_disk_usage();
+            let file_bytes = file.size().ok_or_else(|| {
+                Error::refusal("scratch_path", "scratch file reports no byte size")
+            })?;
             let next_bytes = files
                 .retained_bytes
                 .checked_add(file_bytes)
@@ -236,26 +236,27 @@ impl Budget {
                         "retained files and native spill exceed the operation allowance",
                     )
                 })?;
+            let next_cap = self
+                .limits
+                .scratch_bytes
+                .checked_sub(self.retained_existing_bytes)
+                .and_then(|remaining| remaining.checked_sub(next_bytes))
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "disk_capacity",
+                        "retained files and native spill exceed the operation allowance",
+                    )
+                })?;
             let permit = self.reserve(charge)?;
-            if files.ledger.is_none() {
-                let ledger = self
-                    .runtime
-                    .disk_manager
-                    .create_tmp_file("retained operation disk ledger")?;
-                std::fs::remove_file(ledger.path())?;
-                files.ledger = Some(ledger);
-            }
-            // The durable hard link owns the bytes; unlink and close the per-file
-            // handle so large snapshots hold O(1) file descriptors instead of O(N),
-            // transferring the exact native disk charge onto the single sparse ledger.
-            std::fs::remove_file(file.path())?;
+            // The durable hard link owns the bytes; dropping the temporary handle
+            // unlinks its private scratch alias, closes its descriptor so snapshots
+            // hold O(1) open descriptors, and releases its per-file disk charge
+            // while lowering the native disk cap by the same retained byte count.
             drop(file);
-            let previous_bytes = files.retained_bytes;
-            let ledger = files.ledger.as_mut().expect("ledger initialized above");
-            ledger.inner().as_file().set_len(next_bytes)?;
-            if ledger.update_disk_usage().is_err() {
-                let _ = ledger.inner().as_file().set_len(previous_bytes);
-                let _ = ledger.update_disk_usage();
+            self.runtime
+                .disk_manager
+                .set_max_temp_directory_size(next_cap)?;
+            if self.runtime.disk_manager.used_disk_space() > next_cap {
                 return Err(Error::refusal(
                     "disk_capacity",
                     "retained files and native spill exceed the operation allowance",
@@ -280,12 +281,12 @@ impl Budget {
     ///
     /// It counts every consumer of the shared pool, retained results included.
     pub(crate) fn pool_peak(&self) -> usize {
-        self.pool.peak()
+        self.pool.peak_reserved()
     }
 
     /// Starts a new peak interval at the pool's current total.
     pub(crate) fn restart_pool_peak(&self) {
-        self.pool.restart();
+        self.pool.reset_peak();
     }
 
     /// Lowest shared-admission byte balance observed since [`Self::restart_shared_available_min`].
@@ -299,26 +300,25 @@ impl Budget {
             .store(self.bytes.available_permits(), Ordering::Relaxed);
     }
 
-    pub(crate) fn scratch_writer(
-        &self,
-        file: &datafusion::execution::disk_manager::RefCountedTempFile,
-    ) -> Result<ScratchWriter> {
-        ScratchWriter::new(file.clone(), self.clone())
+    /// Returns a scratch file's local path; this runtime creates only local files.
+    ///
+    /// The file's own writer (`SpillFile::open_writer`) charges the shared
+    /// scratch limit and refuses a write that would exceed it before writing.
+    ///
+    /// # Errors
+    /// Refuses a scratch file without a local path.
+    pub(crate) fn scratch_path(
+        file: &dyn datafusion::execution::SpillFile,
+    ) -> Result<&std::path::Path> {
+        file.path()
+            .ok_or_else(|| Error::refusal("scratch_path", "scratch file has no local path"))
     }
 
     pub(crate) fn context(&self) -> SessionContext {
-        // DataFusion 53.1 can promote a filtered row estimate through OFFSET to
-        // exact zero, then fold COUNT to an incorrect constant. Retain join cost
-        // planning, but disable that aggregate rewrite until the upstream path
-        // passes native_statistics_preserve_filtered_offset_counts unguarded.
         let mut rules: Vec<
             Arc<dyn datafusion::physical_optimizer::PhysicalOptimizerRule + Send + Sync>,
         > = Vec::new();
-        for rule in PhysicalOptimizer::new()
-            .rules
-            .into_iter()
-            .filter(|rule| rule.name() != "aggregate_statistics")
-        {
+        for rule in PhysicalOptimizer::new().rules {
             // Keep admitted evaluation outside scan projection pushdown, after
             // native join/sort planning. Logical reader-column pruning remains.
             if rule.name() == "ProjectionPushdown" {
@@ -332,24 +332,7 @@ impl Budget {
         }
         let config = SessionConfig::new()
             .with_batch_size(self.limits.batch_rows)
-            .with_target_partitions(self.limits.compute_threads)
-            // DataFusion 53.1's dynamic join bounds use ordinary comparisons
-            // even for null-safe joins, dropping matching partial-null keys.
-            // Keep other pruning enabled; qualify an upstream fix before reuse.
-            .set_bool(
-                "datafusion.optimizer.enable_join_dynamic_filter_pushdown",
-                false,
-            )
-            // DataFusion 53.1's `push_down_leaf_projections` leaks extracted
-            // `__datafusion_extracted_N` columns across aliased outer joins
-            // (`apache/datafusion#22971`, `dr-7uke`), failing with ambiguous
-            // schema errors on valid views and filters. Top-level column
-            // pruning (`OptimizeProjections` + `ProjectionPushdown`) remains
-            // active; re-enable once DataFusion >= 55.2 is qualified.
-            .set_bool(
-                "datafusion.optimizer.enable_leaf_expression_pushdown",
-                false,
-            );
+            .with_target_partitions(self.limits.compute_threads);
         // Bound each partition's merge headroom to 1/16 of its native share,
         // leaving room for concurrent sorts and retained steps. Preserve the
         // maintained default ceiling for larger pools and at least one byte.
@@ -358,7 +341,15 @@ impl Budget {
             .execution
             .sort_spill_reservation_bytes
             .min((self.limits.memory_bytes / 2 / self.limits.compute_threads / 16).max(1));
-        let config = config.with_sort_spill_reservation_bytes(sort_spill_bytes);
+        let mut config = config.with_sort_spill_reservation_bytes(sort_spill_bytes);
+        // Scale PushdownSort's BufferExec cap (default 1 GiB) to 1/4 of each
+        // partition's native pool share so bounded pools cannot starve on sort pushdown.
+        let sort_pushdown_bytes = config
+            .options()
+            .execution
+            .sort_pushdown_buffer_capacity
+            .min((self.limits.memory_bytes / 2 / self.limits.compute_threads / 4).max(1));
+        config.options_mut().execution.sort_pushdown_buffer_capacity = sort_pushdown_bytes;
         // The initial retained profile admits footer/page-index metadata before
         // native inference. Optional Bloom headers/bitsets need a separate
         // bounded admission path; disabling this pruning preserves row results
@@ -570,11 +561,11 @@ mod tests {
 
     #[test]
     fn sort_spill_headroom_scales_to_native_pool_and_partitions() {
-        for (memory, threads, expected) in [
-            (192 << 20, 2, 3 << 20),
-            (192 << 20, 4, 1536 << 10),
-            (24usize << 30, 12, 10 << 20),
-            (32, 64, 1),
+        for (memory, threads, expected, expected_pushdown) in [
+            (192 << 20, 2, 3 << 20, 12 << 20),
+            (192 << 20, 4, 1536 << 10, 6 << 20),
+            (24usize << 30, 12, 10 << 20, 256 << 20),
+            (32, 64, 1, 1),
         ] {
             let budget = Budget::new(Limits {
                 memory_bytes: memory,
@@ -582,15 +573,10 @@ mod tests {
                 ..Limits::default()
             })
             .unwrap();
-            assert_eq!(
-                budget
-                    .context()
-                    .state()
-                    .config_options()
-                    .execution
-                    .sort_spill_reservation_bytes,
-                expected
-            );
+            let state = budget.context().state();
+            let execution = &state.config_options().execution;
+            assert_eq!(execution.sort_spill_reservation_bytes, expected);
+            assert_eq!(execution.sort_pushdown_buffer_capacity, expected_pushdown);
         }
     }
 
@@ -713,14 +699,15 @@ mod tests {
             .disk_manager
             .create_tmp_file("physical guard")
             .unwrap();
-        let mut writer = budget.scratch_writer(&file).unwrap();
+        let path = Budget::scratch_path(file.as_ref()).unwrap().to_owned();
+        let mut writer = file.open_writer().unwrap();
         writer.write_all(&[1; 60]).unwrap();
         assert!(writer.write_all(&[2; 5]).is_err());
-        assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 60);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 60);
         assert_eq!(budget.runtime.disk_manager.used_disk_space(), 60);
         writer.write_all(&[3; 4]).unwrap();
         assert_eq!(
-            std::fs::read(file.path()).unwrap(),
+            std::fs::read(&path).unwrap(),
             [[1; 60].as_slice(), &[3; 4]].concat()
         );
         drop(writer);
@@ -746,11 +733,11 @@ mod tests {
             .disk_manager
             .create_tmp_file("second")
             .unwrap();
-        let mut one = budget.scratch_writer(&first).unwrap();
-        let mut two = budget.scratch_writer(&second).unwrap();
+        let mut one = first.open_writer().unwrap();
+        let mut two = second.open_writer().unwrap();
         one.write_all(&[0; 60]).unwrap();
         assert!(two.write_all(&[0; 41]).is_err());
-        assert_eq!(std::fs::metadata(second.path()).unwrap().len(), 0);
+        assert_eq!(second.size(), Some(0));
         two.write_all(&[0; 40]).unwrap();
         assert!(one.write_all(&[0]).is_err());
     }
@@ -779,16 +766,15 @@ mod tests {
         two.try_grow(4 << 20).unwrap();
         drop(two);
         assert_eq!(first.memory_pool.reserved(), 0);
-        let mut spill = first
+        let spill = first
             .disk_manager
             .create_tmp_file("shared accounting probe")
             .unwrap();
-        assert!(spill.path().starts_with(root.path()));
-        spill.inner().as_file().set_len(768).unwrap();
-        spill.update_disk_usage().unwrap();
+        let path = Budget::scratch_path(spill.as_ref()).unwrap().to_owned();
+        assert!(path.starts_with(root.path()));
+        std::io::Write::write_all(&mut spill.open_writer().unwrap(), &[0; 768]).unwrap();
         assert_eq!(second.disk_manager.used_disk_space(), 768);
         let retained = spill.clone();
-        let path = spill.path().to_owned();
         drop(spill);
         assert_eq!(first.disk_manager.used_disk_space(), 768);
         drop(retained);
@@ -797,39 +783,30 @@ mod tests {
     }
 
     #[test]
-    fn pinned_native_spill_overrun_leaves_accounting_until_runtime_reopen() {
-        // Capability probe for DataFusion 53.1: quota failure updates global
-        // usage before the file's own charge, so dropping it cannot refund it.
-        // Keep this limitation explicit until a maintained dependency fixes it.
-        let limits = Limits {
+    fn native_spill_overrun_is_refused_without_a_phantom_charge() {
+        // DataFusion 53.1 charged a refused spill globally and never refunded
+        // it until the runtime reopened. 55's spill writer checks before it
+        // writes and refunds the refused charge; keep that guarantee probed.
+        use std::io::Write;
+        let budget = Budget::new(Limits {
             scratch_bytes: 16,
             ..Limits::default()
-        };
-        let budget = Budget::new(limits.clone()).unwrap();
+        })
+        .unwrap();
         let manager = &budget.runtime.disk_manager;
-        let mut spill = manager.create_tmp_file("quota overrun probe").unwrap();
-        spill.inner().as_file().set_len(17).unwrap();
-        assert!(spill.update_disk_usage().is_err());
-        let path = spill.path().to_owned();
+        let spill = manager.create_tmp_file("quota overrun probe").unwrap();
+        let path = Budget::scratch_path(spill.as_ref()).unwrap().to_owned();
+        assert!(spill.open_writer().unwrap().write_all(&[0; 17]).is_err());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(manager.used_disk_space(), 0);
         drop(spill);
         assert!(!path.exists());
-        assert_eq!(manager.used_disk_space(), 17);
         assert_eq!(manager.spilling_progress().active_files_count, 0);
-        let mut next = manager.create_tmp_file("retry after failure").unwrap();
-        next.inner().as_file().set_len(1).unwrap();
-        assert!(next.update_disk_usage().is_err());
+        let next = manager.create_tmp_file("retry after failure").unwrap();
+        next.open_writer().unwrap().write_all(&[0; 16]).unwrap();
+        assert_eq!(manager.used_disk_space(), 16);
         drop(next);
-        drop(budget);
-        let fresh = Budget::new(limits).unwrap();
-        let mut spill = fresh
-            .runtime
-            .disk_manager
-            .create_tmp_file("reopened runtime")
-            .unwrap();
-        spill.inner().as_file().set_len(1).unwrap();
-        spill.update_disk_usage().unwrap();
-        drop(spill);
-        assert_eq!(fresh.runtime.disk_manager.used_disk_space(), 0);
+        assert_eq!(manager.used_disk_space(), 0);
     }
 
     #[tokio::test]
@@ -1063,10 +1040,11 @@ mod tests {
                 .disk_manager
                 .create_tmp_file("fd bound check")
                 .unwrap();
-            let mut writer = budget.scratch_writer(&file).unwrap();
+            let mut writer = file.open_writer().unwrap();
             std::io::Write::write_all(&mut writer, &[0x3c; 1024]).unwrap();
             drop(writer);
-            std::fs::hard_link(file.path(), root.path().join(format!("retained-{idx}"))).unwrap();
+            let scratch = Budget::scratch_path(file.as_ref()).unwrap();
+            std::fs::hard_link(scratch, root.path().join(format!("retained-{idx}"))).unwrap();
             budget.retain_temporary(file).unwrap();
         }
         assert_eq!(budget.retained_operation_disk_bytes(), 4096 + 512 * 1024);
@@ -1076,8 +1054,46 @@ mod tests {
                 .disk_manager
                 .spilling_progress()
                 .active_files_count,
-            1,
-            "retaining 512 files must hold one shared sparse ledger handle, not 512 open descriptors"
+            0,
+            "retaining 512 files must release temporary descriptors rather than holding 512 open handles"
         );
+    }
+
+    #[test]
+    fn runtime_cache_manager_disables_uncharged_statistics_and_file_list_caches() {
+        let budget = Budget::new(Limits::default()).unwrap();
+        for env in [
+            budget.runtime_env(),
+            budget.with_retained_disk(0).unwrap().runtime_env(),
+        ] {
+            assert!(env.cache_manager.get_file_statistic_cache().is_none());
+            assert!(env.cache_manager.get_list_files_cache().is_none());
+            assert_eq!(
+                env.cache_manager.get_file_metadata_cache().name(),
+                "AdmittedFileMetadataCache"
+            );
+            assert_eq!(env.disk_manager.max_spill_merge_fan_in(), 32);
+        }
+    }
+
+    #[test]
+    fn peak_keeps_the_highest_total_until_restarted() {
+        use datafusion::execution::memory_pool::{MemoryConsumer, MemoryLimit};
+        let tracked = Arc::new(PeakRecordingPool::new(Arc::new(FairSpillPool::new(1000))));
+        let pool: Arc<dyn MemoryPool> = tracked.clone();
+        let held = MemoryConsumer::new("retained").register(&pool);
+        let query = MemoryConsumer::new("query").register(&pool);
+        held.try_grow(100).unwrap();
+        query.try_grow(600).unwrap();
+        // A refused request reserves nothing and must not raise the peak.
+        query.try_grow(600).unwrap_err();
+        query.shrink(500);
+        query.grow(50);
+        assert_eq!((pool.reserved(), tracked.peak_reserved()), (250, 700));
+        tracked.reset_peak();
+        assert_eq!(tracked.peak_reserved(), 250);
+        query.free();
+        assert_eq!((pool.reserved(), tracked.peak_reserved()), (100, 250));
+        assert!(matches!(pool.memory_limit(), MemoryLimit::Finite(1000)));
     }
 }

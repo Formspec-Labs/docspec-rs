@@ -1,7 +1,7 @@
 //! Refuse casts DataFusion's type coercion adds between value families.
 //!
 //! DataFusion makes mismatched SQL plan by casting one side: `integer = text`
-//! compares text, and `date >= 20200101` reads the integer as days since 1970.
+//! casts text to integer, and `date >= 20200101` reads the integer as days since 1970.
 //! Both plan and run, then return wrong rows. Schema-only planning refuses them
 //! and names each cast, so the author writes the conversion they mean.
 //!
@@ -76,8 +76,8 @@ fn mark_written_casts(plan: LogicalPlan) -> datafusion::common::Result<LogicalPl
             node.map_expressions(|expression| {
                 expression.transform(|part| {
                     Ok(match part {
-                        Expr::Cast(Cast { expr, data_type }) => {
-                            Transformed::yes(Expr::TryCast(TryCast::new(expr, data_type)))
+                        Expr::Cast(Cast { expr, field }) => {
+                            Transformed::yes(Expr::TryCast(TryCast::new_from_field(expr, field)))
                         }
                         other => Transformed::no(other),
                     })
@@ -111,9 +111,9 @@ fn restore_written_casts(
         .transform_up(|part| {
             Ok(match part {
                 Expr::TryCast(ref try_cast) if !original_try_casts.contains(&part) => {
-                    Transformed::yes(Expr::Cast(Cast::new(
+                    Transformed::yes(Expr::Cast(Cast::new_from_field(
                         try_cast.expr.clone(),
-                        try_cast.data_type.clone(),
+                        try_cast.field.clone(),
                     )))
                 }
                 other => Transformed::no(other),
@@ -146,11 +146,11 @@ fn time_to_nanos_operand<'a>(
     let Expr::Cast(outer) = cast_part else {
         return Ok(None);
     };
-    if outer.data_type != DataType::Int64 {
+    if *outer.field.data_type() != DataType::Int64 {
         return Ok(None);
     }
     let candidate = match outer.expr.as_ref() {
-        Expr::Cast(inner) if inner.data_type == DataType::Int32 => inner.expr.as_ref(),
+        Expr::Cast(inner) if *inner.field.data_type() == DataType::Int32 => inner.expr.as_ref(),
         other => other,
     };
     Ok(matches!(
@@ -167,7 +167,7 @@ fn visit_expr(
 ) -> datafusion::common::Result<TreeNodeRecursion> {
     expression.apply(|part| {
         if let Expr::Cast(cast) = part {
-            if cast.data_type == DataType::Duration(TimeUnit::Nanosecond)
+            if *cast.field.data_type() == DataType::Duration(TimeUnit::Nanosecond)
                 && let Some(operand) = time_to_nanos_operand(&cast.expr, schema)?
             {
                 visit_expr(operand, schema, visit)?;
@@ -222,11 +222,12 @@ fn added_casts(
     let mut added = BTreeSet::new();
     each_added_cast(&marked, |cast, schema| {
         let from = cast.expr.get_type(schema)?;
-        if let (Some(source), Some(target)) = (family(&from), family(&cast.data_type))
+        let target_type = cast.field.data_type();
+        if let (Some(source), Some(target)) = (family(&from), family(target_type))
             && source != target
         {
             let shown = restore_written_casts(&cast.expr, &original_try_casts)?;
-            added.insert(format!("{shown} ({from} to {})", cast.data_type));
+            added.insert(format!("{shown} ({from} to {target_type})"));
         }
         Ok(())
     })?;
@@ -366,11 +367,19 @@ mod tests {
         let message = refusal("SELECT 1 FROM t WHERE code = CAST(id AS INT)")
             .await
             .unwrap();
+        assert!(message.contains("t.code (Utf8 to Int32)"), "{message}");
+        let message = refusal("SELECT 1 FROM t WHERE code = TRY_CAST(id AS INT)")
+            .await
+            .unwrap();
+        assert!(message.contains("t.code (Utf8 to Int32)"), "{message}");
+        let message = refusal("SELECT code || CAST(id AS INT) FROM t")
+            .await
+            .unwrap();
         assert!(
             message.contains("CAST(t.id AS Int32) (Int32 to Utf8)"),
             "{message}"
         );
-        let message = refusal("SELECT 1 FROM t WHERE code = TRY_CAST(id AS INT)")
+        let message = refusal("SELECT code || TRY_CAST(id AS INT) FROM t")
             .await
             .unwrap();
         assert!(

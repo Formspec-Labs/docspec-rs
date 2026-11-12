@@ -6,9 +6,12 @@ mod sequence;
 pub(crate) fn immutable_function(expression: &datafusion::logical_expr::Expr) -> bool {
     use datafusion::logical_expr::{Expr, Volatility};
     match expression {
-        Expr::ScalarFunction(f) => f.func.signature().volatility == Volatility::Immutable,
+        Expr::ScalarFunction(f) => {
+            f.func.name() != "version" && f.func.signature().volatility == Volatility::Immutable
+        }
         Expr::AggregateFunction(f) => f.func.signature().volatility == Volatility::Immutable,
         Expr::WindowFunction(f) => f.fun.signature().volatility == Volatility::Immutable,
+        Expr::HigherOrderFunction(f) => f.func.signature().volatility == Volatility::Immutable,
         _ => true,
     }
 }
@@ -39,11 +42,13 @@ use crate::{Result, budget::Budget, storage};
 use arrow::datatypes::SchemaRef;
 use datafusion::{
     catalog::{Session, TableProvider},
-    common::{DataFusionError, Statistics, stats::Precision},
+    common::{DataFusionError, Statistics, stats::Precision, tree_node::TreeNodeRecursion},
     datasource::source::{DataSource, DataSourceExec},
     execution::TaskContext,
     logical_expr::{Expr, TableType},
-    physical_expr::{EquivalenceProperties, Partitioning, projection::ProjectionExprs},
+    physical_expr::{
+        EquivalenceProperties, Partitioning, PhysicalExpr, projection::ProjectionExprs,
+    },
     physical_plan::{
         DisplayFormatType, ExecutionPlan, SendableRecordBatchStream, coop::make_cooperative,
         limit::GlobalLimitExec, stream::RecordBatchStreamAdapter, streaming::PartitionStream,
@@ -51,7 +56,7 @@ use datafusion::{
 };
 use futures::{StreamExt, TryStreamExt};
 use iceberg::table::Table;
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
 /// Uses the same reader admission and native field interpretation as independent reads.
@@ -190,10 +195,6 @@ struct NativeTable(Arc<NativePartition>);
 
 #[async_trait::async_trait]
 impl TableProvider for NativeTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.0.schema.clone()
     }
@@ -356,10 +357,6 @@ impl DataSource for NativePartition {
         Ok(make_cooperative(PartitionStream::execute(self, context)))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _kind: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
         let projected = self
             .schema
@@ -383,10 +380,18 @@ impl DataSource for NativePartition {
         EquivalenceProperties::new(self.schema.clone())
     }
 
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Filters stay logical and are applied by the native reader.
+        Ok(TreeNodeRecursion::Continue)
+    }
+
     fn partition_statistics(
         &self,
         partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
+    ) -> datafusion::common::Result<Arc<Statistics>> {
         if partition.is_some_and(|partition| partition != 0) {
             return Err(DataFusionError::Execution(
                 "native scan has one partition".into(),
@@ -395,8 +400,10 @@ impl DataSource for NativePartition {
         // Counts guide build-side selection. Budget also guards the pinned
         // aggregate-statistics rewrite: inexactness alone cannot prevent later
         // operators from promoting an estimate. Decoded byte sizes stay unknown.
-        Ok(Statistics::new_unknown(&self.schema)
-            .with_num_rows(self.rows.map_or(Precision::Absent, Precision::Inexact)))
+        Ok(Arc::new(
+            Statistics::new_unknown(&self.schema)
+                .with_num_rows(self.rows.map_or(Precision::Absent, Precision::Inexact)),
+        ))
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
@@ -1133,11 +1140,19 @@ mod tests {
     async fn native_statistics_choose_the_smaller_build_in_both_directions() {
         let pin_budget = query_budget();
         use datafusion::physical_plan::joins::HashJoinExec;
+        fn statistics(plan: &Arc<dyn ExecutionPlan>) -> Arc<datafusion::common::Statistics> {
+            datafusion::physical_plan::StatisticsContext::new()
+                .compute(
+                    plan.as_ref(),
+                    &datafusion::physical_plan::StatisticsArgs::new(),
+                )
+                .unwrap()
+        }
         fn joins(plan: &dyn ExecutionPlan, found: &mut Vec<(Precision<usize>, Precision<usize>)>) {
-            if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
+            if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
                 found.push((
-                    join.left().partition_statistics(None).unwrap().num_rows,
-                    join.right().partition_statistics(None).unwrap().num_rows,
+                    statistics(join.left()).num_rows,
+                    statistics(join.right()).num_rows,
                 ));
             }
             for child in plan.children() {
@@ -1180,9 +1195,10 @@ mod tests {
         }
     }
 
-    // Capability probe for the pinned native dependency; see the retained failure log.
+    // Capability probe for the pinned native dependency. Iceberg 0.10.1 refused
+    // `_pos` ("field not found"); the git revision pinned since DataFusion 55 reads it.
     #[tokio::test]
-    async fn pinned_native_position_column_is_unavailable() {
+    async fn pinned_native_position_column_is_available() {
         let (_root, _engine, _spec, native) = fixture().await;
         let mut stream = native
             .scan()
@@ -1193,14 +1209,66 @@ mod tests {
             .to_arrow()
             .await
             .unwrap();
-        assert!(
-            stream
-                .try_next()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("field not found")
-        );
+        let batch = stream.try_next().await.unwrap().unwrap();
+        assert!(batch.schema().column_with_name("_pos").is_some());
+    }
+
+    #[tokio::test]
+    async fn validate_immutable_functions_refuses_version_and_volatile_higher_order_functions() {
+        use arrow::datatypes::FieldRef;
+        use datafusion::logical_expr::{
+            ColumnarValue, HigherOrderFunctionArgs, HigherOrderReturnFieldArgs,
+            HigherOrderSignature, HigherOrderUDF, HigherOrderUDFImpl, LambdaParametersProgress,
+            ValueOrLambda, Volatility, expr::HigherOrderFunction,
+        };
+        #[derive(Debug, PartialEq, Eq, Hash)]
+        struct TestHof(HigherOrderSignature);
+        impl HigherOrderUDFImpl for TestHof {
+            fn name(&self) -> &str {
+                "test_hof"
+            }
+            fn signature(&self) -> &HigherOrderSignature {
+                &self.0
+            }
+            fn lambda_parameters(
+                &self,
+                _step: usize,
+                _fields: &[ValueOrLambda<FieldRef, Option<FieldRef>>],
+            ) -> datafusion::common::Result<LambdaParametersProgress> {
+                unimplemented!()
+            }
+            fn return_field_from_args(
+                &self,
+                _args: HigherOrderReturnFieldArgs,
+            ) -> datafusion::common::Result<FieldRef> {
+                unimplemented!()
+            }
+            fn invoke_with_args(
+                &self,
+                _args: HigherOrderFunctionArgs,
+            ) -> datafusion::common::Result<ColumnarValue> {
+                unimplemented!()
+            }
+        }
+        let context = query_budget().context();
+        let version_plan = context
+            .sql("SELECT version()")
+            .await
+            .unwrap()
+            .into_unoptimized_plan();
+        assert!(super::validate_immutable_functions(&version_plan).is_err());
+
+        let hof = |volatility| {
+            Expr::HigherOrderFunction(HigherOrderFunction::new(
+                Arc::new(HigherOrderUDF::new_from_impl(TestHof(
+                    HigherOrderSignature::variadic_any(volatility),
+                ))),
+                Vec::new(),
+            ))
+        };
+        assert!(!super::immutable_function(&hof(Volatility::Volatile)));
+        assert!(!super::immutable_function(&hof(Volatility::Stable)));
+        assert!(super::immutable_function(&hof(Volatility::Immutable)));
     }
 }
 

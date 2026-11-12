@@ -49,7 +49,7 @@ fn ensure_spill_metadata_groups<W: Write + Send>(
 }
 
 /// Admit the known live input, encoded buffer growth and statistics copies.
-/// Parquet58 byte_array.rs::compute_min_max copies both full values; the V2
+/// Parquet 59 byte_array.rs::compute_min_max copies both full values; the V2
 /// delta fallback also retains last_value. Use the portable piece size as a
 /// conservative bound for each copy, including non-byte fields. The encoded
 /// buffer term includes Vec growth. Native compression/dictionary workspace

@@ -186,14 +186,13 @@ pub(in crate::engine) fn validate_plan(plan: &datafusion::logical_expr::LogicalP
         node.apply_expressions(|expression| {
             expression.apply(|part| {
                 match part {
-                    Expr::AggregateFunction(f) => {
+                    Expr::AggregateFunction(f)
                         if f.func.order_sensitivity()
-                            != datafusion::logical_expr::utils::AggregateOrderSensitivity::Insensitive
-                        {
-                            refusal = Some(
-                                "order-sensitive aggregates require ordering qualification before their results can be reused",
-                            );
-                        }
+                            != datafusion::logical_expr::utils::AggregateOrderSensitivity::Insensitive =>
+                    {
+                        refusal = Some(
+                            "order-sensitive aggregates require ordering qualification before their results can be reused",
+                        );
                     }
                     Expr::WindowFunction(_) => {
                         refusal = Some(

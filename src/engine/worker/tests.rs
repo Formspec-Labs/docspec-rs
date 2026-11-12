@@ -41,9 +41,8 @@ async fn a_detached_native_disk_owner_prevents_a_second_full_disk_allowance() {
             let budget = owner.inner.lifecycle.budget.with_retained_disk(1024)?;
             let manager = budget.runtime_env().disk_manager.clone();
             *owner.inner.retained_disk.lock().await = Arc::downgrade(&manager);
-            let mut file = manager.create_tmp_file("detached native child")?;
-            file.inner().as_file().set_len(4096)?;
-            file.update_disk_usage()?;
+            let file = manager.create_tmp_file("detached native child")?;
+            file.open_writer()?.write_all(&[0; 4096])?;
             Ok((manager, file))
         })
         .await
@@ -94,10 +93,11 @@ async fn cold_reopen_reclaims_private_scratch_aliases_after_process_death() {
                 .disk_manager
                 .create_tmp_file("crash custody probe")
                 .unwrap();
-            let mut writer = budget.scratch_writer(&file).unwrap();
+            let mut writer = file.open_writer().unwrap();
             writer.write_all(&vec![0x5a; 1 << 20]).unwrap();
             drop(writer);
-            std::fs::hard_link(file.path(), root.join(name)).unwrap();
+            let scratch = Budget::scratch_path(file.as_ref()).unwrap();
+            std::fs::hard_link(scratch, root.join(name)).unwrap();
             if acknowledge {
                 budget.retain_temporary(file).unwrap();
             } else {

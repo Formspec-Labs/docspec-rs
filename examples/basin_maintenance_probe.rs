@@ -17,7 +17,7 @@ use iceberg::{
     spec::{DataFile, NestedField, PrimitiveType, Schema, Transform, Type, UnboundPartitionSpec},
     table::Table,
 };
-use iceberg_datafusion::table::IcebergStaticTableProvider;
+use iceberg_datafusion::IcebergStaticTableProvider;
 use opendal::{Operator, services::S3};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
@@ -150,8 +150,7 @@ async fn connect() -> Result<(Arc<dyn Catalog>, Operator, String)> {
             .secret_access_key(&required("DOCSPEC_M1_SECRET_ACCESS_KEY")?)
             .disable_ec2_metadata()
             .disable_config_load(),
-    )?
-    .finish();
+    )?;
     Ok((catalog, operator, bucket))
 }
 
@@ -407,14 +406,14 @@ async fn observe(
         .indent(true)
         .to_string();
     ensure!(
-        plan.contains("predicate:[") && !plan.contains("predicate:[]"),
+        plan.contains("format=iceberg") && plan.contains(", predicate="),
         "partition filter did not reach Iceberg planning"
     );
     let native = table.scan().build()?;
     let tasks = native.plan_files().await?.try_collect::<Vec<_>>().await?;
     let data = tasks
         .iter()
-        .map(|t| t.data_file_path.clone())
+        .map(|t| t.data_file_path().to_owned())
         .collect::<std::collections::BTreeSet<_>>();
     let snapshot = table
         .metadata()
@@ -479,15 +478,15 @@ async fn observe(
         .context("expected data file")?;
     let first = tasks
         .iter()
-        .find(|t| &t.data_file_path == selected)
+        .find(|t| t.data_file_path() == selected)
         .context("selected data file missing")?;
     let mut reader = iceberg::arrow::ArrowFileReader::new(
         iceberg::io::FileMetadata {
-            size: first.file_size_in_bytes,
+            size: first.file_size_in_bytes(),
         },
         table
             .file_io()
-            .new_input(&first.data_file_path)?
+            .new_input(first.data_file_path())?
             .reader()
             .await?,
     );
@@ -517,9 +516,9 @@ async fn observe(
     Ok(
         json!({"namespace":args.namespace,"table":args.table,"maintenance_run":args.maintenance_run,
         "snapshot":snapshot.snapshot_id(),"table_uuid":table.metadata().uuid(),"day":args.day,"rows_per_day":args.rows_per_day,"maintenance_evidence":maintenance_evidence,"projection":projection,"codec_file":selected,"compaction_codec_verified":compacted.is_some(),"cap_trial":args.cap_trial,"rows":rows,"rows_equal":rows == expected && distinct == expected && bad == 0,
-        "data_files":data.len(),"data_paths":data,"data_bytes":tasks.iter().map(|t|(&t.data_file_path,t.file_size_in_bytes)).collect::<std::collections::BTreeMap<_,_>>().values().sum::<u64>(),"manifests":manifests.entries().len(),
+        "data_files":data.len(),"data_paths":data,"data_bytes":tasks.iter().map(|t|(t.data_file_path(),t.file_size_in_bytes())).collect::<std::collections::BTreeMap<_,_>>().values().sum::<u64>(),"manifests":manifests.entries().len(),
         "metadata_json_files":objects.keys().filter(|k| k.ends_with(".metadata.json")).count(),
-        "expired_bytes":expired_bytes,"objects":objects,"codecs":codecs,"row_group_rows":footer.row_groups().iter().map(|g|g.num_rows()).collect::<Vec<_>>(),"codec_file_bytes":first.file_size_in_bytes,"peak_rss_bytes":process_peak_rss(),"partition_plan":plan,
+        "expired_bytes":expired_bytes,"objects":objects,"codecs":codecs,"row_group_rows":footer.row_groups().iter().map(|g|g.num_rows()).collect::<Vec<_>>(),"codec_file_bytes":first.file_size_in_bytes(),"peak_rss_bytes":process_peak_rss(),"partition_plan":plan,
         "scan_ms":scan_ms,"scan_started_at_ns":scan_started_at_ns,"projected":args.projected,"runner_os":std::env::consts::OS,
         "runner_threads":std::thread::available_parallelism()?.get(),"runner_memory_bytes":runner_memory(),"pool_bytes":10_u64 << 30,
         "scratch_bytes":32_u64 << 30,"writer_profile":table.metadata().properties().get("probe.writer-profile")}),
@@ -759,7 +758,13 @@ async fn create_table(
         .with_identifier_field_ids([1, 2])
         .build()?;
     let partition = UnboundPartitionSpec::builder()
-        .add_partition_field(1, "day", Transform::Identity)?
+        .add_partition_field(
+            iceberg::spec::UnboundPartitionField::builder()
+                .source_ids(vec![1])
+                .name("day")
+                .transform(Transform::Identity)
+                .build()?,
+        )?
         .build();
     let table = catalog
         .create_table(
@@ -1062,7 +1067,7 @@ mod native_tests {
             .indent(true)
             .to_string();
         assert!(
-            plan.contains("predicate:[") && !plan.contains("predicate:[]"),
+            plan.contains("format=iceberg") && plan.contains(", predicate="),
             "{plan}"
         );
         Ok(())

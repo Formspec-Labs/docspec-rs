@@ -2,7 +2,7 @@
 //!
 //! Cloudflare R2 refuses a multipart upload whose non-trailing parts differ
 //! in length ("InvalidPart: All non-trailing parts must have the same
-//! length"). OpenDAL 0.57's S3 writer turns the caller's write sizes into
+//! length"). OpenDAL 0.58's S3 writer turns the caller's write sizes into
 //! part sizes unless the writer is opened with `.chunk(..)`, and
 //! iceberg-storage-opendal 0.10.1 opens it without one, so Parquet data and
 //! manifest writes produced unequal parts. This factory wraps that storage
@@ -144,7 +144,7 @@ impl FileWrite for FixedPartWriter {
         Ok(())
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<iceberg::io::FileMetadata> {
         if !self.pending.is_empty() {
             self.inner.write(self.pending.split().freeze()).await?;
         }

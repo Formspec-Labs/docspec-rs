@@ -84,10 +84,6 @@ pub(super) async fn execute_plan_stream(
 
 #[async_trait::async_trait]
 impl TableProvider for SchemaOnlyTable {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.0.clone()
     }

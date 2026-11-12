@@ -272,7 +272,7 @@ pub(crate) async fn inspect_table(
     let name_mapping = table
         .metadata()
         .properties()
-        .get(iceberg::spec::DEFAULT_SCHEMA_NAME_MAPPING)
+        .get(iceberg::spec::TableProperties::PROPERTY_DEFAULT_NAME_MAPPING)
         .map(|raw| serde_json::from_str::<iceberg::spec::NameMapping>(raw).map(Arc::new))
         .transpose()?;
     let selected_count = selected.len();
@@ -288,7 +288,7 @@ pub(crate) async fn inspect_table(
             .with_project_field_ids(fields.clone())
             .with_name_mapping(name_mapping.clone())
             .with_case_sensitive(true)
-            .build();
+            .build()?;
         let mut stream = table
             .reader_builder()
             .with_data_file_concurrency_limit(1)

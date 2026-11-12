@@ -286,25 +286,39 @@ async fn malformed_incomplete_and_repeated_native_tasks_cannot_establish_coverag
         .unwrap();
     let task = tasks[0].clone();
     let state = Occurrences::open(&table, &budget(2)).await.unwrap();
-    let file = &state.expected[&task.data_file_path];
-    for change in 0..8 {
-        let mut invalid = task.clone();
-        match change {
-            0 => invalid.start = 1,
-            1 => invalid.length -= 1,
-            2 => invalid.record_count = None,
-            3 => invalid.file_size_in_bytes += 1,
-            4 => invalid.record_count = Some(file.record_count() + 1),
-            5 => invalid.predicate = Some(iceberg::expr::BoundPredicate::AlwaysTrue),
-            6 => invalid.data_file_format = DataFileFormat::Avro,
-            _ => invalid.deletes.push(iceberg::scan::FileScanTaskDeleteFile {
-                file_path: "delete.parquet".into(),
-                file_size_in_bytes: 10,
-                file_type: iceberg::spec::DataContentType::PositionDeletes,
-                partition_spec_id: 0,
-                equality_ids: None,
-            }),
-        }
+    let file = &state.expected[task.data_file_path()];
+    // Native tasks are immutable; change one serialized field at a time.
+    let encoded = serde_json::to_value(&task).unwrap();
+    let delete = iceberg::scan::FileScanTaskDeleteFile::builder()
+        .with_file_path("delete.parquet".into())
+        .with_file_size_in_bytes(10)
+        .with_file_type(iceberg::spec::DataContentType::PositionDeletes)
+        .with_file_format(DataFileFormat::Parquet)
+        .with_partition_spec_id(0)
+        .build()
+        .unwrap();
+    for (field, value) in [
+        ("start", serde_json::json!(1)),
+        ("length", serde_json::json!(task.length() - 1)),
+        ("record_count", serde_json::Value::Null),
+        (
+            "file_size_in_bytes",
+            serde_json::json!(task.file_size_in_bytes() + 1),
+        ),
+        ("record_count", serde_json::json!(file.record_count() + 1)),
+        (
+            "predicate",
+            serde_json::to_value(iceberg::expr::BoundPredicate::AlwaysTrue).unwrap(),
+        ),
+        (
+            "data_file_format",
+            serde_json::to_value(DataFileFormat::Avro).unwrap(),
+        ),
+        ("deletes", serde_json::json!([delete])),
+    ] {
+        let mut changed = encoded.clone();
+        changed[field] = value;
+        let invalid: FileScanTask = serde_json::from_value(changed).unwrap();
         assert_eq!(
             check_task(&invalid, file).unwrap_err().code(),
             "unsupported_occurrence_scan"

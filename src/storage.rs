@@ -301,7 +301,7 @@ async fn read_projected_batches_inner(
         let filters = filters.to_vec();
         tasks
             .try_filter_map(move |task| {
-                let matches = if let Some(file) = file_map.get(&task.data_file_path) {
+                let matches = if let Some(file) = file_map.get(task.data_file_path()) {
                     crate::query::file_matches_inexact_filters_with_partition(
                         &native_schema,
                         &partition_spec,
@@ -962,7 +962,7 @@ async fn current_snapshot_added_files_match(table: &Table, expected: &[DataFile]
         .iter()
         .filter(|entry| entry.added_snapshot_id == snapshot.snapshot_id())
     {
-        let Ok(manifest) = entry.load_manifest(table.file_io()).await else {
+        let Ok(manifest) = table.manifest_reader().read(entry).await else {
             return false;
         };
         for item in manifest.entries().iter().filter(|item| item.is_alive()) {
@@ -1404,7 +1404,7 @@ async fn snapshot_files_guarded_with_scope_and_files(
             );
             check_inventory_size(&paths, metadata_bytes, budget)?;
             paths.insert(entry.manifest_path.clone());
-            let manifest = entry.load_manifest(table.file_io()).await?;
+            let manifest = table.manifest_reader().read(entry).await?;
             #[cfg(test)]
             {
                 manifest_decode_tracker()

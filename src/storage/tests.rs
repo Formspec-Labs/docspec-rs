@@ -639,7 +639,9 @@ async fn interleaved_partitions_close_open_writers_within_fanout_allowance() {
         .build()
         .unwrap();
     let spec = UnboundPartitionSpec::builder()
-        .add_partition_field(10, "observed_at_day", Transform::Day)
+        .add_partition_field(
+            super::tables::unbound_partition_field(10, "observed_at_day", Transform::Day).unwrap(),
+        )
         .unwrap()
         .build();
     let table_dir = root.path().join("events");
@@ -755,7 +757,10 @@ async fn month_partitioned_batches_write_distinct_data_files_prune_by_month_and_
         .build()
         .unwrap();
     let spec = UnboundPartitionSpec::builder()
-        .add_partition_field(20, "observed_at_month", Transform::Month)
+        .add_partition_field(
+            super::tables::unbound_partition_field(20, "observed_at_month", Transform::Month)
+                .unwrap(),
+        )
         .unwrap()
         .build();
     let table_dir = root.path().join("articles");

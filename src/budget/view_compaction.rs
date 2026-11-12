@@ -19,21 +19,23 @@ use datafusion::{
     common::{
         JoinType, Result, Statistics,
         config::ConfigOptions,
-        tree_node::{Transformed, TreeNode},
+        tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     },
     execution::TaskContext,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+        ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr, PlanProperties,
+        SendableRecordBatchStream, StatisticsArgs,
         aggregates::AggregateExec,
         joins::{HashJoinExec, NestedLoopJoinExec},
         metrics::{ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
+        replace_children_if_necessary,
         sorts::sort::SortExec,
         stream::RecordBatchStreamAdapter,
     },
 };
 use futures::TryStreamExt;
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// The rule's name, which also removes it from a session in tests.
 const NAME: &str = "compact_retained_inputs";
@@ -43,7 +45,7 @@ const NAME: &str = "compact_retained_inputs";
 pub(super) struct Planner(pub Budget);
 impl Planner {
     fn compacted(&self, input: &Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
-        if input.as_any().is::<CompactViews>() {
+        if input.is::<CompactViews>() {
             input.clone()
         } else {
             Arc::new(CompactViews {
@@ -83,7 +85,6 @@ pub(crate) fn without(
 /// coalescer as one batch, and a nested-loop join emits unfiltered ranges of
 /// its build batch.
 fn emits_slices(plan: &dyn ExecutionPlan) -> bool {
-    let plan = plan.as_any();
     if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
         emits_build_rows_last(*join.join_type())
     } else if let Some(join) = plan.downcast_ref::<NestedLoopJoinExec>() {
@@ -131,17 +132,17 @@ impl PhysicalOptimizerRule for Planner {
                 // Children are visited first, so a second pass wraps a slicing
                 // operator again beneath its first wrap. Folding the pair keeps
                 // the rule idempotent.
-                if let Some(wrap) = plan.as_any().downcast_ref::<CompactViews>()
-                    && wrap.input.as_any().is::<CompactViews>()
+                if let Some(wrap) = plan.downcast_ref::<CompactViews>()
+                    && wrap.input.is::<CompactViews>()
                 {
                     return Ok(Transformed::yes(wrap.input.clone()));
                 }
                 // Leading inputs the operator retains whole: all of a sort's,
                 // and a hash join's first child, its build side.
-                let retained = if plan.as_any().is::<SortExec>() {
+                let retained = if plan.is::<SortExec>() {
                     usize::MAX
                 } else {
-                    usize::from(plan.as_any().is::<HashJoinExec>())
+                    usize::from(plan.is::<HashJoinExec>())
                 };
                 let sliced = emits_slices(plan.as_ref());
                 if retained == 0 && !sliced {
@@ -160,7 +161,7 @@ impl PhysicalOptimizerRule for Planner {
                             }
                         })
                         .collect();
-                    plan.with_new_children(children)?
+                    replace_children_if_necessary(plan, children)?
                 } else {
                     plan
                 };
@@ -203,9 +204,6 @@ impl ExecutionPlan for CompactViews {
     fn name(&self) -> &str {
         "CompactViews"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
@@ -218,8 +216,21 @@ impl ExecutionPlan for CompactViews {
     fn cardinality_effect(&self) -> datafusion::physical_plan::execution_plan::CardinalityEffect {
         datafusion::physical_plan::execution_plan::CardinalityEffect::Equal
     }
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.input.partition_statistics(partition)
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        _args: &StatisticsArgs,
+    ) -> Result<Arc<Statistics>> {
+        Ok(Arc::clone(&input_stats[0]))
     }
     fn with_new_children(
         self: Arc<Self>,
@@ -347,7 +358,7 @@ mod tests {
     /// Every hash join in `plan`, outermost first.
     fn hash_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<Arc<dyn ExecutionPlan>> {
         let mut found = Vec::new();
-        if plan.as_any().is::<HashJoinExec>() {
+        if plan.is::<HashJoinExec>() {
             found.push(plan.clone());
         }
         for child in plan.children() {
@@ -402,15 +413,11 @@ mod tests {
         assert_eq!(found.len(), 1);
         // The reproduced shape: the build side is the DISTINCT's aggregate.
         let mut build = found[0]
-            .as_any()
             .downcast_ref::<HashJoinExec>()
             .unwrap()
             .left()
             .clone();
-        while !build
-            .as_any()
-            .is::<datafusion::physical_plan::aggregates::AggregateExec>()
-        {
+        while !build.is::<datafusion::physical_plan::aggregates::AggregateExec>() {
             assert_eq!(build.children().len(), 1, "{}", build.name());
             build = build.children()[0].clone();
         }

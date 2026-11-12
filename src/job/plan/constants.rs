@@ -12,7 +12,6 @@ use datafusion::{
     prelude::SessionContext,
 };
 use std::{
-    any::Any,
     hash::{Hash, Hasher},
     sync::{
         Arc, Mutex,
@@ -154,7 +153,6 @@ pub(in crate::job) fn owner(state: &SessionState) -> Result<Arc<Scope>> {
         .find_map(|function| {
             function
                 .inner()
-                .as_any()
                 .downcast_ref::<Admitted>()
                 .map(|function| function.scope.clone())
         })
@@ -168,7 +166,6 @@ pub(in crate::job) fn owner(state: &SessionState) -> Result<Arc<Scope>> {
 pub(in crate::job) fn byte_limit(function: &ScalarUDF) -> Option<usize> {
     function
         .inner()
-        .as_any()
         .downcast_ref::<Admitted>()
         .map(|function| function.scope.budget.limits.max_batch_bytes)
 }
@@ -191,9 +188,6 @@ impl Hash for Admitted {
     }
 }
 impl ScalarUDFImpl for Admitted {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         self.native.name()
     }

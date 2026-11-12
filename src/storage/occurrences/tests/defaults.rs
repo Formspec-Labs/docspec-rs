@@ -60,10 +60,12 @@ async fn native_batches(table: &Table) -> Vec<RecordBatch> {
         .plan_files()
         .await
         .unwrap()
-        .map_ok(move |mut task| {
-            task.schema = schema.clone();
-            task.project_field_ids = ids.clone();
-            task
+        .map_ok(move |task| {
+            // Native tasks are immutable; replace the projection through serde.
+            let mut task = serde_json::to_value(&task).unwrap();
+            task["schema"] = serde_json::to_value(&schema).unwrap();
+            task["project_field_ids"] = serde_json::json!(ids);
+            serde_json::from_value::<iceberg::scan::FileScanTask>(task).unwrap()
         })
         .boxed();
     table

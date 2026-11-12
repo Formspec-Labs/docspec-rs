@@ -4,18 +4,17 @@ use crate::{Error, Result, budget::Budget};
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use datafusion::{
     catalog::{Session, TableProvider, streaming::StreamingTable},
-    common::{Statistics, internal_err, stats::Precision},
+    common::{Statistics, internal_err, stats::Precision, tree_node::TreeNodeRecursion},
     config::ConfigOptions,
     execution::{
-        TaskContext,
-        disk_manager::RefCountedTempFile,
+        SpillFile, SpillWriter, TaskContext,
         memory_pool::{MemoryConsumer, MemoryReservation},
     },
     logical_expr::{Expr, TableType},
     physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
-        metrics::MetricsSet, projection::ProjectionExec, stream::RecordBatchStreamAdapter,
-        streaming::PartitionStream,
+        DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr, PlanProperties,
+        SendableRecordBatchStream, StatisticsArgs, metrics::MetricsSet, projection::ProjectionExec,
+        stream::RecordBatchStreamAdapter, streaming::PartitionStream,
     },
     prelude::{ParquetReadOptions, SessionContext},
 };
@@ -25,7 +24,7 @@ use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::{EnabledStatistics, WriterProperties},
 };
-use std::{any::Any, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// Physical storage selected for a reusable SQL step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -54,7 +53,6 @@ struct Batches {
     retained: Arc<StepData>,
 }
 
-#[derive(Debug)]
 enum StepData {
     Memory {
         batches: Vec<RecordBatch>,
@@ -63,8 +61,20 @@ enum StepData {
     },
     Scratch {
         frame: Box<datafusion::dataframe::DataFrame>,
-        _file: RefCountedTempFile,
+        _file: Arc<dyn SpillFile>,
     },
+}
+// Spill files have no Debug; name the storage without dumping retained batches.
+impl std::fmt::Debug for StepData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Memory { batches, .. } => f
+                .debug_struct("Memory")
+                .field("batches", &batches.len())
+                .finish_non_exhaustive(),
+            Self::Scratch { .. } => f.debug_struct("Scratch").finish_non_exhaustive(),
+        }
+    }
 }
 impl PartitionStream for Batches {
     fn schema(&self) -> &SchemaRef {
@@ -108,9 +118,6 @@ struct ReservedTable {
 }
 #[async_trait::async_trait]
 impl TableProvider for ReservedTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> SchemaRef {
         self.table.schema()
     }
@@ -193,14 +200,17 @@ impl ExecutionPlan for RetainedScan {
     fn name(&self) -> &str {
         self.input.name()
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         self.input.properties()
     }
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         Vec::new()
+    }
+    fn apply_expressions(
+        &self,
+        f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        self.input.apply_expressions(f)
     }
     fn with_new_children(
         self: Arc<Self>,
@@ -222,11 +232,12 @@ impl ExecutionPlan for RetainedScan {
     fn metrics(&self) -> Option<MetricsSet> {
         self.input.metrics()
     }
-    fn partition_statistics(
+    fn statistics_from_inputs(
         &self,
-        partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        self.input.partition_statistics(partition)
+        _input_stats: &[Arc<Statistics>],
+        args: &StatisticsArgs,
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        self.input.statistics_from_inputs(&[], args)
     }
     fn fetch(&self) -> Option<usize> {
         self.input.fetch()
@@ -272,7 +283,7 @@ pub(super) fn summarize_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<super::metri
     use datafusion::physical_plan::joins::{HashJoinExec, PartitionMode};
     fn retained_scan_under(plan: &Arc<dyn ExecutionPlan>) -> Option<(&str, usize)> {
         fn collect<'a>(plan: &'a Arc<dyn ExecutionPlan>, out: &mut Vec<(&'a str, usize)>) {
-            if let Some(scan) = plan.as_any().downcast_ref::<RetainedScan>() {
+            if let Some(scan) = plan.downcast_ref::<RetainedScan>() {
                 out.push((scan.step.as_ref(), scan.rows));
                 return;
             }
@@ -288,7 +299,7 @@ pub(super) fn summarize_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<super::metri
         }
     }
     fn walk(plan: &Arc<dyn ExecutionPlan>, out: &mut Vec<super::metrics::JoinSummary>) {
-        if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
+        if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
             let scanned = retained_scan_under(join.left());
             let build_rows = join
                 .metrics()
@@ -334,7 +345,7 @@ pub(super) async fn retain(
     let mut file = None;
     let mut writer_memory = None;
     let mut spill_metadata: Option<(usize, tokio::sync::OwnedSemaphorePermit)> = None;
-    let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
+    let mut writer: Option<ArrowWriter<Box<dyn SpillWriter>>> = None;
     while let Some(batch) = stream.try_next().await? {
         rows += batch.num_rows();
         let size = batch.get_array_memory_size();
@@ -374,11 +385,8 @@ pub(super) async fn retain(
                 .set_statistics_enabled(EnabledStatistics::None)
                 .set_offset_index_disabled(true)
                 .build();
-            let mut spill = ArrowWriter::try_new(
-                budget.scratch_writer(&temporary)?,
-                schema.clone(),
-                Some(props),
-            )?;
+            let mut spill =
+                ArrowWriter::try_new(temporary.open_writer()?, schema.clone(), Some(props))?;
             for previous in batches.drain(..) {
                 super::encoding::write_bounded(
                     &mut spill,
@@ -433,7 +441,7 @@ pub(super) async fn retain(
         drop(writer_memory);
         drop(spill_metadata);
         let file = file.expect("spill owns temporary file");
-        let frame = read_spill(budget, &file, name).await?;
+        let frame = read_spill(budget, file.as_ref(), name).await?;
         (
             StepStorage::Scratch,
             StepData::Scratch {
@@ -517,7 +525,7 @@ fn named_spill_capacity(step: &str, error: Error) -> Error {
 /// hold the footer's charge.
 async fn read_spill(
     budget: &Budget,
-    file: &RefCountedTempFile,
+    file: &dyn SpillFile,
     step: &str,
 ) -> Result<datafusion::dataframe::DataFrame> {
     let memory = crate::storage::admit_spill_footer(file, budget)
@@ -534,8 +542,9 @@ async fn read_spill(
         })?;
     let reader = retained_reader(budget, |options| {
         options.execution.collect_statistics = false;
+        options.execution.target_partitions = 1;
     });
-    scan_retained(reader, file.path(), Arc::new(memory)).await
+    scan_retained(reader, Budget::scratch_path(file)?, Arc::new(memory)).await
 }
 
 /// Reads a Parquet file the engine keeps beyond one statement: an export or a retained phase.
@@ -670,9 +679,6 @@ mod tests {
     struct Unnamed(Arc<dyn TableProvider>);
     #[async_trait::async_trait]
     impl TableProvider for Unnamed {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
         fn schema(&self) -> SchemaRef {
             self.0.schema()
         }
@@ -689,7 +695,7 @@ mod tests {
             filters: &[Expr],
             limit: Option<usize>,
         ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-            let step = self.0.as_any().downcast_ref::<ReservedTable>();
+            let step = self.0.downcast_ref::<ReservedTable>();
             let step = step.expect("a retained step");
             step.table.scan(session, projection, filters, limit).await
         }

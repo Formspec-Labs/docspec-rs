@@ -394,8 +394,23 @@ impl Engine {
             .lifecycle
             .budget
             .blocking_admitted(move || {
+                type CachedExe = (PathBuf, u64, Option<std::time::SystemTime>, String);
+                static EXE_CACHE: std::sync::Mutex<Option<CachedExe>> = std::sync::Mutex::new(None);
+
                 let _memory = memory;
-                let mut file = File::open(std::env::current_exe()?)?;
+                let exe = std::env::current_exe()?;
+                let meta = std::fs::metadata(&exe)?;
+                let len = meta.len();
+                let modified = meta.modified().ok();
+                if let Ok(guard) = EXE_CACHE.lock()
+                    && let Some((cached_path, cached_len, cached_mod, cached_sha)) = guard.as_ref()
+                    && cached_path == &exe
+                    && *cached_len == len
+                    && *cached_mod == modified
+                {
+                    return Ok(cached_sha.clone());
+                }
+                let mut file = File::open(&exe)?;
                 let mut buffer = vec![0; 64 << 10];
                 let mut digest = Sha256::new();
                 loop {
@@ -405,7 +420,11 @@ impl Engine {
                     }
                     digest.update(&buffer[..count]);
                 }
-                Ok(format!("{:x}", digest.finalize()))
+                let sha = format!("{:x}", digest.finalize());
+                if let Ok(mut guard) = EXE_CACHE.lock() {
+                    *guard = Some((exe, len, modified, sha.clone()));
+                }
+                Ok(sha)
             })
             .await?;
         let _ = self.inner.job_runtime_sha256.set(identity.clone());

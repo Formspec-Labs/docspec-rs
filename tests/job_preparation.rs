@@ -90,7 +90,8 @@ async fn multiple_scalar_counter_schemas_match_optimized_native_report_ipc_witho
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("events.parquet");
     let sql = "SELECT (SELECT COUNT(*) FROM events WHERE event_id < 0) AS negative_ids, (SELECT COUNT(*) FROM events WHERE source IS NULL) AS missing_sources, (SELECT COUNT(*) FROM events WHERE event_id > 2) AS high_ids";
-    let spec = json!({"scratch":root.path().join("must-not-exist"),"inputs":[{"kind":"parquet","name":"events","path":path}],"steps":[],"outputs":[],"queries":[{"name":"counters","sql":sql}]});
+    let union_sql = "SELECT arrow_cast(source, 'Utf8') AS label FROM events UNION ALL SELECT arrow_cast('x', 'LargeUtf8') AS label";
+    let spec = json!({"scratch":root.path().join("must-not-exist"),"inputs":[{"kind":"parquet","name":"events","path":path}],"steps":[],"outputs":[],"queries":[{"name":"counters","sql":sql},{"name":"union_coercion","sql":union_sql}]});
     let prepared = request(root.path(), &spec).prepare(limits()).await.unwrap();
     assert!(!path.exists());
     assert!(!root.path().join("must-not-exist").exists());
@@ -124,18 +125,39 @@ async fn multiple_scalar_counter_schemas_match_optimized_native_report_ipc_witho
     );
     let expected = Schema::new(vec![
         Field::new("negative_ids", DataType::Int64, false),
-        Field::new("missing_sources", DataType::Int64, true),
-        Field::new("high_ids", DataType::Int64, true),
+        Field::new("missing_sources", DataType::Int64, false),
+        Field::new("high_ids", DataType::Int64, false),
     ]);
     assert_eq!(actual.as_ref(), &expected);
     assert_eq!(optimized, expected);
-    assert_ne!(
-        unoptimized, expected,
-        "the independent fixture must distinguish pre-optimization inference"
-    );
+    assert_eq!(unoptimized, expected);
     assert_eq!(
         inferred(&prepared, &prepared.queries[0].schema_sha256),
         expected
+    );
+    // DataFusion 55 still types DataFrame::schema() on UNION ALL from the first
+    // branch while optimizing/executing the widened LargeUtf8 branch type;
+    // prepare() must record the optimized executed schema rather than pre-optimization.
+    let union_frame = job.sql(union_sql).await.unwrap();
+    let union_unoptimized = union_frame.schema().as_arrow().clone();
+    let (union_state, union_plan) = union_frame.clone().into_parts();
+    let union_optimized = union_state
+        .optimize(&union_plan)
+        .unwrap()
+        .schema()
+        .as_arrow()
+        .clone();
+    let union_actual = union_frame.execute_stream().await.unwrap().schema();
+    let union_expected = Schema::new(vec![Field::new("label", DataType::LargeUtf8, false)]);
+    assert_ne!(
+        union_unoptimized, union_expected,
+        "the independent fixture must distinguish pre-optimization inference"
+    );
+    assert_eq!(union_actual.as_ref(), &union_expected);
+    assert_eq!(union_optimized, union_expected);
+    assert_eq!(
+        inferred(&prepared, &prepared.queries[1].schema_sha256),
+        union_expected
     );
     let batch = stream.try_next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);
@@ -914,7 +936,7 @@ async fn implicit_casts_between_type_families_refuse_and_the_trial_baseline_stay
         "F3-string-integer-join.sql",
     )
     .await;
-    assert!(f3.contains("c.number (Int64 to Utf8)"), "{f3}");
+    assert!(f3.contains("v.roll_call_id (Utf8 to Int64)"), "{f3}");
     let f3b = trial_refusal(root.path(), "rule_history", "F3b-date-integer-compare.sql").await;
     assert!(f3b.contains("Int64(20200101) (Int64 to Date32)"), "{f3b}");
 

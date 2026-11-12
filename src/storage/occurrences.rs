@@ -216,7 +216,7 @@ impl Occurrences {
         let name_mapping = table
             .metadata()
             .properties()
-            .get(iceberg::spec::DEFAULT_SCHEMA_NAME_MAPPING)
+            .get(iceberg::spec::TableProperties::PROPERTY_DEFAULT_NAME_MAPPING)
             .map(|raw| serde_json::from_str::<iceberg::spec::NameMapping>(raw).map(Arc::new))
             .transpose()?;
         // Build scan tasks directly from the already-admitted current-snapshot
@@ -226,20 +226,12 @@ impl Occurrences {
                 .data
                 .iter()
                 .map(|file| {
-                    Ok(FileScanTask::builder()
-                        .with_file_size_in_bytes(file.file_size_in_bytes())
-                        .with_start(0)
-                        .with_length(file.file_size_in_bytes())
-                        .with_record_count(Some(file.record_count()))
-                        .with_data_file_path(file.file_path().to_owned())
-                        .with_data_file_format(file.file_format())
-                        .with_schema(native_schema.clone())
-                        .with_project_field_ids(fields.clone())
-                        .with_partition(Some(file.partition().clone()))
-                        .with_partition_spec(None)
-                        .with_name_mapping(name_mapping.clone())
-                        .with_case_sensitive(true)
-                        .build())
+                    file_task(
+                        file,
+                        native_schema.clone(),
+                        fields.clone(),
+                        name_mapping.clone(),
+                    )
                 })
                 .collect::<Vec<_>>(),
         )
@@ -343,14 +335,14 @@ impl Occurrences {
                     }
                     return Ok(None);
                 };
-                let file = self.expected.remove(&task.data_file_path).ok_or_else(|| {
+                let file = self.expected.remove(task.data_file_path()).ok_or_else(|| {
                     Error::refusal(
                         "occurrence_tasks",
                         "native scan repeats a file or includes an unknown file",
                     )
                 })?;
                 check_task(&task, &file)?;
-                let path = task.data_file_path.clone();
+                let path = task.data_file_path().to_owned();
                 let rows = file.record_count();
                 let result = self
                     .reader
@@ -436,19 +428,22 @@ impl OccurrenceScan {
         let mut tasks = BTreeMap::new();
         let mut bytes = 0usize;
         while let Some(task) = state.tasks.try_next().await? {
-            let file = state.expected.remove(&task.data_file_path).ok_or_else(|| {
-                Error::refusal(
-                    "occurrence_tasks",
-                    "native scan repeats or introduces a file",
-                )
-            })?;
+            let file = state
+                .expected
+                .remove(task.data_file_path())
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "occurrence_tasks",
+                        "native scan repeats or introduces a file",
+                    )
+                })?;
             check_task(&task, &file)?;
             // Bound retained task details as well as the native inventory. Schema
             // objects are shared; field projections and paths are task-owned.
             bytes = bytes
-                .saturating_add(task.data_file_path.len().saturating_mul(3))
+                .saturating_add(task.data_file_path().len().saturating_mul(3))
                 .saturating_add(
-                    task.project_field_ids
+                    task.project_field_ids()
                         .len()
                         .saturating_mul(size_of::<i32>()),
                 )
@@ -459,7 +454,7 @@ impl OccurrenceScan {
                     "captured file tasks exceed metadata allowance",
                 ));
             }
-            tasks.insert(task.data_file_path.clone(), (task, file));
+            tasks.insert(task.data_file_path().to_owned(), (task, file));
         }
         if !state.expected.is_empty() {
             return Err(Error::refusal(
@@ -605,11 +600,13 @@ impl OccurrenceScan {
         selection: Option<super::selection::Selection>,
         observation: Option<super::scan_metrics::NativeScanObservation>,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + use<>> {
-        let mut task = task.clone();
-        if let Some(selection) = &selection {
-            task.project_field_ids = selection.fields.clone();
-        }
-        let expected = BTreeMap::from([(task.data_file_path.clone(), file.clone())]);
+        let task = match &selection {
+            Some(selection) => {
+                super::schema::reproject(task, task.schema_ref(), selection.fields.clone())?
+            }
+            None => task.clone(),
+        };
+        let expected = BTreeMap::from([(task.data_file_path().to_owned(), file.clone())]);
         let state = Occurrences {
             tasks: futures::stream::iter([Ok(task)]).boxed(),
             reader: self.reader.clone(),
@@ -632,15 +629,40 @@ impl OccurrenceScan {
     }
 }
 
+/// An unfiltered scan of one whole data file, projecting `fields`.
+fn file_task(
+    file: &DataFile,
+    schema: iceberg::spec::SchemaRef,
+    fields: Vec<i32>,
+    name_mapping: Option<Arc<iceberg::spec::NameMapping>>,
+) -> iceberg::Result<FileScanTask> {
+    FileScanTask::builder()
+        .with_file_size_in_bytes(file.file_size_in_bytes())
+        .with_start(0)
+        .with_length(file.file_size_in_bytes())
+        .with_record_count(Some(file.record_count()))
+        .with_data_file_path(file.file_path().to_owned())
+        .with_data_file_format(file.file_format())
+        .with_schema(schema)
+        .with_project_field_ids(fields)
+        // No partition constants: values come from the file, as with Iceberg
+        // 0.10.1, which applied constants only when a task carried both.
+        .with_partition(None)
+        .with_partition_spec(None)
+        .with_name_mapping(name_mapping)
+        .with_case_sensitive(true)
+        .build()
+}
+
 fn check_task(task: &FileScanTask, file: &DataFile) -> Result<()> {
-    if task.start != 0
-        || task.length != file.file_size_in_bytes()
-        || task.file_size_in_bytes != file.file_size_in_bytes()
-        || task.record_count != Some(file.record_count())
+    if task.start() != 0
+        || task.length() != file.file_size_in_bytes()
+        || task.file_size_in_bytes() != file.file_size_in_bytes()
+        || task.record_count() != Some(file.record_count())
         || file.record_count() > i64::MAX as u64
-        || task.data_file_format != DataFileFormat::Parquet
-        || task.predicate.is_some()
-        || !task.deletes.is_empty()
+        || task.data_file_format() != DataFileFormat::Parquet
+        || task.predicate().is_some()
+        || !task.deletes().is_empty()
     {
         return Err(Error::refusal(
             "unsupported_occurrence_scan",

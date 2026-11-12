@@ -8,7 +8,7 @@ use arrow::{
 use futures::{StreamExt, TryStreamExt};
 use iceberg::{
     metadata_columns::{RESERVED_FIELD_ID_FILE, is_metadata_field},
-    scan::FileScanTaskStream,
+    scan::{FileScanTask, FileScanTaskStream},
     table::Table,
 };
 use std::sync::Arc;
@@ -118,6 +118,38 @@ pub(super) async fn plan_files(table: &Table) -> Result<FileScanTaskStream> {
     plan_selected_files(table, fields).await
 }
 
+/// Copies a native scan task, reading it with `schema` and projecting `fields`.
+///
+/// Native tasks are immutable. Every other field is carried over unchanged.
+pub(super) fn reproject(
+    task: &FileScanTask,
+    schema: iceberg::spec::SchemaRef,
+    fields: Vec<i32>,
+) -> iceberg::Result<FileScanTask> {
+    FileScanTask::builder()
+        .with_file_size_in_bytes(task.file_size_in_bytes())
+        .with_start(task.start())
+        .with_length(task.length())
+        .with_record_count(task.record_count())
+        .with_first_row_id(task.first_row_id())
+        .with_data_sequence_number(task.data_sequence_number())
+        .with_data_file_path(task.data_file_path().to_owned())
+        .with_data_file_format(task.data_file_format())
+        .with_schema(schema)
+        .with_project_field_ids(fields)
+        .with_predicate(task.predicate().cloned())
+        .with_deletes(task.deletes().to_vec())
+        .with_partition(task.partition().cloned())
+        .with_partition_spec(task.partition_spec().cloned())
+        .with_name_mapping(task.name_mapping().cloned())
+        .with_unified_partition_type(task.unified_partition_type().cloned())
+        .with_sort_order_id(task.sort_order_id())
+        .with_sort_order(task.sort_order().cloned())
+        .with_case_sensitive(task.case_sensitive())
+        .with_key_metadata(task.key_metadata().map(Into::into))
+        .build()
+}
+
 /// Plans already-qualified current-schema field IDs, including the transient file field.
 pub(super) async fn plan_selected_files(
     table: &Table,
@@ -129,10 +161,8 @@ pub(super) async fn plan_selected_files(
     // These also call the SQL planner, which needs the normal thread stack.
     Ok(Box::pin(scan.plan_files())
         .await?
-        .map_ok(move |mut task| {
-            task.schema = schema.clone();
-            task.project_field_ids = fields.clone();
-            task
+        .and_then(move |task| {
+            futures::future::ready(reproject(&task, schema.clone(), fields.clone()))
         })
         .boxed())
 }

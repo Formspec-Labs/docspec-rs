@@ -8,6 +8,7 @@ pub(crate) mod fitting;
 mod functions;
 mod json_lines;
 mod json_many;
+mod json_strict;
 mod materialized;
 pub(crate) mod metrics;
 mod native;
@@ -242,7 +243,14 @@ impl Job {
                 ParquetReadOptions::default(),
             )
             .await
-            .map_err(|error| unreadable_parquet(name, path, error))?;
+            .map_err(|error| match &error {
+                datafusion::error::DataFusionError::Plan(message)
+                    if message.starts_with("No files found at ") =>
+                {
+                    missing_parquet_input(name, path)
+                }
+                _ => unreadable_parquet(name, path, error),
+            })?;
         let provider = self.context.table_provider(name).await?;
         self.require_parquet_file(name, path, &provider.schema())?;
         self.context.deregister_table(name)?;
@@ -256,20 +264,15 @@ impl Job {
         Ok(())
     }
 
-    /// Refuses a Parquet input for which the listing found no file to read.
+    /// Refuses a Parquet input for which the listing found no non-empty file to read.
     ///
-    /// The listing reads a path it cannot find, and a directory holding no
-    /// non-empty file with the suffix (it skips files of zero bytes), as a
-    /// table with no columns and no rows. A statement then fails on an
-    /// unknown column, or counts zero rows and succeeds. A written Parquet
-    /// file brings its columns whether or not it has rows, so `listed`
-    /// without columns means nothing was read. A single file's footer is
-    /// admitted before the listing, so a lone empty or torn file is refused
-    /// there instead.
-    ///
-    /// It runs after the listing on purpose: a check before it would restate
-    /// the listing's rules for what it reads, list the path twice, and refuse
-    /// a path given as a URL.
+    /// DataFusion 55 refuses a missing path or empty directory during listing
+    /// (`No files found at ...`), mapped above, while a directory holding only
+    /// zero-byte `.parquet` files still yields an empty 0-column schema because
+    /// schema inference filters out zero-byte objects. A written Parquet file
+    /// brings its columns whether or not it has rows, so `listed` without
+    /// columns means nothing was read. A single file's footer is admitted
+    /// before the listing, so a lone empty or torn file is refused there instead.
     fn require_parquet_file(
         &self,
         name: &str,
@@ -280,14 +283,7 @@ impl Job {
             return Ok(());
         }
         self.context.deregister_table(name)?;
-        Err(crate::Error::refusal(
-            "missing_input",
-            format!(
-                "Parquet input {name:?} has no readable Parquet file at {}: \
-                 the path is missing or holds no non-empty file ending in .parquet",
-                path.display()
-            ),
-        ))
+        Err(missing_parquet_input(name, path))
     }
 
     /// Registers plain or gzip JSON lines with nullable fields and raw evidence.
@@ -511,7 +507,7 @@ impl Job {
         table: iceberg::table::Table,
         memory: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<()> {
-        use iceberg_datafusion::table::IcebergStaticTableProvider;
+        use iceberg_datafusion::IcebergStaticTableProvider;
         let observation = NativeInputObservation::from_table(name, &table);
         let metadata = table.metadata();
         let head = match metadata.current_snapshot() {
@@ -556,7 +552,6 @@ impl Job {
     pub async fn native_input_observation(&self, name: &str) -> Result<NativeInputObservation> {
         let provider = self.context.table_provider(name).await?;
         provider
-            .as_any()
             .downcast_ref::<native::AdmittedTable>()
             .map(|table| table.observation.clone())
             .ok_or_else(|| {
@@ -602,6 +597,17 @@ impl Job {
         }
         plan::execute_stream(frame).await
     }
+}
+
+fn missing_parquet_input(name: &str, path: &Path) -> crate::Error {
+    crate::Error::refusal(
+        "missing_input",
+        format!(
+            "Parquet input {name:?} has no readable Parquet file at {}: \
+             the path is missing or holds no non-empty file ending in .parquet",
+            path.display()
+        ),
+    )
 }
 
 /// Puts the input's name and path ahead of a failure to list or read it.

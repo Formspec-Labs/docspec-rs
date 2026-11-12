@@ -209,8 +209,10 @@ mod tests {
         use axum::{Json, Router, extract::Request, http::StatusCode, response::IntoResponse};
         use std::{sync::Mutex, time::Duration};
 
-        // Exercise the real REST decoder and scoped adapter. A HEAD error is
+        // Exercise the real REST decoder and scoped adapter. A probe error is
         // never absence; a successful LIST must not introduce another request.
+        // Iceberg's REST client probes with HEAD only when the server advertises
+        // it; this fixture advertises nothing, so the probe loads (GETs) the namespace.
         for (list_status, head_status, child, succeeds, expected_heads) in [
             (403, 404, false, true, 1),
             (403, 200, false, false, 1),
@@ -246,9 +248,17 @@ mod tests {
                                     "NamespaceActionForbidden", "code": list_status}
                             }),
                         ),
-                        ("HEAD", _) if uri.path() == format!("/v1/namespaces/{root}") => {
-                            (head_status, serde_json::Value::Null)
-                        }
+                        ("HEAD" | "GET", path) if path == format!("/v1/namespaces/{root}") => (
+                            head_status,
+                            if head_status == 200 {
+                                serde_json::json!({"namespace": [root], "properties": {}})
+                            } else {
+                                serde_json::json!({
+                                    "error": {"message": "fixture namespace probe", "type":
+                                        "NamespaceProbe", "code": head_status}
+                                })
+                            },
+                        ),
                         _ => (500, serde_json::Value::Null),
                     };
                     (StatusCode::from_u16(status).unwrap(), Json(body)).into_response()
@@ -280,7 +290,7 @@ mod tests {
             assert_eq!(
                 requests
                     .iter()
-                    .filter(|(method, _)| method == "HEAD")
+                    .filter(|(_, uri)| uri.path() == format!("/v1/namespaces/{root}"))
                     .count(),
                 expected_heads,
                 "{list_status}/{head_status}, child={child}: {requests:?}"

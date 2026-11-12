@@ -697,7 +697,7 @@ async fn remote_candidate_creation_sends_one_conditional_put_before_registration
         )
         .unwrap();
         let expected = serde_json::to_vec(&metadata).unwrap();
-        let location = iceberg::MetadataLocation::new_with_metadata(metadata.location(), &metadata);
+        let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata).unwrap();
         let path = location.to_string();
         let mut fixture = WriteFixture::for_path(behavior, path.replacen("s3://", "/", 1));
         // A successful fixture response requires no timing coordination here.
@@ -776,7 +776,7 @@ async fn remote_candidate_keeps_created_metadata_when_catalog_registration_fails
     )
     .unwrap();
     let expected = serde_json::to_vec(&metadata).unwrap();
-    let location = iceberg::MetadataLocation::new_with_metadata(metadata.location(), &metadata);
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata).unwrap();
     let path = location.to_string();
     let mut fixture =
         WriteFixture::for_path(Behavior::HoldPutResponse, path.replacen("s3://", "/", 1));
@@ -843,7 +843,7 @@ async fn canceled_remote_candidate_keeps_original_admission_until_put_finishes()
     )
     .unwrap();
     let expected = serde_json::to_vec(&metadata).unwrap();
-    let location = iceberg::MetadataLocation::new_with_metadata(metadata.location(), &metadata);
+    let location = iceberg::MetadataLocation::try_new_with_metadata(&metadata).unwrap();
     let path = location.to_string();
     let mut fixture =
         WriteFixture::for_path(Behavior::HoldPutResponse, path.replacen("s3://", "/", 1));
@@ -939,22 +939,22 @@ async fn remote_candidate_refuses_mismatched_location_and_compression_without_ef
     let cases = [
         (
             metadata.clone(),
-            iceberg::MetadataLocation::new_with_metadata("s3://bucket/owned/different", &metadata),
+            location_at("s3://bucket/owned/different", &metadata),
             "metadata_location",
         ),
         (
             compressed.clone(),
-            iceberg::MetadataLocation::new_with_metadata(compressed.location(), &compressed),
+            location_at(compressed.location(), &compressed),
             "metadata_compression",
         ),
         (
             metadata.clone(),
-            iceberg::MetadataLocation::new_with_metadata(metadata.location(), &compressed),
+            location_at(metadata.location(), &compressed),
             "metadata_location",
         ),
         (
             outside.clone(),
-            iceberg::MetadataLocation::new_with_metadata(outside.location(), &outside),
+            location_at(outside.location(), &outside),
             "remote_scope",
         ),
     ];
@@ -1224,4 +1224,20 @@ async fn canceled_single_file_put_keeps_admission_until_transport_finishes() {
     let report = fixture.finish();
     assert_eq!(report.requests, vec![("PUT".into(), None)]);
     assert_eq!(report.published.as_deref(), Some(bytes.as_slice()));
+}
+
+/// A metadata location under `location`, using `metadata`'s compression.
+/// Iceberg derives the directory from the metadata, so set its location first.
+fn location_at(
+    location: &str,
+    metadata: &iceberg::spec::TableMetadata,
+) -> iceberg::MetadataLocation {
+    let metadata = metadata
+        .clone()
+        .into_builder(None)
+        .set_location(location.into())
+        .build()
+        .unwrap()
+        .metadata;
+    iceberg::MetadataLocation::try_new_with_metadata(&metadata).unwrap()
 }

@@ -173,7 +173,7 @@ async fn run() -> Result<()> {
     let namespace = NamespaceIdent::new(format!("candidate_{}", suffix.replace('-', "_")));
     let ident = TableIdent::new(namespace.clone(), "candidate".into());
     let expected = candidate(&root)?;
-    let metadata_location = MetadataLocation::new_with_metadata(&root, &expected);
+    let metadata_location = MetadataLocation::try_new_with_metadata(&expected)?;
     let path = metadata_location.to_string();
     let bytes = serde_json::to_vec(&expected)?;
     let expected_object = object(&owner, path.clone(), &bytes);
@@ -574,12 +574,15 @@ async fn append_tiny(
     futures::pin_mut!(tasks);
     let mut observed_files = BTreeMap::new();
     while let Some(task) = provider("append_file_task", tasks.try_next().await)? {
-        scoped(root, &task.data_file_path)?;
-        paths.insert(task.data_file_path.clone());
-        let rows = task.record_count.ok_or_else(|| {
+        scoped(root, task.data_file_path())?;
+        paths.insert(task.data_file_path().to_owned());
+        let rows = task.record_count().ok_or_else(|| {
             Error::refusal("probe_append_inventory", "native task has no row count")
         })?;
-        if observed_files.insert(task.data_file_path, rows).is_some() {
+        if observed_files
+            .insert(task.data_file_path().to_owned(), rows)
+            .is_some()
+        {
             return Err(Error::refusal(
                 "probe_append_inventory",
                 "native task repeats a live file",

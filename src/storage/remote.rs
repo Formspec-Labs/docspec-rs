@@ -253,6 +253,10 @@ fn resolve_properties(
     properties.insert("disable-header-redaction".into(), "false".into());
     properties.insert("s3.disable-ec2-metadata".into(), "true".into());
     properties.insert("s3.disable-config-load".into(), "true".into());
+    properties.insert(
+        "opendal.io-timeout-ms".into(),
+        REQUEST_TIMEOUT.as_millis().to_string(),
+    );
     Ok(properties)
 }
 

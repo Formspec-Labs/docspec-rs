@@ -2131,7 +2131,7 @@ async fn an_unaccepted_candidate_requalifies_exact_native_scalar_report_schemas(
         b"{\"id\":1,\"amount\":10}\n{\"id\":2,\"amount\":null}\n",
     )
     .unwrap();
-    let sql = "SELECT (SELECT COUNT(*) FROM outputs.\"values\" WHERE id < 0) AS negative_ids, (SELECT COUNT(*) FROM outputs.\"values\" WHERE amount > 10) AS high_amounts, (SELECT COUNT(*) FROM outputs.\"values\" WHERE id > 2) AS high_ids";
+    let sql = "SELECT (SELECT COUNT(*) FROM outputs.\"values\" WHERE id < 0) AS negative_ids, (SELECT SUM(0) FROM outputs.\"values\") AS high_amounts, (SELECT MIN(id) - 1 FROM outputs.\"values\") AS high_ids";
     let ManagedJobCommand::Prepare(mut original) =
         request(root.path(), "unaccepted-schema", sql, None)
     else {

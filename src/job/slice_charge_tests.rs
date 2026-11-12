@@ -500,7 +500,6 @@ fn shapes() -> [Shape; 12] {
 /// The join type of an executed hash or nested-loop join.
 fn join_type(join: &Arc<dyn ExecutionPlan>) -> Option<JoinType> {
     use datafusion::physical_plan::joins::{HashJoinExec, NestedLoopJoinExec};
-    let join = join.as_any();
     join.downcast_ref::<HashJoinExec>()
         .map(|join| *join.join_type())
         .or_else(|| {

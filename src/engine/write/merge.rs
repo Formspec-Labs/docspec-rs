@@ -772,7 +772,7 @@ fn set_union_generic_list<O: OffsetSizeTrait>(
                 row_items.push((encoded_items.row(combined_idx), combined_idx as u32));
             }
         }
-        row_items.sort_by(|(ra, _), (rb, _)| ra.cmp(rb));
+        row_items.sort_by_key(|(row, _)| *row);
         row_items.dedup_by(|(ra, _), (rb, _)| ra == rb);
         lengths.push(row_items.len());
         take_indices.extend(row_items.into_iter().map(|(_, idx)| idx));

@@ -3,7 +3,7 @@
 use super::Objects;
 use crate::{Error, Result, budget::Budget, model::ObjectRef};
 use datafusion::{
-    execution::disk_manager::RefCountedTempFile,
+    execution::SpillFile,
     physical_plan::{SendableRecordBatchStream, stream::RecordBatchStreamAdapter},
 };
 use futures::TryStreamExt;
@@ -122,10 +122,10 @@ pub(crate) async fn admit_parquet_footer(
 /// # Errors
 /// Refuses with `capacity` when the shared budget cannot hold the charge.
 pub(crate) async fn admit_spill_footer(
-    file: &RefCountedTempFile,
+    file: &dyn SpillFile,
     budget: &Budget,
 ) -> Result<tokio::sync::OwnedSemaphorePermit> {
-    admit_footer(file.path(), budget, None).await
+    admit_footer(Budget::scratch_path(file)?, budget, None).await
 }
 
 /// Charges a footer and its index ranges, judging them by `allowance` if one is given.

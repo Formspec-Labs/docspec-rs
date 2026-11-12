@@ -1279,7 +1279,7 @@ fn copy_input_admitted(
     };
     let mut output = temporary
         .as_ref()
-        .map(|file| budget.scratch_writer(file))
+        .map(|file| file.open_writer())
         .transpose()?;
     let mut sha = Sha256::new();
     let mut digest = blake3::Hasher::new();
@@ -1307,8 +1307,9 @@ fn copy_input_admitted(
     }
     drop(output);
     if let Some(temporary) = temporary {
-        temporary.inner().as_file().sync_all()?;
-        std::fs::hard_link(temporary.path(), path)?;
+        let scratch = Budget::scratch_path(temporary.as_ref())?;
+        File::open(scratch)?.sync_all()?;
+        std::fs::hard_link(scratch, path)?;
         budget.retain_temporary(temporary)?;
     }
     File::open(path.parent().ok_or_else(mismatch)?)?.sync_all()?;

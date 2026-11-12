@@ -2,7 +2,7 @@
 name = "docspec"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 publish = false
 autotests = false
 description = "Recoverable, evidence-bound dataset operations over Apache Iceberg"
@@ -41,18 +41,18 @@ remote = ["dep:iceberg-catalog-rest", "dep:iceberg-storage-opendal", "dep:openda
 [dependencies]
 base64 = "=0.22.1"
 anyhow = "1"
-arrow = { version = "58", features = ["ipc", "json"] }
-arrow-schema = { version = "=58.4.0", features = ["serde"] }
+arrow = { version = "59", features = ["ipc", "json"] }
+arrow-schema = { version = "=59.3.2", features = ["serde"] }
 async-trait = "0.1"
 axum = "0.8"
 blake3 = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
-datafusion = "=53.1.0"
-datafusion-substrait = { version = "=53.1.0", default-features = false, optional = true }
+datafusion = "=55.2.0"
+datafusion-substrait = { version = "=55.2.0", default-features = false, optional = true }
 prost = { version = "=0.14.4", optional = true }
-substrait = { version = "=0.62.2", features = ["serde"], optional = true }
-datafusion-functions-json = "=0.53.1"
+substrait = { version = "=0.63.0", features = ["serde"], optional = true }
+datafusion-functions-json = "=0.55.6"
 url = "=2.5.8"
 percent-encoding = "=2.3.2"
 fs2 = "0.4"
@@ -60,24 +60,27 @@ flate2 = "1.1.10"
 futures = "0.3"
 hashbrown = { version = "=0.17.1", default-features = false }
 httpdate = "=1.0.3"
-iceberg = "=0.10.1"
-iceberg-datafusion = "=0.10.1"
-iceberg-catalog-sql = "=0.10.1"
-iceberg-catalog-rest = { version = "=0.10.1", optional = true }
-iceberg-storage-opendal = { version = "=0.10.1", optional = true, default-features = false, features = ["opendal-s3"] }
+# Unreleased: iceberg-datafusion moved to apache/datafusion-iceberg, whose main
+# builds on DataFusion 55 and this iceberg-rust revision. Use the same revision
+# here so one iceberg crate serves both.
+iceberg = { git = "https://github.com/apache/iceberg-rust", rev = "5b82ab99aeaf50bf4f5b3b776ac9cd6380a5f3e3" }
+iceberg-datafusion = { git = "https://github.com/apache/datafusion-iceberg", rev = "726e4208f4c2295e17b1bc5747332f6f04e7d965" }
+iceberg-catalog-sql = { git = "https://github.com/apache/iceberg-rust", rev = "5b82ab99aeaf50bf4f5b3b776ac9cd6380a5f3e3" }
+iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust", rev = "5b82ab99aeaf50bf4f5b3b776ac9cd6380a5f3e3", optional = true }
+iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust", rev = "5b82ab99aeaf50bf4f5b3b776ac9cd6380a5f3e3", optional = true, default-features = false, features = ["opendal-s3"] }
 # Match DataFusion's locked object_store and enable its maintained S3 reader.
 object_store = { version = "=0.13.2", optional = true, default-features = false, features = ["aws"] }
-opendal = { version = "=0.57.0", optional = true, default-features = false, features = ["services-s3", "layers-timeout"] }
-# Register docspec's Iceberg storage factory (iceberg 0.10.1 uses typetag 0.2).
+opendal = { version = "=0.58.2", optional = true, default-features = false, features = ["services-s3", "layers-timeout"] }
+# Register docspec's Iceberg storage factory (iceberg uses typetag 0.2).
 typetag = "0.2"
 # Unify rustls-tls on reqwest 0.12 for iceberg-catalog-rest; S3 uses a separate reqwest version.
 reqwest-rest = { package = "reqwest", version = "=0.12.28", optional = true, default-features = false, features = ["rustls-tls"] }
 mimalloc = { version = "0.1", features = ["extended"] }
 md-5 = "=0.10.6"
-parquet = { version = "58", features = ["arrow"] }
+parquet = { version = "59", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-jiter = "=0.13.0"
+jiter = "=0.17.0"
 # Safe getrlimit/setrlimit for the CLI's open-file limit: std has neither and
 # this crate forbids unsafe. Already locked through tempfile.
 rustix = { version = "1.1", features = ["process"] }
@@ -105,19 +108,23 @@ required-features = ["remote"]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
-# DataFusion 53.1.0's physical-plan crate as published on crates.io (sha256
-# 5edc023675791af9d5fb4cc4c24abf5f7bd3bd4dcf9e5bd90ea1eff6976dcc79), plus
-# backported upstream fixes, each a separate commit touching only this
-# directory. iceberg-datafusion 0.10.1 requires DataFusion ^53.1, so the
-# releases carrying them are not available here. Remove this patch when
-# docspec moves to a DataFusion release that contains every backport.
-[patch.crates-io]
-datafusion-physical-plan = { path = "vendor/datafusion-physical-plan" }
-
 # Avoid 60-90 GB DataFusion/Arrow incremental debug caches while retaining line-table backtraces.
 [profile.dev]
 debug = "line-tables-only"
 incremental = false
+
+# Keep software digest crates fast in dev/test builds when hashing the unstripped test binary.
+[profile.dev.package.sha2]
+opt-level = 2
+
+[profile.dev.package.digest]
+opt-level = 2
+
+[profile.dev.package.blake3]
+opt-level = 2
+
+[profile.dev.package.md-5]
+opt-level = 2
 
 [profile.release]
 debug = 1
