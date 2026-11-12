@@ -199,6 +199,7 @@ impl SnapshotSource {
     }
 
     // The caller holds the exact destination allowance until it consumes the bytes.
+    #[cfg(test)]
     pub(crate) async fn read_range(
         &self,
         uri: &str,

@@ -530,9 +530,16 @@ impl JobSpec {
             match input {
                 JobInput::Parquet { name, path } => {
                     job.register_parquet(name, path).await?;
-                    result
-                        .inputs
-                        .push(observe_parquet_input(name, path, &job.budget)?);
+                    let name_owned = name.clone();
+                    let path_owned = path.clone();
+                    let hash_budget = job.budget.clone();
+                    let observed = job
+                        .budget
+                        .blocking_admitted_queued(move || {
+                            observe_parquet_input(&name_owned, &path_owned, &hash_budget)
+                        })
+                        .await?;
+                    result.inputs.push(observed);
                 }
                 JobInput::JsonLines {
                     name,
@@ -540,9 +547,16 @@ impl JobSpec {
                     schema,
                 } => {
                     job.register_json_lines(name, files.clone(), Arc::new(schema.clone()))?;
-                    result
-                        .inputs
-                        .push(observe_json_lines_input(name, files, &job.budget)?);
+                    let name_owned = name.clone();
+                    let files_owned = files.clone();
+                    let hash_budget = job.budget.clone();
+                    let observed = job
+                        .budget
+                        .blocking_admitted_queued(move || {
+                            observe_json_lines_input(&name_owned, &files_owned, &hash_budget)
+                        })
+                        .await?;
+                    result.inputs.push(observed);
                 }
                 JobInput::NativeTable {
                     name,
@@ -561,8 +575,14 @@ impl JobSpec {
                         },
                     )
                     .await?;
-                    let (sha256, bytes) =
-                        observe_optional_local_file(Path::new(metadata_location), &job.budget)?;
+                    let location_owned = PathBuf::from(metadata_location);
+                    let hash_budget = job.budget.clone();
+                    let (sha256, bytes) = job
+                        .budget
+                        .blocking_admitted_queued(move || {
+                            observe_optional_local_file(&location_owned, &hash_budget)
+                        })
+                        .await?;
                     result.inputs.push(InputResult {
                         name: name.clone(),
                         kind: "native_table".into(),
@@ -577,8 +597,14 @@ impl JobSpec {
                 }
                 JobInput::Iceberg { name, pin } => {
                     job.register_iceberg(name, pin).await?;
-                    let (sha256, local_bytes) =
-                        observe_optional_local_file(Path::new(&pin.metadata.path), &job.budget)?;
+                    let location_owned = PathBuf::from(&pin.metadata.path);
+                    let hash_budget = job.budget.clone();
+                    let (sha256, local_bytes) = job
+                        .budget
+                        .blocking_admitted_queued(move || {
+                            observe_optional_local_file(&location_owned, &hash_budget)
+                        })
+                        .await?;
                     result.inputs.push(InputResult {
                         name: name.clone(),
                         kind: "iceberg".into(),

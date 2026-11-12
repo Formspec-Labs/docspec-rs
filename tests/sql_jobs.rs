@@ -1134,7 +1134,7 @@ async fn unmaterialized_timeline_view_selects_json_columns_under_filter() {
 
         let spec: JobSpec = serde_json::from_value(json!({
             "id": format!("spicyregs.timeline.{label}"),
-            "scratch_dir": dir.join("scratch"),
+            "scratch": dir.join("scratch"),
             "inputs": [
                 {"kind": "parquet", "name": "fr_docs", "path": a_path},
                 {"kind": "parquet", "name": "reginfo", "path": b_path},
@@ -1150,14 +1150,21 @@ async fn unmaterialized_timeline_view_selects_json_columns_under_filter() {
                             SELECT json_get_str(r.j, 'f') AS rulemaking_id, \
                             CAST(NULL AS VARCHAR) AS fr_document_number \
                             FROM reginfo AS r WHERE r.k = '__never__'",
+                },
+                {
+                    "name": "by_rulemaking_filtered",
+                    "materialize": false,
+                    "sql": "SELECT fr_document_number FROM rulemaking_timeline \
+                            WHERE rulemaking_id = $rid",
+                    "parameters": {"rid": "RIN-1"},
                 }
             ],
+            "outputs": [],
             "queries": [
                 {
                     "name": "by_rulemaking",
-                    "sql": "SELECT fr_document_number FROM rulemaking_timeline \
-                            WHERE rulemaking_id = $rid ORDER BY fr_document_number",
-                    "parameters": {"rid": "RIN-1"},
+                    "sql": "SELECT fr_document_number FROM by_rulemaking_filtered \
+                            ORDER BY fr_document_number",
                 }
             ],
         }))

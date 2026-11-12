@@ -475,12 +475,179 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections,
+                    protections: done_protections.clone(),
                 },
                 None,
             )
             .await
             .unwrap(),
         completed
+    );
+
+    // 5. Completed policy-governed Refresh must refuse `select_prepared` (`None` policy) and stale policy.
+    engine
+        .inner
+        .lifecycle
+        .commit(
+            &done_view,
+            vec![
+                record(
+                    managed_build::initial_policy_key(&refresh_done_spec.operation),
+                    &policy,
+                )
+                .unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        engine
+            .select_prepared(
+                &refresh_done_req,
+                &done_op,
+                Retained {
+                    value: completed.clone(),
+                    protections: done_protections.clone(),
+                },
+                None,
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_qualification_policy"
+    );
+    assert_eq!(
+        engine
+            .select_prepared_with_policy(
+                &refresh_done_req,
+                &done_op,
+                Retained {
+                    value: completed.clone(),
+                    protections: done_protections.clone(),
+                },
+                None,
+                Some(&other_policy_id),
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_qualification_policy"
+    );
+    assert_eq!(
+        engine
+            .select_prepared_with_policy(
+                &refresh_done_req,
+                &done_op,
+                Retained {
+                    value: completed.clone(),
+                    protections: done_protections,
+                },
+                None,
+                Some(&policy_id),
+            )
+            .await
+            .unwrap(),
+        completed
+    );
+
+    // 6. Backfill must refuse `select_prepared_with_policy` and enforce `initial_policy_key` across resume and completion.
+    let backfill_spec = crate::model::BackfillSpec {
+        dataset: Id::new("source").unwrap(),
+        operation: Id::new("backfill-1").unwrap(),
+        base: Id::new("initial").unwrap(),
+        definition: "v1".into(),
+        group: Id::new("derived").unwrap(),
+        group_definition: "g1".into(),
+        fields: vec![crate::model::ComputedField {
+            id: 1,
+            name: "doubled".into(),
+            expression: "id * 2".into(),
+        }],
+    };
+    let backfill_req = OperationRequest::Backfill(backfill_spec.clone());
+    assert_eq!(
+        engine
+            .select_prepared_with_policy(
+                &backfill_req,
+                &done_op,
+                Retained {
+                    value: completed.clone(),
+                    protections: None,
+                },
+                None,
+                Some(&policy_id),
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        "invalid_spec"
+    );
+    assert_eq!(
+        engine
+            .run_admitted(&backfill_req, Some("readback"))
+            .await
+            .unwrap_err()
+            .code(),
+        "injected_failure"
+    );
+    let source_view = engine
+        .inner
+        .lifecycle
+        .open(&backfill_spec.dataset)
+        .await
+        .unwrap();
+    engine
+        .inner
+        .lifecycle
+        .commit(
+            &source_view,
+            vec![
+                record(
+                    managed_build::initial_policy_key(&backfill_spec.operation),
+                    &policy,
+                )
+                .unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.backfill(&backfill_spec).await.unwrap_err().code(),
+        "stale_qualification_policy"
+    );
+    let backfill_done_spec = crate::model::BackfillSpec {
+        operation: Id::new("backfill-done").unwrap(),
+        group: Id::new("derived-done").unwrap(),
+        ..backfill_spec
+    };
+    engine.backfill(&backfill_done_spec).await.unwrap();
+    let source_view = engine
+        .inner
+        .lifecycle
+        .open(&backfill_done_spec.dataset)
+        .await
+        .unwrap();
+    engine
+        .inner
+        .lifecycle
+        .commit(
+            &source_view,
+            vec![
+                record(
+                    managed_build::initial_policy_key(&backfill_done_spec.operation),
+                    &policy,
+                )
+                .unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        engine
+            .backfill(&backfill_done_spec)
+            .await
+            .unwrap_err()
+            .code(),
+        "stale_qualification_policy"
     );
 }

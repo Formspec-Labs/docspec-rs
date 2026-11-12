@@ -358,10 +358,8 @@ impl Engine {
             .get::<ReleasePin>(&view, &format!("result/{}", spec.operation))
             .await?
         {
-            if let Some(requested_policy) = requested_policy {
-                self.guard_completed_policy(&view, &spec.operation, requested_policy)
-                    .await?;
-            }
+            self.guard_completed_policy(&view, &spec.operation, requested_policy)
+                .await?;
             return Ok(selected);
         }
         let authority = self.check(&view, operation, &spec.operation).await?;

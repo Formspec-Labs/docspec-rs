@@ -951,11 +951,14 @@ impl Engine {
             return Ok(());
         }
         let directory = admitted.directory.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            File::open(directory)?.sync_all()?;
-            Ok(())
-        })
-        .await??;
+        self.inner
+            .lifecycle
+            .budget
+            .blocking_admitted_queued(move || {
+                File::open(directory)?.sync_all()?;
+                Ok(())
+            })
+            .await?;
         let entries = completed_batch
             .iter()
             .map(|(key, member)| (key.as_str(), member))
@@ -1200,15 +1203,16 @@ async fn copy_member_admitted(
         (None, None)
     } else {
         let budget_open = budget.clone();
-        tokio::task::spawn_blocking(move || -> Result<_> {
-            let temporary = budget_open
-                .runtime_env()
-                .disk_manager
-                .create_tmp_file("retained native member")?;
-            let writer = budget_open.scratch_writer(&temporary)?;
-            Ok((Some(temporary), Some(writer)))
-        })
-        .await??
+        budget
+            .blocking_admitted_queued(move || {
+                let temporary = budget_open
+                    .runtime_env()
+                    .disk_manager
+                    .create_tmp_file("retained native member")?;
+                let writer = budget_open.scratch_writer(&temporary)?;
+                Ok((Some(temporary), Some(writer)))
+            })
+            .await?
     };
     #[cfg(feature = "remote")]
     let mut destination = match &reader {
@@ -1227,8 +1231,8 @@ async fn copy_member_admitted(
                 if bytes.len() as u64 != end - start {
                     return Err(mismatch());
                 }
-                (output, sha, digest, permit) =
-                    tokio::task::spawn_blocking(move || -> Result<_> {
+                (output, sha, digest, permit) = budget
+                    .blocking_admitted_queued(move || {
                         if let Some(writer) = &mut output {
                             writer.write_all(&bytes)?;
                         }
@@ -1236,7 +1240,7 @@ async fn copy_member_admitted(
                         digest.update(&bytes);
                         Ok((output, sha, digest, permit))
                     })
-                    .await??;
+                    .await?;
             }
             #[cfg(feature = "remote")]
             SnapshotReader::S3(source) => {
@@ -1251,8 +1255,8 @@ async fn copy_member_admitted(
                         &permit,
                     )
                     .await?;
-                (output, sha, digest, destination, permit) =
-                    tokio::task::spawn_blocking(move || -> Result<_> {
+                (output, sha, digest, destination, permit) = budget
+                    .blocking_admitted_queued(move || {
                         let slice = &destination[..len];
                         if let Some(writer) = &mut output {
                             writer.write_all(slice)?;
@@ -1261,7 +1265,7 @@ async fn copy_member_admitted(
                         digest.update(slice);
                         Ok((output, sha, digest, destination, permit))
                     })
-                    .await??;
+                    .await?;
             }
         }
         start = end;
@@ -1280,19 +1284,23 @@ async fn copy_member_admitted(
     }
     let retained_path = member_path.to_string_lossy().into_owned();
     let budget_finalize = budget.clone();
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        drop(output);
-        if let Some(temporary) = temporary {
-            temporary.inner().as_file().sync_all()?;
-            std::fs::hard_link(temporary.path(), &member_path)?;
-            budget_finalize.retain_temporary(temporary)?;
-        }
-        if sync_parent {
-            File::open(member_path.parent().ok_or_else(mismatch)?)?.sync_all()?;
-        }
-        Ok(())
-    })
-    .await??;
+    budget
+        .blocking_admitted_queued(move || {
+            drop(output);
+            if let Some(temporary) = temporary {
+                temporary.inner().as_file().sync_all()?;
+                std::fs::hard_link(temporary.path(), &member_path)?;
+                if let Err(error) = budget_finalize.retain_temporary(temporary) {
+                    let _ = std::fs::remove_file(&member_path);
+                    return Err(error);
+                }
+            }
+            if sync_parent {
+                File::open(member_path.parent().ok_or_else(mismatch)?)?.sync_all()?;
+            }
+            Ok(())
+        })
+        .await?;
     Ok(SnapshotObject {
         origin_operation: admitted.request.operation.clone(),
         uri: uri.into(),

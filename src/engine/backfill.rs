@@ -668,16 +668,8 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
             {
-                if self
-                    .initial_qualification(&view, &spec.operation)
-                    .await?
-                    .is_some()
-                {
-                    return Err(Error::refusal(
-                        "stale_qualification_policy",
-                        "selection requires the active quality policy",
-                    ));
-                }
+                self.guard_completed_policy(&view, &spec.operation, None)
+                    .await?;
                 return Ok(BackfillAdmission::Completed(result));
             }
             self.check_not_abandoned(&view, &spec.operation).await?;
@@ -707,6 +699,16 @@ impl Engine {
                 ));
             }
             if let Some(operation) = old {
+                if self
+                    .initial_qualification(&view, &spec.operation)
+                    .await?
+                    .is_some()
+                {
+                    return Err(Error::refusal(
+                        "stale_qualification_policy",
+                        "selection requires the active quality policy",
+                    ));
+                }
                 check_preparation(&authority, &operation)?;
                 let capture: BackfillCapture = lifecycle
                     .get(&view, &format!("backfill/{}", spec.operation))
@@ -943,6 +945,8 @@ impl Engine {
                     .get(&view, &format!("result/{}", spec.operation))
                     .await?
                 {
+                    self.guard_completed_policy(&view, &spec.operation, None)
+                        .await?;
                     return Ok(completed);
                 }
                 let authority: Authority =
@@ -1144,16 +1148,8 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation))
                 .await?
             {
-                if self
-                    .initial_qualification(&view, &spec.operation)
-                    .await?
-                    .is_some()
-                {
-                    return Err(Error::refusal(
-                        "stale_qualification_policy",
-                        "selection requires the active quality policy",
-                    ));
-                }
+                self.guard_completed_policy(&view, &spec.operation, None)
+                    .await?;
                 return Ok(completed);
             }
             let authority: Authority = lifecycle.get(&view, "authority").await?.unwrap_or_default();

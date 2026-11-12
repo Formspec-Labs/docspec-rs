@@ -359,6 +359,24 @@ impl Budget {
         })
         .await?
     }
+
+    /// Runs admitted blocking work queued behind `blocking_jobs` capacity.
+    pub(crate) async fn blocking_admitted_queued<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let permit = self
+            .blocking_jobs
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| Error::refusal("worker", "blocking I/O limiter closed"))?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await?
+    }
     /// Reserves bytes without waiting while already holding other reservations.
     ///
     /// # Errors

@@ -1055,12 +1055,19 @@ impl Engine {
         &self,
         view: &View,
         operation: &Id,
-        requested: &Id,
+        requested: Option<&Id>,
     ) -> Result<()> {
-        if &self.quality_policy(view, operation).await?.id != requested {
+        if self.initial_qualification(view, operation).await?.is_none() {
+            if requested.is_some() {
+                return Err(unknown_operation());
+            }
+            return Ok(());
+        }
+        let policy = self.quality_policy(view, operation).await?;
+        if requested != Some(&policy.id) {
             return Err(Error::refusal(
                 "stale_qualification_policy",
-                "selection requested a stale quality policy",
+                "selection requires the active quality policy",
             ));
         }
         Ok(())

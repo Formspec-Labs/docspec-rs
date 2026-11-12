@@ -124,6 +124,12 @@ impl Engine {
     ) -> futures::future::BoxFuture<'a, Result<ReleasePin>> {
         // Heap-box state machine to bound poll-frame stack size and worker admission
         Box::pin(async move {
+            if matches!(spec, OperationRequest::Backfill(_)) {
+                return Err(Error::refusal(
+                    "invalid_spec",
+                    "backfill operations must use backfill promotion",
+                ));
+            }
             if let OperationRequest::Refresh(refresh) = spec {
                 let selected = self
                     .select_refresh(refresh, operation, &release, requested_policy)
@@ -147,10 +153,8 @@ impl Engine {
                 .get(&view, &format!("result/{}", spec.operation()))
                 .await?
             {
-                if let Some(requested_policy) = requested_policy {
-                    self.guard_completed_policy(&view, spec.operation(), requested_policy)
-                        .await?;
-                }
+                self.guard_completed_policy(&view, spec.operation(), requested_policy)
+                    .await?;
                 return Ok(completed);
             }
             let authority = self.check(&view, operation, spec.operation()).await?;
