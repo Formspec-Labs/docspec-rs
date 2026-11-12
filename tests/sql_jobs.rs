@@ -1039,3 +1039,130 @@ async fn json_reservation_errors_keep_file_key_line_and_resource_cause() {
         "{error}"
     );
 }
+
+/// Writes one join side: a struct `s` and a JSON text `j` holding the same field `f`, keyed by `k`.
+fn write_outer_join_side(path: &std::path::Path, keys: &[&str], fields: &[&str]) {
+    use arrow::array::{ArrayRef, StructArray};
+    use parquet::arrow::ArrowWriter;
+    let field = Arc::new(Field::new("f", DataType::Utf8, true));
+    let structs = StructArray::from(vec![(
+        field,
+        Arc::new(StringArray::from(fields.to_vec())) as ArrayRef,
+    )]);
+    let json = StringArray::from_iter_values(fields.iter().map(|f| format!(r#"{{"f":"{f}"}}"#)));
+    let batch = arrow::record_batch::RecordBatch::try_from_iter([
+        ("s", Arc::new(structs) as ArrayRef),
+        ("j", Arc::new(json) as ArrayRef),
+        ("k", Arc::new(StringArray::from(keys.to_vec())) as ArrayRef),
+    ])
+    .unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(path).unwrap(), batch.schema(), None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
+// DataFusion 53.1's `push_down_leaf_projections` refused this valid shape with "Schema contains
+// qualified field name l.__datafusion_extracted_3 and unqualified field name
+// __datafusion_extracted_3 which would be ambiguous". It needs a field read (`get_field` or a JSON
+// getter) on each side of an outer join over Parquet scans, an aliased left input, and a sub-query
+// projection whose filtered column combines both sides. The data map's rulemaking timeline view
+// hit it through `json_get_str`. DataFusion 55.2 plans and answers it.
+#[tokio::test]
+async fn reads_fields_from_both_sides_of_an_outer_join_under_a_filter() {
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(limits(), root.path().join("scratch")).unwrap();
+    for (name, keys, fields) in [
+        ("a", &["1", "2", "3"][..], &["a1", "a2", "a3"][..]),
+        ("b", &["1"][..], &["x"][..]),
+    ] {
+        let path = root.path().join(format!("{name}.parquet"));
+        write_outer_join_side(&path, keys, fields);
+        job.register_parquet(name, &path).await.unwrap();
+    }
+    for read in ["{}.s['f']", "json_get_str({}.j, 'f')"] {
+        let (right, left) = (read.replace("{}", "r"), read.replace("{}", "l"));
+        // 'x' comes from the matched right row; '2' from the left key of an unmatched row.
+        for (rid, expected) in [("x", "a1"), ("2", "a2")] {
+            let sql = format!(
+                "SELECT fr FROM (SELECT coalesce({right}, l.k) AS rid, {left} AS fr \
+                 FROM a AS l LEFT JOIN b AS r ON r.k = l.k) WHERE rid = '{rid}'"
+            );
+            let batches = match job.sql(&sql).await {
+                Ok(frame) => frame.collect().await,
+                Err(error) => panic!("{left}, rid {rid}: {error}"),
+            }
+            .unwrap_or_else(|error| panic!("{left}, rid {rid}: {error}"));
+            let found: Vec<String> = batches
+                .iter()
+                .flat_map(|batch| {
+                    let column = arrow::compute::cast(batch.column(0), &DataType::Utf8).unwrap();
+                    let column = column.as_any().downcast_ref::<StringArray>().unwrap();
+                    (0..column.len())
+                        .map(|row| column.value(row).to_owned())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            assert_eq!(found, [expected], "{left}, rid {rid}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn unmaterialized_timeline_view_selects_json_columns_under_filter() {
+    use docspec::job::JobSpec;
+    use serde_json::json;
+
+    let root = tempfile::tempdir().unwrap();
+    for (label, a_keys, a_fields, b_keys, b_fields, expected) in [
+        (
+            "populated",
+            &["1", "2"][..],
+            &["DOC-1", "DOC-2"][..],
+            &["1"][..],
+            &["RIN-1"][..],
+            json!([{"fr_document_number": "DOC-1"}]),
+        ),
+        ("empty", &[][..], &[][..], &[][..], &[][..], json!([])),
+    ] {
+        let dir = root.path().join(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a_path = dir.join("fr_docs.parquet");
+        let b_path = dir.join("reginfo.parquet");
+        write_outer_join_side(&a_path, a_keys, a_fields);
+        write_outer_join_side(&b_path, b_keys, b_fields);
+
+        let spec: JobSpec = serde_json::from_value(json!({
+            "id": format!("spicyregs.timeline.{label}"),
+            "scratch_dir": dir.join("scratch"),
+            "inputs": [
+                {"kind": "parquet", "name": "fr_docs", "path": a_path},
+                {"kind": "parquet", "name": "reginfo", "path": b_path},
+            ],
+            "steps": [
+                {
+                    "name": "rulemaking_timeline",
+                    "materialize": false,
+                    "sql": "SELECT coalesce(json_get_str(r.j, 'f'), l.k) AS rulemaking_id, \
+                            json_get_str(l.j, 'f') AS fr_document_number \
+                            FROM fr_docs AS l LEFT JOIN reginfo AS r ON r.k = l.k \
+                            UNION ALL \
+                            SELECT json_get_str(r.j, 'f') AS rulemaking_id, \
+                            CAST(NULL AS VARCHAR) AS fr_document_number \
+                            FROM reginfo AS r WHERE r.k = '__never__'",
+                }
+            ],
+            "queries": [
+                {
+                    "name": "by_rulemaking",
+                    "sql": "SELECT fr_document_number FROM rulemaking_timeline \
+                            WHERE rulemaking_id = $rid ORDER BY fr_document_number",
+                    "parameters": {"rid": "RIN-1"},
+                }
+            ],
+        }))
+        .unwrap();
+        let result = spec.run(limits()).await.expect(label);
+        assert_eq!(result.queries[0].data, expected, "{label}");
+    }
+}
