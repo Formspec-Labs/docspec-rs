@@ -61,6 +61,15 @@ pub(super) fn declared_schema(
 pub(super) async fn execute_stream(
     frame: DataFrame,
 ) -> crate::Result<datafusion::physical_plan::SendableRecordBatchStream> {
+    Ok(execute_plan_stream(frame).await?.1)
+}
+
+pub(super) async fn execute_plan_stream(
+    frame: DataFrame,
+) -> crate::Result<(
+    Arc<dyn ExecutionPlan>,
+    datafusion::physical_plan::SendableRecordBatchStream,
+)> {
     let (state, _) = frame.clone().into_parts();
     let owner = constants::owner(&state)?;
     let planning = owner.enter();
@@ -69,7 +78,8 @@ pub(super) async fn execute_stream(
     planning.check()?;
     let plan = super::native::admit_metadata_plan(plan?, owner);
     drop(planning);
-    Ok(datafusion::physical_plan::execute_stream(plan, context)?)
+    let stream = datafusion::physical_plan::execute_stream(plan.clone(), context)?;
+    Ok((plan, stream))
 }
 
 #[async_trait::async_trait]

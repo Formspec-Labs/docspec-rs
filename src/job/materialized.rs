@@ -244,13 +244,72 @@ pub(super) async fn materialize(
     name: &str,
     sql: &str,
 ) -> Result<(StepStorage, usize, usize)> {
+    let (storage, rows, bytes, _) = materialize_with_joins(job, name, sql).await?;
+    Ok((storage, rows, bytes))
+}
+
+pub(super) async fn materialize_with_joins(
+    job: &super::Job,
+    name: &str,
+    sql: &str,
+) -> Result<(StepStorage, usize, usize, Vec<super::metrics::JoinSummary>)> {
     if job.context.table_exist(name)? {
         return Err(Error::refusal("invalid_spec", "named step already exists"));
     }
     let frame = job.sql(sql).await?;
     let schema = super::plan::declared_schema(&frame, &job.budget)?;
-    let stream = super::plan::execute_stream(frame).await?;
-    retain(&job.context, &job.budget, name, schema, stream).await
+    let (plan, stream) = super::plan::execute_plan_stream(frame).await?;
+    let (storage, rows, bytes) = retain(&job.context, &job.budget, name, schema, stream).await?;
+    Ok((storage, rows, bytes, summarize_joins(&plan)))
+}
+
+/// Summarizes each executed `HashJoinExec` in `plan`, naming its build step and row count.
+pub(super) fn summarize_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<super::metrics::JoinSummary> {
+    use datafusion::physical_plan::joins::{HashJoinExec, PartitionMode};
+    fn retained_scan_under(plan: &Arc<dyn ExecutionPlan>) -> Option<(&str, usize)> {
+        fn collect<'a>(plan: &'a Arc<dyn ExecutionPlan>, out: &mut Vec<(&'a str, usize)>) {
+            if let Some(scan) = plan.as_any().downcast_ref::<RetainedScan>() {
+                out.push((scan.step.as_ref(), scan.rows));
+                return;
+            }
+            for child in plan.children() {
+                collect(child, out);
+            }
+        }
+        let mut found = Vec::new();
+        collect(plan, &mut found);
+        match found.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
+    }
+    fn walk(plan: &Arc<dyn ExecutionPlan>, out: &mut Vec<super::metrics::JoinSummary>) {
+        if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
+            let scanned = retained_scan_under(join.left());
+            let build_rows = join
+                .metrics()
+                .and_then(|metrics| metrics.sum_by_name("build_input_rows"))
+                .map(|value| value.as_usize() as u64)
+                .or_else(|| scanned.map(|(_, rows)| rows as u64));
+            let partition_mode = match join.partition_mode() {
+                PartitionMode::CollectLeft => "CollectLeft",
+                PartitionMode::Partitioned => "Partitioned",
+                PartitionMode::Auto => "Auto",
+            };
+            out.push(super::metrics::JoinSummary {
+                join_type: join.join_type().to_string(),
+                partition_mode: partition_mode.to_owned(),
+                build_step: scanned.map(|(step, _)| step.to_owned()),
+                build_rows,
+            });
+        }
+        for child in plan.children() {
+            walk(child, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(plan, &mut out);
+    out
 }
 
 pub(super) async fn retain(

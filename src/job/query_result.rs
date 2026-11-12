@@ -109,8 +109,16 @@ impl Write for Buffer {
 }
 
 pub(super) async fn query(job: &Job, name: &str, sql: &str) -> Result<QueryResult> {
+    Ok(query_with_joins(job, name, sql).await?.0)
+}
+
+pub(super) async fn query_with_joins(
+    job: &Job,
+    name: &str,
+    sql: &str,
+) -> Result<(QueryResult, Vec<super::metrics::JoinSummary>)> {
     let (frame, _) = plan_query_frame(job, name, sql).await?;
-    let mut stream = super::plan::execute_stream(frame).await?;
+    let (plan, mut stream) = super::plan::execute_plan_stream(frame).await?;
     let columns = ensure_distinct_columns(name, &stream.schema())?;
     let buffer = Buffer {
         bytes: Vec::new(),
@@ -137,13 +145,16 @@ pub(super) async fn query(job: &Job, name: &str, sql: &str) -> Result<QueryResul
     writer.finish()?;
     let buffer = writer.into_inner();
     let data = serde_json::from_slice(&buffer.bytes)?;
-    Ok(QueryResult {
-        name: name.into(),
-        columns,
-        data,
-        _memory: Some(Arc::new(buffer.memory)),
-        _metadata: None,
-    })
+    Ok((
+        QueryResult {
+            name: name.into(),
+            columns,
+            data,
+            _memory: Some(Arc::new(buffer.memory)),
+            _metadata: None,
+        },
+        super::materialized::summarize_joins(&plan),
+    ))
 }
 
 #[cfg(test)]

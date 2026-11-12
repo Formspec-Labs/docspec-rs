@@ -2885,3 +2885,62 @@ async fn managed_job_receipt_and_manifest_bind_job_id_spec_digest_inputs_and_ste
         .unwrap();
     assert!(!inspection.is_empty());
 }
+
+#[tokio::test]
+async fn managed_job_names_failing_step_output_and_query() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(root.path().join("host"), limits())
+        .await
+        .unwrap();
+
+    // 1. Failing query (report)
+    std::fs::write(
+        root.path().join("input.jsonl"),
+        b"{\"id\":1,\"amount\":10}\n",
+    )
+    .unwrap();
+    let bad_query = request(root.path(), "bad-query", "SELECT absent_column", None);
+    let err = engine.managed_job(bad_query).await.unwrap_err();
+    assert_eq!(err.code(), "query", "{err}");
+    assert!(
+        err.message().starts_with("query 0 \"invariants\": "),
+        "expected query prefix, got {:?}",
+        err.message()
+    );
+
+    // 2. Failing step & output
+    for (op_name, kind, prefix) in [
+        ("bad-step", "steps", "step 0 \"material\": "),
+        ("bad-output", "outputs", "output 0 \"values\": "),
+    ] {
+        let op_dir = root.path().join(op_name);
+        std::fs::create_dir_all(&op_dir).unwrap();
+        std::fs::write(op_dir.join("input.jsonl"), b"{\"id\":1,\"amount\":10}\n").unwrap();
+        let ManagedJobCommand::Prepare(mut prepare) = request(
+            &op_dir,
+            op_name,
+            "SELECT COUNT(*) AS invalid_rows FROM outputs.\"values\"",
+            None,
+        ) else {
+            unreachable!()
+        };
+        let mut job: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&prepare.job.path).unwrap()).unwrap();
+        job[kind][0]["sql"] = json!("SELECT absent_column");
+        prepare.job = artifact(prepare.job.path, &job);
+        let mut policy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&prepare.policy.path).unwrap()).unwrap();
+        policy["job_sha256"] = json!(prepare.job.sha256);
+        prepare.policy = artifact(prepare.policy.path, &policy);
+        let err = engine
+            .managed_job(ManagedJobCommand::Prepare(prepare))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "query", "{err}");
+        assert!(
+            err.message().starts_with(prefix),
+            "expected {prefix:?}, got {:?}",
+            err.message()
+        );
+    }
+}

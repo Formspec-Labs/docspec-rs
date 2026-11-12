@@ -322,3 +322,168 @@ async fn a_missing_json_lines_source_in_an_anonymous_job_fails_at_the_statement_
     assert_eq!(fail.completed.queries.len(), 1);
     assert_eq!(fail.completed.queries[0].name, "before");
 }
+
+#[tokio::test]
+async fn job_metric_events_record_start_join_summaries_shared_floor_and_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let limits = Limits {
+        compute_threads: 2,
+        memory_bytes: 256 << 20,
+        scratch_bytes: 256 << 20,
+        batch_rows: 1024,
+        max_batch_bytes: 4 << 20,
+        max_metadata_bytes: 4 << 20,
+    };
+    let half = (limits.memory_bytes / 2) as u64;
+    let out_path = root.path().join("joined.parquet");
+    let mut joined_export = export_settings();
+    joined_export["order_by"] = json!([{"field": "k"}]);
+    let spec = json!({
+        "steps": [
+            {"name": "big", "materialize": true, "sql": "SELECT value AS k FROM generate_series(1, 20) AS t(value)"},
+            {"name": "few", "materialize": true, "sql": "SELECT value * 2 AS k, value * 10 AS v FROM generate_series(1, 3) AS t(value)"},
+            {"name": "joined", "materialize": true, "sql": "SELECT big.k, few.v FROM big LEFT JOIN few ON big.k = few.k"}
+        ],
+        "outputs": [
+            {"name": "joined_out", "path": out_path, "sql": "SELECT k, v FROM joined", "settings": joined_export}
+        ],
+        "queries": [
+            {"name": "summary", "sql": "SELECT count(*) AS n FROM joined"}
+        ]
+    });
+    let (res, events) =
+        super::metrics::capture_events(run(root.path(), limits.clone(), spec)).await;
+    res.unwrap();
+
+    assert_eq!(events[0]["event"], "start");
+    assert_eq!(events[0]["pool_bytes"], half);
+    assert_eq!(events[0]["shared_admission_bytes"], half);
+    assert_eq!(events[0]["retention_ceiling_bytes"], half / 4);
+    assert_eq!(events[0]["target_partitions"], 2);
+    assert!(events[0]["open_files_soft"].as_u64().is_some_and(|n| n > 0));
+    assert!(events[0].get("start_epoch").is_none());
+
+    let joined_step = events
+        .iter()
+        .find(|e| e["event"] == "step" && e["name"] == "joined")
+        .expect("joined step event");
+    assert!(joined_step["process_peak_rss_bytes"].as_u64().unwrap() > 0);
+    assert!(joined_step["shared_available_min"].as_u64().unwrap() <= half);
+    assert_eq!(
+        joined_step["joins"],
+        json!([{
+            "join_type": "Right",
+            "partition_mode": "CollectLeft",
+            "build_step": "few",
+            "build_rows": 3
+        }])
+    );
+
+    let output_ev = events
+        .iter()
+        .find(|e| e["event"] == "output" && e["name"] == "joined_out")
+        .expect("output event");
+    assert!(output_ev["pool_reserved_peak"].as_u64().unwrap() > 0);
+    assert!(
+        output_ev["shared_available_min"].as_u64().unwrap() < half,
+        "export reserves writer and metadata permits from the shared half: {output_ev}"
+    );
+    assert_eq!(output_ev["compaction_copied_batches"], 0);
+    assert_eq!(output_ev["compaction_refused_copies"], 0);
+    assert!(output_ev["process_peak_rss_bytes"].as_u64().unwrap() > 0);
+
+    let query_ev = events
+        .iter()
+        .find(|e| e["event"] == "step" && e["name"] == "query:summary")
+        .expect("query event");
+    assert!(query_ev["process_peak_rss_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        query_ev["shared_available_min"].as_u64().unwrap() < half,
+        "query JSON encoding reserves from the shared half: {query_ev}"
+    );
+
+    // Failing job emits a final `failed` event naming the statement with live pool bytes.
+    let fail_spec = json!({
+        "steps": [
+            {"name": "kept", "materialize": true, "sql": "SELECT value AS k FROM generate_series(1, 500) AS t(value)"},
+            {"name": "broken", "sql": "SELECT missing_column FROM kept"}
+        ]
+    });
+    let (fail_res, fail_events) =
+        super::metrics::capture_events(run(root.path(), limits, fail_spec)).await;
+    let err = fail_res.unwrap_err();
+    let last = fail_events.last().expect("failed event");
+    assert_eq!(last["event"], "failed");
+    assert_eq!(last["statement_kind"], "step");
+    assert_eq!(last["statement_index"], 1);
+    assert_eq!(last["name"], "broken");
+    assert_eq!(last["code"], err.error.code());
+    assert!(last["pool_reserved"].as_u64().unwrap() > 0, "{last}");
+    assert!(last["process_peak_rss_bytes"].as_u64().unwrap() > 0);
+    assert!(last.get("start_epoch").is_none());
+    assert!(last.get("end_epoch").is_none());
+}
+
+#[tokio::test]
+async fn prepare_job_names_failing_step_output_and_query() {
+    use sha2::{Digest, Sha256};
+
+    let root = tempfile::tempdir().unwrap();
+    let cases = [
+        (
+            "step 1 \"broken_step\": ",
+            json!({
+                "scratch": root.path().join("scratch"),
+                "inputs": [],
+                "steps": [
+                    {"name": "ok_step", "sql": "SELECT 1 AS id"},
+                    {"name": "broken_step", "sql": BROKEN}
+                ],
+                "outputs": []
+            }),
+        ),
+        (
+            "output 0 \"broken_out\": ",
+            json!({
+                "scratch": root.path().join("scratch"),
+                "inputs": [],
+                "steps": [{"name": "ok_step", "sql": "SELECT 1 AS id"}],
+                "outputs": [
+                    {"name": "broken_out", "path": root.path().join("out.parquet"), "sql": BROKEN, "settings": export_settings()}
+                ]
+            }),
+        ),
+        (
+            "query 1 \"broken_query\": ",
+            json!({
+                "scratch": root.path().join("scratch"),
+                "inputs": [],
+                "steps": [{"name": "ok_step", "sql": "SELECT 1 AS id"}],
+                "outputs": [],
+                "queries": [
+                    {"name": "ok_query", "sql": "SELECT id FROM ok_step"},
+                    {"name": "broken_query", "sql": BROKEN}
+                ]
+            }),
+        ),
+    ];
+
+    for (expected_prefix, job_json) in cases {
+        let job_path = root.path().join("job.json");
+        let bytes = serde_json::to_vec(&job_json).unwrap();
+        std::fs::write(&job_path, &bytes).unwrap();
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let prep: PrepareJobSpec = serde_json::from_value(json!({
+            "job": {"path": job_path, "sha256": sha256},
+            "inputs": []
+        }))
+        .unwrap();
+        let err = prep.prepare(Limits::default()).await.unwrap_err();
+        assert_eq!(err.code(), "query", "{err}");
+        assert!(
+            err.message().starts_with(expected_prefix),
+            "expected prefix {expected_prefix:?}, got {:?}",
+            err.message()
+        );
+    }
+}

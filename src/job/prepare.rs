@@ -416,77 +416,91 @@ impl PrepareJobSpec {
         }
         #[cfg(feature = "substrait")]
         let mut saved_plan_memory = Vec::new();
-        for step in &spec.steps {
-            let schema = match step {
-                JobStep::Sql(step) => {
-                    if step.materialize && !step.parameters.is_empty() {
-                        return Err(Error::refusal(
-                            "unsupported_parameters",
-                            "parameters are supported for view steps",
-                        ));
+        let mut running = None;
+        let statement_outcome: Result<()> = async {
+            for (index, step) in spec.steps.iter().enumerate() {
+                running = Some(super::Running::Step(index));
+                let schema = match step {
+                    JobStep::Sql(step) => {
+                        if step.materialize && !step.parameters.is_empty() {
+                            return Err(Error::refusal(
+                                "unsupported_parameters",
+                                "parameters are supported for view steps",
+                            ));
+                        }
+                        let frame = job.sql_bound(&step.sql, &step.parameters).await?;
+                        if step.materialize {
+                            let schema = super::plan::declared_schema(&frame, &job.budget)?;
+                            job.context.register_table(
+                                &step.name,
+                                Arc::new(SchemaOnlyTable(schema.clone())),
+                            )?;
+                            schema.as_ref().clone()
+                        } else {
+                            let schema = super::plan::inferred_schema(&frame, &job.budget)?;
+                            job.register_frame(&step.name, frame)?;
+                            schema
+                        }
                     }
-                    let frame = job.sql_bound(&step.sql, &step.parameters).await?;
-                    if step.materialize {
-                        let schema = super::plan::declared_schema(&frame, &job.budget)?;
-                        job.context.register_table(
-                            &step.name,
-                            Arc::new(SchemaOnlyTable(schema.clone())),
-                        )?;
-                        schema.as_ref().clone()
-                    } else {
+                    #[cfg(feature = "substrait")]
+                    JobStep::Substrait(step) => {
+                        let (frame, _, memory) = job.read_substrait(&step.substrait).await?;
                         let schema = super::plan::inferred_schema(&frame, &job.budget)?;
                         job.register_frame(&step.name, frame)?;
+                        saved_plan_memory.push(memory);
                         schema
                     }
+                    JobStep::Components(step) => {
+                        let schema =
+                            super::components::describe(&job, &step.name, &step.components).await?;
+                        job.context.register_table(
+                            &step.name,
+                            Arc::new(SchemaOnlyTable(Arc::new(schema.clone()))),
+                        )?;
+                        schema
+                    }
+                };
+                let relation = prepared.infer(&job.budget, step.name(), &schema)?;
+                prepared.steps.push(relation);
+                for name in step.release_after() {
+                    job.release(name)?;
                 }
-                #[cfg(feature = "substrait")]
-                JobStep::Substrait(step) => {
-                    let (frame, _, memory) = job.read_substrait(&step.substrait).await?;
-                    let schema = super::plan::inferred_schema(&frame, &job.budget)?;
-                    job.register_frame(&step.name, frame)?;
-                    saved_plan_memory.push(memory);
-                    schema
-                }
-                JobStep::Components(step) => {
-                    let schema =
-                        super::components::describe(&job, &step.name, &step.components).await?;
-                    job.context.register_table(
-                        &step.name,
-                        Arc::new(SchemaOnlyTable(Arc::new(schema.clone()))),
-                    )?;
-                    schema
-                }
-            };
-            let relation = prepared.infer(&job.budget, step.name(), &schema)?;
-            prepared.steps.push(relation);
-            for name in step.release_after() {
-                job.release(name)?;
             }
-        }
-        for output in &spec.outputs {
-            let export =
-                super::export::prepare(job.sql(&output.sql).await?, &output.settings, &job.budget)?;
-            if export.metadata_unit
-                > output
-                    .settings
-                    .footer_limit
-                    .saturating_mul(8)
-                    .min(job.budget.limits.max_metadata_bytes)
-            {
-                return Err(capacity());
+            for (index, output) in spec.outputs.iter().enumerate() {
+                running = Some(super::Running::Output(index));
+                let export = super::export::prepare(
+                    job.sql(&output.sql).await?,
+                    &output.settings,
+                    &job.budget,
+                )?;
+                if export.metadata_unit
+                    > output
+                        .settings
+                        .footer_limit
+                        .saturating_mul(8)
+                        .min(job.budget.limits.max_metadata_bytes)
+                {
+                    return Err(capacity());
+                }
+                let relation = prepared.infer(&job.budget, &output.name, &export.schema)?;
+                job.register_declared_output(&output.name, export.schema.clone())?;
+                prepared.outputs.push(relation);
             }
-            let relation = prepared.infer(&job.budget, &output.name, &export.schema)?;
-            job.register_declared_output(&output.name, export.schema.clone())?;
-            prepared.outputs.push(relation);
+            for (index, query) in spec.queries.iter().enumerate() {
+                running = Some(super::Running::Query(index));
+                let (frame, _) =
+                    super::query_result::plan_query_frame(&job, &query.name, &query.sql).await?;
+                let schema = super::plan::inferred_schema(&frame, &job.budget)?;
+                super::query_result::ensure_distinct_columns(&query.name, &schema)?;
+                let relation = prepared.infer(&job.budget, &query.name, &schema)?;
+                prepared.queries.push(relation);
+            }
+            Ok(())
         }
-        for query in &spec.queries {
-            let (frame, _) =
-                super::query_result::plan_query_frame(&job, &query.name, &query.sql).await?;
-            let schema = super::plan::inferred_schema(&frame, &job.budget)?;
-            super::query_result::ensure_distinct_columns(&query.name, &schema)?;
-            let relation = prepared.infer(&job.budget, &query.name, &schema)?;
-            prepared.queries.push(relation);
-        }
+        .await;
+        statement_outcome.map_err(|error| spec.named(running, error))?;
+        #[cfg(feature = "substrait")]
+        drop(saved_plan_memory);
         Ok(prepared)
     }
 }

@@ -422,15 +422,31 @@ impl JobSpec {
             queries: Vec::new(),
         };
         let mut running = None;
+        let mut failure_budget = None;
         match self
-            .execute(limits, &mut completed, connections, &mut running)
+            .execute(
+                limits,
+                &mut completed,
+                connections,
+                &mut running,
+                &mut failure_budget,
+            )
             .await
         {
             Ok(()) => Ok(completed),
-            Err(error) => Err(JobFailure {
-                completed,
-                error: self.named(running, error),
-            }),
+            Err(raw_error) => {
+                let error = self.named(running, raw_error);
+                let (kind, index, name) = self.running_parts(running);
+                super::metrics::log_failed(
+                    kind,
+                    index,
+                    name,
+                    error.code(),
+                    error.message(),
+                    failure_budget,
+                );
+                Err(JobFailure { completed, error })
+            }
         }
     }
 
@@ -499,6 +515,7 @@ impl JobSpec {
         result: &mut JobResult,
         connections: Connections,
         running: &mut Option<Running>,
+        failure_budget: &mut Option<(usize, usize, usize)>,
     ) -> Result<()> {
         self.validate()?;
         if connections.catalog.is_some() && self.catalog_root.is_some() {
@@ -524,6 +541,27 @@ impl JobSpec {
         };
         #[cfg(not(feature = "remote"))]
         let job = Job::new(limits, self.scratch.clone())?;
+        super::metrics::log_start(&job.budget.limits, &self.scratch);
+        let outcome = self
+            .execute_with_job(&job, result, connections.catalog, running)
+            .await;
+        if outcome.is_err() {
+            *failure_budget = Some((
+                job.budget.runtime_env().memory_pool.reserved(),
+                job.budget.pool_peak(),
+                job.budget.shared_available_min(),
+            ));
+        }
+        outcome
+    }
+
+    async fn execute_with_job(
+        &self,
+        job: &Job,
+        result: &mut JobResult,
+        injected_catalog: Option<Arc<dyn iceberg::Catalog>>,
+        running: &mut Option<Running>,
+    ) -> Result<()> {
         // Hold each producing host's exclusive protection through all output scans.
         let mut native_hosts = BTreeMap::new();
         let compactions = super::metrics::Compactions::install(&job.context);
@@ -711,10 +749,11 @@ impl JobSpec {
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            job.budget.restart_shared_available_min();
             compactions.take();
-            let (storage, rows, charged_bytes) = match step {
+            let (storage, rows, charged_bytes, joins) = match step {
                 JobStep::Sql(step) if step.materialize && step.parameters.is_empty() => {
-                    job.materialize_detailed(&step.name, &step.sql).await?
+                    job.materialize_with_joins(&step.name, &step.sql).await?
                 }
                 JobStep::Sql(step) => {
                     if step.materialize {
@@ -725,7 +764,7 @@ impl JobSpec {
                     }
                     let frame = job.sql_bound(&step.sql, &step.parameters).await?;
                     job.register_frame(&step.name, frame)?;
-                    (StepStorage::View, 0, 0)
+                    (StepStorage::View, 0, 0, Vec::new())
                 }
                 #[cfg(feature = "substrait")]
                 JobStep::Substrait(step) => {
@@ -733,11 +772,13 @@ impl JobSpec {
                     job.register_frame(&step.name, frame)?;
                     result.saved_plans.push(receipt);
                     saved_plan_admission.push(memory);
-                    (StepStorage::View, 0, 0)
+                    (StepStorage::View, 0, 0, Vec::new())
                 }
                 JobStep::Components(step) => {
-                    job.connected_components_detailed(&step.name, &step.components)
-                        .await?
+                    let (storage, rows, bytes) = job
+                        .connected_components_detailed(&step.name, &step.components)
+                        .await?;
+                    (storage, rows, bytes, Vec::new())
                 }
             };
             let pool_after = job.budget.runtime_env().memory_pool.reserved();
@@ -755,7 +796,10 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                job.budget.shared_available_min(),
                 compactions.take(),
+                super::metrics::process_peak_rss_bytes(),
+                &joins,
             );
             for name in step.release_after() {
                 job.release_for_step(step_index, step.name(), name)?;
@@ -764,7 +808,7 @@ impl JobSpec {
         }
         *running = None;
         let catalog = if !self.table_operations.is_empty() {
-            match connections.catalog {
+            match injected_catalog {
                 Some(catalog) => Some(catalog),
                 None => {
                     let root = self.catalog_root.as_ref().expect("validated local catalog");
@@ -788,7 +832,7 @@ impl JobSpec {
             result.table_operations.push(
                 operation
                     .execute(
-                        &job,
+                        job,
                         catalog.as_ref().expect("operation owns catalog").as_ref(),
                     )
                     .await?,
@@ -802,6 +846,9 @@ impl JobSpec {
             let start_epoch = super::metrics::now_epoch_secs();
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
+            job.budget.restart_pool_peak();
+            job.budget.restart_shared_available_min();
+            compactions.take();
             let file = job
                 .export(&output.sql, &output.path, &output.settings)
                 .await?;
@@ -818,6 +865,10 @@ impl JobSpec {
                 duration_seconds,
                 pool_before,
                 pool_after,
+                job.budget.pool_peak(),
+                job.budget.shared_available_min(),
+                compactions.take(),
+                super::metrics::process_peak_rss_bytes(),
             );
             result.outputs.push(OutputResult {
                 name: output.name.clone(),
@@ -857,8 +908,10 @@ impl JobSpec {
             let start_instant = std::time::Instant::now();
             let pool_before = job.budget.runtime_env().memory_pool.reserved();
             job.budget.restart_pool_peak();
+            job.budget.restart_shared_available_min();
             compactions.take();
-            let q_res = super::query_result::query(&job, &query.name, &query.sql).await?;
+            let (q_res, joins) =
+                super::query_result::query_with_joins(job, &query.name, &query.sql).await?;
             let pool_after = job.budget.runtime_env().memory_pool.reserved();
             let end_epoch = super::metrics::now_epoch_secs();
             let duration_seconds = start_instant.elapsed().as_secs_f64();
@@ -874,7 +927,10 @@ impl JobSpec {
                 pool_before,
                 pool_after,
                 job.budget.pool_peak(),
+                job.budget.shared_available_min(),
                 compactions.take(),
+                super::metrics::process_peak_rss_bytes(),
+                &joins,
             );
             result.queries.push(q_res);
 
@@ -902,28 +958,44 @@ impl JobSpec {
     /// went wrong, and which of a job's statements did is read off the order
     /// of the log. The name is the statement that was running: a view fails
     /// when a later statement reads it, and is then named as that reader.
-    /// It covers `docspec job` only: managed jobs (`engine::managed_job::execution`)
-    /// and `prepare-job` (`PrepareJobSpec::prepare`) run their own statement
-    /// loops, and their failures are not named.
-    fn named(&self, running: Option<Running>, error: Error) -> Error {
-        let (kind, index, name) = match running {
-            None => return error,
-            Some(Running::Step(index)) => ("step", index, self.steps[index].name()),
-            Some(Running::Output(index)) => ("output", index, self.outputs[index].name.as_str()),
-            Some(Running::Query(index)) => ("query", index, self.queries[index].name.as_str()),
+    /// Shared across `docspec job`, `prepare-job`, and `managed-job`.
+    pub(crate) fn running_parts(
+        &self,
+        running: Option<Running>,
+    ) -> (Option<&'static str>, Option<usize>, Option<&str>) {
+        match running {
+            None => (None, None, None),
+            Some(Running::Step(index)) => {
+                (Some("step"), Some(index), Some(self.steps[index].name()))
+            }
+            Some(Running::Output(index)) => (
+                Some("output"),
+                Some(index),
+                Some(self.outputs[index].name.as_str()),
+            ),
+            Some(Running::Query(index)) => (
+                Some("query"),
+                Some(index),
+                Some(self.queries[index].name.as_str()),
+            ),
+        }
+    }
+
+    pub(crate) fn named(&self, running: Option<Running>, error: Error) -> Error {
+        let (Some(kind), Some(index), Some(name)) = self.running_parts(running) else {
+            return error;
         };
         error.context(format_args!("{kind} {index} {name:?}"))
     }
 }
 
-/// The statement `execute` is working on, by position in its own list.
+/// The statement a job loop is working on, by position in its own list.
 ///
 /// Positions count from zero, as `step_index` and `output_index` do in the
-/// step log. `execute` sets it as each statement starts and clears it after
-/// the steps, so the table operations that follow are not blamed on a step.
-/// Nothing runs between the outputs and the queries, or after the queries.
+/// step log. Each loop sets it as a statement starts and clears it before
+/// non-statement work (such as table operations or directory creation) runs.
 #[derive(Debug, Clone, Copy)]
-enum Running {
+pub(crate) enum Running {
     Step(usize),
     Output(usize),
     Query(usize),

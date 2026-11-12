@@ -56,6 +56,7 @@ pub use prepare::{
     SchemaArtifact, SchemaArtifactFormat,
 };
 pub use query_result::QueryResult;
+pub(crate) use spec::Running;
 pub use spec::{
     ComponentsStep, InputFileResult, InputResult, JobFailure, JobInput, JobOutput, JobResult,
     JobSpec, JobStep, OutputResult, SqlQuery, SqlStep, StepResult,
@@ -345,6 +346,14 @@ impl Job {
         sql: &str,
     ) -> Result<(StepStorage, usize, usize)> {
         materialized::materialize(self, name, sql).await
+    }
+
+    pub(crate) async fn materialize_with_joins(
+        &self,
+        name: &str,
+        sql: &str,
+    ) -> Result<(StepStorage, usize, usize, Vec<metrics::JoinSummary>)> {
+        materialized::materialize_with_joins(self, name, sql).await
     }
 
     /// Groups an undirected string edge relation into deterministic components.

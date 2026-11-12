@@ -7,18 +7,31 @@ use datafusion::execution::cache::{
     },
 };
 use datafusion::object_store::path::Path;
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{
+    any::Any,
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub(super) struct AdmittedMetadataCache {
     inner: DefaultFilesMetadataCache,
     bytes: Arc<Semaphore>,
+    shared_available_min: Arc<AtomicUsize>,
 }
 impl AdmittedMetadataCache {
-    pub(super) fn new(limit: usize, bytes: Arc<Semaphore>) -> Self {
+    pub(super) fn new(
+        limit: usize,
+        bytes: Arc<Semaphore>,
+        shared_available_min: Arc<AtomicUsize>,
+    ) -> Self {
         Self {
             inner: DefaultFilesMetadataCache::new(limit),
             bytes,
+            shared_available_min,
         }
     }
 }
@@ -55,6 +68,8 @@ impl CacheAccessor<Path, CachedFileMetadataEntry> for AdmittedMetadataCache {
         let Ok(memory) = self.bytes.clone().try_acquire_many_owned(size) else {
             return previous;
         };
+        self.shared_available_min
+            .fetch_min(self.bytes.available_permits(), Ordering::Relaxed);
         self.inner.put(
             key,
             CachedFileMetadataEntry::new(
@@ -125,10 +140,12 @@ mod tests {
     #[test]
     fn cache_entries_hold_shared_admission_until_the_last_entry_owner_drops() {
         let bytes = Arc::new(Semaphore::new(1280));
-        let cache = AdmittedMetadataCache::new(4096, bytes.clone());
+        let floor = Arc::new(AtomicUsize::new(1280));
+        let cache = AdmittedMetadataCache::new(4096, bytes.clone(), floor.clone());
         let key = Path::from("first.parquet");
         cache.put(&key, entry(&key));
         assert_eq!(bytes.available_permits(), 384);
+        assert_eq!(floor.load(Ordering::Relaxed), 384);
         let reader = cache.get(&key).unwrap();
         assert!(reader.file_metadata.as_any().is::<Metadata>());
         let second = Path::from("second.parquet");

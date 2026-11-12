@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 mod array_admission;
@@ -70,6 +73,7 @@ impl Default for Limits {
 pub struct Budget {
     pub limits: Limits,
     bytes: Arc<Semaphore>,
+    shared_available_min: Arc<AtomicUsize>,
     blocking_jobs: Arc<Semaphore>,
     runtime: Arc<RuntimeEnv>,
     pool: Arc<peak_pool::PeakPool<FairSpillPool>>,
@@ -117,15 +121,18 @@ impl Budget {
             ));
         }
         // The other half belongs to the shared DataFusion memory pool.
-        let bytes = Arc::new(Semaphore::new(limits.memory_bytes / 2));
-        let cache =
-            metadata_cache::AdmittedMetadataCache::new(limits.max_metadata_bytes, bytes.clone());
+        let shared_half = limits.memory_bytes / 2;
+        let bytes = Arc::new(Semaphore::new(shared_half));
+        let shared_available_min = Arc::new(AtomicUsize::new(shared_half));
+        let cache = metadata_cache::AdmittedMetadataCache::new(
+            limits.max_metadata_bytes,
+            bytes.clone(),
+            shared_available_min.clone(),
+        );
         let cache = datafusion::execution::cache::cache_manager::CacheManagerConfig::default()
             .with_file_metadata_cache(Some(Arc::new(cache)))
             .with_metadata_cache_limit(limits.max_metadata_bytes);
-        let pool = Arc::new(peak_pool::PeakPool::new(FairSpillPool::new(
-            limits.memory_bytes / 2,
-        )));
+        let pool = Arc::new(peak_pool::PeakPool::new(FairSpillPool::new(shared_half)));
         let mut runtime = RuntimeEnvBuilder::new()
             .with_memory_pool(pool.clone())
             .with_cache_manager(cache)
@@ -135,6 +142,7 @@ impl Budget {
         }
         Ok(Self {
             bytes,
+            shared_available_min,
             blocking_jobs: Arc::new(Semaphore::new(limits.compute_threads)),
             runtime: Arc::new(runtime.build()?),
             pool,
@@ -278,6 +286,17 @@ impl Budget {
     /// Starts a new peak interval at the pool's current total.
     pub(crate) fn restart_pool_peak(&self) {
         self.pool.restart();
+    }
+
+    /// Lowest shared-admission byte balance observed since [`Self::restart_shared_available_min`].
+    pub(crate) fn shared_available_min(&self) -> usize {
+        self.shared_available_min.load(Ordering::Relaxed)
+    }
+
+    /// Starts a new low-water interval at the shared semaphore's current available bytes.
+    pub(crate) fn restart_shared_available_min(&self) {
+        self.shared_available_min
+            .store(self.bytes.available_permits(), Ordering::Relaxed);
     }
 
     pub(crate) fn scratch_writer(
@@ -434,15 +453,21 @@ impl Budget {
         );
         let count = u32::try_from(bytes)
             .map_err(|_| Error::refusal("capacity", "allocation exceeds admission granularity"))?;
-        self.bytes
+        let permit = self
+            .bytes
             .clone()
             .try_acquire_many_owned(count)
             .map_err(|_| {
+                self.shared_available_min
+                    .fetch_min(self.bytes.available_permits(), Ordering::Relaxed);
                 Error::refusal(
                     "capacity",
                     format!("shared memory budget exhausted: requested {bytes} bytes, available {} of {}, native reserved {}; {}:{}; completed phases remain retained", self.bytes.available_permits(), self.limits.memory_bytes / 2, self.runtime.memory_pool.reserved(), caller.file(), caller.line()),
                 )
-            })
+            })?;
+        self.shared_available_min
+            .fetch_min(self.bytes.available_permits(), Ordering::Relaxed);
+        Ok(permit)
     }
 }
 

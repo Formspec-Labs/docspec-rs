@@ -435,7 +435,12 @@ impl Engine {
         drop(admissions);
         drop(admission_memory);
         let mut steps = Vec::new();
+        let mut outputs = Vec::new();
+        let mut reports = Vec::new();
+        let mut running = None;
+        let statement_outcome: Result<()> = async {
         for (index, step) in spec.steps.iter().enumerate() {
+            running = Some(crate::job::Running::Step(index));
             let key = format!("job-phase/{}/step/{index}", request.operation);
             let sql = match step {
                 JobStep::Sql(step) => Some(step.sql.as_str()),
@@ -572,10 +577,11 @@ impl Engine {
                 job.release(name)?;
             }
         }
+        running = None;
         let output_directory = admitted.directory.join("outputs");
         std::fs::create_dir_all(&output_directory)?;
-        let mut outputs = Vec::new();
         for (index, output) in spec.outputs.iter().enumerate() {
+            running = Some(crate::job::Running::Output(index));
             let key = format!("job-phase/{}/output/{index}", request.operation);
             let dependencies =
                 dependency_identities(&job, &output.sql, &BTreeMap::new(), &identities).await?;
@@ -647,8 +653,8 @@ impl Engine {
             });
             outputs.push(serde_json::json!({"name":output.name,"path":object.path,"sha256":file.sha256,"md5":file.md5,"size":file.size,"rows":file.rows,"footer_bytes":file.footer_bytes,"schema_sha256":phase.schema_sha256,"settings":output.settings,"completion":object,"dependencies":phase.dependencies}));
         }
-        let mut reports = Vec::new();
         for (index, query) in spec.queries.iter().enumerate() {
+            running = Some(crate::job::Running::Query(index));
             let key = format!("job-phase/{}/report/{index}", request.operation);
             let dependencies =
                 dependency_identities(&job, &query.sql, &BTreeMap::new(), &identities).await?;
@@ -719,6 +725,10 @@ impl Engine {
             reports.push(serde_json::json!({"name":query.name,"sql_sha256":sha256(query.sql.as_bytes()),"schema_sha256":phase.schema_sha256,"rows":phase.rows,"data":rendered.data,"completion":object,"dependencies":phase.dependencies}));
             result.queries.push(rendered);
         }
+        Ok(())
+        }
+        .await;
+        statement_outcome.map_err(|error| spec.named(running, error))?;
         let _view_memory = self.request_memory(&reports)?;
         // All report and export consumers have finished. Their sealed bytes,
         // schema dictionary and report representations keep their own admission;
