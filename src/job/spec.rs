@@ -1106,21 +1106,42 @@ fn observe_json_lines_input(
     compute_digest: bool,
 ) -> Result<InputResult> {
     let mut files = Vec::with_capacity(declared_files.len());
-    let mut total_bytes = 0_u64;
+    let mut total_bytes = Some(0_u64);
     for declared in declared_files {
-        let (sha256, bytes) = observe_local_file(&declared.path, budget, compute_digest)?;
-        total_bytes = total_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| Error::refusal("capacity", "JSON Lines input size overflowed"))?;
-        files.push(InputFileResult {
-            key: Some(declared.key.clone()),
-            path: declared.path.clone(),
-            sha256,
-            bytes,
-        });
+        if compute_digest {
+            let (sha256, bytes) = observe_local_file(&declared.path, budget, true)?;
+            total_bytes =
+                Some(total_bytes.unwrap_or(0).checked_add(bytes).ok_or_else(|| {
+                    Error::refusal("capacity", "JSON Lines input size overflowed")
+                })?);
+            files.push(InputFileResult {
+                key: Some(declared.key.clone()),
+                path: declared.path.clone(),
+                sha256,
+                bytes,
+            });
+        } else {
+            let (_, maybe_bytes) = observe_optional_local_file(&declared.path, budget, false)?;
+            if let Some(bytes) = maybe_bytes {
+                if let Some(running) = total_bytes {
+                    total_bytes = Some(running.checked_add(bytes).ok_or_else(|| {
+                        Error::refusal("capacity", "JSON Lines input size overflowed")
+                    })?);
+                }
+                files.push(InputFileResult {
+                    key: Some(declared.key.clone()),
+                    path: declared.path.clone(),
+                    sha256: None,
+                    bytes,
+                });
+            } else {
+                total_bytes = None;
+            }
+        }
     }
-    let (path, sha256) = if files.len() == 1 {
-        (Some(files[0].path.clone()), files[0].sha256.clone())
+    let (path, sha256) = if declared_files.len() == 1 {
+        let single_sha = files.first().and_then(|f| f.sha256.clone());
+        (Some(declared_files[0].path.clone()), single_sha)
     } else if compute_digest {
         let summary = files
             .iter()
@@ -1135,7 +1156,7 @@ fn observe_json_lines_input(
         kind: "json_lines".into(),
         path,
         sha256,
-        bytes: Some(total_bytes),
+        bytes: total_bytes,
         files,
         ..Default::default()
     })

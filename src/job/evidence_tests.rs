@@ -291,3 +291,34 @@ async fn an_unreadable_parquet_file_is_refused_naming_its_input_and_path() {
         assert_names(&failure, &named, &alone);
     }
 }
+
+#[tokio::test]
+async fn a_missing_json_lines_source_in_an_anonymous_job_fails_at_the_statement_that_reads_it() {
+    let root = tempfile::tempdir().unwrap();
+    let absent_path = root.path().join("absent.jsonl.gz");
+    let schema = Schema::new(vec![Field::new("x", DataType::Int64, true)]);
+    let spec = json!({
+        "inputs": [{
+            "name": "absent",
+            "kind": "json_lines",
+            "files": [{"key": "absent", "path": absent_path}],
+            "schema": schema
+        }],
+        "steps": [{"name": "one", "sql": "SELECT 1 AS x"}],
+        "queries": [
+            {"name": "before", "sql": "SELECT x FROM one"},
+            {"name": "q", "sql": "SELECT count(*) AS n FROM absent"}
+        ]
+    });
+    let fail = failure(root.path(), Limits::default(), spec).await;
+    assert_eq!(fail.error.code(), "query", "{}", fail.error);
+    assert!(
+        fail.error
+            .message()
+            .starts_with("query 1 \"q\": Execution error: absent line 1: source open failed"),
+        "{}",
+        fail.error
+    );
+    assert_eq!(fail.completed.queries.len(), 1);
+    assert_eq!(fail.completed.queries[0].name, "before");
+}
