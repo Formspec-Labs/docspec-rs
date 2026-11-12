@@ -3,6 +3,7 @@
 //! There is no durable partial multipart resume. A failed write remains
 //! unconfirmed until explicitly checked; this adapter never automatically
 //! retransmits it. These primitives do not qualify the complete remote engine.
+// Rust guideline compliant 2026-02-21
 
 use crate::{Error, Result, budget::Budget, model::ObjectRef};
 use futures::TryStreamExt;
@@ -167,12 +168,31 @@ impl SnapshotSource {
         object_store::path::Path::parse(key).map_err(|_| scope_error())
     }
 
+    pub(crate) const TRANSPORT_ADMISSION: usize = READ_ADMISSION;
+
     pub(crate) async fn size(&self, uri: &str, budget: &Budget) -> Result<u64> {
-        let path = self.object_path(uri)?;
-        let _transport = budget.reserve(READ_ADMISSION)?;
+        let object_path = self.object_path(uri)?;
+        let transport = budget.reserve(READ_ADMISSION)?;
+        self.size_admitted_path(&object_path, &transport).await
+    }
+
+    pub(crate) async fn size_admitted(
+        &self,
+        uri: &str,
+        transport: &tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<u64> {
+        let object_path = self.object_path(uri)?;
+        self.size_admitted_path(&object_path, transport).await
+    }
+
+    async fn size_admitted_path(
+        &self,
+        object_path: &object_store::path::Path,
+        _transport: &tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<u64> {
         Ok(self
             .query_store
-            .head(&path)
+            .head(object_path)
             .await
             .map_err(|_| read_error())?
             .size)
@@ -187,23 +207,56 @@ impl SnapshotSource {
         destination: &mut [u8],
         budget: &Budget,
     ) -> Result<()> {
+        let max_chunk = budget
+            .limits
+            .max_batch_bytes
+            .min(crate::storage::SNAPSHOT_MEMBER_CHUNK_BYTES);
         if range.start >= range.end
             || range.end > size
             || range.end - range.start != destination.len() as u64
-            || destination.len()
-                > budget
-                    .limits
-                    .max_batch_bytes
-                    .min(crate::storage::SNAPSHOT_MEMBER_CHUNK_BYTES)
+            || destination.len() > max_chunk
         {
             return Err(mismatch());
         }
-        let path = self.object_path(uri)?;
-        let _transport = budget.reserve(READ_ADMISSION)?;
+        let object_path = self.object_path(uri)?;
+        let transport = budget.reserve(READ_ADMISSION)?;
+        self.read_range_admitted_path(&object_path, size, range, destination, &transport)
+            .await
+    }
+
+    pub(crate) async fn read_range_admitted(
+        &self,
+        uri: &str,
+        size: u64,
+        range: Range<u64>,
+        destination: &mut [u8],
+        max_chunk: usize,
+        transport: &tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<()> {
+        if range.start >= range.end
+            || range.end > size
+            || range.end - range.start != destination.len() as u64
+            || destination.len() > max_chunk
+        {
+            return Err(mismatch());
+        }
+        let object_path = self.object_path(uri)?;
+        self.read_range_admitted_path(&object_path, size, range, destination, transport)
+            .await
+    }
+
+    async fn read_range_admitted_path(
+        &self,
+        object_path: &object_store::path::Path,
+        size: u64,
+        range: Range<u64>,
+        destination: &mut [u8],
+        _transport: &tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<()> {
         let response = self
             .query_store
             .get_opts(
-                &path,
+                object_path,
                 object_store::GetOptions {
                     range: Some(object_store::GetRange::Bounded(range.clone())),
                     ..Default::default()

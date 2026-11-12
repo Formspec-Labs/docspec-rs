@@ -102,7 +102,7 @@ use std::{
 /// (including 36-byte UUIDs, 64-byte SHA-256 hex digests, and 74-byte `body_key`
 /// locators).
 pub(crate) const STATISTICS_TRUNCATE_BYTES: usize = 128;
-pub(crate) const SNAPSHOT_MEMBER_CHUNK_BYTES: usize = 64 << 10;
+pub(crate) const SNAPSHOT_MEMBER_CHUNK_BYTES: usize = 8 << 20;
 
 /// Hashes the exact compact JSON serialization without retaining its bytes.
 ///

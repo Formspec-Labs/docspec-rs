@@ -38,8 +38,14 @@ pub(in crate::engine) fn record_roots(
         if json_identity(&original)? != admitted.request_digest {
             return Err(mismatch());
         }
-        for (name, input) in &admitted.input_grants {
-            if &input.name != name
+        let mut seen_reuse = BTreeSet::new();
+        for (name, input) in admitted
+            .input_grants
+            .iter()
+            .chain(admitted.input_donors.iter())
+        {
+            if !seen_reuse.insert(name)
+                || &input.name != name
                 || input.reuse_from.as_ref()
                     != admitted
                         .request
@@ -48,6 +54,11 @@ pub(in crate::engine) fn record_roots(
                         .find(|binding| &binding.name == name)
                         .and_then(|binding| binding.reuse_from.as_ref())
             {
+                return Err(mismatch());
+            }
+            if let Some(custody) = &input.snapshot_custody {
+                custody.validate(&input.selector)?;
+            } else {
                 return Err(mismatch());
             }
             objects.extend(input_custody::input_objects(input));

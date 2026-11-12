@@ -107,21 +107,30 @@ fn valid_reference(reference: &JobInputCustodyRef, view: &View, dataset: &Id) ->
     Ok(())
 }
 
+type InputReuseMaps = (
+    BTreeMap<String, execution::InputAdmission>,
+    BTreeMap<String, execution::InputAdmission>,
+);
+
 impl Engine {
-    pub(super) async fn prepare_input_grants(
+    pub(super) async fn prepare_input_reuse(
         &self,
         request: &ManagedJobPrepare,
         spec: &JobSpec,
         view: &View,
         rows: &SnapshotRows,
-    ) -> Result<Held<BTreeMap<String, execution::InputAdmission>>> {
+    ) -> Result<Held<InputReuseMaps>> {
         let budget = &self.inner.lifecycle.budget;
         let mut grants = BTreeMap::new();
+        let mut donors = BTreeMap::new();
         let mut grant_memory = budget.reserve(0)?;
         for binding in &request.snapshot_inputs {
             let Some(reference) = &binding.reuse_from else {
                 continue;
             };
+            if !valid_sha256(&binding.metadata_sha256) {
+                return Err(mismatch());
+            }
             valid_reference(reference, view, &request.dataset)?;
             if reference.operation == request.operation {
                 return Err(mismatch());
@@ -197,16 +206,14 @@ impl Engine {
                 .iter()
                 .find(|input| input.name() == binding.name)
                 .ok_or_else(mismatch)?;
-            if serde_json::to_value(snapshots::selection(original_input)?)?
-                != serde_json::to_value(snapshots::selection(target)?)?
-            {
+            let donor_sel = snapshots::selection(original_input)?;
+            let target_sel = snapshots::selection(target)?;
+            if donor_sel.table_uuid != target_sel.table_uuid {
                 return Err(mismatch());
             }
             let custody = input.snapshot_custody.as_ref().ok_or_else(mismatch)?;
             custody.validate(original_input)?;
-            if custody.metadata_sha256 != binding.metadata_sha256
-                || custody.metadata_size != binding.metadata_size
-                || !input.files.is_empty()
+            if !input.files.is_empty()
                 || custody.objects.iter().any(|object| {
                     matches!(
                         object.role.as_str(),
@@ -220,10 +227,10 @@ impl Engine {
                 .request
                 .snapshot_inputs
                 .iter()
-                .find(|binding| binding.name == reference.input)
+                .find(|candidate| candidate.name == reference.input)
                 .ok_or_else(mismatch)?;
-            if original_binding.metadata_sha256 != binding.metadata_sha256
-                || original_binding.metadata_size != binding.metadata_size
+            if original_binding.metadata_sha256 != custody.metadata_sha256
+                || original_binding.metadata_size != custody.metadata_size
             {
                 return Err(mismatch());
             }
@@ -254,15 +261,43 @@ impl Engine {
                 }
                 self.check_custody_object(rows, view, &object.retained, &object.origin_operation)?;
             }
-            input.name = binding.name.clone();
-            input.selector = target.clone();
-            input.reuse_from = Some(reference.clone());
-            // Transfer the descriptor's admission before the source-row permits end.
-            grant_memory.merge(self.request_memory(&input)?);
-            grants.insert(binding.name.clone(), input);
+            let same_snapshot =
+                serde_json::to_value(&donor_sel)? == serde_json::to_value(&target_sel)?;
+            if same_snapshot {
+                if custody.metadata_sha256 != binding.metadata_sha256
+                    || custody.metadata_size != binding.metadata_size
+                {
+                    return Err(mismatch());
+                }
+                input.name = binding.name.clone();
+                input.selector = target.clone();
+                input.reuse_from = Some(reference.clone());
+                // Transfer the descriptor's admission before the source-row permits end.
+                grant_memory.merge(self.request_memory(&input)?);
+                if grants.insert(binding.name.clone(), input).is_some()
+                    || donors.contains_key(&binding.name)
+                {
+                    return Err(mismatch());
+                }
+            } else {
+                if !request.prerequisites.is_empty()
+                    || donor_sel.metadata_location == target_sel.metadata_location
+                    || target_sel.snapshot.is_none()
+                {
+                    return Err(mismatch());
+                }
+                input.name = binding.name.clone();
+                input.reuse_from = Some(reference.clone());
+                grant_memory.merge(self.request_memory(&input)?);
+                if donors.insert(binding.name.clone(), input).is_some()
+                    || grants.contains_key(&binding.name)
+                {
+                    return Err(mismatch());
+                }
+            }
         }
         Ok(Held {
-            value: grants,
+            value: (grants, donors),
             _memory: grant_memory,
         })
     }
@@ -390,7 +425,10 @@ impl Engine {
 pub(super) fn inherited_bytes(admitted: &Admission) -> Result<u64> {
     reference_bytes(
         &admitted.directory,
-        admitted.input_grants.values(),
+        admitted
+            .input_grants
+            .values()
+            .chain(admitted.input_donors.values()),
         producer::inherited_objects(admitted),
     )
 }

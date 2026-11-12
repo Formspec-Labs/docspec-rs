@@ -233,6 +233,8 @@ struct Admission {
     runtime: PhaseRuntime,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     input_grants: BTreeMap<String, execution::InputAdmission>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    input_donors: BTreeMap<String, execution::InputAdmission>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     snapshot_source: Option<snapshots::SnapshotSourcePlacement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -844,10 +846,13 @@ impl Engine {
             &policy_bytes.value,
         );
         // Eligibility and this receiving root use the same locked native view.
-        let input_grants = self
-            .prepare_input_grants(&request, &spec, &view, &rows)
+        let Held {
+            value: (input_grants, input_donors),
+            _memory: _input_reuse_memory,
+        } = self
+            .prepare_input_reuse(&request, &spec, &view, &rows)
             .await?;
-        let snapshot_source = self.admit_snapshot_source(&spec, &input_grants.value)?;
+        let snapshot_source = self.admit_snapshot_source(&spec, &input_grants)?;
         let _source_memory = snapshot_source
             .as_ref()
             .map(|placement| self.request_memory(placement))
@@ -862,7 +867,8 @@ impl Engine {
             protection: protection.clone(),
             base_definition: authority.definition.clone(),
             runtime,
-            input_grants: input_grants.value,
+            input_grants,
+            input_donors,
             snapshot_source,
             producer,
         };

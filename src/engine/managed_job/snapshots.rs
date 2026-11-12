@@ -7,6 +7,7 @@ use iceberg::{
 };
 
 const CUSTODY: &str = "urn:docspec:whole-job-snapshot-custody:2";
+const SNAPSHOT_MEMBER_CONCURRENCY: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -311,7 +312,8 @@ impl Engine {
                         role: &object.role,
                         sha: Some(&object.sha256),
                         size: object.size,
-                        inherited: inherited.is_some(),
+                        inherited: inherited.is_some()
+                            || object.origin_operation != admitted.request.operation,
                     },
                 )?;
             }
@@ -326,7 +328,7 @@ impl Engine {
                             role: &object.role,
                             sha: None,
                             size: object.size,
-                            inherited: false,
+                            inherited: donor_has_uri(admitted, input.name(), &object.uri),
                         },
                     )?;
                 }
@@ -422,21 +424,171 @@ impl Engine {
         }
         let mut objects = plan.metadata.clone();
         let remote = storage::is_remote_uri(&selection(input)?.metadata_location);
+        let mut unresolved = Vec::new();
         for payload in &plan.payloads {
-            objects.push(
-                self.snapshot_member(
-                    admitted,
-                    remote,
-                    MemberCopy {
-                        uri: &payload.uri,
-                        role: &payload.role,
-                        size: payload.size,
-                        sha: None,
-                    },
-                    budget,
-                )
-                .await?,
-            );
+            if let Some(reused) = donor_member(
+                admitted,
+                input.name(),
+                &payload.uri,
+                &payload.role,
+                payload.size,
+            )? {
+                check_member_scope(admitted.snapshot_source.as_ref(), remote, &payload.uri)?;
+                objects.push(reused);
+            } else {
+                let key = format!(
+                    "job-snapshot-member/{}/{}",
+                    request.operation,
+                    sha256(payload.uri.as_bytes())
+                );
+                unresolved.push((payload, key));
+            }
+        }
+        let mut to_copy = Vec::new();
+        if !unresolved.is_empty() {
+            let view = self.read_view(&request.dataset).await?;
+            let rows = self.inner.lifecycle.rows(&view).await?;
+            let existing_keys = unresolved
+                .iter()
+                .filter(|(_, key)| rows.contains_key(key))
+                .map(|(_, key)| key.as_str())
+                .collect::<Vec<_>>();
+            let _decoded = rows.reserve_decoded(&self.inner.lifecycle.budget, &existing_keys)?;
+            for (payload, key) in unresolved {
+                if let Some((_, _, saved)) = rows.get_record::<SnapshotMember>(&key)? {
+                    if saved.operation != request.operation
+                        || saved.request_digest != admitted.request_digest
+                        || saved.object.uri != payload.uri
+                        || saved.object.role != payload.role
+                        || saved.object.size != payload.size
+                    {
+                        return Err(mismatch());
+                    }
+                    objects.push(saved.object);
+                } else {
+                    to_copy.push((payload, key));
+                }
+            }
+        }
+        if !to_copy.is_empty() {
+            let mut pending_iter = to_copy.into_iter().peekable();
+            let mut active = futures::stream::FuturesUnordered::new();
+            let mut completed_batch: Vec<(String, SnapshotMember)> = Vec::new();
+            while pending_iter.peek().is_some() || !active.is_empty() {
+                while active.len() < SNAPSHOT_MEMBER_CONCURRENCY {
+                    let Some(&(payload, _)) = pending_iter.peek() else {
+                        break;
+                    };
+                    let member_path = admitted
+                        .directory
+                        .join(format!("snapshot-{}", sha256(payload.uri.as_bytes())));
+                    let prepared = prepare_member_copy(
+                        admitted,
+                        remote,
+                        MemberCopy {
+                            uri: &payload.uri,
+                            role: &payload.role,
+                            size: payload.size,
+                            sha: None,
+                        },
+                        member_path,
+                        budget,
+                    )?;
+                    match budget.reserve(prepared.reserve_bytes) {
+                        Ok(permit) => {
+                            let (_, key) = pending_iter.next().ok_or_else(mismatch)?;
+                            active.push(async move {
+                                let object = copy_member_admitted(
+                                    self, admitted, remote, prepared, permit, false, budget,
+                                )
+                                .await?;
+                                Ok::<(String, SnapshotMember), Error>((
+                                    key,
+                                    SnapshotMember {
+                                        operation: request.operation.clone(),
+                                        request_digest: admitted.request_digest.clone(),
+                                        object,
+                                    },
+                                ))
+                            });
+                        }
+                        Err(_) if !active.is_empty() => break,
+                        Err(error) => {
+                            if !completed_batch.is_empty() {
+                                let _ = self
+                                    .flush_snapshot_members(
+                                        admitted,
+                                        &mut completed_batch,
+                                        &mut objects,
+                                    )
+                                    .await;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+                let Some(first) = active.next().await else {
+                    break;
+                };
+                match first {
+                    Ok(item) => completed_batch.push(item),
+                    Err(error) => {
+                        if !completed_batch.is_empty() {
+                            let _ = self
+                                .flush_snapshot_members(
+                                    admitted,
+                                    &mut completed_batch,
+                                    &mut objects,
+                                )
+                                .await;
+                        }
+                        return Err(error);
+                    }
+                }
+                while let std::task::Poll::Ready(Some(next_done)) = futures::poll!(active.next()) {
+                    match next_done {
+                        Ok(item) => completed_batch.push(item),
+                        Err(error) => {
+                            if !completed_batch.is_empty() {
+                                let _ = self
+                                    .flush_snapshot_members(
+                                        admitted,
+                                        &mut completed_batch,
+                                        &mut objects,
+                                    )
+                                    .await;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+                if completed_batch.len() >= SNAPSHOT_MEMBER_CONCURRENCY
+                    || (pending_iter.peek().is_none() && active.is_empty())
+                {
+                    if let Err(error) = self
+                        .flush_snapshot_members(admitted, &mut completed_batch, &mut objects)
+                        .await
+                    {
+                        if error.code() == "capacity" && !active.is_empty() {
+                            while let Some(next_done) = active.next().await {
+                                completed_batch.push(next_done?);
+                            }
+                            self.flush_snapshot_members(
+                                admitted,
+                                &mut completed_batch,
+                                &mut objects,
+                            )
+                            .await?;
+                        } else {
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+            if !completed_batch.is_empty() {
+                self.flush_snapshot_members(admitted, &mut completed_batch, &mut objects)
+                    .await?;
+            }
         }
         objects.sort_by(|left, right| left.uri.cmp(&right.uri));
         let value = SnapshotCustody {
@@ -521,19 +673,40 @@ impl Engine {
                 if !seen.insert(entry.manifest_path.clone()) {
                     return Err(mismatch());
                 }
-                let manifest = self
-                    .snapshot_metadata(
-                        admitted,
+                let expected_size = u64::try_from(entry.manifest_length).map_err(|_| mismatch())?;
+                let manifest = if let Some(reused) = donor_member(
+                    admitted,
+                    input.name(),
+                    &entry.manifest_path,
+                    "manifest",
+                    expected_size,
+                )? {
+                    check_member_scope(
+                        admitted.snapshot_source.as_ref(),
                         remote,
                         &entry.manifest_path,
-                        "manifest",
-                        &mut metadata_bytes,
-                        budget,
-                    )
-                    .await?;
-                if manifest.size != entry.manifest_length as u64 {
-                    return Err(mismatch());
-                }
+                    )?;
+                    metadata_bytes = metadata_bytes
+                        .checked_add(reused.size)
+                        .filter(|total| *total <= budget.limits.max_metadata_bytes as u64)
+                        .ok_or_else(capacity)?;
+                    reused
+                } else {
+                    let copied = self
+                        .snapshot_metadata(
+                            admitted,
+                            remote,
+                            &entry.manifest_path,
+                            "manifest",
+                            &mut metadata_bytes,
+                            budget,
+                        )
+                        .await?;
+                    if copied.size != expected_size {
+                        return Err(mismatch());
+                    }
+                    copied
+                };
                 objects.push(manifest);
                 let io = crate::storage::custody::retained_io(paths(&objects)?, budget, None)?;
                 let manifest = entry.load_manifest(&io).await?;
@@ -681,11 +854,13 @@ impl Engine {
             }
             return Ok(saved.value.object);
         }
-        let path = admitted
+        let member_path = admitted
             .directory
             .join(format!("snapshot-{}", sha256(uri.as_bytes())));
-        check_member_scope(admitted.snapshot_source.as_ref(), remote, uri)?;
-        let object = copy_native(self, admitted, remote, member, &path, budget).await?;
+        let prepared = prepare_member_copy(admitted, remote, member, member_path, budget)?;
+        let permit = budget.reserve(prepared.reserve_bytes)?;
+        let object =
+            copy_member_admitted(self, admitted, remote, prepared, permit, true, budget).await?;
         self.commit_job_record(
             &request.dataset,
             &key,
@@ -698,6 +873,73 @@ impl Engine {
         .await?;
         Ok(object)
     }
+
+    async fn flush_snapshot_members(
+        &self,
+        admitted: &Admission,
+        completed_batch: &mut Vec<(String, SnapshotMember)>,
+        objects: &mut Vec<SnapshotObject>,
+    ) -> Result<()> {
+        if completed_batch.is_empty() {
+            return Ok(());
+        }
+        File::open(&admitted.directory)?.sync_all()?;
+        let entries = completed_batch
+            .iter()
+            .map(|(key, member)| (key.as_str(), member))
+            .collect::<Vec<_>>();
+        self.commit_job_records(&admitted.request.dataset, &entries)
+            .await?;
+        for (_, member) in completed_batch.drain(..) {
+            objects.push(member.object);
+        }
+        Ok(())
+    }
+}
+
+fn donor_has_uri(admitted: &Admission, input_name: &str, uri: &str) -> bool {
+    admitted
+        .input_donors
+        .get(input_name)
+        .and_then(|donor| donor.snapshot_custody.as_ref())
+        .is_some_and(|custody| {
+            custody
+                .objects
+                .binary_search_by(|object| object.uri.as_str().cmp(uri))
+                .is_ok()
+        })
+}
+
+fn donor_member(
+    admitted: &Admission,
+    input_name: &str,
+    uri: &str,
+    role: &str,
+    expected_size: u64,
+) -> Result<Option<SnapshotObject>> {
+    let Some(donor) = admitted.input_donors.get(input_name) else {
+        return Ok(None);
+    };
+    let custody = donor.snapshot_custody.as_ref().ok_or_else(mismatch)?;
+    let Ok(index) = custody
+        .objects
+        .binary_search_by(|object| object.uri.as_str().cmp(uri))
+    else {
+        return Ok(None);
+    };
+    let object = &custody.objects[index];
+    if object.role != role
+        || object.size != expected_size
+        || object.retained.bytes != expected_size
+        || !valid_sha256(&object.sha256)
+    {
+        return Err(mismatch());
+    }
+    let meta = std::fs::symlink_metadata(&object.retained.path)?;
+    if !meta.file_type().is_file() || meta.len() != expected_size {
+        return Err(mismatch());
+    }
+    Ok(Some(object.clone()))
 }
 
 fn paths(objects: &[SnapshotObject]) -> Result<BTreeMap<String, String>> {
@@ -752,18 +994,6 @@ fn check_member_scope(
     }
 }
 
-impl SnapshotReader {
-    async fn size(&self, uri: &str, budget: &Budget) -> Result<u64> {
-        #[cfg(not(feature = "remote"))]
-        let _ = (uri, budget);
-        match self {
-            Self::Local { input, .. } => Ok(input.metadata().await?.size),
-            #[cfg(feature = "remote")]
-            Self::S3(source) => source.size(uri, budget).await,
-        }
-    }
-}
-
 impl Engine {
     async fn snapshot_source_size(
         &self,
@@ -784,12 +1014,69 @@ impl Engine {
     }
 }
 
-async fn copy_native(
+struct PreparedMemberCopy<'a> {
+    member: MemberCopy<'a>,
+    path: PathBuf,
+    present: bool,
+    chunk_cap: usize,
+    chunk: usize,
+    reserve_bytes: usize,
+}
+
+fn prepare_member_copy<'a>(
+    admitted: &Admission,
+    remote: bool,
+    member: MemberCopy<'a>,
+    member_path: PathBuf,
+    budget: &Budget,
+) -> Result<PreparedMemberCopy<'a>> {
+    check_member_scope(admitted.snapshot_source.as_ref(), remote, member.uri)?;
+    let present = member_path.try_exists()?;
+    if present
+        && std::fs::symlink_metadata(&member_path)?
+            .file_type()
+            .is_symlink()
+    {
+        return Err(mismatch());
+    }
+    let chunk_cap = budget
+        .limits
+        .max_batch_bytes
+        .min(storage::SNAPSHOT_MEMBER_CHUNK_BYTES);
+    if chunk_cap == 0 && member.size > 0 {
+        return Err(capacity());
+    }
+    let chunk = member.size.min(chunk_cap as u64) as usize;
+    let transport = if !present && remote {
+        #[cfg(feature = "remote")]
+        {
+            storage::remote::SnapshotSource::TRANSPORT_ADMISSION
+        }
+        #[cfg(not(feature = "remote"))]
+        {
+            return Err(source_unavailable());
+        }
+    } else {
+        0
+    };
+    let reserve_bytes = chunk.checked_add(transport).ok_or_else(capacity)?;
+    Ok(PreparedMemberCopy {
+        member,
+        path: member_path,
+        present,
+        chunk_cap,
+        chunk,
+        reserve_bytes,
+    })
+}
+
+async fn copy_member_admitted(
     engine: &Engine,
     admitted: &Admission,
     remote: bool,
-    member: MemberCopy<'_>,
-    path: &Path,
+    prepared: PreparedMemberCopy<'_>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    sync_parent: bool,
     budget: &Budget,
 ) -> Result<SnapshotObject> {
     #[cfg(not(feature = "remote"))]
@@ -799,16 +1086,13 @@ async fn copy_native(
         role,
         size,
         sha: expected_sha,
-    } = member;
-    let present = path.try_exists()?;
-    if present && std::fs::symlink_metadata(path)?.file_type().is_symlink() {
-        return Err(mismatch());
-    }
+    } = prepared.member;
+    let present = prepared.present;
     let reader = if !present && remote {
         #[cfg(feature = "remote")]
         {
             let source = engine.snapshot_source_for(admitted)?;
-            if source.size(uri, budget).await? != size {
+            if size == 0 && source.size_admitted(uri, &permit).await? != 0 {
                 return Err(mismatch());
             }
             SnapshotReader::S3(source.clone())
@@ -817,7 +1101,7 @@ async fn copy_native(
         return Err(source_unavailable());
     } else {
         let input = if present {
-            FileIO::new_with_fs().new_input(path.to_string_lossy())?
+            FileIO::new_with_fs().new_input(prepared.path.to_string_lossy())?
         } else {
             FileIO::new_with_fs().new_input(uri)?
         };
@@ -843,16 +1127,12 @@ async fn copy_native(
         .as_ref()
         .map(|file| budget.scratch_writer(file))
         .transpose()?;
-    let chunk = budget
-        .limits
-        .max_batch_bytes
-        .min(storage::SNAPSHOT_MEMBER_CHUNK_BYTES) as u64;
-    let _memory = budget.reserve(chunk as usize)?;
     #[cfg(feature = "remote")]
     let mut destination = match &reader {
-        SnapshotReader::S3(_) => vec![0; chunk as usize],
+        SnapshotReader::S3(_) => vec![0; prepared.chunk],
         SnapshotReader::Local { .. } => Vec::new(),
     };
+    let chunk = prepared.chunk_cap as u64;
     let mut sha = Sha256::new();
     let mut digest = blake3::Hasher::new();
     let mut start = 0;
@@ -868,7 +1148,7 @@ async fn copy_native(
             SnapshotReader::S3(source) => {
                 let slice = &mut destination[..(end - start) as usize];
                 source
-                    .read_range(uri, size, start..end, slice, budget)
+                    .read_range_admitted(uri, size, start..end, slice, prepared.chunk_cap, &permit)
                     .await?;
                 slice
             }
@@ -883,19 +1163,27 @@ async fn copy_native(
         digest.update(bytes);
         start = end;
     }
+    #[cfg(feature = "remote")]
+    drop(destination);
+    drop(permit);
     let sha256 = format!("{:x}", sha.finalize());
-    if expected_sha.is_some_and(|expected| expected != sha256)
-        || reader.size(uri, budget).await? != size
+    if expected_sha.is_some_and(|expected| expected != sha256) {
+        return Err(mismatch());
+    }
+    if let SnapshotReader::Local { input, .. } = &reader
+        && input.metadata().await?.size != size
     {
         return Err(mismatch());
     }
     drop(output);
     if let Some(temporary) = temporary {
         temporary.inner().as_file().sync_all()?;
-        std::fs::hard_link(temporary.path(), path)?;
+        std::fs::hard_link(temporary.path(), &prepared.path)?;
         budget.retain_temporary(temporary)?;
     }
-    File::open(path.parent().ok_or_else(mismatch)?)?.sync_all()?;
+    if sync_parent {
+        File::open(prepared.path.parent().ok_or_else(mismatch)?)?.sync_all()?;
+    }
     Ok(SnapshotObject {
         origin_operation: admitted.request.operation.clone(),
         uri: uri.into(),
@@ -904,7 +1192,7 @@ async fn copy_native(
         size,
         retained: ObjectRef {
             owner: admitted.request.dataset.clone(),
-            path: path.to_string_lossy().into_owned(),
+            path: prepared.path.to_string_lossy().into_owned(),
             digest: digest.finalize().to_hex().to_string(),
             bytes: size,
         },

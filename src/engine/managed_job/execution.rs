@@ -182,13 +182,27 @@ impl Engine {
                     continue;
                 }
                 let snapshot = self.admit_job_snapshot(admitted, input, &budget).await?;
+                let donor = admitted.input_donors.get(input.name());
+                let mut provenance = vec![input_custody::InputOrigin::from_admission(admitted)];
+                if let Some(donor) = donor {
+                    for origin in &donor.provenance {
+                        if origin.operation != admitted.request.operation
+                            && snapshot
+                                .objects
+                                .iter()
+                                .any(|object| object.origin_operation == origin.operation)
+                        {
+                            provenance.push(origin.clone());
+                        }
+                    }
+                }
                 let saved = InputAdmission {
                     name: input.name().into(),
                     selector: input.clone(),
                     files: Vec::new(),
                     snapshot_custody: Some(snapshot.value),
-                    provenance: vec![input_custody::InputOrigin::from_admission(admitted)],
-                    reuse_from: None,
+                    provenance,
+                    reuse_from: donor.and_then(|donor| donor.reuse_from.clone()),
                 };
                 self.commit_job_record(&request.dataset, &key, &saved)
                     .await?;
