@@ -281,9 +281,12 @@ impl Engine {
         admitted: &Admission,
         spec: &JobSpec,
         budget: &Budget,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let mut unique = BTreeMap::new();
         let mut memory = budget.reserve(0)?;
+        let inherited_map = input_custody::inherited_objects_map(admitted)?;
+        let mut native_retained_paths = BTreeSet::<String>::new();
+        let mut reused_donors = BTreeMap::<String, ObjectRef>::new();
         // All native metadata is admitted before any input payload copy begins.
         for input in &spec.inputs {
             if !matches!(input, JobInput::NativeTable { .. }) {
@@ -303,6 +306,19 @@ impl Engine {
                 &plan.as_ref().ok_or_else(mismatch)?.metadata
             };
             for object in metadata {
+                let from_donor =
+                    inherited.is_none() && object.origin_operation != admitted.request.operation;
+                if inherited.is_some() || from_donor {
+                    native_retained_paths.insert(object.retained.path.clone());
+                }
+                if from_donor {
+                    record_reused_donor(
+                        &admitted.directory,
+                        &inherited_map,
+                        &mut reused_donors,
+                        &object.retained,
+                    )?;
+                }
                 add_claim(
                     &mut unique,
                     &mut memory,
@@ -312,13 +328,28 @@ impl Engine {
                         role: &object.role,
                         sha: Some(&object.sha256),
                         size: object.size,
-                        inherited: inherited.is_some()
-                            || object.origin_operation != admitted.request.operation,
+                        inherited: inherited.is_some() || from_donor,
                     },
                 )?;
             }
             if let Some(plan) = &plan {
                 for object in &plan.payloads {
+                    let reused = donor_member(
+                        admitted,
+                        input.name(),
+                        &object.uri,
+                        &object.role,
+                        object.size,
+                    )?;
+                    if let Some(reused) = &reused {
+                        native_retained_paths.insert(reused.retained.path.clone());
+                        record_reused_donor(
+                            &admitted.directory,
+                            &inherited_map,
+                            &mut reused_donors,
+                            &reused.retained,
+                        )?;
+                    }
                     add_claim(
                         &mut unique,
                         &mut memory,
@@ -328,7 +359,7 @@ impl Engine {
                             role: &object.role,
                             sha: None,
                             size: object.size,
-                            inherited: donor_has_uri(admitted, input.name(), &object.uri),
+                            inherited: reused.is_some(),
                         },
                     )?;
                 }
@@ -345,6 +376,15 @@ impl Engine {
                     .iter()
                     .flat_map(|input| input.members.iter().map(|member| member.size)),
             )
+            .chain(
+                producer::inherited_objects(admitted)
+                    .iter()
+                    .filter(|object| {
+                        !native_retained_paths.contains(object.path.as_str())
+                            && !Path::new(&object.path).starts_with(&admitted.directory)
+                    })
+                    .map(|object| object.bytes),
+            )
             .try_fold(0u64, |sum, size| sum.checked_add(size).ok_or_else(capacity))?;
         if total > budget.limits.scratch_bytes {
             return Err(Error::refusal(
@@ -352,7 +392,9 @@ impl Engine {
                 "complete admitted native and file inputs exceed the operation allowance",
             ));
         }
-        Ok(())
+        reused_donors.values().try_fold(0u64, |sum, object| {
+            sum.checked_add(object.bytes).ok_or_else(capacity)
+        })
     }
 
     async fn job_snapshot_plan(
@@ -565,24 +607,13 @@ impl Engine {
                 if completed_batch.len() >= SNAPSHOT_MEMBER_CONCURRENCY
                     || (pending_iter.peek().is_none() && active.is_empty())
                 {
-                    if let Err(error) = self
-                        .flush_snapshot_members(admitted, &mut completed_batch, &mut objects)
-                        .await
-                    {
-                        if error.code() == "capacity" && !active.is_empty() {
-                            while let Some(next_done) = active.next().await {
-                                completed_batch.push(next_done?);
-                            }
-                            self.flush_snapshot_members(
-                                admitted,
-                                &mut completed_batch,
-                                &mut objects,
-                            )
-                            .await?;
-                        } else {
-                            return Err(error);
-                        }
-                    }
+                    self.flush_or_drain_snapshot_members(
+                        admitted,
+                        &mut active,
+                        &mut completed_batch,
+                        &mut objects,
+                    )
+                    .await?;
                 }
             }
             if !completed_batch.is_empty() {
@@ -874,6 +905,42 @@ impl Engine {
         Ok(object)
     }
 
+    async fn flush_or_drain_snapshot_members<F>(
+        &self,
+        admitted: &Admission,
+        active: &mut futures::stream::FuturesUnordered<F>,
+        completed_batch: &mut Vec<(String, SnapshotMember)>,
+        objects: &mut Vec<SnapshotObject>,
+    ) -> Result<()>
+    where
+        F: std::future::Future<Output = Result<(String, SnapshotMember)>>,
+    {
+        match self
+            .flush_snapshot_members(admitted, completed_batch, objects)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == "capacity" && !active.is_empty() => {
+                let mut first_error = None;
+                while let Some(next_done) = active.next().await {
+                    match next_done {
+                        Ok(item) => completed_batch.push(item),
+                        Err(err) if first_error.is_none() => first_error = Some(err),
+                        Err(_) => {}
+                    }
+                }
+                let flush_result = self
+                    .flush_snapshot_members(admitted, completed_batch, objects)
+                    .await;
+                if let Some(err) = first_error {
+                    return Err(err);
+                }
+                flush_result
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn flush_snapshot_members(
         &self,
         admitted: &Admission,
@@ -883,7 +950,12 @@ impl Engine {
         if completed_batch.is_empty() {
             return Ok(());
         }
-        File::open(&admitted.directory)?.sync_all()?;
+        let directory = admitted.directory.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            File::open(directory)?.sync_all()?;
+            Ok(())
+        })
+        .await??;
         let entries = completed_batch
             .iter()
             .map(|(key, member)| (key.as_str(), member))
@@ -897,17 +969,27 @@ impl Engine {
     }
 }
 
-fn donor_has_uri(admitted: &Admission, input_name: &str, uri: &str) -> bool {
-    admitted
-        .input_donors
-        .get(input_name)
-        .and_then(|donor| donor.snapshot_custody.as_ref())
-        .is_some_and(|custody| {
-            custody
-                .objects
-                .binary_search_by(|object| object.uri.as_str().cmp(uri))
-                .is_ok()
-        })
+fn record_reused_donor(
+    directory: &Path,
+    inherited_map: &BTreeMap<String, ObjectRef>,
+    reused_donors: &mut BTreeMap<String, ObjectRef>,
+    retained: &ObjectRef,
+) -> Result<()> {
+    if let Some(old) = inherited_map.get(&retained.path) {
+        if old != retained {
+            return Err(mismatch());
+        }
+        return Ok(());
+    }
+    if Path::new(&retained.path).starts_with(directory) {
+        return Ok(());
+    }
+    if let Some(old) = reused_donors.insert(retained.path.clone(), retained.clone())
+        && &old != retained
+    {
+        return Err(mismatch());
+    }
+    Ok(())
 }
 
 fn donor_member(
@@ -1019,7 +1101,6 @@ struct PreparedMemberCopy<'a> {
     path: PathBuf,
     present: bool,
     chunk_cap: usize,
-    chunk: usize,
     reserve_bytes: usize,
 }
 
@@ -1065,7 +1146,6 @@ fn prepare_member_copy<'a>(
         path: member_path,
         present,
         chunk_cap,
-        chunk,
         reserve_bytes,
     })
 }
@@ -1088,6 +1168,9 @@ async fn copy_member_admitted(
         sha: expected_sha,
     } = prepared.member;
     let present = prepared.present;
+    let chunk_cap = prepared.chunk_cap;
+    let member_path = prepared.path;
+    let mut permit = permit;
     let reader = if !present && remote {
         #[cfg(feature = "remote")]
         {
@@ -1101,7 +1184,7 @@ async fn copy_member_admitted(
         return Err(source_unavailable());
     } else {
         let input = if present {
-            FileIO::new_with_fs().new_input(prepared.path.to_string_lossy())?
+            FileIO::new_with_fs().new_input(member_path.to_string_lossy())?
         } else {
             FileIO::new_with_fs().new_input(uri)?
         };
@@ -1113,54 +1196,74 @@ async fn copy_member_admitted(
             input,
         }
     };
-    let temporary = if present {
-        None
+    let (temporary, mut output) = if present {
+        (None, None)
     } else {
-        Some(
-            budget
+        let budget_open = budget.clone();
+        tokio::task::spawn_blocking(move || -> Result<_> {
+            let temporary = budget_open
                 .runtime_env()
                 .disk_manager
-                .create_tmp_file("retained native member")?,
-        )
+                .create_tmp_file("retained native member")?;
+            let writer = budget_open.scratch_writer(&temporary)?;
+            Ok((Some(temporary), Some(writer)))
+        })
+        .await??
     };
-    let mut output = temporary
-        .as_ref()
-        .map(|file| budget.scratch_writer(file))
-        .transpose()?;
     #[cfg(feature = "remote")]
     let mut destination = match &reader {
-        SnapshotReader::S3(_) => vec![0; prepared.chunk],
+        SnapshotReader::S3(_) => vec![0; size.min(chunk_cap as u64) as usize],
         SnapshotReader::Local { .. } => Vec::new(),
     };
-    let chunk = prepared.chunk_cap as u64;
+    let chunk = chunk_cap as u64;
     let mut sha = Sha256::new();
     let mut digest = blake3::Hasher::new();
     let mut start = 0;
     while start < size {
         let end = start.saturating_add(chunk).min(size);
-        let local;
-        let bytes: &[u8] = match &reader {
+        match &reader {
             SnapshotReader::Local { reader, .. } => {
-                local = reader.read(start..end).await?;
-                &local
+                let bytes = reader.read(start..end).await?;
+                if bytes.len() as u64 != end - start {
+                    return Err(mismatch());
+                }
+                (output, sha, digest, permit) =
+                    tokio::task::spawn_blocking(move || -> Result<_> {
+                        if let Some(writer) = &mut output {
+                            writer.write_all(&bytes)?;
+                        }
+                        sha.update(&bytes);
+                        digest.update(&bytes);
+                        Ok((output, sha, digest, permit))
+                    })
+                    .await??;
             }
             #[cfg(feature = "remote")]
             SnapshotReader::S3(source) => {
-                let slice = &mut destination[..(end - start) as usize];
+                let len = (end - start) as usize;
                 source
-                    .read_range_admitted(uri, size, start..end, slice, prepared.chunk_cap, &permit)
+                    .read_range_admitted(
+                        uri,
+                        size,
+                        start..end,
+                        &mut destination[..len],
+                        chunk_cap,
+                        &permit,
+                    )
                     .await?;
-                slice
+                (output, sha, digest, destination, permit) =
+                    tokio::task::spawn_blocking(move || -> Result<_> {
+                        let slice = &destination[..len];
+                        if let Some(writer) = &mut output {
+                            writer.write_all(slice)?;
+                        }
+                        sha.update(slice);
+                        digest.update(slice);
+                        Ok((output, sha, digest, destination, permit))
+                    })
+                    .await??;
             }
-        };
-        if bytes.len() as u64 != end - start {
-            return Err(mismatch());
         }
-        if let Some(output) = &mut output {
-            output.write_all(bytes)?;
-        }
-        sha.update(bytes);
-        digest.update(bytes);
         start = end;
     }
     #[cfg(feature = "remote")]
@@ -1175,15 +1278,21 @@ async fn copy_member_admitted(
     {
         return Err(mismatch());
     }
-    drop(output);
-    if let Some(temporary) = temporary {
-        temporary.inner().as_file().sync_all()?;
-        std::fs::hard_link(temporary.path(), &prepared.path)?;
-        budget.retain_temporary(temporary)?;
-    }
-    if sync_parent {
-        File::open(prepared.path.parent().ok_or_else(mismatch)?)?.sync_all()?;
-    }
+    let retained_path = member_path.to_string_lossy().into_owned();
+    let budget_finalize = budget.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        drop(output);
+        if let Some(temporary) = temporary {
+            temporary.inner().as_file().sync_all()?;
+            std::fs::hard_link(temporary.path(), &member_path)?;
+            budget_finalize.retain_temporary(temporary)?;
+        }
+        if sync_parent {
+            File::open(member_path.parent().ok_or_else(mismatch)?)?.sync_all()?;
+        }
+        Ok(())
+    })
+    .await??;
     Ok(SnapshotObject {
         origin_operation: admitted.request.operation.clone(),
         uri: uri.into(),
@@ -1192,7 +1301,7 @@ async fn copy_member_admitted(
         size,
         retained: ObjectRef {
             owner: admitted.request.dataset.clone(),
-            path: prepared.path.to_string_lossy().into_owned(),
+            path: retained_path,
             digest: digest.finalize().to_hex().to_string(),
             bytes: size,
         },

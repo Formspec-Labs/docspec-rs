@@ -1043,6 +1043,101 @@ async fn cross_snapshot_custody_reuses_unchanged_table_files_and_survives_donor_
     );
 }
 
+#[tokio::test]
+async fn compacted_donor_superseded_files_do_not_exhaust_receiver_scratch_budget() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("host");
+    let base = base_s3_table_metadata();
+
+    // S1 has ~1.5 MiB of data; S2 replaces S1 completely after upstream compaction (~1.5 MiB).
+    // With `scratch_bytes` = 3 MiB, `size(S1) + size(S2) > scratch_bytes`, while each snapshot
+    // individually fits cleanly within `scratch_bytes`.
+    let rows = 200_000_usize;
+    let d1_bytes = uncompressed_id_parquet(&(0..rows as i64).collect::<Vec<_>>());
+    let d2_bytes = uncompressed_id_parquet(&(1..=rows as i64).collect::<Vec<_>>());
+    assert!(d1_bytes.len() > (3 << 19) && d2_bytes.len() > (3 << 19));
+
+    let meta_1 = "s3://bucket/owned/candidate/metadata/compact-00001.metadata.json";
+    let meta_2 = "s3://bucket/owned/candidate/metadata/compact-00002.metadata.json";
+    let list_1 = "s3://bucket/owned/candidate/metadata/compact-list-1.avro";
+    let list_2 = "s3://bucket/owned/candidate/metadata/compact-list-2.avro";
+    let manifest_1 = "s3://bucket/owned/candidate/metadata/compact-manifest-1.avro";
+    let manifest_2 = "s3://bucket/owned/candidate/metadata/compact-manifest-2.avro";
+    let data_1 = "s3://bucket/owned/candidate/data/uncompacted.parquet";
+    let data_2 = "s3://bucket/owned/candidate/data/compacted.parquet";
+
+    let (m1_file, m1_bytes) = write_manifest_bytes(
+        &base,
+        1,
+        manifest_1,
+        &[(data_1, d1_bytes.len() as u64, rows as u64)],
+    )
+    .await;
+    let (m2_file, m2_bytes) = write_manifest_bytes(
+        &base,
+        2,
+        manifest_2,
+        &[(data_2, d2_bytes.len() as u64, rows as u64)],
+    )
+    .await;
+    let (s1_meta, l1_bytes) = write_snapshot_version(&base, 1, list_1, vec![m1_file]).await;
+    let s1_meta_bytes = serde_json::to_vec(&s1_meta).unwrap();
+    let (s2_meta, l2_bytes) = write_snapshot_version(&base, 2, list_2, vec![m2_file]).await;
+    let s2_meta_bytes = serde_json::to_vec(&s2_meta).unwrap();
+
+    let bounds = Limits {
+        compute_threads: 2,
+        memory_bytes: 64 << 20,
+        scratch_bytes: (d1_bytes.len() + d2_bytes.len() - (256 << 10)) as u64,
+        batch_rows: 4096,
+        max_batch_bytes: 4 << 20,
+        max_metadata_bytes: 1 << 20,
+    };
+    let fixture = ReadFixture::inventory(HashMap::from([
+        (meta_1.into(), s1_meta_bytes.clone()),
+        (list_1.into(), l1_bytes),
+        (manifest_1.into(), m1_bytes),
+        (data_1.into(), d1_bytes),
+        (meta_2.into(), s2_meta_bytes.clone()),
+        (list_2.into(), l2_bytes),
+        (manifest_2.into(), m2_bytes),
+        (data_2.into(), d2_bytes),
+    ]));
+    let mut engine = Engine::open(&workspace, bounds).await.unwrap();
+    engine.snapshot_source = Some(Arc::new(fixture.snapshot_source(None)));
+
+    let day1 = engine
+        .managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
+            root.path(),
+            "native-s3",
+            "compact-day1",
+            meta_1,
+            &s1_meta,
+            &s1_meta_bytes,
+            rows,
+            None,
+        )))
+        .await
+        .unwrap();
+    assert_eq!(day1.status, "completed");
+
+    let day2 = engine
+        .managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
+            root.path(),
+            "native-s3",
+            "compact-day2",
+            meta_2,
+            &s2_meta,
+            &s2_meta_bytes,
+            rows,
+            Some(day1.input_custody[0].clone()),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(day2.status, "completed");
+    let _ = fixture.finish();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "756-member 488 MiB Stage 1b throughput benchmark; run explicitly with --ignored"]
 async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {

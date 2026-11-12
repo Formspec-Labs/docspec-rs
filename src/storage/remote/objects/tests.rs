@@ -1,10 +1,11 @@
 //! Scope and exact identity checks without provider requests.
+// Rust guideline compliant 2026-02-21
 
 use super::*;
 use crate::{budget::Limits, model::Id};
 use std::{
     io::Write,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     thread,
     time::Duration,
@@ -316,38 +317,11 @@ impl ReadFixture {
                     let observed_peak = observed_peak.clone();
                     let observed_token = observed_token.clone();
                     workers.push(thread::spawn(move || {
-                        socket.set_nonblocking(false).unwrap();
-                        socket
-                            .set_read_timeout(Some(Duration::from_secs(30)))
-                            .unwrap();
-                        socket
-                            .set_write_timeout(Some(Duration::from_secs(30)))
-                            .unwrap();
-                        let mut request = Vec::new();
-                        while !request.ends_with(b"\r\n\r\n") {
-                            let mut byte = [0];
-                            if socket.read(&mut byte).unwrap_or(0) == 0 {
-                                return;
-                            }
-                            request.push(byte[0]);
-                            assert!(request.len() < 16 << 10);
-                        }
-                        let request = String::from_utf8(request).unwrap();
-                        if request.lines().any(|line| {
-                            line.split_once(':').is_some_and(|(name, _)| {
-                                name.eq_ignore_ascii_case("x-amz-security-token")
-                            })
-                        }) {
-                            observed_token.store(true, Ordering::Release);
-                        }
-                        let method = request.split_whitespace().next().unwrap().to_owned();
-                        let req_path = request.split_whitespace().nth(1).unwrap();
-                        let uri = format!("s3://{}", req_path.strip_prefix('/').unwrap());
-                        let range = request.lines().find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("range")
-                                .then(|| value.trim().to_owned())
-                        });
+                        let Some((method, uri, range)) =
+                            parse_fixture_request(&mut socket, Duration::from_secs(30), &observed_token)
+                        else {
+                            return;
+                        };
                         observed_paths
                             .lock()
                             .unwrap()
@@ -389,49 +363,7 @@ impl ReadFixture {
                         if !get_delay.is_zero() {
                             thread::sleep(get_delay);
                         }
-                        let (start, end) = match range.as_deref() {
-                            None => (0, bytes.len()),
-                            Some(value) => {
-                                let (start, end) = value
-                                    .strip_prefix("bytes=")
-                                    .unwrap()
-                                    .split_once('-')
-                                    .unwrap();
-                                if start.is_empty() {
-                                    (
-                                        bytes.len().saturating_sub(end.parse::<usize>().unwrap()),
-                                        bytes.len(),
-                                    )
-                                } else {
-                                    (
-                                        start.parse::<usize>().unwrap(),
-                                        if end.is_empty() {
-                                            bytes.len()
-                                        } else {
-                                            (end.parse::<usize>().unwrap() + 1).min(bytes.len())
-                                        },
-                                    )
-                                }
-                            }
-                        };
-                        let selected = &bytes[start..end];
-                        let size = selected.len();
-                        if range.is_some() {
-                            write!(
-                                socket,
-                                "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes {start}-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n",
-                                end.saturating_sub(1),
-                                bytes.len()
-                            )
-                            .unwrap();
-                        } else {
-                            write!(
-                                socket,
-                                "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n"
-                            )
-                            .unwrap();
-                        }
-                        socket.write_all(selected).unwrap();
+                        write_ranged_slice(&mut socket, bytes, range.as_deref(), false);
                     }));
                 }
                 if !accepted_any {
@@ -441,8 +373,7 @@ impl ReadFixture {
             for worker in workers {
                 worker.join().unwrap();
             }
-            let out = requests.lock().unwrap().clone();
-            out
+            requests.lock().unwrap().clone()
         });
         Self {
             endpoint,
@@ -538,40 +469,13 @@ impl ReadFixture {
                     }
                     Err(error) => panic!("fixture accept failed: {error}"),
                 };
-                // Accepted sockets inherit nonblocking mode on macOS.
-                socket.set_nonblocking(false).unwrap();
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                socket
-                    .set_write_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                let mut request = Vec::new();
-                while !request.ends_with(b"\r\n\r\n") {
-                    let mut byte = [0];
-                    assert_eq!(socket.read(&mut byte).unwrap(), 1);
-                    request.push(byte[0]);
-                    assert!(request.len() < 16 << 10);
-                }
-                let request = String::from_utf8(request).unwrap();
-                if request.lines().any(|line| {
-                    line.split_once(':')
-                        .is_some_and(|(name, _)| name.eq_ignore_ascii_case("x-amz-security-token"))
-                }) {
-                    observed_token.store(true, Ordering::Release);
-                }
-                let method = request.split_whitespace().next().unwrap().to_owned();
-                let path = request.split_whitespace().nth(1).unwrap();
-                let uri = format!("s3://{}", path.strip_prefix('/').unwrap());
+                let (method, uri, range) =
+                    parse_fixture_request(&mut socket, Duration::from_secs(5), &observed_token)
+                        .expect("fixture client closed before sending HTTP headers");
                 observed_paths
                     .lock()
                     .unwrap()
                     .push((method.clone(), uri.clone()));
-                let range = request.lines().find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("range")
-                        .then(|| value.trim().to_owned())
-                });
                 observed_detailed.lock().unwrap().push((
                     method.clone(),
                     uri.clone(),
@@ -632,46 +536,12 @@ impl ReadFixture {
                             let _ = socket.write_all(bytes);
                             continue;
                         }
-                        let (start, end) = match range.as_deref() {
-                            None => (0, bytes.len()),
-                            Some(value) => {
-                                let (start, end) = value
-                                    .strip_prefix("bytes=")
-                                    .unwrap()
-                                    .split_once('-')
-                                    .unwrap();
-                                if start.is_empty() {
-                                    (
-                                        bytes.len().saturating_sub(end.parse::<usize>().unwrap()),
-                                        bytes.len(),
-                                    )
-                                } else {
-                                    (
-                                        start.parse::<usize>().unwrap(),
-                                        if end.is_empty() {
-                                            bytes.len()
-                                        } else {
-                                            (end.parse::<usize>().unwrap() + 1).min(bytes.len())
-                                        },
-                                    )
-                                }
-                            }
-                        };
-                        let selected = &bytes[start..end];
-                        let size = selected.len();
-                        if range.is_some() {
-                            write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes {start}-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n", end.saturating_sub(1), bytes.len()).unwrap();
-                        } else {
-                            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n").unwrap();
-                        }
-                        if matches!(reply, RangeReply::Fragmented) {
-                            let split = selected.len() / 2;
-                            socket.write_all(&selected[..split]).unwrap();
-                            thread::sleep(Duration::from_millis(20));
-                            socket.write_all(&selected[split..]).unwrap();
-                        } else {
-                            socket.write_all(selected).unwrap();
-                        }
+                        write_ranged_slice(
+                            &mut socket,
+                            bytes,
+                            range.as_deref(),
+                            matches!(reply, RangeReply::Fragmented),
+                        );
                         continue;
                     }
                     let size = bytes.len();
@@ -745,6 +615,95 @@ impl ReadFixture {
     pub(crate) fn finish(self) -> Vec<(String, Option<String>)> {
         self.stop.store(true, Ordering::Release);
         self.server.join().unwrap()
+    }
+}
+
+fn parse_fixture_request(
+    socket: &mut TcpStream,
+    timeout: Duration,
+    observed_token: &AtomicBool,
+) -> Option<(String, String, Option<String>)> {
+    // Accepted sockets inherit nonblocking mode on macOS.
+    socket.set_nonblocking(false).unwrap();
+    socket.set_read_timeout(Some(timeout)).unwrap();
+    socket.set_write_timeout(Some(timeout)).unwrap();
+    let mut request = Vec::new();
+    while !request.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        if socket.read(&mut byte).unwrap_or(0) == 0 {
+            return None;
+        }
+        request.push(byte[0]);
+        assert!(request.len() < 16 << 10);
+    }
+    let request = String::from_utf8(request).unwrap();
+    if request.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(name, _)| name.eq_ignore_ascii_case("x-amz-security-token"))
+    }) {
+        observed_token.store(true, Ordering::Release);
+    }
+    let method = request.split_whitespace().next().unwrap().to_owned();
+    let req_path = request.split_whitespace().nth(1).unwrap();
+    let uri = format!("s3://{}", req_path.strip_prefix('/').unwrap());
+    let range = request.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("range")
+            .then(|| value.trim().to_owned())
+    });
+    Some((method, uri, range))
+}
+
+fn write_ranged_slice(socket: &mut TcpStream, bytes: &[u8], range: Option<&str>, fragmented: bool) {
+    let (start, end) = match range {
+        None => (0, bytes.len()),
+        Some(value) => {
+            let (start, end) = value
+                .strip_prefix("bytes=")
+                .unwrap()
+                .split_once('-')
+                .unwrap();
+            if start.is_empty() {
+                (
+                    bytes.len().saturating_sub(end.parse::<usize>().unwrap()),
+                    bytes.len(),
+                )
+            } else {
+                (
+                    start.parse::<usize>().unwrap(),
+                    if end.is_empty() {
+                        bytes.len()
+                    } else {
+                        (end.parse::<usize>().unwrap() + 1).min(bytes.len())
+                    },
+                )
+            }
+        }
+    };
+    let selected = &bytes[start..end];
+    let size = selected.len();
+    if range.is_some() {
+        write!(
+            socket,
+            "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes {start}-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n",
+            end.saturating_sub(1),
+            bytes.len()
+        )
+        .unwrap();
+    } else {
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    }
+    if fragmented {
+        let split = selected.len() / 2;
+        socket.write_all(&selected[..split]).unwrap();
+        thread::sleep(Duration::from_millis(20));
+        socket.write_all(&selected[split..]).unwrap();
+    } else {
+        socket.write_all(selected).unwrap();
     }
 }
 

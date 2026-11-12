@@ -143,7 +143,28 @@ impl Engine {
         let mut admissions = Vec::new();
         let mut admission_memory = Vec::new();
         let mut input_view_memory = Vec::new();
-        self.plan_job_snapshots(admitted, &spec, &budget).await?;
+        let reused_donor_bytes = self.plan_job_snapshots(admitted, &spec, &budget).await?;
+        let budget = if reused_donor_bytes > 0 {
+            let retained = owned_bytes(&admitted.directory, host_budget.limits.max_metadata_bytes)?
+                .checked_add(input_custody::inherited_bytes(admitted)?)
+                .and_then(|sum| sum.checked_add(reused_donor_bytes))
+                .ok_or_else(capacity)?;
+            let next = host_budget.with_retained_disk(retained).map_err(|error| {
+                if error.code() == "disk_capacity" {
+                    Error::refusal(
+                        "disk_capacity",
+                        "complete admitted native and file inputs exceed the operation allowance",
+                    )
+                } else {
+                    error
+                }
+            })?;
+            *self.inner.retained_disk.lock().await =
+                Arc::downgrade(&next.runtime_env().disk_manager);
+            next
+        } else {
+            budget
+        };
         let producer_evidence = self
             .seal_job_producer_evidence(admitted, &spec, &budget)
             .await?;

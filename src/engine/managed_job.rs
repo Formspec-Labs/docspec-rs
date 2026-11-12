@@ -377,15 +377,8 @@ impl Engine {
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
         let changes = vec![record(key, attempt)?];
-        if view.table.metadata().snapshots().count() >= Self::JOB_LIFECYCLE_COMPACT_SNAPSHOTS {
-            self.inner
-                .lifecycle
-                .compact_baseline_with_records(&view, &BTreeSet::new(), &changes)
-                .await?;
-        } else {
-            self.inner.lifecycle.commit(&view, changes).await?;
-        }
-        Ok(())
+        self.commit_or_compact_job_changes(dataset, &view, changes)
+            .await
     }
     async fn job_runtime_sha256(&self) -> Result<String> {
         if let Some(identity) = self.inner.job_runtime_sha256.get() {
@@ -622,15 +615,25 @@ impl Engine {
         if pending.is_empty() {
             return Ok(());
         }
+        self.commit_or_compact_job_changes(dataset, &view, pending)
+            .await
+    }
+
+    async fn commit_or_compact_job_changes(
+        &self,
+        dataset: &Id,
+        view: &View,
+        pending: Vec<(String, serde_json::Value)>,
+    ) -> Result<()> {
         let committed =
             if view.table.metadata().snapshots().count() >= Self::JOB_LIFECYCLE_COMPACT_SNAPSHOTS {
                 self.inner
                     .lifecycle
-                    .compact_baseline_with_records(&view, &BTreeSet::new(), &pending)
+                    .compact_baseline_with_records(view, &BTreeSet::new(), &pending)
                     .await
                     .map(|(next, _)| next)
             } else {
-                self.inner.lifecycle.commit(&view, pending.clone()).await
+                self.inner.lifecycle.commit(view, pending.clone()).await
             };
         if let Err(error) = committed {
             let after = self.inner.lifecycle.open(dataset).await?;
