@@ -1,4 +1,5 @@
 //! Structured refusals and retained upstream causes.
+// Rust guideline compliant 2026-02-21
 
 use std::{backtrace::Backtrace, fmt};
 
@@ -143,6 +144,14 @@ impl Error {
     #[must_use]
     pub(crate) fn context(mut self, place: impl fmt::Display) -> Self {
         self.message = format!("{place}: {}", self.message);
+        self
+    }
+
+    /// Reclassifies the refusal code while keeping the message, cause and backtrace.
+    #[must_use]
+    pub(crate) fn with_code(mut self, code: &'static str) -> Self {
+        self.kind = ErrorKind::from_code(code);
+        self.code = code;
         self
     }
 

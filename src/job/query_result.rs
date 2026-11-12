@@ -41,7 +41,7 @@ impl QueryResult {
 }
 
 pub(super) fn ensure_distinct_columns(
-    name: &str,
+    _name: &str,
     schema: &arrow::datatypes::Schema,
 ) -> Result<Vec<String>> {
     let mut seen = std::collections::BTreeSet::new();
@@ -51,7 +51,7 @@ pub(super) fn ensure_distinct_columns(
             return Err(Error::refusal(
                 "invalid_sql",
                 format!(
-                    "SQL query {name:?} repeats output column {:?}; give each column a distinct alias",
+                    "SQL query repeats output column {:?}; give each column a distinct alias",
                     field.name()
                 ),
             ));
@@ -61,17 +61,21 @@ pub(super) fn ensure_distinct_columns(
     Ok(columns)
 }
 
+fn is_duplicate_column_plan_error(message: &str) -> bool {
+    message.contains("Projections require unique expression names")
+        || message.contains("contains duplicate qualified field name")
+        || message.contains("contains duplicate unqualified field name")
+        || message.contains("Source table contains duplicate column name")
+}
+
 pub(super) async fn plan_query_frame(
     job: &Job,
     name: &str,
     sql: &str,
 ) -> Result<(datafusion::dataframe::DataFrame, Vec<String>)> {
     let frame = job.sql(sql).await.map_err(|error| {
-        if error
-            .message()
-            .contains("Projections require unique expression names")
-        {
-            Error::refusal("invalid_sql", error.message())
+        if is_duplicate_column_plan_error(error.message()) {
+            error.with_code("invalid_sql")
         } else {
             error
         }
@@ -194,6 +198,11 @@ mod tests {
                 "SELECT k.sha, c.sha FROM k LEFT JOIN c ON c.sha = k.sha",
             ),
             ("join_star", "SELECT * FROM k LEFT JOIN c ON c.sha = k.sha"),
+            ("wildcard_twice", "SELECT k.*, k.* FROM k"),
+            (
+                "cte_duplicate_alias",
+                "WITH t(sha, sha) AS (SELECT 1, 2) SELECT * FROM t",
+            ),
         ] {
             let spec: JobSpec = serde_json::from_value(json!({
                 "scratch": root.path().join(label),

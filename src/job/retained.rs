@@ -288,7 +288,11 @@ impl Job {
                 true,
                 true,
                 true,
-                Some((metadata_unit, metadata_limit, self.budget.limits.batch_rows)),
+                Some(super::encoding::MetadataBound::Ceiling {
+                    unit: metadata_unit,
+                    limit: metadata_limit,
+                    row_group_rows: self.budget.limits.batch_rows,
+                }),
             )?;
         }
         writer.finish()?;

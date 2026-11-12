@@ -5,6 +5,49 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use std::io::Write;
 
+/// Row-group metadata accounting enforced as `ArrowWriter` flushes groups.
+pub(super) enum MetadataBound<'a> {
+    /// Enforce a fixed byte ceiling over predicted row groups (`retained` phases).
+    Ceiling {
+        unit: usize,
+        limit: usize,
+        row_group_rows: usize,
+    },
+    /// Charge per-flushed-row-group metadata incrementally to the shared budget (`spill`).
+    Spill {
+        step: &'a str,
+        unit: usize,
+        permit: &'a mut tokio::sync::OwnedSemaphorePermit,
+    },
+}
+
+fn ensure_spill_metadata_groups<W: Write + Send>(
+    writer: &ArrowWriter<W>,
+    extra_groups: usize,
+    budget: &Budget,
+    step: &str,
+    unit: usize,
+    permit: &mut tokio::sync::OwnedSemaphorePermit,
+) -> Result<()> {
+    let required = writer
+        .flushed_row_groups()
+        .len()
+        .checked_add(extra_groups)
+        .and_then(|groups| groups.checked_add(1))
+        .and_then(|groups| groups.checked_mul(unit))
+        .ok_or_else(|| {
+            crate::Error::refusal(
+                "capacity",
+                format!("spilled step {step}: row-group metadata overflow"),
+            )
+        })?;
+    let additional = required.saturating_sub(permit.num_permits());
+    if additional > 0 {
+        permit.merge(budget.reserve(additional)?);
+    }
+    Ok(())
+}
+
 /// Admit the known live input, encoded buffer growth and statistics copies.
 /// Parquet58 byte_array.rs::compute_min_max copies both full values; the V2
 /// delta fallback also retains last_value. Use the portable piece size as a
@@ -46,7 +89,7 @@ pub(super) fn write_bounded<W: Write + Send>(
     statistics: bool,
     delta: bool,
     flush: bool,
-    metadata: Option<(usize, usize, usize)>,
+    mut metadata: Option<MetadataBound<'_>>,
 ) -> Result<()> {
     let input = batch.get_array_memory_size();
     let mut offset = 0;
@@ -78,32 +121,53 @@ pub(super) fn write_bounded<W: Write + Send>(
                 // The caller still owns the fixed input/retained-state
                 // reservation. Release that group before refusing a row that
                 // can fit by itself; no new input is written during retry.
+                if let Some(MetadataBound::Spill { step, unit, permit }) = metadata.as_mut() {
+                    ensure_spill_metadata_groups(writer, 1, budget, step, *unit, permit)?;
+                }
                 writer.flush()?;
                 continue;
             }
             Err(error) => return Err(error),
         };
-        if let Some((unit, limit, row_group_rows)) = metadata {
-            let possible = writer
-                .flushed_row_groups()
-                .len()
-                .saturating_add(
-                    writer
-                        .in_progress_rows()
-                        .saturating_add(take)
-                        .div_ceil(row_group_rows),
-                )
-                .saturating_add(1);
-            if possible.saturating_mul(unit) > limit {
-                return Err(crate::Error::refusal(
-                    "metadata_capacity",
-                    "retained row groups exceed footer allowance",
-                ));
+        match metadata.as_mut() {
+            Some(MetadataBound::Ceiling {
+                unit,
+                limit,
+                row_group_rows,
+            }) => {
+                let possible = writer
+                    .flushed_row_groups()
+                    .len()
+                    .saturating_add(
+                        writer
+                            .in_progress_rows()
+                            .saturating_add(take)
+                            .div_ceil(*row_group_rows),
+                    )
+                    .saturating_add(1);
+                if possible.saturating_mul(*unit) > *limit {
+                    return Err(crate::Error::refusal(
+                        "metadata_capacity",
+                        "retained row groups exceed footer allowance",
+                    ));
+                }
             }
+            Some(MetadataBound::Spill { step, unit, permit }) => {
+                let group_bytes = (budget.limits.max_batch_bytes / 4).max(1);
+                let piece_groups = piece.get_array_memory_size().div_ceil(group_bytes).max(1);
+                ensure_spill_metadata_groups(writer, piece_groups, budget, step, *unit, permit)?;
+            }
+            None => {}
         }
         writer.write(&piece)?;
         if flush && writer.memory_size() > budget.limits.max_batch_bytes {
+            if let Some(MetadataBound::Spill { step, unit, permit }) = metadata.as_mut() {
+                ensure_spill_metadata_groups(writer, 1, budget, step, *unit, permit)?;
+            }
             writer.flush()?;
+        }
+        if let Some(MetadataBound::Spill { step, unit, permit }) = metadata.as_mut() {
+            ensure_spill_metadata_groups(writer, 0, budget, step, *unit, permit)?;
         }
         // Retained encoder state stays covered by `writer_memory` before
         // releasing the transient copies. Native auto-flush is covered too.
@@ -350,6 +414,58 @@ mod tests {
         assert_eq!(
             arrow::compute::concat_batches(&input.schema(), &read).unwrap(),
             input
+        );
+    }
+
+    #[test]
+    fn spill_metadata_charges_intra_batch_flushes_under_memory_pressure() {
+        let budget = budget(320 << 10);
+        let base = 2 * budget.limits.max_batch_bytes;
+        let mut base_permit = budget.reserve(base).unwrap();
+        let mut metadata_permit = budget.reserve(0).unwrap();
+        let input = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new(
+                "value",
+                DataType::Utf8,
+                false,
+            )])),
+            vec![Arc::new(StringArray::from_iter_values(
+                std::iter::repeat_n("x".repeat(8 << 10), 8),
+            ))],
+        )
+        .unwrap();
+        let properties = WriterProperties::builder()
+            .set_dictionary_enabled(false)
+            .set_statistics_enabled(EnabledStatistics::None)
+            .set_max_row_group_bytes(Some(16 << 10))
+            .build();
+        let mut out = ArrowWriter::try_new(Vec::new(), input.schema(), Some(properties)).unwrap();
+        let unit = 1024;
+        super::write_bounded(
+            &mut out,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            false,
+            false,
+            true,
+            Some(super::MetadataBound::Spill {
+                step: "wide",
+                unit,
+                permit: &mut metadata_permit,
+            }),
+        )
+        .unwrap();
+        let flushed = out.flushed_row_groups().len();
+        assert!(
+            flushed >= 2,
+            "expected multiple intra-batch flushes, got {flushed}"
+        );
+        assert!(
+            metadata_permit.num_permits() >= (flushed + 1) * unit,
+            "metadata permit {} did not cover ({flushed} + 1) * {unit}",
+            metadata_permit.num_permits()
         );
     }
 }

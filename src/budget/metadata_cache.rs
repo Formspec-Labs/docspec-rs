@@ -66,6 +66,8 @@ impl CacheAccessor<Path, CachedFileMetadataEntry> for AdmittedMetadataCache {
             return previous;
         };
         let Ok(memory) = self.bytes.clone().try_acquire_many_owned(size) else {
+            self.shared_available_min
+                .fetch_min(self.bytes.available_permits(), Ordering::Relaxed);
             return previous;
         };
         self.shared_available_min

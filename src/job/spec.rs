@@ -422,6 +422,7 @@ impl JobSpec {
             queries: Vec::new(),
         };
         let mut running = None;
+        let mut started = false;
         let mut failure_budget = None;
         match self
             .execute(
@@ -429,6 +430,7 @@ impl JobSpec {
                 &mut completed,
                 connections,
                 &mut running,
+                &mut started,
                 &mut failure_budget,
             )
             .await
@@ -436,15 +438,17 @@ impl JobSpec {
             Ok(()) => Ok(completed),
             Err(raw_error) => {
                 let error = self.named(running, raw_error);
-                let (kind, index, name) = self.running_parts(running);
-                super::metrics::log_failed(
-                    kind,
-                    index,
-                    name,
-                    error.code(),
-                    error.message(),
-                    failure_budget,
-                );
+                if started {
+                    let (kind, index, name) = self.running_parts(running);
+                    super::metrics::log_failed(
+                        kind,
+                        index,
+                        name,
+                        error.code(),
+                        error.message(),
+                        failure_budget,
+                    );
+                }
                 Err(JobFailure { completed, error })
             }
         }
@@ -515,6 +519,7 @@ impl JobSpec {
         result: &mut JobResult,
         connections: Connections,
         running: &mut Option<Running>,
+        started: &mut bool,
         failure_budget: &mut Option<(usize, usize, usize)>,
     ) -> Result<()> {
         self.validate()?;
@@ -542,6 +547,7 @@ impl JobSpec {
         #[cfg(not(feature = "remote"))]
         let job = Job::new(limits, self.scratch.clone())?;
         super::metrics::log_start(&job.budget.limits, &self.scratch);
+        *started = true;
         let outcome = self
             .execute_with_job(&job, result, connections.catalog, running)
             .await;
@@ -807,6 +813,8 @@ impl JobSpec {
             result.steps.push(step.step_result(storage)?);
         }
         *running = None;
+        job.budget.restart_pool_peak();
+        job.budget.restart_shared_available_min();
         let catalog = if !self.table_operations.is_empty() {
             match injected_catalog {
                 Some(catalog) => Some(catalog),
@@ -1074,11 +1082,20 @@ fn observe_optional_local_file(
     budget: &crate::budget::Budget,
     compute_digest: bool,
 ) -> Result<(Option<String>, Option<u64>)> {
-    if path.is_file() {
-        let (sha256, bytes) = observe_local_file(path, budget, compute_digest)?;
-        Ok((sha256, Some(bytes)))
+    if compute_digest {
+        if path.is_file() {
+            let (sha256, bytes) = hash_local_file(path, budget)?;
+            Ok((Some(sha256), Some(bytes)))
+        } else {
+            Ok((None, None))
+        }
     } else {
-        Ok((None, None))
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_file() => Ok((None, Some(meta.len()))),
+            Ok(_) => Ok((None, None)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok((None, None)),
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -1210,6 +1227,9 @@ fn observe_json_lines_input(
                 total_bytes = None;
             }
         }
+    }
+    if total_bytes.is_none() {
+        files.clear();
     }
     let (path, sha256) = if declared_files.len() == 1 {
         let single_sha = files.first().and_then(|f| f.sha256.clone());

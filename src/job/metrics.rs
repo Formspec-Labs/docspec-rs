@@ -82,6 +82,16 @@ pub fn now_epoch_secs() -> f64 {
         .as_secs_f64()
 }
 
+#[derive(Deserialize)]
+struct MiProcessStats {
+    rss_peak: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct MiStats {
+    process: Option<MiProcessStats>,
+}
+
 /// Peak resident set size of the process in bytes, read from mimalloc's process stats.
 pub fn process_peak_rss_bytes() -> u64 {
     mimalloc::MiMalloc::stats_json()
@@ -90,9 +100,9 @@ pub fn process_peak_rss_bytes() -> u64 {
             stats
                 .to_str()
                 .ok()
-                .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+                .and_then(|json| serde_json::from_str::<MiStats>(json).ok())
         })
-        .and_then(|value| value["process"]["rss_peak"].as_u64())
+        .and_then(|value| value.process.and_then(|p| p.rss_peak))
         .unwrap_or(0)
 }
 

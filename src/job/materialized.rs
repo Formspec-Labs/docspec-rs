@@ -219,7 +219,7 @@ impl ExecutionPlan for RetainedScan {
         partition: Option<usize>,
     ) -> datafusion::common::Result<Statistics> {
         if partition.is_some_and(|p| p != 0) {
-            return Ok(Statistics::new_unknown(&self.schema()));
+            return self.input.partition_statistics(partition);
         }
         let rows = self.fetch().map_or(self.rows, |fetch| fetch.min(self.rows));
         Ok(Statistics::new_unknown(&self.schema()).with_num_rows(Precision::Inexact(rows)))
@@ -289,8 +289,7 @@ pub(super) fn summarize_joins(plan: &Arc<dyn ExecutionPlan>) -> Vec<super::metri
             let build_rows = join
                 .metrics()
                 .and_then(|metrics| metrics.sum_by_name("build_input_rows"))
-                .map(|value| value.as_usize() as u64)
-                .or_else(|| scanned.map(|(_, rows)| rows as u64));
+                .map(|value| value.as_usize() as u64);
             let partition_mode = match join.partition_mode() {
                 PartitionMode::CollectLeft => "CollectLeft",
                 PartitionMode::Partitioned => "Partitioned",
@@ -377,15 +376,7 @@ pub(super) async fn retain(
                 Some(props),
             )?;
             for previous in batches.drain(..) {
-                reserve_spill_metadata(
-                    &spill,
-                    &previous,
-                    budget,
-                    name,
-                    metadata_unit,
-                    &mut metadata_permit,
-                )?;
-                super::encoding::write(
+                super::encoding::write_bounded(
                     &mut spill,
                     &previous,
                     budget,
@@ -394,6 +385,11 @@ pub(super) async fn retain(
                     false,
                     false,
                     true,
+                    Some(super::encoding::MetadataBound::Spill {
+                        step: name,
+                        unit: metadata_unit,
+                        permit: &mut metadata_permit,
+                    }),
                 )
                 .map_err(|error| named_spill_capacity(name, error))?;
             }
@@ -408,15 +404,7 @@ pub(super) async fn retain(
             let permit = writer_memory.as_mut().expect("spill owns writer_memory");
             let (metadata_unit, metadata_permit) =
                 spill_metadata.as_mut().expect("spill owns spill_metadata");
-            reserve_spill_metadata(
-                writer,
-                &batch,
-                budget,
-                name,
-                *metadata_unit,
-                metadata_permit,
-            )?;
-            super::encoding::write(
+            super::encoding::write_bounded(
                 writer,
                 &batch,
                 budget,
@@ -425,6 +413,11 @@ pub(super) async fn retain(
                 false,
                 false,
                 true,
+                Some(super::encoding::MetadataBound::Spill {
+                    step: name,
+                    unit: *metadata_unit,
+                    permit: metadata_permit,
+                }),
             )
             .map_err(|error| named_spill_capacity(name, error))?;
         } else {
@@ -489,38 +482,6 @@ fn spill_metadata_unit(schema: &arrow::datatypes::Schema) -> Result<usize> {
                 .saturating_add(96)
         },
     ))
-}
-
-fn reserve_spill_metadata<W: std::io::Write + Send>(
-    writer: &ArrowWriter<W>,
-    batch: &RecordBatch,
-    budget: &Budget,
-    step: &str,
-    unit: usize,
-    permit: &mut tokio::sync::OwnedSemaphorePermit,
-) -> Result<()> {
-    let group_bytes = (budget.limits.max_batch_bytes / 4).max(1);
-    let batch_groups = batch.get_array_memory_size().div_ceil(group_bytes).max(1);
-    let required = writer
-        .flushed_row_groups()
-        .len()
-        .checked_add(batch_groups)
-        .and_then(|groups| groups.checked_add(1))
-        .and_then(|groups| groups.checked_mul(unit))
-        .ok_or_else(|| {
-            Error::refusal(
-                "capacity",
-                format!("spilled step {step}: row-group metadata overflow"),
-            )
-        })?;
-    let additional = required.saturating_sub(permit.num_permits());
-    if additional > 0 {
-        let more = budget
-            .reserve(additional)
-            .map_err(|error| named_spill_capacity(step, error))?;
-        permit.merge(more);
-    }
-    Ok(())
 }
 
 fn named_spill_capacity(step: &str, error: Error) -> Error {
@@ -863,10 +824,7 @@ mod tests {
             leaf.partition_statistics(Some(0)).unwrap().num_rows,
             Precision::Inexact(3)
         );
-        assert_eq!(
-            leaf.partition_statistics(Some(1)).unwrap().num_rows,
-            Precision::Absent
-        );
+        assert!(leaf.partition_statistics(Some(1)).is_err());
 
         let limited = leaf.with_fetch(Some(1)).unwrap();
         let limited_stats = limited.partition_statistics(None).unwrap();

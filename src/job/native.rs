@@ -149,17 +149,10 @@ impl TableProvider for AdmittedTable {
             // (`List`, `Struct`, `Map`) fails with `Accessor for Field … not found`.
             // Keep such predicates in DataFusion's `FilterExec` above the scan.
             if filter.column_refs().iter().any(|column| {
-                schema
-                    .field_with_name(&column.name)
-                    .ok()
-                    .or_else(|| {
-                        schema
-                            .fields()
-                            .iter()
-                            .find(|field| field.name().eq_ignore_ascii_case(&column.name))
-                            .map(AsRef::as_ref)
-                    })
-                    .is_some_and(|field| field.data_type().is_nested())
+                let target = column.name.to_lowercase();
+                schema.fields().iter().any(|field| {
+                    field.data_type().is_nested() && field.name().to_lowercase() == target
+                })
             }) {
                 *support = TableProviderFilterPushDown::Unsupported;
             }
