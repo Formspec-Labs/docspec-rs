@@ -39,3 +39,7 @@ The preserved sibling remains the owner of native Parquet field metadata and the
 Evidence: [rust/manifest.json](/Users/mikewolfd/Work/spicy-stack-review-work/reconciliation-20261029/rust/manifest.json).
 
 Full item-to-owner mapping and preserved pre-update records: [ticket update report](/Users/mikewolfd/Work/spicy-stack-review-work/reconciliation-20261029/ticket-updates/REPORT.md).
+
+**2026-11-12T01:18:00Z**
+
+Managed-job step reopen field-ID preservation (`Job::reopen_retained` setting `execution.parquet.skip_metadata = false` and declaring managed SQL steps from `plan::declared_schema`) landed on `dx/one-line` at `8db7ebb` (`ct-exlx`, Stage 1a: 28/28 CT fixture exports byte-identical between plain and managed jobs). Keep `def-9ise` open for `JobInput::Parquet` external input handoffs (`Job::register_parquet`) and the cross-budget byte-identity question.

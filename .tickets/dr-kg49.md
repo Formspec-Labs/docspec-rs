@@ -1,6 +1,6 @@
 ---
 id: dr-kg49
-status: in_progress
+status: closed
 deps: [dr-z0vd]
 links: []
 created: 2026-11-09T19:38:50Z
@@ -24,3 +24,7 @@ Trial cases F3 and F3b fail planning with a clear diagnostic; the six real map r
 **2026-11-09T20:19:44Z**
 
 Implemented on feat/implicit-cast-check-20261109 at 3cc56c8 (local, unmerged): job-plan and prepare-job refuse implicit casts between text, numbers, dates and booleans with a new implicit_cast error; trial cases F3 and F3b now fail planning; the six data-map baseline files still plan clean. Remaining: independent review, then merge after step A (dr-z0vd).
+
+**2026-11-12T01:18:00Z**
+
+Independently blind-reviewed with `greybeard`, `etl-workflow`, and `evolutionary-refactoring`; resolved all findings in `ae608e3` (`LogicalPlan::Join` left/right schema typing for semi/anti/`USING` joins, pre-coercion `TryCast` marking for written casts wrapping coerced subqueries and `date + int` math, `time_to_nanos` handling for `DATE`/`TIME` arithmetic, `Job::refusing_implicit_casts` visibility, and `VALUES` documentation) with `ship` across all three lenses, and merged `--no-ff` into `dx/one-line`.
