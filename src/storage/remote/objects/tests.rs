@@ -5,7 +5,7 @@ use crate::{budget::Limits, model::Id};
 use std::{
     io::Write,
     net::TcpListener,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     thread,
     time::Duration,
 };
@@ -258,6 +258,8 @@ pub(crate) struct ReadFixture {
     stop: Arc<AtomicBool>,
     server: thread::JoinHandle<Vec<(String, Option<String>)>>,
     paths: Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    detailed_requests: Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>>,
+    peak_in_flight: Arc<AtomicUsize>,
     contents: Option<FixtureInventory>,
     session_token_observed: Arc<AtomicBool>,
 }
@@ -278,6 +280,180 @@ impl ReadFixture {
 
     pub(crate) fn inventory(contents: HashMap<String, Vec<u8>>) -> Self {
         Self::serve(Vec::new(), [0; 2], Some(contents), None, RangeReply::Normal)
+    }
+
+    pub(crate) fn concurrent_shared_inventory(
+        contents: HashMap<String, Arc<Vec<u8>>>,
+        get_delay: Duration,
+    ) -> Self {
+        let inventory = Arc::new(contents);
+        let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_paths = paths.clone();
+        let detailed_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_detailed = detailed_requests.clone();
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak_in_flight = Arc::new(AtomicUsize::new(0));
+        let observed_peak = peak_in_flight.clone();
+        let session_token_observed = Arc::new(AtomicBool::new(false));
+        let observed_token = session_token_observed.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = stop.clone();
+        let server = thread::spawn(move || {
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut workers = Vec::new();
+            while !server_stop.load(Ordering::Acquire) {
+                let mut accepted_any = false;
+                while let Ok((mut socket, _)) = listener.accept() {
+                    accepted_any = true;
+                    let inventory = inventory.clone();
+                    let observed_paths = observed_paths.clone();
+                    let observed_detailed = observed_detailed.clone();
+                    let requests = requests.clone();
+                    let in_flight = in_flight.clone();
+                    let observed_peak = observed_peak.clone();
+                    let observed_token = observed_token.clone();
+                    workers.push(thread::spawn(move || {
+                        socket.set_nonblocking(false).unwrap();
+                        socket
+                            .set_read_timeout(Some(Duration::from_secs(30)))
+                            .unwrap();
+                        socket
+                            .set_write_timeout(Some(Duration::from_secs(30)))
+                            .unwrap();
+                        let mut request = Vec::new();
+                        while !request.ends_with(b"\r\n\r\n") {
+                            let mut byte = [0];
+                            if socket.read(&mut byte).unwrap_or(0) == 0 {
+                                return;
+                            }
+                            request.push(byte[0]);
+                            assert!(request.len() < 16 << 10);
+                        }
+                        let request = String::from_utf8(request).unwrap();
+                        if request.lines().any(|line| {
+                            line.split_once(':').is_some_and(|(name, _)| {
+                                name.eq_ignore_ascii_case("x-amz-security-token")
+                            })
+                        }) {
+                            observed_token.store(true, Ordering::Release);
+                        }
+                        let method = request.split_whitespace().next().unwrap().to_owned();
+                        let req_path = request.split_whitespace().nth(1).unwrap();
+                        let uri = format!("s3://{}", req_path.strip_prefix('/').unwrap());
+                        let range = request.lines().find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("range")
+                                .then(|| value.trim().to_owned())
+                        });
+                        observed_paths
+                            .lock()
+                            .unwrap()
+                            .push((method.clone(), uri.clone()));
+                        observed_detailed.lock().unwrap().push((
+                            method.clone(),
+                            uri.clone(),
+                            range.clone(),
+                        ));
+                        requests
+                            .lock()
+                            .unwrap()
+                            .push((method.clone(), range.clone()));
+                        let Some(bytes) = inventory.get(&uri) else {
+                            let _ = write!(
+                                socket,
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            );
+                            return;
+                        };
+                        if method == "HEAD" {
+                            let _ = write!(
+                                socket,
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n",
+                                bytes.len()
+                            );
+                            return;
+                        }
+                        assert_eq!(method, "GET");
+                        struct ActiveGuard<'a>(&'a AtomicUsize);
+                        impl Drop for ActiveGuard<'_> {
+                            fn drop(&mut self) {
+                                self.0.fetch_sub(1, Ordering::AcqRel);
+                            }
+                        }
+                        let current = in_flight.fetch_add(1, Ordering::AcqRel) + 1;
+                        observed_peak.fetch_max(current, Ordering::AcqRel);
+                        let _guard = ActiveGuard(&in_flight);
+                        if !get_delay.is_zero() {
+                            thread::sleep(get_delay);
+                        }
+                        let (start, end) = match range.as_deref() {
+                            None => (0, bytes.len()),
+                            Some(value) => {
+                                let (start, end) = value
+                                    .strip_prefix("bytes=")
+                                    .unwrap()
+                                    .split_once('-')
+                                    .unwrap();
+                                if start.is_empty() {
+                                    (
+                                        bytes.len().saturating_sub(end.parse::<usize>().unwrap()),
+                                        bytes.len(),
+                                    )
+                                } else {
+                                    (
+                                        start.parse::<usize>().unwrap(),
+                                        if end.is_empty() {
+                                            bytes.len()
+                                        } else {
+                                            (end.parse::<usize>().unwrap() + 1).min(bytes.len())
+                                        },
+                                    )
+                                }
+                            }
+                        };
+                        let selected = &bytes[start..end];
+                        let size = selected.len();
+                        if range.is_some() {
+                            write!(
+                                socket,
+                                "HTTP/1.1 206 Partial Content\r\nContent-Length: {size}\r\nContent-Range: bytes {start}-{}/{}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n",
+                                end.saturating_sub(1),
+                                bytes.len()
+                            )
+                            .unwrap();
+                        } else {
+                            write!(
+                                socket,
+                                "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 21 Oct 2015 07:28:00 GMT\r\nConnection: close\r\n\r\n"
+                            )
+                            .unwrap();
+                        }
+                        socket.write_all(selected).unwrap();
+                    }));
+                }
+                if !accepted_any {
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+            for worker in workers {
+                worker.join().unwrap();
+            }
+            let out = requests.lock().unwrap().clone();
+            out
+        });
+        Self {
+            endpoint,
+            stop,
+            server,
+            paths,
+            detailed_requests,
+            peak_in_flight,
+            contents: None,
+            session_token_observed,
+        }
     }
 
     pub(crate) fn held(
@@ -340,6 +516,9 @@ impl ReadFixture {
         let inventory = contents.clone();
         let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
         let observed_paths = paths.clone();
+        let detailed_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_detailed = detailed_requests.clone();
+        let peak_in_flight = Arc::new(AtomicUsize::new(0));
         let session_token_observed = Arc::new(AtomicBool::new(false));
         let observed_token = session_token_observed.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -393,6 +572,11 @@ impl ReadFixture {
                     name.eq_ignore_ascii_case("range")
                         .then(|| value.trim().to_owned())
                 });
+                observed_detailed.lock().unwrap().push((
+                    method.clone(),
+                    uri.clone(),
+                    range.clone(),
+                ));
                 requests.push((method.clone(), range.clone()));
                 if let RangeReply::Redirect(location) = &reply {
                     write!(
@@ -511,6 +695,8 @@ impl ReadFixture {
             stop,
             server,
             paths,
+            detailed_requests,
+            peak_in_flight,
             contents,
             session_token_observed,
         }
@@ -518,6 +704,14 @@ impl ReadFixture {
 
     pub(crate) fn observed_paths(&self) -> Vec<(String, String)> {
         self.paths.lock().unwrap().clone()
+    }
+
+    pub(crate) fn observed_requests(&self) -> Vec<(String, String, Option<String>)> {
+        self.detailed_requests.lock().unwrap().clone()
+    }
+
+    pub(crate) fn peak_in_flight(&self) -> usize {
+        self.peak_in_flight.load(Ordering::Acquire)
     }
 
     pub(crate) fn objects(&self) -> RemoteObjects {
