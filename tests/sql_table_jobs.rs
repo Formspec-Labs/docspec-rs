@@ -1393,3 +1393,126 @@ async fn a_commit_racing_the_add_lands_and_the_add_refuses_before_its_commit() {
     assert!(schema.field_by_name("note").is_none());
     assert!(schema.field_by_name("score").is_none());
 }
+
+#[tokio::test]
+async fn nullable_nested_columns_filter_with_is_null_and_is_not_null() {
+    use iceberg::spec::{ListType, StructType};
+    let root = tempfile::tempdir().unwrap();
+    let schema = Schema::builder()
+        .with_fields(vec![
+            Arc::new(NestedField::required(
+                1,
+                "id",
+                Type::Primitive(PrimitiveType::Long),
+            )),
+            Arc::new(NestedField::required(
+                2,
+                "kind",
+                Type::Primitive(PrimitiveType::String),
+            )),
+            Arc::new(NestedField::optional(
+                3,
+                "committees",
+                Type::List(ListType::new(Arc::new(NestedField::list_element(
+                    4,
+                    Type::Primitive(PrimitiveType::String),
+                    true,
+                )))),
+            )),
+            Arc::new(NestedField::optional(
+                5,
+                "meta",
+                Type::Struct(StructType::new(vec![Arc::new(NestedField::optional(
+                    6,
+                    "tag",
+                    Type::Primitive(PrimitiveType::String),
+                ))])),
+            )),
+        ])
+        .with_identifier_field_ids([1])
+        .build()
+        .unwrap();
+    let create_and_append = json!({
+        "scratch": root.path().join("write-scratch"),
+        "catalog_root": root.path().join("catalog"),
+        "inputs": [],
+        "steps": [{
+            "name": "incoming",
+            "sql": "SELECT CAST(1 AS BIGINT) AS id, 'hearing' AS kind, ['HSJU', 'SSJU'] AS committees, named_struct('tag', 'a') AS meta \
+                    UNION ALL SELECT CAST(2 AS BIGINT) AS id, 'hearing' AS kind, NULL AS committees, NULL AS meta \
+                    UNION ALL SELECT CAST(3 AS BIGINT) AS id, 'markup' AS kind, CAST([] AS VARCHAR[]) AS committees, named_struct('tag', 'b') AS meta \
+                    UNION ALL SELECT CAST(4 AS BIGINT) AS id, 'markup' AS kind, NULL AS committees, named_struct('tag', 'c') AS meta"
+        }],
+        "outputs": [],
+        "table_operations": [
+            {"kind": "create_namespace", "name": "ns", "namespace": ["archive"], "properties": {}},
+            {"kind": "create", "name": "create", "table": {"namespace": ["archive"], "name": "appearances"}, "location": root.path().join("data"), "schema": schema, "format_version": 2, "properties": {"gc.enabled": "true", "commit.retry.num-retries": "0"}},
+            {"kind": "append", "name": "append", "table": {"namespace": ["archive"], "name": "appearances"}, "current_table": "existing", "work_table": "pending", "sql": "SELECT incoming.* FROM incoming LEFT ANTI JOIN existing ON incoming.id = existing.id", "identity_sql": "SELECT 'appearances-v1' AS identity FROM pending LIMIT 1", "layout": {"file_bytes": 1048576, "row_group_rows": 64, "row_group_bytes": 1048576}}
+        ]
+    });
+    let written = run_ok(create_and_append).await;
+    let head = &written["table_operations"][2];
+    let out = run_ok(json!({
+        "scratch": root.path().join("read-pinned"),
+        "inputs": [{
+            "kind": "native_table",
+            "name": "tbl",
+            "metadata_location": head["metadata_location"],
+            "table_uuid": head["table_uuid"],
+            "snapshot": head["snapshot"],
+            "schema_id": head["schema_id"]
+        }],
+        "steps": [],
+        "outputs": [],
+        "queries": [
+            {"name": "is_null", "sql": "SELECT id FROM tbl WHERE committees IS NULL ORDER BY id"},
+            {"name": "is_not_null", "sql": "SELECT id FROM tbl WHERE committees IS NOT NULL ORDER BY id"},
+            {"name": "case_folded", "sql": "SELECT id FROM tbl WHERE COMMITTEES IS NULL ORDER BY id"},
+            {"name": "conjunct", "sql": "SELECT id FROM tbl WHERE committees IS NOT NULL AND kind = 'hearing' ORDER BY id"},
+            {"name": "disjunct", "sql": "SELECT id FROM tbl WHERE committees IS NULL OR id = 1 ORDER BY id"},
+            {"name": "struct_null", "sql": "SELECT id FROM tbl WHERE meta IS NULL ORDER BY id"}
+        ]
+    }))
+    .await;
+    let ids = |name: &str| -> Vec<i64> {
+        out["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["name"] == name)
+            .unwrap()["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_i64().unwrap())
+            .collect()
+    };
+    assert_eq!(ids("is_null"), vec![2, 4]);
+    assert_eq!(ids("is_not_null"), vec![1, 3]);
+    assert_eq!(ids("case_folded"), vec![2, 4]);
+    assert_eq!(ids("conjunct"), vec![1]);
+    assert_eq!(ids("disjunct"), vec![1, 2, 4]);
+    assert_eq!(ids("struct_null"), vec![2]);
+
+    // Also verify `table_operations` (`existing` registered via `register_admitted_native_table`)
+    // shares the same guard when an append reads `existing WHERE committees IS NULL`.
+    let noop_append = run_ok(json!({
+        "scratch": root.path().join("append-check"),
+        "catalog_root": root.path().join("catalog"),
+        "inputs": [],
+        "steps": [],
+        "outputs": [],
+        "table_operations": [{
+            "kind": "append",
+            "name": "recheck",
+            "table": {"namespace": ["archive"], "name": "appearances"},
+            "current_table": "existing",
+            "work_table": "pending",
+            "sql": "SELECT existing.* FROM existing WHERE existing.committees IS NULL AND existing.id < 0",
+            "identity_sql": "SELECT 'noop' AS identity FROM pending LIMIT 1",
+            "layout": {"file_bytes": 1048576, "row_group_rows": 64, "row_group_bytes": 1048576}
+        }]
+    }))
+    .await;
+    assert_eq!(noop_append["table_operations"][0]["files"], json!([]));
+}

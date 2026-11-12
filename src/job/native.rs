@@ -141,7 +141,30 @@ impl TableProvider for AdmittedTable {
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>> {
-        super::fitting::filter_support(self.provider.as_ref(), filters)
+        let mut support = super::fitting::filter_support(self.provider.as_ref(), filters)?;
+        let schema = self.provider.schema();
+        for (support, filter) in support.iter_mut().zip(filters) {
+            // `iceberg` 0.10 builds `StructAccessor` entries only for primitive
+            // leaves, so binding a predicate over any top-level nested column
+            // (`List`, `Struct`, `Map`) fails with `Accessor for Field … not found`.
+            // Keep such predicates in DataFusion's `FilterExec` above the scan.
+            if filter.column_refs().iter().any(|column| {
+                schema
+                    .field_with_name(&column.name)
+                    .ok()
+                    .or_else(|| {
+                        schema
+                            .fields()
+                            .iter()
+                            .find(|field| field.name().eq_ignore_ascii_case(&column.name))
+                            .map(AsRef::as_ref)
+                    })
+                    .is_some_and(|field| field.data_type().is_nested())
+            }) {
+                *support = TableProviderFilterPushDown::Unsupported;
+            }
+        }
+        Ok(support)
     }
     async fn scan(
         &self,
