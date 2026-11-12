@@ -367,15 +367,22 @@ impl Engine {
         result
     }
 
+    pub(super) const JOB_LIFECYCLE_COMPACT_SNAPSHOTS: usize = 100;
+
     async fn record_job_attempt(&self, dataset: &Id, key: &str, attempt: &Attempt) -> Result<()> {
         let _memory = self.request_memory(attempt)?;
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
-        self.inner
-            .lifecycle
-            .commit(&view, vec![record(key, attempt)?])
-            .await?;
+        let changes = vec![record(key, attempt)?];
+        if view.table.metadata().snapshots().count() >= Self::JOB_LIFECYCLE_COMPACT_SNAPSHOTS {
+            self.inner
+                .lifecycle
+                .compact_baseline_with_records(&view, &BTreeSet::new(), &changes)
+                .await?;
+        } else {
+            self.inner.lifecycle.commit(&view, changes).await?;
+        }
         Ok(())
     }
     async fn job_runtime_sha256(&self) -> Result<String> {
@@ -542,60 +549,101 @@ impl Engine {
         key: &str,
         value: &T,
     ) -> Result<()> {
-        let _value_memory = self.request_memory(value)?;
+        self.commit_job_records(dataset, &[(key, value)]).await
+    }
+
+    pub(super) async fn commit_job_records<T: Serialize>(
+        &self,
+        dataset: &Id,
+        entries: &[(&str, &T)],
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let _value_memory = entries
+            .iter()
+            .map(|(_, value)| self.request_memory(*value))
+            .collect::<Result<Vec<_>>>()?;
         let lock = self.lock(dataset).await;
         let _guard = lock.lock().await;
         let view = self.inner.lifecycle.open(dataset).await?;
-        let rows = self.inner.lifecycle.rows(&view).await?;
-        let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[key])?;
-        if let Some((revision, _, old)) = rows.get_record::<serde_json::Value>(key)? {
-            if old == serde_json::to_value(value)? {
-                return Ok(());
+        let pending = {
+            let rows = self.inner.lifecycle.rows(&view).await?;
+            let keys = entries.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+            let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &keys)?;
+            let mut seen = BTreeSet::new();
+            let mut pending = Vec::with_capacity(entries.len());
+            for &(key, value) in entries {
+                if !seen.insert(key) {
+                    return Err(mismatch());
+                }
+                let encoded = record(key, value)?;
+                if let Some((revision, _, old)) = rows.get_record::<serde_json::Value>(key)? {
+                    if old == encoded.1 {
+                        continue;
+                    }
+                    let reusable =
+                        key.starts_with("job-material/") || key.starts_with("job-input-material/");
+                    if !reusable
+                        || !super::retention::retirement::record_retired(
+                            &rows,
+                            &view,
+                            key,
+                            revision,
+                            &self.inner.lifecycle.budget,
+                        )?
+                    {
+                        return Err(mismatch());
+                    }
+                }
+                if let Some(operation) = key
+                    .strip_prefix("job-phase/")
+                    .or_else(|| key.strip_prefix("job-input/"))
+                    .or_else(|| key.strip_prefix("job-member/"))
+                    .or_else(|| key.strip_prefix("job-snapshot-member/"))
+                    .or_else(|| key.strip_prefix("job-snapshot-plan/"))
+                    .or_else(|| key.strip_prefix("job-producer-static/"))
+                    .or_else(|| key.strip_prefix("job-result/"))
+                {
+                    let operation = operation.split('/').next().ok_or_else(mismatch)?;
+                    if rows.contains_key(&format!("abandoned/{operation}")) {
+                        return Err(Error::refusal(
+                            "operation_abandoned",
+                            "whole-job operation was abandoned before completion",
+                        ));
+                    }
+                }
+                pending.push(encoded);
             }
-            let reusable =
-                key.starts_with("job-material/") || key.starts_with("job-input-material/");
-            if !reusable
-                || !super::retention::retirement::record_retired(
-                    &rows,
-                    &view,
-                    key,
-                    revision,
-                    &self.inner.lifecycle.budget,
-                )?
-            {
-                return Err(mismatch());
-            }
+            pending
+        };
+        if pending.is_empty() {
+            return Ok(());
         }
-        if let Some(operation) = key
-            .strip_prefix("job-phase/")
-            .or_else(|| key.strip_prefix("job-input/"))
-            .or_else(|| key.strip_prefix("job-member/"))
-            .or_else(|| key.strip_prefix("job-snapshot-member/"))
-            .or_else(|| key.strip_prefix("job-snapshot-plan/"))
-            .or_else(|| key.strip_prefix("job-producer-static/"))
-            .or_else(|| key.strip_prefix("job-result/"))
-        {
-            let operation = operation.split('/').next().ok_or_else(mismatch)?;
-            if rows.contains_key(&format!("abandoned/{operation}")) {
-                return Err(Error::refusal(
-                    "operation_abandoned",
-                    "whole-job operation was abandoned before completion",
-                ));
-            }
-        }
-        if let Err(error) = self
-            .inner
-            .lifecycle
-            .commit(&view, vec![record(key, value)?])
-            .await
-        {
+        let committed =
+            if view.table.metadata().snapshots().count() >= Self::JOB_LIFECYCLE_COMPACT_SNAPSHOTS {
+                self.inner
+                    .lifecycle
+                    .compact_baseline_with_records(&view, &BTreeSet::new(), &pending)
+                    .await
+                    .map(|(next, _)| next)
+            } else {
+                self.inner.lifecycle.commit(&view, pending.clone()).await
+            };
+        if let Err(error) = committed {
             let after = self.inner.lifecycle.open(dataset).await?;
             let rows = self.inner.lifecycle.rows(&after).await?;
-            let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &[key])?;
-            if rows
-                .get_record::<serde_json::Value>(key)?
-                .is_some_and(|(_, _, old)| serde_json::to_value(value).is_ok_and(|new| old == new))
-            {
+            let keys = pending
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>();
+            let _memory = rows.reserve_decoded(&self.inner.lifecycle.budget, &keys)?;
+            if pending.iter().all(|(key, expected)| {
+                rows.get_record::<serde_json::Value>(key)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|(_, _, old)| old == *expected)
+            }) {
                 return Ok(());
             }
             return Err(error);
