@@ -84,7 +84,9 @@ an integer key joined to a text key or `event_date >= 20200101`. Both run and
 return wrong rows. The `implicit_cast` refusal names each cast. Casts written in
 the SQL stay allowed (`CAST`, `TRY_CAST`, `::`, `DATE '2020-01-01'`), so write
 the conversion you mean; a bare string compared with a date is refused too.
-Running a job (`docspec job`) does not apply this check.
+Casts that DataFusion's SQL translator inserts before analysis—such as unifying
+mixed literals across rows of an inline `VALUES` list—are not visible to this
+check. Running a job (`docspec job`) does not apply this check.
 
 Build with the optional Cargo feature `substrait` and Protocol Buffers compiler
 to enable `calculation.save_substrait`. Set `path` and `readable_path` to new

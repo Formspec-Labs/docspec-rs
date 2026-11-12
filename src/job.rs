@@ -165,7 +165,7 @@ impl Job {
     }
 
     /// Makes later SQL planning refuse implicit casts between type families.
-    pub(crate) fn refusing_implicit_casts(mut self) -> Self {
+    fn refusing_implicit_casts(mut self) -> Self {
         self.refuse_implicit_casts = true;
         self
     }
