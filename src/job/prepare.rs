@@ -480,8 +480,10 @@ impl PrepareJobSpec {
             prepared.outputs.push(relation);
         }
         for query in &spec.queries {
-            let frame = job.sql(&query.sql).await?;
+            let (frame, _) =
+                super::query_result::plan_query_frame(&job, &query.name, &query.sql).await?;
             let schema = super::plan::inferred_schema(&frame, &job.budget)?;
+            super::query_result::ensure_distinct_columns(&query.name, &schema)?;
             let relation = prepared.infer(&job.budget, &query.name, &schema)?;
             prepared.queries.push(relation);
         }

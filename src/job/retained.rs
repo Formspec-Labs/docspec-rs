@@ -30,6 +30,7 @@ pub(crate) struct ClosedFile {
     pub schema: Schema,
 }
 
+#[derive(Debug)]
 pub(crate) struct MetadataBytes {
     pub bytes: Vec<u8>,
     _memory: tokio::sync::OwnedSemaphorePermit,
@@ -322,9 +323,11 @@ impl Job {
         Ok((file, digest, schema))
     }
 
-    pub(crate) async fn report_ipc(&self, sql: &str) -> Result<MetadataBytes> {
-        let mut stream = super::plan::execute_stream(self.sql(sql).await?).await?;
+    pub(crate) async fn report_ipc(&self, name: &str, sql: &str) -> Result<MetadataBytes> {
+        let (frame, _) = super::query_result::plan_query_frame(self, name, sql).await?;
+        let mut stream = super::plan::execute_stream(frame).await?;
         let schema = stream.schema();
+        super::query_result::ensure_distinct_columns(name, &schema)?;
         let buffer = MetadataBuffer::new(&self.budget);
         let mut writer = StreamWriter::try_new(buffer, &schema)?;
         while let Some(batch) = stream.try_next().await? {
@@ -355,6 +358,7 @@ impl Job {
         let _memory = self.budget.reserve(bytes.len().saturating_mul(32))?;
         let reader = StreamReader::try_new(Cursor::new(bytes), None)?;
         let schema = reader.schema();
+        let columns = super::query_result::ensure_distinct_columns(name, &schema)?;
         let mut writer =
             arrow::json::WriterBuilder::new()
                 .with_explicit_nulls(true)
@@ -370,7 +374,12 @@ impl Job {
         writer.finish()?;
         let buffer = writer.into_inner();
         Ok((
-            QueryResult::retained(name, serde_json::from_slice(&buffer.bytes)?, buffer.memory),
+            QueryResult::retained(
+                name,
+                columns,
+                serde_json::from_slice(&buffer.bytes)?,
+                buffer.memory,
+            ),
             schema.as_ref().clone(),
             rows,
         ))
@@ -476,7 +485,7 @@ mod tests {
         let job = Job::from_budget(budget.clone()).unwrap();
         job.register_parquet("events", &path).await.unwrap();
         let report = job
-            .report_ipc("SELECT COUNT(*) AS observed_rows FROM events")
+            .report_ipc("observed", "SELECT COUNT(*) AS observed_rows FROM events")
             .await
             .unwrap();
         let reader = StreamReader::try_new(Cursor::new(&report.bytes), None).unwrap();

@@ -668,7 +668,7 @@ impl Engine {
                         .await?;
                     saved.value
                 } else {
-                    let ipc = job.report_ipc(&query.sql).await?;
+                    let ipc = job.report_ipc(&query.name, &query.sql).await?;
                     let reader = StreamReader::try_new(Cursor::new(&ipc.bytes), None)?;
                     let schema = crate::job::retained::encode_schema(&reader.schema(), &budget)?;
                     let mut rows = 0u64;
