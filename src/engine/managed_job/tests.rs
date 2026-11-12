@@ -6,6 +6,7 @@ use arrow::{datatypes::Field, ipc::convert::try_schema_from_ipc_buffer};
 use serde_json::json;
 
 mod field_ids;
+mod lifecycle_compaction;
 #[cfg(feature = "remote")]
 mod s3_source;
 
@@ -1124,7 +1125,7 @@ async fn producer_proof_preseal_retry_keeps_original_definition_after_adoption_m
     );
 }
 
-async fn retire_producer_fixture_job(
+pub(super) async fn retire_producer_fixture_job(
     engine: &Engine,
     request: &ManagedJobPrepare,
     availability: bool,
