@@ -287,6 +287,7 @@ impl Job {
                 allowance,
                 true,
                 true,
+                true,
                 Some((metadata_unit, metadata_limit, self.budget.limits.batch_rows)),
             )?;
         }

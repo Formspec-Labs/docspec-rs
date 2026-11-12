@@ -292,6 +292,44 @@ async fn a_spill_whose_footer_the_budget_cannot_hold_is_refused_by_name() {
     assert!(error.message().contains("spilled step wide"), "{error}");
 }
 
+#[tokio::test]
+async fn a_spill_writer_charges_row_group_metadata_while_it_writes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    const ROWS: usize = 16_384;
+    let total_batches = ROWS / BATCH;
+    let root = tempfile::tempdir().unwrap();
+    let job = Job::new(tight(), root.path().join("scratch")).unwrap();
+    // Leave working room for `writer_memory` (2 MiB) plus a bounded prefix of row
+    // groups, but less than all ~1,024 row groups' live `RowGroupMetaData`.
+    let spare = 12 << 20;
+    let available = job
+        .budget
+        .reserve(0)
+        .unwrap()
+        .semaphore()
+        .available_permits();
+    let _held = job.budget.reserve(available - spare).unwrap();
+
+    let pulled = Arc::new(AtomicUsize::new(0));
+    let pulled_counter = pulled.clone();
+    let schema = wide_schema();
+    let batches = stream::iter(wide_batches(ROWS).into_iter().map(move |batch| {
+        pulled_counter.fetch_add(1, Ordering::Relaxed);
+        Ok(batch)
+    }));
+    let input = Box::pin(RecordBatchStreamAdapter::new(schema.clone(), batches));
+    let error = retain(&job.context, &job.budget, "wide", schema, input)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "capacity", "{error}");
+    assert!(error.message().contains("spilled step wide"), "{error}");
+    let seen = pulled.load(Ordering::Relaxed);
+    assert!(
+        seen < total_batches,
+        "spill writer pulled all {seen}/{total_batches} batches without charging row-group metadata during writing"
+    );
+}
+
 /// A file the engine did not write, with the spill writer's old shape:
 /// statistics, page index and a row group every 256 KiB.
 fn write_foreign(path: &Path, rows: usize) {

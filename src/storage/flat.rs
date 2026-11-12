@@ -106,10 +106,10 @@ pub(crate) async fn admit_parquet_footer(
 /// fall. What bounds it now is the charge, which stays: a footer the shared
 /// budget cannot hold is refused.
 ///
-/// The charge starts here, at read-back. While the spill is written, the
-/// Parquet writer keeps every row group's metadata until it closes and nothing
-/// charges it: `encoding::write` has no metadata term, where exports charge
-/// theirs per row group.
+/// While the spill is written, `job::materialized::retain` charges each flushed
+/// row group's live `RowGroupMetaData` against the shared budget and releases
+/// that writer-side permit once `ArrowWriter::close` finishes; this function
+/// then takes over the read-back charge for the serialized footer on disk.
 ///
 /// Neither the handle nor the path makes a file the engine's own: the disk
 /// manager also issues handles for byte copies of input files the engine did

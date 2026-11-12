@@ -11,12 +11,14 @@ use std::io::Write;
 /// conservative bound for each copy, including non-byte fields. The encoded
 /// buffer term includes Vec growth. Native compression/dictionary workspace
 /// still has no public pre-allocation estimate; this is not a global RSS bound.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn write<W: Write + Send>(
     writer: &mut ArrowWriter<W>,
     batch: &RecordBatch,
     budget: &Budget,
     writer_memory: &mut tokio::sync::OwnedSemaphorePermit,
     base_reserved: usize,
+    statistics: bool,
     delta: bool,
     flush: bool,
 ) -> Result<()> {
@@ -26,6 +28,7 @@ pub(super) fn write<W: Write + Send>(
         budget,
         writer_memory,
         base_reserved,
+        statistics,
         delta,
         flush,
         None,
@@ -40,6 +43,7 @@ pub(super) fn write_bounded<W: Write + Send>(
     budget: &Budget,
     writer_memory: &mut tokio::sync::OwnedSemaphorePermit,
     base_reserved: usize,
+    statistics: bool,
     delta: bool,
     flush: bool,
     metadata: Option<(usize, usize, usize)>,
@@ -52,7 +56,11 @@ pub(super) fn write_bounded<W: Write + Send>(
         let piece = batch.slice(offset, take);
         let logical = crate::export::portable_batch_bytes(&piece)?;
         let encoded_growth = logical.saturating_mul(2);
-        let statistics_copies = logical.saturating_mul(2);
+        let statistics_copies = if statistics {
+            logical.saturating_mul(2)
+        } else {
+            0
+        };
         let delta_last_value = if delta { logical } else { 0 };
         let required = input
             .saturating_add(writer.memory_size())
@@ -181,6 +189,7 @@ mod tests {
             &budget,
             &mut base_permit,
             base,
+            true,
             false,
             true,
         )
@@ -206,6 +215,7 @@ mod tests {
             &budget,
             &mut base_permit,
             base,
+            true,
             false,
             true,
         )
@@ -223,6 +233,7 @@ mod tests {
             &larger,
             &mut base_permit,
             base,
+            true,
             false,
             true,
         )
@@ -270,12 +281,66 @@ mod tests {
             &budget,
             &mut base_permit,
             base,
+            true,
             false,
             true,
         )
         .unwrap();
         let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(
             output.into_inner().unwrap(),
+        ))
+        .unwrap()
+        .build()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+        assert_eq!(
+            arrow::compute::concat_batches(&input.schema(), &read).unwrap(),
+            input
+        );
+    }
+
+    #[test]
+    fn writer_without_statistics_reserves_only_encoded_buffer_growth() {
+        let budget = budget(512 << 10);
+        let base = 2 * budget.limits.max_batch_bytes;
+        let mut base_permit = budget.reserve(base).unwrap();
+        let input = batch(1, 60 << 10);
+
+        let mut with_stats = writer(&input);
+        let error = super::write(
+            &mut with_stats,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            true,
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "capacity");
+
+        let properties = WriterProperties::builder()
+            .set_dictionary_enabled(false)
+            .set_statistics_enabled(EnabledStatistics::None)
+            .set_max_row_group_bytes(Some(16 << 10))
+            .build();
+        let mut without_stats =
+            ArrowWriter::try_new(Vec::new(), input.schema(), Some(properties)).unwrap();
+        super::write(
+            &mut without_stats,
+            &input,
+            &budget,
+            &mut base_permit,
+            base,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        let read = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(
+            without_stats.into_inner().unwrap(),
         ))
         .unwrap()
         .build()

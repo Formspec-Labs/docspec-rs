@@ -273,6 +273,7 @@ pub(super) async fn retain(
     let mut bytes = 0;
     let mut file = None;
     let mut writer_memory = None;
+    let mut spill_metadata: Option<(usize, tokio::sync::OwnedSemaphorePermit)> = None;
     let mut writer: Option<ArrowWriter<crate::budget::ScratchWriter>> = None;
     while let Some(batch) = stream.try_next().await? {
         rows += batch.num_rows();
@@ -287,7 +288,13 @@ pub(super) async fn retain(
         if writer.is_none()
             && (retention.try_grow(size).is_err() || reservation.try_grow(size).is_err())
         {
-            let mut permit = budget.reserve(budget.limits.max_batch_bytes * 2)?;
+            let mut permit = budget
+                .reserve(budget.limits.max_batch_bytes * 2)
+                .map_err(|error| named_spill_capacity(name, error))?;
+            let metadata_unit = spill_metadata_unit(&schema)?;
+            let mut metadata_permit = budget
+                .reserve(0)
+                .map_err(|error| named_spill_capacity(name, error))?;
             let temporary = budget
                 .runtime_env()
                 .disk_manager
@@ -313,6 +320,14 @@ pub(super) async fn retain(
                 Some(props),
             )?;
             for previous in batches.drain(..) {
+                reserve_spill_metadata(
+                    &spill,
+                    &previous,
+                    budget,
+                    name,
+                    metadata_unit,
+                    &mut metadata_permit,
+                )?;
                 super::encoding::write(
                     &mut spill,
                     &previous,
@@ -320,10 +335,13 @@ pub(super) async fn retain(
                     &mut permit,
                     budget.limits.max_batch_bytes * 2,
                     false,
+                    false,
                     true,
-                )?;
+                )
+                .map_err(|error| named_spill_capacity(name, error))?;
             }
             writer_memory = Some(permit);
+            spill_metadata = Some((metadata_unit, metadata_permit));
             reservation.free();
             retention.free();
             file = Some(temporary);
@@ -331,6 +349,16 @@ pub(super) async fn retain(
         }
         if let Some(writer) = &mut writer {
             let permit = writer_memory.as_mut().expect("spill owns writer_memory");
+            let (metadata_unit, metadata_permit) =
+                spill_metadata.as_mut().expect("spill owns spill_metadata");
+            reserve_spill_metadata(
+                writer,
+                &batch,
+                budget,
+                name,
+                *metadata_unit,
+                metadata_permit,
+            )?;
             super::encoding::write(
                 writer,
                 &batch,
@@ -338,8 +366,10 @@ pub(super) async fn retain(
                 permit,
                 budget.limits.max_batch_bytes * 2,
                 false,
+                false,
                 true,
-            )?;
+            )
+            .map_err(|error| named_spill_capacity(name, error))?;
         } else {
             batches.push(batch);
         }
@@ -347,6 +377,7 @@ pub(super) async fn retain(
     let (storage, retained) = if let Some(writer) = writer {
         writer.close()?;
         drop(writer_memory);
+        drop(spill_metadata);
         let file = file.expect("spill owns temporary file");
         let frame = read_spill(budget, &file, name).await?;
         (
@@ -381,6 +412,69 @@ pub(super) async fn retain(
     let pool_after = budget.runtime_env().memory_pool.reserved();
     super::metrics::log_retain(name, storage.label(), rows, bytes, pool_before, pool_after);
     Ok((storage, rows, bytes))
+}
+
+/// Upper bound on one flushed spill row group's live `RowGroupMetaData`.
+///
+/// Spills disable statistics and offset indexes (`EnabledStatistics::None`,
+/// `set_offset_index_disabled(true)`), and `ColumnDescPtr` is shared across row
+/// groups, so each flushed group holds `RowGroupMetaData`, its
+/// `Vec<ColumnChunkMetaData>`, and per-column `PageEncodingStats` plus `Vec`
+/// growth slack.
+fn spill_metadata_unit(schema: &arrow::datatypes::Schema) -> Result<usize> {
+    let descriptor = parquet::arrow::ArrowSchemaConverter::new().convert(schema)?;
+    Ok(descriptor.columns().iter().fold(
+        std::mem::size_of::<parquet::file::metadata::RowGroupMetaData>().saturating_add(256),
+        |bytes, _| {
+            bytes
+                .saturating_add(std::mem::size_of::<
+                    parquet::file::metadata::ColumnChunkMetaData,
+                >())
+                .saturating_add(96)
+        },
+    ))
+}
+
+fn reserve_spill_metadata<W: std::io::Write + Send>(
+    writer: &ArrowWriter<W>,
+    batch: &RecordBatch,
+    budget: &Budget,
+    step: &str,
+    unit: usize,
+    permit: &mut tokio::sync::OwnedSemaphorePermit,
+) -> Result<()> {
+    let group_bytes = (budget.limits.max_batch_bytes / 4).max(1);
+    let batch_groups = batch.get_array_memory_size().div_ceil(group_bytes).max(1);
+    let required = writer
+        .flushed_row_groups()
+        .len()
+        .checked_add(batch_groups)
+        .and_then(|groups| groups.checked_add(1))
+        .and_then(|groups| groups.checked_mul(unit))
+        .ok_or_else(|| {
+            Error::refusal(
+                "capacity",
+                format!("spilled step {step}: row-group metadata overflow"),
+            )
+        })?;
+    let additional = required.saturating_sub(permit.num_permits());
+    if additional > 0 {
+        let more = budget
+            .reserve(additional)
+            .map_err(|error| named_spill_capacity(step, error))?;
+        permit.merge(more);
+    }
+    Ok(())
+}
+
+fn named_spill_capacity(step: &str, error: Error) -> Error {
+    match error.code() {
+        "capacity" if !error.message().contains("spilled step ") => Error::refusal(
+            "capacity",
+            format!("spilled step {step}: {}", error.message()),
+        ),
+        _ => error,
+    }
 }
 
 /// Reads back step `step`'s spill file through the handle its writer still holds.

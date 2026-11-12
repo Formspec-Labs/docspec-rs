@@ -396,6 +396,7 @@ pub(super) async fn export_retained(
             &mut writer_memory,
             allowance,
             true,
+            true,
             false,
         )?;
     }
