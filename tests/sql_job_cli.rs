@@ -436,3 +436,82 @@ async fn job_receipt_binds_stable_job_id_spec_digest_input_versions_and_step_sum
     assert_eq!(receipt["outputs"][0]["rows"], 2);
     assert_eq!(receipt["queries"][0]["data"], json!([{"null_ids": 0}]));
 }
+
+#[tokio::test]
+async fn anonymous_job_records_input_sizes_without_hashing_local_payloads() {
+    let root = tempfile::tempdir().unwrap();
+    let parquet_path = root.path().join("items.parquet");
+    super::scalar::input(&parquet_path, &[(Some(1), Some("one".into()))]);
+    let parquet_len = std::fs::metadata(&parquet_path).unwrap().len();
+
+    let dir_path = root.path().join("parts");
+    std::fs::create_dir_all(&dir_path).unwrap();
+    let part_path = dir_path.join("part-0.parquet");
+    super::scalar::input(&part_path, &[(Some(2), Some("two".into()))]);
+    let part_len = std::fs::metadata(&part_path).unwrap().len();
+
+    let unqueried_jsonl = root.path().join("unqueried.jsonl");
+    let jsonl_payload = b"{\"id\":1}\n";
+    std::fs::write(&unqueried_jsonl, jsonl_payload).unwrap();
+    #[cfg(unix)]
+    let permission_gated = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&unqueried_jsonl, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::File::open(&unqueried_jsonl).is_err()
+    };
+
+    let schema = Schema::new(vec![Field::new("id", DataType::Int64, true)]);
+    let limits = Limits {
+        compute_threads: 2,
+        memory_bytes: 32 << 20,
+        batch_rows: 8,
+        max_batch_bytes: 4 << 20,
+        scratch_bytes: 32 << 20,
+        ..Limits::default()
+    };
+    let mut spec_json = json!({
+        "scratch": root.path().join("scratch-anon"),
+        "inputs": [
+            {"name": "items", "kind": "parquet", "path": parquet_path},
+            {"name": "parts", "kind": "parquet", "path": dir_path},
+            {
+                "name": "raw",
+                "kind": "json_lines",
+                "files": [{"key": "raw/0", "path": unqueried_jsonl}],
+                "schema": schema,
+            }
+        ],
+        "steps": [],
+        "outputs": [],
+        "queries": [{"name": "sample", "sql": "SELECT id FROM items LIMIT 1"}],
+    });
+
+    let anon_spec: JobSpec = serde_json::from_value(spec_json.clone()).unwrap();
+    let anon_result = anon_spec.run(limits.clone()).await.unwrap();
+    let anon_value = serde_json::to_value(&anon_result).unwrap();
+    assert!(anon_value.get("job_id").is_none());
+    let anon_inputs = anon_value["inputs"].as_array().unwrap();
+    assert_eq!(anon_inputs.len(), 3);
+    assert_eq!(anon_inputs[0]["bytes"], parquet_len);
+    assert!(anon_inputs[0].get("sha256").is_none());
+    assert_eq!(anon_inputs[1]["bytes"], part_len);
+    assert!(anon_inputs[1].get("sha256").is_none());
+    assert!(anon_inputs[1]["files"][0].get("sha256").is_none());
+    assert_eq!(anon_inputs[2]["bytes"], jsonl_payload.len() as u64);
+    assert!(anon_inputs[2].get("sha256").is_none());
+    assert!(anon_inputs[2]["files"][0].get("sha256").is_none());
+
+    #[cfg(unix)]
+    if permission_gated {
+        spec_json["id"] = json!("urn:example:job:declared");
+        spec_json["scratch"] = json!(root.path().join("scratch-declared"));
+        let declared_spec: JobSpec = serde_json::from_value(spec_json).unwrap();
+        let err = declared_spec.run(limits).await.unwrap_err();
+        assert_eq!(err.error.code(), "io");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&unqueried_jsonl, std::fs::Permissions::from_mode(0o644));
+    }
+}

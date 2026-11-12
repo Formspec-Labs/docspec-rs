@@ -253,7 +253,7 @@ async fn auto_compacts_workspace_lifecycle_and_preserves_recovery_reuse_and_reti
     let remaining_keys = records
         .iter()
         .filter(|(key, value)| {
-            super::super::retention::retirement::completion_key(key)
+            crate::engine::retention::retirement::completion_key(key)
                 && !key.contains("/retired-early/")
                 && !key.contains("/prior/")
                 && value

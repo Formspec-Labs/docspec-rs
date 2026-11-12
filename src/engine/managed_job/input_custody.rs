@@ -423,22 +423,26 @@ impl Engine {
 }
 
 pub(super) fn inherited_bytes(admitted: &Admission) -> Result<u64> {
-    inherited_objects_map(admitted)?
-        .values()
-        .filter(|object| !Path::new(&object.path).starts_with(&admitted.directory))
-        .try_fold(0u64, |sum, object| {
-            sum.checked_add(object.bytes).ok_or_else(capacity)
-        })
+    reference_bytes(
+        &admitted.directory,
+        admitted.input_grants.values(),
+        producer::inherited_objects(admitted),
+    )
 }
 
 pub(super) fn inherited_objects_map(admitted: &Admission) -> Result<BTreeMap<String, ObjectRef>> {
+    unique_objects_map(
+        admitted.input_grants.values(),
+        producer::inherited_objects(admitted),
+    )
+}
+
+fn unique_objects_map<'a>(
+    inputs: impl Iterator<Item = &'a execution::InputAdmission>,
+    extra: &[ObjectRef],
+) -> Result<BTreeMap<String, ObjectRef>> {
     let mut unique = BTreeMap::<String, ObjectRef>::new();
-    for object in admitted
-        .input_grants
-        .values()
-        .flat_map(input_objects)
-        .chain(producer::inherited_objects(admitted).iter().cloned())
-    {
+    for object in inputs.flat_map(input_objects).chain(extra.iter().cloned()) {
         if let Some(old) = unique.insert(object.path.clone(), object.clone())
             && old != object
         {
@@ -446,6 +450,19 @@ pub(super) fn inherited_objects_map(admitted: &Admission) -> Result<BTreeMap<Str
         }
     }
     Ok(unique)
+}
+
+fn reference_bytes<'a>(
+    directory: &Path,
+    inputs: impl Iterator<Item = &'a execution::InputAdmission>,
+    extra: &[ObjectRef],
+) -> Result<u64> {
+    unique_objects_map(inputs, extra)?
+        .values()
+        .filter(|object| !Path::new(&object.path).starts_with(directory))
+        .try_fold(0u64, |sum, object| {
+            sum.checked_add(object.bytes).ok_or_else(capacity)
+        })
 }
 
 pub(super) fn completed_references(

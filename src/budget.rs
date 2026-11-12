@@ -81,7 +81,9 @@ pub struct Budget {
 
 #[derive(Debug)]
 struct RetainedFiles {
-    files: Vec<datafusion::execution::disk_manager::RefCountedTempFile>,
+    ledger: Option<datafusion::execution::disk_manager::RefCountedTempFile>,
+    retained_bytes: u64,
+    count: usize,
     memory: OwnedSemaphorePermit,
 }
 impl Budget {
@@ -177,7 +179,9 @@ impl Budget {
         budget.runtime = runtime;
         budget.retained_existing_bytes = bytes;
         budget.retained_files = Some(Arc::new(std::sync::Mutex::new(RetainedFiles {
-            files: Vec::new(),
+            ledger: None,
+            retained_bytes: 0,
+            count: 0,
             memory: self.reserve(0)?,
         })));
         Ok(budget)
@@ -193,6 +197,10 @@ impl Budget {
         file: datafusion::execution::disk_manager::RefCountedTempFile,
     ) -> Result<()> {
         if let Some(files) = &self.retained_files {
+            let _scratch_guard = self
+                .scratch_writes
+                .lock()
+                .map_err(|_| Error::refusal("worker", "scratch writer lock is poisoned"))?;
             if self.retained_operation_disk_bytes() > self.limits.scratch_bytes {
                 return Err(Error::refusal(
                     "disk_capacity",
@@ -203,19 +211,51 @@ impl Budget {
                 .lock()
                 .map_err(|_| Error::refusal("worker", "retained file admission is poisoned"))?;
             let charge = size_of_val(&file).saturating_mul(2).saturating_add(128);
-            if files.files.len().saturating_add(1).saturating_mul(charge)
-                > self.limits.max_metadata_bytes
+            if files.count.saturating_add(1).saturating_mul(charge) > self.limits.max_metadata_bytes
             {
                 return Err(Error::refusal(
                     "metadata_capacity",
                     "retained file handles exceed metadata allowance",
                 ));
             }
-            files.memory.merge(self.reserve(charge)?);
-            // The open native handle retains its disk charge. The durable hard
-            // link owns the bytes; scratch must not become a second crash root.
+            let file_bytes = file.current_disk_usage();
+            let next_bytes = files
+                .retained_bytes
+                .checked_add(file_bytes)
+                .ok_or_else(|| {
+                    Error::refusal(
+                        "disk_capacity",
+                        "retained files and native spill exceed the operation allowance",
+                    )
+                })?;
+            let permit = self.reserve(charge)?;
+            if files.ledger.is_none() {
+                let ledger = self
+                    .runtime
+                    .disk_manager
+                    .create_tmp_file("retained operation disk ledger")?;
+                std::fs::remove_file(ledger.path())?;
+                files.ledger = Some(ledger);
+            }
+            // The durable hard link owns the bytes; unlink and close the per-file
+            // handle so large snapshots hold O(1) file descriptors instead of O(N),
+            // transferring the exact native disk charge onto the single sparse ledger.
             std::fs::remove_file(file.path())?;
-            files.files.push(file);
+            drop(file);
+            let previous_bytes = files.retained_bytes;
+            let ledger = files.ledger.as_mut().expect("ledger initialized above");
+            ledger.inner().as_file().set_len(next_bytes)?;
+            if ledger.update_disk_usage().is_err() {
+                let _ = ledger.inner().as_file().set_len(previous_bytes);
+                let _ = ledger.update_disk_usage();
+                return Err(Error::refusal(
+                    "disk_capacity",
+                    "retained files and native spill exceed the operation allowance",
+                ));
+            }
+            files.retained_bytes = next_bytes;
+            files.count += 1;
+            files.memory.merge(permit);
         }
         Ok(())
     }
@@ -985,5 +1025,34 @@ mod tests {
         drop(permit);
         let _memory = budget.reserve(budget.limits.memory_bytes / 2).unwrap();
         budget.blocking_admitted(|| Ok(())).await.unwrap();
+    }
+
+    #[test]
+    fn retaining_hundreds_of_files_holds_constant_open_file_descriptors() {
+        let root = tempfile::tempdir().unwrap();
+        let host = Budget::in_workspace(Limits::default(), &root.path().join("scratch")).unwrap();
+        let budget = host.with_retained_disk(4096).unwrap();
+        for idx in 0..512_usize {
+            let file = budget
+                .runtime_env()
+                .disk_manager
+                .create_tmp_file("fd bound check")
+                .unwrap();
+            let mut writer = budget.scratch_writer(&file).unwrap();
+            std::io::Write::write_all(&mut writer, &[0x3c; 1024]).unwrap();
+            drop(writer);
+            std::fs::hard_link(file.path(), root.path().join(format!("retained-{idx}"))).unwrap();
+            budget.retain_temporary(file).unwrap();
+        }
+        assert_eq!(budget.retained_operation_disk_bytes(), 4096 + 512 * 1024);
+        assert_eq!(
+            budget
+                .runtime_env()
+                .disk_manager
+                .spilling_progress()
+                .active_files_count,
+            1,
+            "retaining 512 files must hold one shared sparse ledger handle, not 512 open descriptors"
+        );
     }
 }

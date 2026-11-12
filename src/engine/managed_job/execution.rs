@@ -1060,16 +1060,16 @@ fn observed_managed_input(input: &JobInput, saved: &InputAdmission) -> Result<In
                 files.push(InputFileResult {
                     key: member.key.clone(),
                     path: member.path.clone(),
-                    sha256: member.sha256.clone(),
+                    sha256: Some(member.sha256.clone()),
                     bytes: member.size,
                 });
             }
             let (path, digest) = if files.len() == 1 {
-                (Some(files[0].path.clone()), Some(files[0].sha256.clone()))
+                (Some(files[0].path.clone()), files[0].sha256.clone())
             } else {
                 let summary = files
                     .iter()
-                    .map(|f| (&f.key, &f.sha256, f.bytes))
+                    .map(|f| (&f.key, f.sha256.as_deref().unwrap_or_default(), f.bytes))
                     .collect::<Vec<_>>();
                 (None, Some(sha256(&serde_json::to_vec(&summary)?)))
             };

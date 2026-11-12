@@ -251,6 +251,7 @@ async fn empty_readback_uses_only_stats_and_scope_refusal_performs_no_io() {
 }
 
 type FixtureInventory = Arc<std::sync::Mutex<HashMap<String, Vec<u8>>>>;
+type DetailedRequestLog = Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>>;
 
 // A tiny read-only S3 HTTP boundary, using the actual configured native operator.
 // Records only method/range, never credential-bearing request headers.
@@ -259,7 +260,7 @@ pub(crate) struct ReadFixture {
     stop: Arc<AtomicBool>,
     server: thread::JoinHandle<Vec<(String, Option<String>)>>,
     paths: Arc<std::sync::Mutex<Vec<(String, String)>>>,
-    detailed_requests: Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>>,
+    detailed_requests: DetailedRequestLog,
     peak_in_flight: Arc<AtomicUsize>,
     contents: Option<FixtureInventory>,
     session_token_observed: Arc<AtomicBool>,
@@ -306,6 +307,7 @@ impl ReadFixture {
             let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
             let mut workers = Vec::new();
             while !server_stop.load(Ordering::Acquire) {
+                workers.retain(|w: &thread::JoinHandle<()>| !w.is_finished());
                 let mut accepted_any = false;
                 while let Ok((mut socket, _)) = listener.accept() {
                     accepted_any = true;

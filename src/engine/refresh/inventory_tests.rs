@@ -253,10 +253,12 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
     let refresh_spec = RefreshSpec {
         dataset: Id::new("related").unwrap(),
         operation: Id::new("refresh-1").unwrap(),
+        base: None,
         definition: "v1".into(),
-        policy: RefreshPolicy::Captured,
-        partition_by: Vec::new(),
         transform: RefreshTransform::Join(join.clone()),
+        policy: RefreshPolicy::Captured,
+        mode: RefreshMode::default(),
+        relationship: None,
     };
     let refresh_req = OperationRequest::Refresh(Box::new(refresh_spec.clone()));
     assert_eq!(
@@ -287,10 +289,6 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
         .await
         .unwrap()
         .unwrap();
-    let refresh_protections = engine
-        .retained_protections(&view, "readback/refresh-1")
-        .await
-        .unwrap();
     assert_eq!(
         engine
             .select_prepared_with_policy(
@@ -298,7 +296,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &refresh_op,
                 Retained {
                     value: refresh_rb.release.clone(),
-                    protections: refresh_protections.clone(),
+                    protections: engine
+                        .retained_protections(&view, "readback/refresh-1")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&policy_id),
@@ -357,6 +358,12 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
         )
         .await
         .unwrap();
+    let view = engine
+        .inner
+        .lifecycle
+        .open(&refresh_spec.dataset)
+        .await
+        .unwrap();
     assert_eq!(
         engine
             .select_prepared(
@@ -364,7 +371,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &refresh_op,
                 Retained {
                     value: refresh_rb.release.clone(),
-                    protections: refresh_protections.clone(),
+                    protections: engine
+                        .retained_protections(&view, "readback/refresh-1")
+                        .await
+                        .unwrap(),
                 },
                 None,
             )
@@ -380,7 +390,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &refresh_op,
                 Retained {
                     value: refresh_rb.release.clone(),
-                    protections: refresh_protections.clone(),
+                    protections: engine
+                        .retained_protections(&view, "readback/refresh-1")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&other_policy_id),
@@ -397,7 +410,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &refresh_op,
                 Retained {
                     value: refresh_rb.release.clone(),
-                    protections: refresh_protections.clone(),
+                    protections: engine
+                        .retained_protections(&view, "readback/refresh-1")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&policy_id),
@@ -427,10 +443,12 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
     let refresh_done_spec = RefreshSpec {
         dataset: Id::new("related-done").unwrap(),
         operation: Id::new("refresh-done").unwrap(),
+        base: None,
         definition: "v1".into(),
-        policy: RefreshPolicy::Captured,
-        partition_by: Vec::new(),
         transform: RefreshTransform::Join(join),
+        policy: RefreshPolicy::Captured,
+        mode: RefreshMode::default(),
+        relationship: None,
     };
     let refresh_done_req = OperationRequest::Refresh(Box::new(refresh_done_spec.clone()));
     let completed = engine.refresh(&refresh_done_spec).await.unwrap();
@@ -447,10 +465,6 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
         .await
         .unwrap()
         .unwrap();
-    let done_protections = engine
-        .retained_protections(&done_view, "readback/refresh-done")
-        .await
-        .unwrap();
     assert_eq!(
         engine
             .select_prepared_with_policy(
@@ -458,7 +472,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections.clone(),
+                    protections: engine
+                        .retained_protections(&done_view, "readback/refresh-done")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&policy_id),
@@ -475,7 +492,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections.clone(),
+                    protections: engine
+                        .retained_protections(&done_view, "readback/refresh-done")
+                        .await
+                        .unwrap(),
                 },
                 None,
             )
@@ -500,6 +520,12 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
         )
         .await
         .unwrap();
+    let done_view = engine
+        .inner
+        .lifecycle
+        .open(&refresh_done_spec.dataset)
+        .await
+        .unwrap();
     assert_eq!(
         engine
             .select_prepared(
@@ -507,7 +533,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections.clone(),
+                    protections: engine
+                        .retained_protections(&done_view, "readback/refresh-done")
+                        .await
+                        .unwrap(),
                 },
                 None,
             )
@@ -523,7 +552,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections.clone(),
+                    protections: engine
+                        .retained_protections(&done_view, "readback/refresh-done")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&other_policy_id),
@@ -540,7 +572,10 @@ async fn select_prepared_with_policy_enforces_requested_policy_across_refresh_an
                 &done_op,
                 Retained {
                     value: completed.clone(),
-                    protections: done_protections,
+                    protections: engine
+                        .retained_protections(&done_view, "readback/refresh-done")
+                        .await
+                        .unwrap(),
                 },
                 None,
                 Some(&policy_id),

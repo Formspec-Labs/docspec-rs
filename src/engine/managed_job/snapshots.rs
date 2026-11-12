@@ -8,6 +8,7 @@ use iceberg::{
 
 const CUSTODY: &str = "urn:docspec:whole-job-snapshot-custody:2";
 const SNAPSHOT_MEMBER_CONCURRENCY: usize = 16;
+const SNAPSHOT_COMMIT_BATCH: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -517,7 +518,9 @@ impl Engine {
             let mut active = futures::stream::FuturesUnordered::new();
             let mut completed_batch: Vec<(String, SnapshotMember)> = Vec::new();
             while pending_iter.peek().is_some() || !active.is_empty() {
-                while active.len() < SNAPSHOT_MEMBER_CONCURRENCY {
+                while active.len() < SNAPSHOT_MEMBER_CONCURRENCY
+                    && completed_batch.len().saturating_add(active.len()) < SNAPSHOT_COMMIT_BATCH
+                {
                     let Some(&(payload, _)) = pending_iter.peek() else {
                         break;
                     };
@@ -556,6 +559,7 @@ impl Engine {
                         }
                         Err(_) if !active.is_empty() => break,
                         Err(error) => {
+                            active.clear();
                             if !completed_batch.is_empty() {
                                 let _ = self
                                     .flush_snapshot_members(
@@ -575,6 +579,9 @@ impl Engine {
                 match first {
                     Ok(item) => completed_batch.push(item),
                     Err(error) => {
+                        // Drop unpolled member futures before awaiting flush so none
+                        // hold FIFO `blocking_jobs` grants or chunk byte reservations.
+                        active.clear();
                         if !completed_batch.is_empty() {
                             let _ = self
                                 .flush_snapshot_members(
@@ -587,33 +594,9 @@ impl Engine {
                         return Err(error);
                     }
                 }
-                while let std::task::Poll::Ready(Some(next_done)) = futures::poll!(active.next()) {
-                    match next_done {
-                        Ok(item) => completed_batch.push(item),
-                        Err(error) => {
-                            if !completed_batch.is_empty() {
-                                let _ = self
-                                    .flush_snapshot_members(
-                                        admitted,
-                                        &mut completed_batch,
-                                        &mut objects,
-                                    )
-                                    .await;
-                            }
-                            return Err(error);
-                        }
-                    }
-                }
-                if completed_batch.len() >= SNAPSHOT_MEMBER_CONCURRENCY
-                    || (pending_iter.peek().is_none() && active.is_empty())
-                {
-                    self.flush_or_drain_snapshot_members(
-                        admitted,
-                        &mut active,
-                        &mut completed_batch,
-                        &mut objects,
-                    )
-                    .await?;
+                if active.is_empty() && !completed_batch.is_empty() {
+                    self.flush_snapshot_members(admitted, &mut completed_batch, &mut objects)
+                        .await?;
                 }
             }
             if !completed_batch.is_empty() {
@@ -903,42 +886,6 @@ impl Engine {
         )
         .await?;
         Ok(object)
-    }
-
-    async fn flush_or_drain_snapshot_members<F>(
-        &self,
-        admitted: &Admission,
-        active: &mut futures::stream::FuturesUnordered<F>,
-        completed_batch: &mut Vec<(String, SnapshotMember)>,
-        objects: &mut Vec<SnapshotObject>,
-    ) -> Result<()>
-    where
-        F: std::future::Future<Output = Result<(String, SnapshotMember)>>,
-    {
-        match self
-            .flush_snapshot_members(admitted, completed_batch, objects)
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(error) if error.code() == "capacity" && !active.is_empty() => {
-                let mut first_error = None;
-                while let Some(next_done) = active.next().await {
-                    match next_done {
-                        Ok(item) => completed_batch.push(item),
-                        Err(err) if first_error.is_none() => first_error = Some(err),
-                        Err(_) => {}
-                    }
-                }
-                let flush_result = self
-                    .flush_snapshot_members(admitted, completed_batch, objects)
-                    .await;
-                if let Some(err) = first_error {
-                    return Err(err);
-                }
-                flush_result
-            }
-            Err(error) => Err(error),
-        }
     }
 
     async fn flush_snapshot_members(

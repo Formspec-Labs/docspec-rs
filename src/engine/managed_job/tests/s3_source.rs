@@ -452,6 +452,8 @@ async fn write_manifest_bytes(
     }
     let mut manifest = writer.write_manifest_file().await.unwrap();
     manifest.manifest_path = manifest_uri.into();
+    manifest.sequence_number = snapshot_id;
+    manifest.min_sequence_number = snapshot_id;
     (manifest, std::fs::read(manifest_path).unwrap())
 }
 
@@ -494,6 +496,7 @@ async fn write_snapshot_version(
     (metadata, std::fs::read(list_path).unwrap())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn s3_job_prepare(
     root: &Path,
     dataset: &str,
@@ -1138,6 +1141,72 @@ async fn compacted_donor_superseded_files_do_not_exhaust_receiver_scratch_budget
     let _ = fixture.finish();
 }
 
+#[tokio::test]
+async fn multi_batch_snapshot_copy_with_fewer_compute_threads_than_concurrency_completes() {
+    let root = tempfile::tempdir().unwrap();
+    let base = base_s3_table_metadata();
+    let file_count = 140_usize;
+    let shared_parquet = Arc::new(uncompressed_id_parquet(&[1]));
+
+    let meta_uri = "s3://bucket/owned/candidate/metadata/batch-deadlock-00001.metadata.json";
+    let list_uri = "s3://bucket/owned/candidate/metadata/batch-deadlock-list.avro";
+    let manifest_uri = "s3://bucket/owned/candidate/metadata/batch-deadlock-manifest.avro";
+
+    let mut entries = Vec::with_capacity(file_count);
+    let mut objects = HashMap::<String, Arc<Vec<u8>>>::new();
+    for idx in 0..file_count {
+        let uri = format!("s3://bucket/owned/candidate/data/batch-part-{idx:03}.parquet");
+        objects.insert(uri.clone(), shared_parquet.clone());
+        entries.push((uri, shared_parquet.len() as u64, 1_u64));
+    }
+    let borrowed = entries
+        .iter()
+        .map(|(uri, size, rows)| (uri.as_str(), *size, *rows))
+        .collect::<Vec<_>>();
+    let (m_file, m_bytes) = write_manifest_bytes(&base, 1, manifest_uri, &borrowed).await;
+    let (meta, l_bytes) = write_snapshot_version(&base, 1, list_uri, vec![m_file]).await;
+    let meta_bytes = serde_json::to_vec(&meta).unwrap();
+    objects.insert(meta_uri.into(), Arc::new(meta_bytes.clone()));
+    objects.insert(list_uri.into(), Arc::new(l_bytes));
+    objects.insert(manifest_uri.into(), Arc::new(m_bytes));
+
+    let fixture = ReadFixture::concurrent_shared_inventory(objects, Duration::ZERO);
+    // `compute_threads = 2` is strictly smaller than `SNAPSHOT_MEMBER_CONCURRENCY = 16`,
+    // exercising the `SNAPSHOT_COMMIT_BATCH = 128` drain boundary without starving
+    // `blocking_jobs` during intermediate directory fsync and catalog commit.
+    let bounds = Limits {
+        compute_threads: 2,
+        memory_bytes: 128 << 20,
+        scratch_bytes: 64 << 20,
+        batch_rows: 1024,
+        max_batch_bytes: 4 << 20,
+        max_metadata_bytes: 4 << 20,
+    };
+    let mut engine = Engine::open(root.path().join("host"), bounds)
+        .await
+        .unwrap();
+    engine.snapshot_source = Some(Arc::new(fixture.snapshot_source(None)));
+
+    let receipt = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
+            root.path(),
+            "native-s3",
+            "batch-deadlock-regression",
+            meta_uri,
+            &meta,
+            &meta_bytes,
+            file_count,
+            None,
+        ))),
+    )
+    .await
+    .expect("140-member snapshot copy across 128-member batch boundary timed out")
+    .unwrap();
+    assert_eq!(receipt.status, "completed");
+    let _ = fixture.finish();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "756-member 488 MiB Stage 1b throughput benchmark; run explicitly with --ignored"]
 async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
@@ -1207,7 +1276,7 @@ async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
     let fixture = ReadFixture::concurrent_shared_inventory(objects, Duration::from_millis(2));
     let bounds = Limits {
         compute_threads: 4,
-        memory_bytes: 512 << 20,
+        memory_bytes: 2 << 30,
         scratch_bytes: 2 << 30,
         batch_rows: 8192,
         max_batch_bytes: 8 << 20,
@@ -1219,8 +1288,9 @@ async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
     engine.snapshot_source = Some(Arc::new(fixture.snapshot_source(None)));
 
     let t0 = std::time::Instant::now();
-    let day1 = engine
-        .managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
+    let day1 = tokio::time::timeout(
+        Duration::from_secs(90),
+        engine.managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
             root.path(),
             "native-s3",
             "bench-day1",
@@ -1229,9 +1299,11 @@ async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
             &s1_meta_bytes,
             file_count * rows_per_file,
             None,
-        )))
-        .await
-        .unwrap();
+        ))),
+    )
+    .await
+    .expect("day1 756-member copy timed out")
+    .unwrap();
     let day1_secs = t0.elapsed().as_secs_f64();
     let reqs_after_d1 = fixture.observed_paths();
     let d1_data_heads = reqs_after_d1
@@ -1245,8 +1317,9 @@ async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
     let d1_peak = fixture.peak_in_flight();
 
     let t1 = std::time::Instant::now();
-    let day2 = engine
-        .managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
+    let day2 = tokio::time::timeout(
+        Duration::from_secs(90),
+        engine.managed_job(ManagedJobCommand::Prepare(s3_job_prepare(
             root.path(),
             "native-s3",
             "bench-day2",
@@ -1255,9 +1328,11 @@ async fn benchmark_756_member_488mib_snapshot_copy_and_day2_reuse() {
             &s2_meta_bytes,
             file_count * rows_per_file,
             Some(day1.input_custody[0].clone()),
-        )))
-        .await
-        .unwrap();
+        ))),
+    )
+    .await
+    .expect("day2 756-member reuse timed out")
+    .unwrap();
     let day2_secs = t1.elapsed().as_secs_f64();
     assert_eq!(day2.status, "completed");
     let reqs_after_d2 = fixture.observed_paths();

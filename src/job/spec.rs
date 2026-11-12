@@ -197,7 +197,8 @@ pub struct InputFileResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     pub path: PathBuf,
-    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
     pub bytes: u64,
 }
 
@@ -526,6 +527,7 @@ impl JobSpec {
         // Hold each producing host's exclusive protection through all output scans.
         let mut native_hosts = BTreeMap::new();
         let compactions = super::metrics::Compactions::install(&job.context);
+        let compute_digests = self.id.is_some();
         for input in &self.inputs {
             match input {
                 JobInput::Parquet { name, path } => {
@@ -536,7 +538,12 @@ impl JobSpec {
                     let observed = job
                         .budget
                         .blocking_admitted_queued(move || {
-                            observe_parquet_input(&name_owned, &path_owned, &hash_budget)
+                            observe_parquet_input(
+                                &name_owned,
+                                &path_owned,
+                                &hash_budget,
+                                compute_digests,
+                            )
                         })
                         .await?;
                     result.inputs.push(observed);
@@ -553,7 +560,12 @@ impl JobSpec {
                     let observed = job
                         .budget
                         .blocking_admitted_queued(move || {
-                            observe_json_lines_input(&name_owned, &files_owned, &hash_budget)
+                            observe_json_lines_input(
+                                &name_owned,
+                                &files_owned,
+                                &hash_budget,
+                                compute_digests,
+                            )
                         })
                         .await?;
                     result.inputs.push(observed);
@@ -580,7 +592,11 @@ impl JobSpec {
                     let (sha256, bytes) = job
                         .budget
                         .blocking_admitted_queued(move || {
-                            observe_optional_local_file(&location_owned, &hash_budget)
+                            observe_optional_local_file(
+                                &location_owned,
+                                &hash_budget,
+                                compute_digests,
+                            )
                         })
                         .await?;
                     result.inputs.push(InputResult {
@@ -602,7 +618,11 @@ impl JobSpec {
                     let (sha256, local_bytes) = job
                         .budget
                         .blocking_admitted_queued(move || {
-                            observe_optional_local_file(&location_owned, &hash_budget)
+                            observe_optional_local_file(
+                                &location_owned,
+                                &hash_budget,
+                                compute_digests,
+                            )
                         })
                         .await?;
                     result.inputs.push(InputResult {
@@ -964,13 +984,27 @@ fn hash_local_file(path: &Path, budget: &crate::budget::Budget) -> Result<(Strin
     Ok((format!("{:x}", hasher.finalize()), total))
 }
 
+fn observe_local_file(
+    path: &Path,
+    budget: &crate::budget::Budget,
+    compute_digest: bool,
+) -> Result<(Option<String>, u64)> {
+    if compute_digest {
+        let (sha256, bytes) = hash_local_file(path, budget)?;
+        Ok((Some(sha256), bytes))
+    } else {
+        Ok((None, std::fs::metadata(path)?.len()))
+    }
+}
+
 fn observe_optional_local_file(
     path: &Path,
     budget: &crate::budget::Budget,
+    compute_digest: bool,
 ) -> Result<(Option<String>, Option<u64>)> {
     if path.is_file() {
-        let (sha256, bytes) = hash_local_file(path, budget)?;
-        Ok((Some(sha256), Some(bytes)))
+        let (sha256, bytes) = observe_local_file(path, budget, compute_digest)?;
+        Ok((sha256, Some(bytes)))
     } else {
         Ok((None, None))
     }
@@ -1000,15 +1034,21 @@ fn observe_parquet_input(
     name: &str,
     path: &Path,
     budget: &crate::budget::Budget,
+    compute_digest: bool,
 ) -> Result<InputResult> {
     let metadata = std::fs::metadata(path)?;
     if metadata.is_file() {
-        let (sha256, bytes) = hash_local_file(path, budget)?;
+        let (sha256, bytes) = if compute_digest {
+            let (digest, len) = hash_local_file(path, budget)?;
+            (Some(digest), len)
+        } else {
+            (None, metadata.len())
+        };
         return Ok(InputResult {
             name: name.to_owned(),
             kind: "parquet".into(),
             path: Some(path.to_path_buf()),
-            sha256: Some(sha256),
+            sha256,
             bytes: Some(bytes),
             ..Default::default()
         });
@@ -1018,18 +1058,24 @@ fn observe_parquet_input(
     member_paths.sort();
     let mut files = Vec::with_capacity(member_paths.len());
     let mut total_bytes = 0_u64;
-    let mut canonical_members = Vec::with_capacity(member_paths.len());
+    let mut canonical_members = Vec::with_capacity(if compute_digest {
+        member_paths.len()
+    } else {
+        0
+    });
     for member_path in member_paths {
-        let (sha256, bytes) = hash_local_file(&member_path, budget)?;
+        let (sha256, bytes) = observe_local_file(&member_path, budget, compute_digest)?;
         total_bytes = total_bytes
             .checked_add(bytes)
             .ok_or_else(|| Error::refusal("capacity", "directory Parquet input size overflowed"))?;
-        let rel = member_path
-            .strip_prefix(path)
-            .unwrap_or(&member_path)
-            .to_string_lossy()
-            .into_owned();
-        canonical_members.push((rel, sha256.clone(), bytes));
+        if let Some(digest) = &sha256 {
+            let rel = member_path
+                .strip_prefix(path)
+                .unwrap_or(&member_path)
+                .to_string_lossy()
+                .into_owned();
+            canonical_members.push((rel, digest.clone(), bytes));
+        }
         files.push(InputFileResult {
             key: None,
             path: member_path,
@@ -1037,12 +1083,16 @@ fn observe_parquet_input(
             bytes,
         });
     }
-    let dir_sha256 = sha256_hex(&serde_json::to_vec(&canonical_members)?);
+    let dir_sha256 = if compute_digest {
+        Some(sha256_hex(&serde_json::to_vec(&canonical_members)?))
+    } else {
+        None
+    };
     Ok(InputResult {
         name: name.to_owned(),
         kind: "parquet".into(),
         path: Some(path.to_path_buf()),
-        sha256: Some(dir_sha256),
+        sha256: dir_sha256,
         bytes: Some(total_bytes),
         files,
         ..Default::default()
@@ -1053,11 +1103,12 @@ fn observe_json_lines_input(
     name: &str,
     declared_files: &[JsonLinesFile],
     budget: &crate::budget::Budget,
+    compute_digest: bool,
 ) -> Result<InputResult> {
     let mut files = Vec::with_capacity(declared_files.len());
     let mut total_bytes = 0_u64;
     for declared in declared_files {
-        let (sha256, bytes) = hash_local_file(&declared.path, budget)?;
+        let (sha256, bytes) = observe_local_file(&declared.path, budget, compute_digest)?;
         total_bytes = total_bytes
             .checked_add(bytes)
             .ok_or_else(|| Error::refusal("capacity", "JSON Lines input size overflowed"))?;
@@ -1069,13 +1120,15 @@ fn observe_json_lines_input(
         });
     }
     let (path, sha256) = if files.len() == 1 {
-        (Some(files[0].path.clone()), Some(files[0].sha256.clone()))
-    } else {
+        (Some(files[0].path.clone()), files[0].sha256.clone())
+    } else if compute_digest {
         let summary = files
             .iter()
             .map(|f| (&f.key, &f.sha256, f.bytes))
             .collect::<Vec<_>>();
         (None, Some(sha256_hex(&serde_json::to_vec(&summary)?)))
+    } else {
+        (None, None)
     };
     Ok(InputResult {
         name: name.to_owned(),
